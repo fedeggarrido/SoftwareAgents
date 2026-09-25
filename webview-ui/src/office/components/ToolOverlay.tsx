@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Button } from '../../components/ui/Button.js';
 import {
   CHARACTER_SITTING_OFFSET_PX,
+  CLAUDE_LABEL_COLOR,
+  CODEX_LABEL_COLOR,
   CONTEXT_CRITICAL_THRESHOLD,
   CONTEXT_DANGER_THRESHOLD,
   CONTEXT_GAUGE_BG,
@@ -20,6 +22,7 @@ import {
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { overlayProjection } from '../projection.js';
+import { getProviderLabel } from '../toolUtils.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
 
@@ -203,7 +206,8 @@ export function ToolOverlay({
 
         // Team info
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel);
+        const providerName = isSub ? null : getProviderLabel(id);
+        const hasExtraLines = !!(ch.folderName || teamRoleLabel || providerName);
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
         // headless — as soon as it has taken a turn. Sub-agents never do: they
@@ -233,6 +237,21 @@ export function ToolOverlay({
                 />
               )}
               <div className="flex flex-col gap-0 overflow-hidden">
+                {providerName && (
+                  <span
+                    className="overflow-hidden text-ellipsis block leading-none"
+                    style={{
+                      fontSize: '18px',
+                      fontWeight: 'bold',
+                      color: providerName.startsWith('Codex')
+                        ? CODEX_LABEL_COLOR
+                        : CLAUDE_LABEL_COLOR,
+                    }}
+                    data-testid="agent-provider"
+                  >
+                    {providerName}
+                  </span>
+                )}
                 {teamRoleLabel && (
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"

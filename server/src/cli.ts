@@ -19,6 +19,7 @@ import {
   loadAllPets,
 } from './assetReload.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
+import { CodexWatcher } from './codexWatcher.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -293,6 +294,15 @@ async function main(): Promise<void> {
       runtime.startStaleCheck();
     }
 
+    // Codex sessions started in this workspace (rollouts under ~/.codex/sessions).
+    const codexWatcher = new CodexWatcher({
+      store,
+      workspaceDir: cwd,
+      removeAgent: (id) => runtime.removeAgent(id),
+    });
+    codexWatcher.start();
+    console.log(`[Pixel Agents] Watching Codex sessions for: ${cwd}`);
+
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
     // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,
@@ -309,6 +319,7 @@ async function main(): Promise<void> {
     // ── Graceful shutdown ──
     function shutdown(): void {
       console.log('\nShutting down...');
+      codexWatcher.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

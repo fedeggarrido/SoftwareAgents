@@ -275,6 +275,10 @@ export const CONTEXT_GAUGE_BG = '#222';
 export const TEAM_LEAD_COLOR = '#ffd700';
 export const TEAM_ROLE_COLOR = '#66aaff';
 
+// ── Provider labels (which CLI drives the character) ────────
+export const CLAUDE_LABEL_COLOR = '#e8a06a';
+export const CODEX_LABEL_COLOR = '#7fd6a0';
+
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */
 export const PET_WALK_SPEED_PX_PER_SEC = 32;

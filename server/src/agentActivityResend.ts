@@ -16,6 +16,10 @@ export function resendAgentActivity(
   store: AgentStateStore,
 ): void {
   for (const [id, agent] of store) {
+    // 0. Provider label (Codex) -- the webview defaults to "Claude" without it.
+    if (agent.providerLabel) {
+      send({ type: 'agentProviderLabel', id, label: agent.providerLabel });
+    }
     // 1. Team metadata first — webview uses this to route tool messages correctly.
     // Derived teams (named background spawns) have a name and a lead link but NO
     // teamName, so gate on any team field.

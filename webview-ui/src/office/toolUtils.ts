@@ -47,3 +47,22 @@ export function isReadingToolName(name: string | null | undefined): boolean {
 export function isSubagentToolName(name: string | null | undefined): boolean {
   return typeof name === 'string' && providerCaps.subagentToolNames.has(name);
 }
+
+// ── Provider labels (which CLI drives each character) ────────────────────────
+// Sent by the server as `agentProviderLabel` for non-Claude agents (Codex).
+// Anything without a label came through the Claude provider, the only other
+// source the server has, so "Claude" is the truthful default.
+
+const providerLabels = new Map<number, string>();
+
+export function setProviderLabel(id: number, label: string): void {
+  providerLabels.set(id, label);
+}
+
+export function clearProviderLabel(id: number): void {
+  providerLabels.delete(id);
+}
+
+export function getProviderLabel(id: number): string {
+  return providerLabels.get(id) ?? 'Claude';
+}

@@ -49,6 +49,48 @@ export interface ProviderQuota {
   weekly?: { usedPercent: number | null; resetsAt: number | null; windowMinutes?: number };
 }
 
+export interface CompanyDecision {
+  id: string;
+  question: string;
+  context?: string;
+  options: string[];
+  recommendation?: string;
+  blocks?: string[];
+  status: string;
+  answer?: string | null;
+}
+
+export interface MeetingLine {
+  at: number;
+  round: string;
+  role: string;
+  stance: string;
+}
+
+export interface MeetingState {
+  id: string;
+  format: string;
+  topic: string;
+  question: string;
+  participants: string[];
+  status: string;
+  round: string;
+  decision?: string | null;
+  waitReason?: string;
+  task?: string;
+  lines: MeetingLine[];
+}
+
+export interface AutopilotState {
+  enabled: boolean;
+  running: boolean;
+  status?: string;
+  waitReason?: string;
+  nextRound?: number | null;
+  lastRound?: number;
+  intervalMinutes?: number;
+}
+
 export interface BoardState {
   project: string;
   items: BoardItem[];
@@ -57,6 +99,15 @@ export interface BoardState {
   sources: { board: boolean; claims: boolean; progress: boolean };
   quota?: { claude: ProviderQuota; codex: ProviderQuota };
   gate?: BoardEvent[];
+  summary?: {
+    total: number;
+    byPhase: Record<string, number>;
+    byEpic: Record<string, { done: number; total: number }>;
+  };
+  waiting?: BoardEvent[];
+  decisions?: CompanyDecision[];
+  meeting?: MeetingState;
+  autopilot?: AutopilotState;
   generatedAt: number;
 }
 
@@ -75,4 +126,23 @@ function subscribe(listener: () => void): () => void {
 
 export function useBoard(): BoardState | null {
   return useSyncExternalStore(subscribe, () => board);
+}
+
+// ── Short notices from the company controls (autopilot, decisions) ──
+let notice: { text: string; at: number } | null = null;
+const noticeListeners = new Set<() => void>();
+
+export function setCompanyNotice(text: string): void {
+  notice = { text, at: Date.now() };
+  for (const l of noticeListeners) l();
+}
+
+export function useCompanyNotice(): { text: string; at: number } | null {
+  return useSyncExternalStore(
+    (l) => {
+      noticeListeners.add(l);
+      return () => noticeListeners.delete(l);
+    },
+    () => notice,
+  );
 }

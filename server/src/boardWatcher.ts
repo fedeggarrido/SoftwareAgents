@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { AgentStateStore } from './agentStateStore.js';
+import { readAutopilot } from './companyControl.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
 
 /**
@@ -40,7 +41,63 @@ interface BoardFile {
   progressDb?: string;
   /** Headless run logs (Claude stream-json) under the Git common dir. */
   runsDir?: string;
+  /** Owner decisions inbox, relative to the workspace. */
+  decisionsFile?: string;
+  /** Meeting transcripts under the Git common dir. */
+  meetingsDir?: string;
   items?: BoardItem[];
+}
+
+/** The newest meeting (running, or ended less than two hours ago) with its last lines. */
+function latestMeeting(dir: string | undefined, nowS: number): Record<string, unknown> | undefined {
+  if (!dir) return undefined;
+  let best: { path: string; mtime: number } | undefined;
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      const file = path.join(dir, name, 'meeting.json');
+      try {
+        const mtime = fs.statSync(file).mtimeMs;
+        if (!best || mtime > best.mtime) best = { path: path.join(dir, name), mtime };
+      } catch {
+        /* not a meeting */
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  if (!best) return undefined;
+  try {
+    const meeting = JSON.parse(
+      fs.readFileSync(path.join(best.path, 'meeting.json'), 'utf-8'),
+    ) as Record<string, unknown>;
+    const ended = typeof meeting.endedAt === 'number' ? meeting.endedAt : null;
+    if (ended !== null && nowS - ended > 2 * 3600) return undefined;
+    let lines: Array<Record<string, unknown>> = [];
+    try {
+      lines = fs
+        .readFileSync(path.join(best.path, 'transcript.jsonl'), 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .map(({ text: _text, ...rest }) => rest);
+    } catch {
+      /* no lines yet */
+    }
+    return { ...meeting, lines: lines.slice(-12) };
+  } catch {
+    return undefined;
+  }
+}
+
+function openDecisions(file: string): Array<Record<string, unknown>> {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
+      decisions?: Array<Record<string, unknown>>;
+    };
+    return (data.decisions ?? []).filter((d) => d.status === 'open' || d.status === 'answered');
+  } catch {
+    return [];
+  }
 }
 
 interface ClaimRow {
@@ -233,6 +290,28 @@ export class BoardWatcher {
     });
 
     const manager = claimByTask.get('__manager__');
+    // Sessions whose newest quota-gate decision is WAIT and that have not started since.
+    const waiting: Record<string, unknown>[] = [];
+    const seenSessions = new Set<string>();
+    for (const e of events ?? []) {
+      if (seenSessions.has(e.session)) continue;
+      seenSessions.add(e.session);
+      if (
+        e.state === 'WAIT' &&
+        (e.phase === 'QUOTA' || e.phase === 'MEETING' || e.phase === 'AUTOPILOT')
+      ) {
+        waiting.push(eventView(e));
+      }
+    }
+    const byPhase: Record<string, number> = {};
+    const byEpic: Record<string, { done: number; total: number }> = {};
+    for (const it of view) {
+      byPhase[it.phase] = (byPhase[it.phase] ?? 0) + 1;
+      const epic = it.epic ?? '—';
+      byEpic[epic] ??= { done: 0, total: 0 };
+      byEpic[epic].total += 1;
+      if (it.phase === 'DONE') byEpic[epic].done += 1;
+    }
     return {
       type: 'boardState',
       project: board.project ?? path.basename(this.workspaceDir),
@@ -249,6 +328,16 @@ export class BoardWatcher {
         .filter((e) => e.phase === 'QUOTA')
         .slice(0, 5)
         .map(eventView),
+      summary: { total: view.length, byPhase, byEpic },
+      waiting,
+      decisions: board.decisionsFile
+        ? openDecisions(path.join(this.workspaceDir, board.decisionsFile))
+        : [],
+      meeting: latestMeeting(
+        dir && board.meetingsDir ? path.join(dir, board.meetingsDir) : undefined,
+        nowS,
+      ),
+      autopilot: readAutopilot(),
       generatedAt: this.now(),
     };
   }

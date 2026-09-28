@@ -20,14 +20,14 @@ const FLOW: { phase: string; label: string }[] = [
   { phase: 'DONE', label: 'Hecho' },
 ];
 
-/** Phases worth a card in the dock even with nobody on them right now. */
+/** Phases worth a row in the dock even with nobody on them right now. */
 const IN_FLIGHT = new Set(['READY', 'ACTIVE', 'AWAITING_REVIEW', 'VERIFIED']);
 
 function flowStep(phase: string): number {
   return FLOW.findIndex((s) => s.phase === phase);
 }
 
-function TaskCard({
+function TaskRow({
   item,
   officeState,
   onFocusAgent,
@@ -43,43 +43,38 @@ function TaskCard({
   const color = PHASE_COLORS[item.phase] ?? PHASE_COLORS['?'];
   return (
     <div
-      className="pixel-panel px-8 pt-4 pb-6 flex flex-col gap-4 w-300"
+      className="flex items-center gap-6 text-2xs leading-none whitespace-nowrap"
       title={`${item.id} — ${item.title}\nFase: ${label}${
         pct !== null ? ` (paso ${step + 1} de ${FLOW.length} del flujo)` : ''
-      }${item.note ? `\n${item.note}` : ''}`}
-      data-testid="task-card"
+      }${item.owner ? `\nReserva: ${item.owner.worker} · ${item.owner.session}` : ''}${
+        item.note ? `\n${item.note}` : ''
+      }`}
+      data-testid="task-row"
     >
-      <div className="text-2xs leading-tight overflow-hidden text-ellipsis whitespace-nowrap">
-        <span style={{ color }}>{item.id}</span> {item.title}
-      </div>
-      <div className="flex items-center gap-6">
-        <div className="flex gap-2">
-          {FLOW.map((s, i) => (
-            <span
-              key={s.phase}
-              className="h-8 w-22 border border-border"
-              style={{ background: !blocked && i <= step ? color : undefined }}
-            />
-          ))}
-        </div>
-        <span className="text-2xs leading-none whitespace-nowrap" style={{ color }}>
-          {label}
-          {pct !== null && !blocked ? ` · ${pct}%` : ''}
-        </span>
-      </div>
-      <div className="flex gap-4 flex-wrap">
-        {item.agentIds.length === 0 && (
+      <span style={{ color }} className="w-80">
+        {item.id}
+      </span>
+      <span className="w-160 overflow-hidden text-ellipsis">{item.title}</span>
+      <span className="flex gap-1">
+        {FLOW.map((s, i) => (
           <span
-            className="text-2xs text-text-muted"
-            title={
-              item.owner
-                ? 'La tarea está reservada, pero su sesión aún no está en la oficina: aparece en cuanto vuelva a escribir en su transcript (p. ej. tras reiniciar la oficina o mientras genera una respuesta larga).'
-                : undefined
-            }
+            key={s.phase}
+            className="h-6 w-10 border border-border"
+            style={{ background: !blocked && i <= step ? color : undefined }}
+          />
+        ))}
+      </span>
+      <span className="w-110" style={{ color }}>
+        {label}
+        {pct !== null && !blocked ? ` · ${pct}%` : ''}
+      </span>
+      <span className="flex gap-3">
+        {item.agentIds.length === 0 && item.owner && (
+          <span
+            className="text-text-muted"
+            title="Reservada, pero su sesión aún no está en la oficina"
           >
-            {item.owner
-              ? `○ ${item.owner.worker} · ${item.owner.session} · aún no visible en la oficina`
-              : 'Sin agente asignado'}
+            ○ {item.owner.worker}
           </span>
         )}
         {item.agentIds.map((id) => {
@@ -88,24 +83,19 @@ function TaskCard({
           return (
             <button
               key={id}
-              className="text-2xs leading-none px-4 py-2 border border-border bg-bg-dark cursor-pointer"
+              className="cursor-pointer"
               style={{
                 color: role ? DEPARTMENT_COLORS[role.department] : undefined,
-                opacity: busy ? 1 : 0.55,
+                opacity: busy ? 1 : 0.5,
               }}
               onClick={() => onFocusAgent(id)}
-              title={
-                busy
-                  ? 'Trabajando ahora · ver en la oficina'
-                  : 'Sin actividad ahora · ver en la oficina'
-              }
+              title={`${role?.label ?? `Agente #${id}`} · ${busy ? 'trabajando ahora' : 'sin actividad ahora'} · ver en la oficina`}
             >
-              {busy ? '● ' : '○ '}
-              {role?.label ?? `Agente #${id}`}
+              {busy ? '●' : '○'} {role?.label ?? `#${id}`}
             </button>
           );
         })}
-      </div>
+      </span>
     </div>
   );
 }
@@ -116,11 +106,12 @@ interface TaskDockProps {
 }
 
 /**
- * Bottom dock: one card per task being worked on (or in flight), never one per
- * character, so a task two agents touch shows once with both of them on it.
+ * Bottom-right dock, one line per task being worked on (or in flight). Folds to a
+ * single button so it never covers the office; starts folded on narrow screens.
  */
 export function TaskDock({ officeState, onFocusAgent }: TaskDockProps) {
   const board = useBoard();
+  const [open, setOpen] = useState(() => window.innerWidth >= 900);
   // Re-render periodically so busy/idle markers follow the characters.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -137,12 +128,21 @@ export function TaskDock({ officeState, onFocusAgent }: TaskDockProps) {
   if (tasks.length === 0) return null;
   return (
     <div
-      className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex gap-8 flex-wrap justify-center max-w-[70%]"
+      className="absolute bottom-10 right-10 z-20 pixel-panel px-8 py-4 flex flex-col gap-4 max-w-[70vw] overflow-x-auto"
       data-testid="task-dock"
     >
-      {tasks.map((item) => (
-        <TaskCard key={item.id} item={item} officeState={officeState} onFocusAgent={onFocusAgent} />
-      ))}
+      <button className="cursor-pointer text-left text-xs" onClick={() => setOpen((v) => !v)}>
+        {open ? '▾' : '▸'} Tareas en marcha ({tasks.length})
+      </button>
+      {open &&
+        tasks.map((item) => (
+          <TaskRow
+            key={item.id}
+            item={item}
+            officeState={officeState}
+            onFocusAgent={onFocusAgent}
+          />
+        ))}
     </div>
   );
 }

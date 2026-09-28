@@ -4,6 +4,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
+import { answerDecision, setAutopilot } from './companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -171,6 +172,28 @@ export function handleClientMessage(
     case 'setGhostHeadlessAgents':
       adapter?.setSetting(KEY_GHOST_HEADLESS_AGENTS, msg.enabled);
       break;
+
+    // Agent company controls: autopilot on/off and answering an owner decision.
+    // Only the operator (tokened URL) may change what the company does.
+    case 'companyAutopilot': {
+      if (!ctx.privileged) {
+        send({ type: 'companyNotice', text: 'Abre la URL con token para controlar el piloto.' });
+        break;
+      }
+      send({ type: 'companyNotice', text: setAutopilot(msg.enabled === true) });
+      break;
+    }
+    case 'companyDecision': {
+      if (!ctx.privileged) {
+        send({ type: 'companyNotice', text: 'Abre la URL con token para responder decisiones.' });
+        break;
+      }
+      send({
+        type: 'companyNotice',
+        text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? '')),
+      });
+      break;
+    }
 
     case 'setWatchAllSessions': {
       const enabled = msg.enabled as boolean;

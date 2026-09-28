@@ -23,6 +23,7 @@ import {
 import { BoardWatcher } from './boardWatcher.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
 import { CodexWatcher } from './codexWatcher.js';
+import { configureCompanyControl } from './companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -113,7 +114,7 @@ function copyHookScriptOrReport(packageRoot: string, context = ''): boolean {
 function watchWorktreeProjectDirs(projectDir: string, onFound: (dir: string) => void): void {
   const root = path.dirname(projectDir);
   const base = path.basename(projectDir).toLowerCase();
-  const prefixes = [`${base}--worktrees-`, `${base}--claude-worktrees-`];
+  const prefixes = [`${base}--worktrees-`, `${base}--claude-worktrees-`, `${base}--meetings-`];
   const seen = new Set<string>();
   const scan = () => {
     let names: string[];
@@ -343,6 +344,7 @@ async function main(): Promise<void> {
     roleResolver.start();
 
     // The company's backlog (docs/backlog/board.json + claims + progress), if any.
+    configureCompanyControl(cwd);
     const boardWatcher = new BoardWatcher(store, cwd);
     boardWatcher.start();
 

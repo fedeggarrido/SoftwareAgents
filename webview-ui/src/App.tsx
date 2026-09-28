@@ -4,12 +4,14 @@ import { toMajorMinor } from './changelogData.js';
 import { BacklogPanel } from './components/BacklogPanel.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
+import { CompanyHud } from './components/CompanyHud.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
 import { DebugView } from './components/DebugView.js';
+import { DecisionsPanel } from './components/DecisionsPanel.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { IntroBubble } from './components/IntroBubble.js';
+import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
-import { QuotaHud } from './components/QuotaHud.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -108,6 +110,7 @@ function App() {
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBacklogOpen, setIsBacklogOpen] = useState(false);
+  const [isDecisionsOpen, setIsDecisionsOpen] = useState(false);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -526,7 +529,9 @@ function App() {
         workspaceFolders={workspaceFolders}
       />
 
-      <QuotaHud />
+      <CompanyHud onOpenDecisions={() => setIsDecisionsOpen((v) => !v)} />
+      <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
+      <MeetingPanel />
 
       <TaskDock
         officeState={officeState}

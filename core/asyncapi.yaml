@@ -144,6 +144,8 @@ components:
         - $ref: '#/components/schemas/SaveAreaMappings'
         - $ref: '#/components/schemas/SetShowAreas'
         - $ref: '#/components/schemas/RequestDiagnostics'
+        - $ref: '#/components/schemas/CompanyAutopilot'
+        - $ref: '#/components/schemas/CompanyDecision'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -1063,6 +1065,30 @@ components:
       properties:
         type:
           const: requestDiagnostics
+
+    CompanyAutopilot:
+      description: Turn the agent company's autopilot on or off (privileged clients only; declared by the workspace's docs/backlog/board.json).
+      type: object
+      additionalProperties: false
+      required: [type, enabled]
+      properties:
+        type:
+          const: companyAutopilot
+        enabled:
+          type: boolean
+
+    CompanyDecision:
+      description: Answer an owner decision of the agent company with one of its listed options (privileged clients only).
+      type: object
+      additionalProperties: false
+      required: [type, id, answer]
+      properties:
+        type:
+          const: companyDecision
+        id:
+          type: string
+        answer:
+          type: string
 
     # ── Supporting schemas ─────────────────────────────────────────
 

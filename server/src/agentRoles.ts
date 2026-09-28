@@ -46,6 +46,7 @@ const SPECIALISTS: Record<string, [string, Department]> = {
   'frontend-engineer': ['DEV Frontend', 'Ingeniería'],
   'technical-architect': ['Arquitecto', 'Ingeniería'],
   'reliability-engineer': ['SRE', 'Ingeniería'],
+  'devops-engineer': ['DevOps', 'Ingeniería'],
   'product-design-lead': ['Diseño', 'Diseño'],
   'ux-researcher': ['UX', 'Diseño'],
   'testing-engineer': ['QA Tests', 'Calidad'],
@@ -58,6 +59,7 @@ const SPECIALISTS: Record<string, [string, Department]> = {
   'technical-analyst': ['Analista Técnico', 'Análisis'],
   'research-analyst': ['Investigación', 'Análisis'],
   'accounting-analyst': ['Analista Contable', 'Análisis'],
+  'financial-analyst': ['Analista Financiero', 'Análisis'],
   'compliance-analyst': ['Compliance', 'Análisis'],
   'growth-strategist': ['Growth', 'Análisis'],
   'customer-discovery-analyst': ['Discovery', 'Análisis'],
@@ -102,10 +104,11 @@ export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'c
   const named = /(?:Actúa como|\$)\s*([a-z0-9]+-[a-z0-9-]+)/i.exec(text)?.[1];
   // The task a specialist was given, when its brief names one explicitly
   // ("Tarea: FT-OPP-001", or the progress command's "--task FT-OPP-001").
+  const meeting = /Reunión:\s*([A-Za-z0-9_-]+)/.exec(text)?.[1];
   const briefTask = /(?:Tarea:|--task)\s+([A-Za-z0-9]+-[A-Za-z0-9-]*\d)\b/.exec(text)?.[1];
   const specialist = specialistRole(
     named?.toLowerCase(),
-    briefTask ? `tarea ${briefTask}` : undefined,
+    meeting ? `reunión ${meeting}` : briefTask ? `tarea ${briefTask}` : undefined,
   );
   if (specialist) return specialist;
   return OWNER_SESSION;

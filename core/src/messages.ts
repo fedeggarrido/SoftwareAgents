@@ -62,7 +62,9 @@ export type ClientMessage =
   | RemoveExternalAssetDirectory
   | SaveAreaMappings
   | SetShowAreas
-  | RequestDiagnostics;
+  | RequestDiagnostics
+  | CompanyAutopilot
+  | CompanyDecision;
 
 export interface ProviderCapabilities {
   type: 'providerCapabilities';
@@ -428,4 +430,15 @@ export interface SetShowAreas {
 
 export interface RequestDiagnostics {
   type: 'requestDiagnostics';
+}
+
+export interface CompanyAutopilot {
+  type: 'companyAutopilot';
+  enabled: boolean;
+}
+
+export interface CompanyDecision {
+  type: 'companyDecision';
+  id: string;
+  answer: string;
 }

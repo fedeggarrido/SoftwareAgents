@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HooksConsentRequest } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { BoardState } from '../office/boardStore.js';
-import { setBoardState } from '../office/boardStore.js';
+import { setBoardState, setCompanyNotice } from '../office/boardStore.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -298,6 +298,8 @@ export function useExtensionMessages(
         saveAgentSeats(os);
       } else if (msg.type === 'agentProviderLabel') {
         setProviderLabel(msg.id as number, msg.label as string);
+      } else if (msg.type === 'companyNotice') {
+        setCompanyNotice(String(msg.text ?? ''));
       } else if (msg.type === 'boardState') {
         setBoardState(msg as unknown as BoardState);
       } else if (msg.type === 'agentRole') {

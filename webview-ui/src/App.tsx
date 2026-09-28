@@ -22,7 +22,6 @@ import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
-import { TaskDock } from './office/components/TaskDock.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
 import { EditorToolbar } from './office/editor/EditorToolbar.js';
@@ -529,18 +528,13 @@ function App() {
         workspaceFolders={workspaceFolders}
       />
 
-      <CompanyHud officeState={officeState} onOpenDecisions={() => setIsDecisionsOpen((v) => !v)} />
+      <CompanyHud
+        officeState={officeState}
+        onOpenBacklog={() => setIsBacklogOpen(true)}
+        onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
+      />
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
       <MeetingPanel />
-
-      <TaskDock
-        officeState={officeState}
-        onFocusAgent={(id) => {
-          const os = getOfficeState();
-          os.selectedAgentId = id;
-          os.cameraFollowId = id;
-        }}
-      />
 
       <BacklogPanel
         isOpen={isBacklogOpen}

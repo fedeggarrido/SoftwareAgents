@@ -83,11 +83,12 @@ const AUTOPILOT_TEXT: Record<string, string> = {
 
 interface CompanyHudProps {
   onOpenDecisions: () => void;
+  onOpenBacklog: () => void;
   officeState: OfficeState;
 }
 
 /** Project progress, autopilot, owner decisions, quota and who is held by the quota gate. */
-export function CompanyHud({ onOpenDecisions, officeState }: CompanyHudProps) {
+export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: CompanyHudProps) {
   const board = useBoard();
   const notice = useCompanyNotice();
   const [open, setOpen] = useState(false);
@@ -139,6 +140,13 @@ export function CompanyHud({ onOpenDecisions, officeState }: CompanyHudProps) {
         <span>
           {done}/{total} hechas
         </span>
+        <Button
+          size="sm"
+          onClick={onOpenBacklog}
+          title="Ver el estado y la actividad de cada tarea"
+        >
+          Tareas
+        </Button>
         {(by.ACTIVE ?? 0) > 0 && (
           <span style={{ color: PHASE_COLORS.ACTIVE }}>{by.ACTIVE} en curso</span>
         )}

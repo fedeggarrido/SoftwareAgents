@@ -36,6 +36,21 @@ export function mapOffset(
   };
 }
 
+/** Keep the world point under an anchor fixed when the zoom level changes.
+ *  Pan and anchor use device pixels relative to the viewport center. */
+export function zoomPanAt(
+  pan: { x: number; y: number },
+  oldZoom: number,
+  newZoom: number,
+  anchor = { x: 0, y: 0 },
+): { x: number; y: number } {
+  const ratio = newZoom / oldZoom;
+  return {
+    x: pan.x * ratio + anchor.x * (1 - ratio),
+    y: pan.y * ratio + anchor.y * (1 - ratio),
+  };
+}
+
 /** Projects world points into CSS pixels within the overlay container that
  *  sits on top of the canvas. */
 export interface OverlayProjection {

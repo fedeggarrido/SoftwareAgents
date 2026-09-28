@@ -27,7 +27,7 @@ export interface OfficeCursorState {
   getCharacter: (id: number) => OfficeCursorCharacter | undefined;
 }
 
-export type OfficeCursor = 'pointer' | 'default';
+export type OfficeCursor = 'pointer' | 'grab';
 
 export function computeNormalModeCursor(state: OfficeCursorState): OfficeCursor {
   // 1. Direct character hit → pointer.
@@ -55,5 +55,5 @@ export function computeNormalModeCursor(state: OfficeCursorState): OfficeCursor 
     }
   }
 
-  return 'default';
+  return 'grab';
 }

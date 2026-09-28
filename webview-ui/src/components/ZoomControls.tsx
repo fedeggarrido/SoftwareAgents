@@ -75,7 +75,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
           onClick={() => onZoomChange(zoom + 1)}
           disabled={maxDisabled}
           className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
-          title="Zoom in (Ctrl+Scroll)"
+          title="Ampliar (Ctrl + rueda)"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <line
@@ -103,7 +103,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
           onClick={() => onZoomChange(zoom - 1)}
           disabled={minDisabled}
           className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
-          title="Zoom out (Ctrl+Scroll)"
+          title="Reducir (Ctrl + rueda)"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <line

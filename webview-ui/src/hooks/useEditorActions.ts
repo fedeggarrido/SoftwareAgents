@@ -36,6 +36,7 @@ import {
   getRotatedType,
   getToggledType,
 } from '../office/layout/furnitureCatalog.js';
+import { zoomPanAt } from '../office/projection.js';
 import type {
   EditTool as EditToolType,
   OfficeLayout,
@@ -74,7 +75,7 @@ interface EditorActions {
   handleRedo: () => void;
   handleReset: () => void;
   handleSave: () => void;
-  handleZoomChange: (zoom: number) => void;
+  handleZoomChange: (zoom: number, anchor?: { x: number; y: number }) => void;
   handleEditorTileAction: (col: number, row: number) => void;
   handleEditorEraseAction: (col: number, row: number) => void;
   handleEditorSelectionChange: () => void;
@@ -115,6 +116,7 @@ export function useEditorActions(
   const [editorTick, setEditorTick] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
   const [zoom, setZoom] = useState(defaultZoom);
+  const zoomRef = useRef(zoom);
   const [carpetVariant, setCarpetVariantState] = useState<number>(editorState.carpetVariant);
   const [carpetColor, setCarpetColorState] = useState<ColorValue>(editorState.carpetColor);
   const [carpetAccentColor, setCarpetAccentColorState] = useState<ColorValue>(
@@ -547,8 +549,13 @@ export function useEditorActions(
     setEditorTick((n) => n + 1);
   }, []);
 
-  const handleZoomChange = useCallback((newZoom: number) => {
-    setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom)));
+  const handleZoomChange = useCallback((newZoom: number, anchor?: { x: number; y: number }) => {
+    const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+    const previousZoom = zoomRef.current;
+    if (nextZoom === previousZoom) return;
+    panRef.current = zoomPanAt(panRef.current, previousZoom, nextZoom, anchor);
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
   }, []);
 
   const handleDragMove = useCallback(

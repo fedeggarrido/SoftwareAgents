@@ -39,7 +39,7 @@ interface OfficeCanvasProps {
   onDragMove: (uid: string, newCol: number, newRow: number) => void;
   editorTick: number;
   zoom: number;
-  onZoomChange: (zoom: number) => void;
+  onZoomChange: (zoom: number, anchor?: { x: number; y: number }) => void;
   panRef: React.MutableRefObject<{ x: number; y: number }>;
   /** Whether the area overlay + labels should render (settings toggle OR active edit). */
   showAreas: boolean;
@@ -68,8 +68,10 @@ export function OfficeCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef({ x: 0, y: 0 });
-  // Middle-mouse pan state (imperative, no re-renders)
+  // Pan state is imperative so moving the camera does not re-render React.
   const isPanningRef = useRef(false);
+  const leftPanCandidateRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 });
   // Delete/rotate button bounds (updated each frame by renderer)
   const deleteButtonBoundsRef = useRef<DeleteButtonBounds | null>(null);
@@ -383,12 +385,25 @@ export function OfficeCanvas({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      // Handle middle-mouse panning
+      // A short left click still selects; dragging past the threshold moves the office.
+      if (leftPanCandidateRef.current && !isPanningRef.current) {
+        const dx = e.clientX - panStartRef.current.mouseX;
+        const dy = e.clientY - panStartRef.current.mouseY;
+        if (dx * dx + dy * dy >= 16) {
+          isPanningRef.current = true;
+          suppressClickRef.current = true;
+          officeState.cameraFollowId = null;
+          officeState.cancelGreeterCamera();
+        }
+      }
+
       if (isPanningRef.current) {
         const dpr = window.devicePixelRatio || 1;
         const dx = (e.clientX - panStartRef.current.mouseX) * dpr;
         const dy = (e.clientY - panStartRef.current.mouseY) * dpr;
         panRef.current = clampPan(panStartRef.current.panX + dx, panStartRef.current.panY + dy);
+        const canvas = canvasRef.current;
+        if (canvas) canvas.style.cursor = 'grabbing';
         return;
       }
 
@@ -556,6 +571,18 @@ export function OfficeCanvas({
         return;
       }
 
+      if (e.button === 0 && !isEditMode) {
+        leftPanCandidateRef.current = true;
+        suppressClickRef.current = false;
+        panStartRef.current = {
+          mouseX: e.clientX,
+          mouseY: e.clientY,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+        };
+        return;
+      }
+
       // Right-click in edit mode for erasing
       if (e.button === 2 && isEditMode) {
         const tile = screenToTile(e.clientX, e.clientY);
@@ -657,7 +684,17 @@ export function OfficeCanvas({
       if (e.button === 1) {
         isPanningRef.current = false;
         const canvas = canvasRef.current;
-        if (canvas) canvas.style.cursor = isEditMode ? 'crosshair' : 'default';
+        if (canvas) canvas.style.cursor = isEditMode ? 'crosshair' : 'grab';
+        return;
+      }
+      if (e.button === 0 && leftPanCandidateRef.current) {
+        leftPanCandidateRef.current = false;
+        const wasPanning = isPanningRef.current;
+        isPanningRef.current = false;
+        if (wasPanning) {
+          const canvas = canvasRef.current;
+          if (canvas) canvas.style.cursor = 'grab';
+        }
         return;
       }
       if (e.button === 2) {
@@ -719,6 +756,10 @@ export function OfficeCanvas({
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
       if (isEditMode) return; // handled by mouseDown/mouseUp
       const pos = screenToWorld(e.clientX, e.clientY);
       if (!pos) return;
@@ -792,7 +833,10 @@ export function OfficeCanvas({
   );
 
   const handleMouseLeave = useCallback(() => {
+    const wasPanning = isPanningRef.current;
     isPanningRef.current = false;
+    leftPanCandidateRef.current = false;
+    suppressClickRef.current = wasPanning;
     isEraseDraggingRef.current = false;
     editorState.isDragging = false;
     editorState.wallDragAdding = null;
@@ -809,7 +853,7 @@ export function OfficeCanvas({
     if (!isEditMode) {
       const canvas = canvasRef.current;
       if (canvas) {
-        canvas.style.cursor = 'default';
+        canvas.style.cursor = 'grab';
       }
     }
   }, [officeState, editorState, isEditMode]);
@@ -841,7 +885,19 @@ export function OfficeCanvas({
           zoomAccumulatorRef.current = 0;
           const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom + delta));
           if (newZoom !== zoom) {
-            onZoomChange(newZoom);
+            const canvas = canvasRef.current;
+            const rect = canvas?.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            const anchor =
+              canvas && rect
+                ? {
+                    x: (e.clientX - rect.left) * dpr - canvas.width / 2,
+                    y: (e.clientY - rect.top) * dpr - canvas.height / 2,
+                  }
+                : undefined;
+            officeState.cameraFollowId = null;
+            officeState.cancelGreeterCamera();
+            onZoomChange(newZoom, anchor);
           }
         }
       } else {
@@ -876,6 +932,9 @@ export function OfficeCanvas({
     <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-bg">
       <canvas
         ref={canvasRef}
+        title={
+          isEditMode ? undefined : 'Arrastra para mover la oficina · Ctrl + rueda para ampliar'
+        }
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -883,7 +942,7 @@ export function OfficeCanvas({
         onAuxClick={handleAuxClick}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
-        className="block"
+        className={isEditMode ? 'block cursor-crosshair' : 'block cursor-grab'}
       />
     </div>
   );

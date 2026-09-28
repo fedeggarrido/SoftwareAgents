@@ -129,6 +129,21 @@ describe('transcript and rollout readers', () => {
     expect(codexRoleFromRollout(file)?.label).toBe('Analista');
   });
 
+  it('skips the AGENTS.md Codex injects before a worker brief', () => {
+    const file = path.join(dir, 'rollout.jsonl');
+    fs.writeFileSync(
+      file,
+      line({ type: 'session_meta', payload: { thread_source: 'user', cwd: dir } }) +
+        codexUser(
+          '# AGENTS.md instructions for D:\\repo\n\n<INSTRUCTIONS>...Actúa como manager de X',
+        ) +
+        codexUser(
+          '# Instrucciones del trabajador\n...\nImplementa solo la tarea ClickUp 869f84a5f, sesión s.',
+        ),
+    );
+    expect(codexRoleFromRollout(file)).toMatchObject({ label: 'DEV', detail: 'tarea 869f84a5f' });
+  });
+
   it('waits (undefined) while a rollout has no brief yet', () => {
     const file = path.join(dir, 'rollout.jsonl');
     fs.writeFileSync(file, line({ type: 'session_meta', payload: { thread_source: 'user' } }));

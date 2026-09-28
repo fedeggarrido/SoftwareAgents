@@ -145,7 +145,13 @@ function textOf(content: unknown): string {
  */
 function isBrief(text: string): boolean {
   const t = text.trim();
-  return t.length > 0 && !t.startsWith('<') && !t.startsWith('Caveat:');
+  return (
+    t.length > 0 &&
+    !t.startsWith('<') &&
+    !t.startsWith('Caveat:') &&
+    // Codex injects the workspace's AGENTS.md as the first user message.
+    !t.startsWith('# AGENTS.md instructions')
+  );
 }
 
 function readHead(file: string, bytes = 256 * 1024): string[] | undefined {

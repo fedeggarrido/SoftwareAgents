@@ -114,6 +114,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent }: BacklogPanelProp
   const [showDone, setShowDone] = useState(false);
   useEffect(() => {
     if (!isOpen) return;
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(t);
   }, [isOpen]);

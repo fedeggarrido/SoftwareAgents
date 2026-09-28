@@ -19,6 +19,7 @@ import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
+import { TaskBadges } from './office/components/TaskBadges.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
 import { EditorToolbar } from './office/editor/EditorToolbar.js';
@@ -438,6 +439,13 @@ function App() {
             panRef={editor.panRef}
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
+          />
+          <TaskBadges
+            officeState={officeState}
+            agents={agents}
+            containerRef={containerRef}
+            zoom={editor.zoom}
+            panRef={editor.panRef}
           />
         </>
       ) : (

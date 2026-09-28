@@ -70,6 +70,26 @@ describe('roleFromBrief', () => {
     expect(role.label).toBe('Analista de producto');
   });
 
+  it("names the task a specialist's brief was given explicitly", () => {
+    const role = roleFromBrief(
+      'Actúa como fundtrinsic-product-analyst.\n... --session claude@x --task FT-OPP-001 --detail "..."',
+      'claude',
+    );
+    expect(role).toEqual({
+      label: 'Analista de producto',
+      department: 'Análisis',
+      detail: 'tarea FT-OPP-001',
+    });
+    expect(
+      roleFromBrief('Actúa como fundtrinsic-code-reviewer. Tarea: FT-OPP-022', 'claude').detail,
+    ).toBe('tarea FT-OPP-022');
+    // A template placeholder is not a task.
+    expect(
+      roleFromBrief('Actúa como fundtrinsic-acceptance-reviewer --task FT-OPP-NNN', 'claude')
+        .detail,
+    ).toBeUndefined();
+  });
+
   it('falls back to a session with the owner', () => {
     expect(roleFromBrief('¿Por qué falla el build?', 'claude').label).toBe('Sesión con el dueño');
   });

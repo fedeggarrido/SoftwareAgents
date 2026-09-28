@@ -100,7 +100,13 @@ export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'c
   const task = /Implementa solo la tarea ClickUp\s+([A-Za-z0-9_-]+)/.exec(text)?.[1];
   if (task) return { label: 'Implementador', department: 'Ingeniería', detail: `tarea ${task}` };
   const named = /(?:Actúa como|\$)\s*([a-z0-9]+-[a-z0-9-]+)/i.exec(text)?.[1];
-  const specialist = specialistRole(named?.toLowerCase());
+  // The task a specialist was given, when its brief names one explicitly
+  // ("Tarea: FT-OPP-001", or the progress command's "--task FT-OPP-001").
+  const briefTask = /(?:Tarea:|--task)\s+([A-Za-z0-9]+-[A-Za-z0-9-]*\d)\b/.exec(text)?.[1];
+  const specialist = specialistRole(
+    named?.toLowerCase(),
+    briefTask ? `tarea ${briefTask}` : undefined,
+  );
   if (specialist) return specialist;
   return OWNER_SESSION;
 }

@@ -21,6 +21,7 @@ import {
   TOOL_OVERLAY_VERTICAL_OFFSET,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
+import { useBoard } from '../boardStore.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { overlayProjection } from '../projection.js';
 import { getAgentRole, getProviderLabel } from '../toolUtils.js';
@@ -97,6 +98,7 @@ export function ToolOverlay({
   onCloseAgent,
   alwaysShowOverlay,
 }: ToolOverlayProps) {
+  const board = useBoard();
   const [, setTick] = useState(0);
   useEffect(() => {
     let rafId = 0;
@@ -221,7 +223,10 @@ export function ToolOverlay({
         // the status dot). The full panel is for the hovered or selected agent.
         if (alwaysShowOverlay && !isSelected && !isHovered) {
           if (isSub) return null;
-          const task = companyRole?.detail?.replace(/^tarea\s+/, '');
+          const rawTask = companyRole?.detail?.replace(/^tarea\s+/, '');
+          // Show the backlog id (FT-OPP-001) rather than the ClickUp one.
+          const task =
+            board?.items.find((i) => i.clickupId === rawTask || i.id === rawTask)?.id ?? rawTask;
           return (
             <div
               key={id}

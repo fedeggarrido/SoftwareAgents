@@ -13,9 +13,11 @@ import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { setCharacterTemplates } from '../office/sprites/spriteData.js';
 import {
+  clearAgentRole,
   clearProviderLabel,
   extractToolName,
   isSubagentToolName,
+  setAgentRole,
   setProviderCapabilities,
   setProviderLabel,
 } from '../office/toolUtils.js';
@@ -294,9 +296,16 @@ export function useExtensionMessages(
         saveAgentSeats(os);
       } else if (msg.type === 'agentProviderLabel') {
         setProviderLabel(msg.id as number, msg.label as string);
+      } else if (msg.type === 'agentRole') {
+        setAgentRole(msg.id as number, {
+          label: msg.label as string,
+          department: msg.department as string,
+          detail: (msg.detail as string | undefined) ?? undefined,
+        });
       } else if (msg.type === 'agentClosed') {
         const id = msg.id as number;
         clearProviderLabel(id);
+        clearAgentRole(id);
         setAgents((prev) => prev.filter((a) => a !== id));
         setSelectedAgent((prev) => (prev === id ? null : prev));
         setAgentTools((prev) => {

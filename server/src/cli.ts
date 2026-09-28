@@ -10,6 +10,7 @@
 
 import * as path from 'path';
 
+import { RoleResolver } from './agentRoles.js';
 import { AgentRuntime } from './agentRuntime.js';
 import { AgentStateStore } from './agentStateStore.js';
 import {
@@ -303,6 +304,10 @@ async function main(): Promise<void> {
     codexWatcher.start();
     console.log(`[Pixel Agents] Watching Codex sessions for: ${cwd}`);
 
+    // Who each character is (Manager, Analista, Implementador...).
+    const roleResolver = new RoleResolver(store);
+    roleResolver.start();
+
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
     // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,
@@ -320,6 +325,7 @@ async function main(): Promise<void> {
     function shutdown(): void {
       console.log('\nShutting down...');
       codexWatcher.dispose();
+      roleResolver.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

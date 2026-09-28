@@ -152,6 +152,18 @@ describe('CodexWatcher', () => {
     expect(store.size).toBe(0);
   });
 
+  it('adopts a worker session in a worktree inside the workspace', () => {
+    writeRollout('rollout-c.jsonl', meta(path.join(WORKSPACE, '.worktrees', 'ft-12')));
+    watcher.tick();
+    expect(store.size).toBe(1);
+  });
+
+  it('does not mistake a sibling folder with the same prefix for the workspace', () => {
+    writeRollout('rollout-d.jsonl', meta(`${WORKSPACE}-old`));
+    watcher.tick();
+    expect(store.size).toBe(0);
+  });
+
   it('replays the backlog silently and announces only what is still open', () => {
     writeRollout(
       'rollout-a.jsonl',

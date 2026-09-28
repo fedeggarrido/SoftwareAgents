@@ -15,6 +15,7 @@ import {
   CONTEXT_GAUGE_HEIGHT_PX,
   CONTEXT_GAUGE_WIDTH_PX,
   CONTEXT_WARN_THRESHOLD,
+  DEPARTMENT_COLORS,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOOL_OVERLAY_VERTICAL_OFFSET,
@@ -22,7 +23,7 @@ import {
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { overlayProjection } from '../projection.js';
-import { getProviderLabel } from '../toolUtils.js';
+import { getAgentRole, getProviderLabel } from '../toolUtils.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
 
@@ -207,7 +208,8 @@ export function ToolOverlay({
         // Team info
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const providerName = isSub ? null : getProviderLabel(id);
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel || providerName);
+        const companyRole = isSub ? undefined : getAgentRole(id);
+        const hasExtraLines = !!(ch.folderName || teamRoleLabel || providerName || companyRole);
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
         // headless — as soon as it has taken a turn. Sub-agents never do: they
@@ -237,6 +239,25 @@ export function ToolOverlay({
                 />
               )}
               <div className="flex flex-col gap-0 overflow-hidden">
+                {companyRole && (
+                  <span
+                    className="overflow-hidden text-ellipsis block leading-none"
+                    style={{
+                      fontSize: '18px',
+                      fontWeight: 'bold',
+                      color: DEPARTMENT_COLORS[companyRole.department] ?? CLAUDE_LABEL_COLOR,
+                    }}
+                    data-testid="agent-role"
+                  >
+                    {companyRole.label}
+                    {companyRole.detail && (
+                      <span style={{ fontWeight: 'normal', opacity: 0.8 }}>
+                        {' '}
+                        · {companyRole.detail}
+                      </span>
+                    )}
+                  </span>
+                )}
                 {providerName && (
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"

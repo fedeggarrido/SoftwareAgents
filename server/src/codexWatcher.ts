@@ -91,6 +91,13 @@ function samePath(a: string, b: string): boolean {
   return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 }
 
+/** The workspace itself or a folder inside it (e.g. a worker's worktree under it). */
+function withinWorkspace(dir: string, workspace: string): boolean {
+  if (samePath(dir, workspace)) return true;
+  const rel = path.relative(path.resolve(workspace), path.resolve(dir));
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 /** Pull the shell command out of a code-mode `exec` call: `tools.exec_command({cmd:"..."})`. */
 function extractCommand(input: string): string | null {
   const m = /cmd\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(input);
@@ -299,7 +306,7 @@ export class CodexWatcher {
     const meta = readSessionMeta(file);
     if (!meta) return; // retry next tick
     const cwd = typeof meta.cwd === 'string' ? meta.cwd : '';
-    if (!cwd || !samePath(cwd, this.workspaceDir)) {
+    if (!cwd || !withinWorkspace(cwd, this.workspaceDir)) {
       this.ignored.add(file);
       return;
     }

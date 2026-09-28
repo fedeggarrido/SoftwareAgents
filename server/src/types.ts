@@ -1,5 +1,7 @@
 import type * as vscode from 'vscode';
 
+import type { AgentRole } from './agentRoles.js';
+
 export interface AgentState {
   id: number;
   sessionId: string;
@@ -37,6 +39,9 @@ export interface AgentState {
   /** Name shown over the character for non-Claude agents ("Codex", "Codex (auto)").
    *  Transient: Codex agents are rediscovered, never persisted. */
   providerLabel?: string;
+  /** Who the character is in the agent company (Manager, Analista...), from its
+   *  session's own records. Transient: recomputed by RoleResolver, never persisted. */
+  role?: AgentRole;
   /** Set when SessionEnd(reason=clear) fires; cleared when SessionStart(source=clear) reassigns */
   pendingClear?: boolean;
   /** Hook-generated tool ID for PreToolUse/PostToolUse correlation */

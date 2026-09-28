@@ -1,3 +1,4 @@
+import { roleMessage } from './agentRoles.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { hasPromotedBackgroundAgent } from './teamUtils.js';
 
@@ -20,6 +21,8 @@ export function resendAgentActivity(
     if (agent.providerLabel) {
       send({ type: 'agentProviderLabel', id, label: agent.providerLabel });
     }
+    // 0b. Role in the agent company (Manager, Analista...), once resolved.
+    if (agent.role) send(roleMessage(id, agent.role));
     // 1. Team metadata first — webview uses this to route tool messages correctly.
     // Derived teams (named background spawns) have a name and a lead link but NO
     // teamName, so gate on any team field.

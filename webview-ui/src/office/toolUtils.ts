@@ -66,3 +66,27 @@ export function clearProviderLabel(id: number): void {
 export function getProviderLabel(id: number): string {
   return providerLabels.get(id) ?? 'Claude';
 }
+
+// ── Roles in the agent company (Manager, Analista de producto...) ─────────────
+// Sent by the server as `agentRole` once the session records who it is. No
+// role yet means unknown, never a default: nothing is shown until it arrives.
+
+export interface AgentRoleView {
+  label: string;
+  department: string;
+  detail?: string;
+}
+
+const agentRoles = new Map<number, AgentRoleView>();
+
+export function setAgentRole(id: number, role: AgentRoleView): void {
+  agentRoles.set(id, role);
+}
+
+export function clearAgentRole(id: number): void {
+  agentRoles.delete(id);
+}
+
+export function getAgentRole(id: number): AgentRoleView | undefined {
+  return agentRoles.get(id);
+}

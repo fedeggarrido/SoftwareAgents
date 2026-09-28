@@ -279,6 +279,16 @@ export const TEAM_ROLE_COLOR = '#66aaff';
 export const CLAUDE_LABEL_COLOR = '#e8a06a';
 export const CODEX_LABEL_COLOR = '#7fd6a0';
 
+// ── Company roles: one color per department (Manager, Analista...) ──
+export const DEPARTMENT_COLORS: Record<string, string> = {
+  Dirección: '#73dfbc',
+  Ingeniería: '#84baff',
+  Diseño: '#dbb4ff',
+  Calidad: '#f1ca80',
+  Análisis: '#91d7e2',
+  Sesiones: '#b7c3d9',
+};
+
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */
 export const PET_WALK_SPEED_PX_PER_SEC = 32;

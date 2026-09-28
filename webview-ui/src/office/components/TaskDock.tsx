@@ -128,7 +128,12 @@ export function TaskDock({ officeState, onFocusAgent }: TaskDockProps) {
     return () => clearInterval(t);
   }, []);
   if (!board) return null;
-  const tasks = board.items.filter((i) => i.agentIds.length > 0 || IN_FLIGHT.has(i.phase));
+  const busy = (i: BoardItem) =>
+    i.agentIds.some((id) => officeState.characters.get(id)?.isActive ?? false);
+  // Finished tasks leave the dock once nobody is working on them anymore.
+  const tasks = board.items.filter((i) =>
+    i.phase === 'DONE' ? busy(i) : i.agentIds.length > 0 || IN_FLIGHT.has(i.phase),
+  );
   if (tasks.length === 0) return null;
   return (
     <div

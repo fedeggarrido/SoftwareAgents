@@ -8,7 +8,7 @@ import { getAgentRole } from '../toolUtils.js';
 
 /**
  * The company's delivery flow, in order. The percentage shown for a task is its
- * position in THIS flow (Desarrollo = 3 of 5 = 60 %), never an estimate of how
+ * position in THIS flow (Desarrollo = 3 of 6 = 50 %), never an estimate of how
  * much of the work is done: nothing reports that truthfully.
  */
 const FLOW: { phase: string; label: string }[] = [
@@ -16,14 +16,14 @@ const FLOW: { phase: string; label: string }[] = [
   { phase: 'READY', label: 'Listo' },
   { phase: 'ACTIVE', label: 'Desarrollo' },
   { phase: 'AWAITING_REVIEW', label: 'Revisión' },
+  { phase: 'VERIFIED', label: 'Verificada' },
   { phase: 'DONE', label: 'Hecho' },
 ];
 
 /** Phases worth a card in the dock even with nobody on them right now. */
-const IN_FLIGHT = new Set(['READY', 'ACTIVE', 'AWAITING_REVIEW']);
+const IN_FLIGHT = new Set(['READY', 'ACTIVE', 'AWAITING_REVIEW', 'VERIFIED']);
 
 function flowStep(phase: string): number {
-  if (phase === 'VERIFIED') return FLOW.length - 1;
   return FLOW.findIndex((s) => s.phase === phase);
 }
 

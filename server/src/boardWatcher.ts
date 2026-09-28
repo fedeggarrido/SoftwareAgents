@@ -220,7 +220,12 @@ export class BoardWatcher {
       const agentIds = [...new Set(keys.flatMap((k) => agentsByKey.get(k) ?? []))];
       return {
         ...item,
-        phase: (claim && CLAIM_PHASE[claim.state]) ?? item.phase ?? 'ANALYSIS',
+        // A claim outranks the board, except that the manager may mark a delivery
+        // that passed review VERIFIED while it still awaits integration.
+        phase:
+          claim?.state === 'awaiting_review' && item.phase === 'VERIFIED'
+            ? 'VERIFIED'
+            : ((claim && CLAIM_PHASE[claim.state]) ?? item.phase ?? 'ANALYSIS'),
         owner: claim && claim.state !== 'released' ? ownerOf(claim) : undefined,
         lastEvent: last ? eventView(last) : undefined,
         agentIds,

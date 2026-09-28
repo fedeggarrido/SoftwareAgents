@@ -338,7 +338,7 @@ async function main(): Promise<void> {
     codexWatcher.start();
     console.log(`[Pixel Agents] Watching Codex sessions for: ${cwd}`);
 
-    // Who each character is (Manager, Analista, Implementador...).
+    // Who each character is (Manager, Analista, DEV, QA...).
     const roleResolver = new RoleResolver(store);
     roleResolver.start();
 

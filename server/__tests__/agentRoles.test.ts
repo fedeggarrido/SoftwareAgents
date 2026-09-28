@@ -27,14 +27,14 @@ function codexUser(text: string): string {
 
 describe('specialistRole', () => {
   it('drops any project prefix', () => {
-    expect(specialistRole('fundtrinsic-code-reviewer')?.label).toBe('Revisor de código');
-    expect(specialistRole('nemesis-code-reviewer')?.label).toBe('Revisor de código');
-    expect(specialistRole('code-reviewer')?.label).toBe('Revisor de código');
+    expect(specialistRole('fundtrinsic-code-reviewer')?.label).toBe('QA Código');
+    expect(specialistRole('nemesis-code-reviewer')?.label).toBe('QA Código');
+    expect(specialistRole('code-reviewer')?.label).toBe('QA Código');
   });
 
   it('knows the finance specialists', () => {
     expect(specialistRole('fundtrinsic-accounting-analyst')).toEqual({
-      label: 'Analista contable',
+      label: 'Analista Contable',
       department: 'Análisis',
       detail: undefined,
     });
@@ -59,7 +59,7 @@ describe('roleFromBrief', () => {
   it('recognises the dispatched worker and its task', () => {
     const role = roleFromBrief('Implementa solo la tarea ClickUp 86c9abc12, sesión s1.', 'claude');
     expect(role).toEqual({
-      label: 'Implementador',
+      label: 'DEV',
       department: 'Ingeniería',
       detail: 'tarea 86c9abc12',
     });
@@ -67,7 +67,7 @@ describe('roleFromBrief', () => {
 
   it('recognises a specialist launched by hand', () => {
     const role = roleFromBrief('Actúa como fundtrinsic-product-analyst. Lee y sigue...', 'codex');
-    expect(role.label).toBe('Analista de producto');
+    expect(role.label).toBe('Analista');
   });
 
   it("names the task a specialist's brief was given explicitly", () => {
@@ -76,7 +76,7 @@ describe('roleFromBrief', () => {
       'claude',
     );
     expect(role).toEqual({
-      label: 'Analista de producto',
+      label: 'Analista',
       department: 'Análisis',
       detail: 'tarea FT-OPP-001',
     });
@@ -91,7 +91,7 @@ describe('roleFromBrief', () => {
   });
 
   it('falls back to a session with the owner', () => {
-    expect(roleFromBrief('¿Por qué falla el build?', 'claude').label).toBe('Sesión con el dueño');
+    expect(roleFromBrief('¿Por qué falla el build?', 'claude').label).toBe('Dueño');
   });
 });
 
@@ -105,7 +105,7 @@ describe('codexRole', () => {
       },
       'Actúa como fundtrinsic-product-analyst',
     );
-    expect(role).toEqual({ label: 'Analista de negocio', department: 'Análisis', detail: 'Zeno' });
+    expect(role).toEqual({ label: 'Analista Negocio', department: 'Análisis', detail: 'Zeno' });
   });
 });
 
@@ -126,7 +126,7 @@ describe('transcript and rollout readers', () => {
         codexUser('<recommended_plugins>\n...') +
         codexUser('Actúa como fundtrinsic-product-analyst. Encargo...'),
     );
-    expect(codexRoleFromRollout(file)?.label).toBe('Analista de producto');
+    expect(codexRoleFromRollout(file)?.label).toBe('Analista');
   });
 
   it('waits (undefined) while a rollout has no brief yet', () => {

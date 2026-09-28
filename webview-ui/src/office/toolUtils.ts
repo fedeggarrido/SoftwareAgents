@@ -67,7 +67,7 @@ export function getProviderLabel(id: number): string {
   return providerLabels.get(id) ?? 'Claude';
 }
 
-// ── Roles in the agent company (Manager, Analista de producto...) ─────────────
+// ── Roles in the agent company (Manager, Analista, DEV, QA...) ─────────────
 // Sent by the server as `agentRole` once the session records who it is. No
 // role yet means unknown, never a default: nothing is shown until it arrives.
 

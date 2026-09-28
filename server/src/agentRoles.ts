@@ -22,7 +22,7 @@ import type { AgentStateStore } from './agentStateStore.js';
  */
 
 export interface AgentRole {
-  /** What the character does, in Spanish ("Revisor de código"). */
+  /** What the character does, in Spanish ("QA Código"). */
   label: string;
   /** Department, used for color and grouping. */
   department: Department;
@@ -35,49 +35,49 @@ export type Department =
 
 const SPECIALISTS: Record<string, [string, Department]> = {
   'company-manager': ['Manager', 'Dirección'],
-  'delivery-lead': ['Responsable de entregas', 'Dirección'],
-  'implementation-lead': ['Jefe de implementación', 'Ingeniería'],
-  'backend-engineer': ['Ingeniero backend', 'Ingeniería'],
-  'connector-engineer': ['Ingeniero de conectores', 'Ingeniería'],
-  'graph-neo4j-engineer': ['Ingeniero de grafos', 'Ingeniería'],
-  'data-ingestion-engineer': ['Ingeniero de ingestión', 'Ingeniería'],
-  'financial-engine-engineer': ['Ingeniero del motor financiero', 'Ingeniería'],
-  'document-intelligence-engineer': ['Ingeniero de documentos', 'Ingeniería'],
-  'frontend-engineer': ['Ingeniero frontend', 'Ingeniería'],
-  'technical-architect': ['Arquitecto técnico', 'Ingeniería'],
-  'reliability-engineer': ['Ingeniero de fiabilidad', 'Ingeniería'],
-  'product-design-lead': ['Diseño de producto', 'Diseño'],
-  'ux-researcher': ['Investigador UX', 'Diseño'],
-  'testing-engineer': ['Ingeniero de pruebas', 'Calidad'],
-  'validation-engineer': ['Ingeniero de validación', 'Calidad'],
-  'code-reviewer': ['Revisor de código', 'Calidad'],
-  'security-reviewer': ['Revisor de seguridad', 'Calidad'],
-  'acceptance-reviewer': ['Revisor de aceptación', 'Calidad'],
-  'product-analyst': ['Analista de producto', 'Análisis'],
-  'business-analyst': ['Analista de negocio', 'Análisis'],
-  'technical-analyst': ['Analista técnico', 'Análisis'],
-  'research-analyst': ['Investigador', 'Análisis'],
-  'accounting-analyst': ['Analista contable', 'Análisis'],
-  'compliance-analyst': ['Analista de cumplimiento', 'Análisis'],
-  'growth-strategist': ['Estratega de crecimiento', 'Análisis'],
-  'customer-discovery-analyst': ['Analista de clientes', 'Análisis'],
-  'strategy-challenger': ['Crítico de estrategia', 'Análisis'],
-  'docs-keeper': ['Documentación', 'Ingeniería'],
-  docs: ['Documentación', 'Ingeniería'],
+  'delivery-lead': ['Delivery', 'Dirección'],
+  'implementation-lead': ['Tech Lead', 'Ingeniería'],
+  'backend-engineer': ['DEV Backend', 'Ingeniería'],
+  'connector-engineer': ['DEV Conectores', 'Ingeniería'],
+  'graph-neo4j-engineer': ['DEV Grafos', 'Ingeniería'],
+  'data-ingestion-engineer': ['DEV Datos', 'Ingeniería'],
+  'financial-engine-engineer': ['DEV Motor', 'Ingeniería'],
+  'document-intelligence-engineer': ['DEV IA', 'Ingeniería'],
+  'frontend-engineer': ['DEV Frontend', 'Ingeniería'],
+  'technical-architect': ['Arquitecto', 'Ingeniería'],
+  'reliability-engineer': ['SRE', 'Ingeniería'],
+  'product-design-lead': ['Diseño', 'Diseño'],
+  'ux-researcher': ['UX', 'Diseño'],
+  'testing-engineer': ['QA Tests', 'Calidad'],
+  'validation-engineer': ['QA Validación', 'Calidad'],
+  'code-reviewer': ['QA Código', 'Calidad'],
+  'security-reviewer': ['Seguridad', 'Calidad'],
+  'acceptance-reviewer': ['QA', 'Calidad'],
+  'product-analyst': ['Analista', 'Análisis'],
+  'business-analyst': ['Analista Negocio', 'Análisis'],
+  'technical-analyst': ['Analista Técnico', 'Análisis'],
+  'research-analyst': ['Investigación', 'Análisis'],
+  'accounting-analyst': ['Analista Contable', 'Análisis'],
+  'compliance-analyst': ['Compliance', 'Análisis'],
+  'growth-strategist': ['Growth', 'Análisis'],
+  'customer-discovery-analyst': ['Discovery', 'Análisis'],
+  'strategy-challenger': ['Estrategia', 'Análisis'],
+  'docs-keeper': ['Docs', 'Ingeniería'],
+  docs: ['Docs', 'Ingeniería'],
 };
 
 /** Codex's built-in agent types, for helpers spawned without a project role. */
 const CODEX_BUILTINS: Record<string, string> = {
   default: 'Ayudante',
-  worker: 'Ayudante que implementa',
+  worker: 'Ayudante DEV',
   explorer: 'Explorador del código',
 };
 
-const OWNER_SESSION: AgentRole = { label: 'Sesión con el dueño', department: 'Sesiones' };
+const OWNER_SESSION: AgentRole = { label: 'Dueño', department: 'Sesiones' };
 
 /**
  * "fundtrinsic-code-reviewer" / "nemesis-code-reviewer" / "code-reviewer"
- * -> Revisor de código. Undefined for unknown names.
+ * -> QA Código. Undefined for unknown names.
  */
 export function specialistRole(name: string | undefined, detail?: string): AgentRole | undefined {
   if (!name) return undefined;
@@ -98,7 +98,7 @@ export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'c
       : { label: 'Manager', department: 'Dirección' };
   }
   const task = /Implementa solo la tarea ClickUp\s+([A-Za-z0-9_-]+)/.exec(text)?.[1];
-  if (task) return { label: 'Implementador', department: 'Ingeniería', detail: `tarea ${task}` };
+  if (task) return { label: 'DEV', department: 'Ingeniería', detail: `tarea ${task}` };
   const named = /(?:Actúa como|\$)\s*([a-z0-9]+-[a-z0-9-]+)/i.exec(text)?.[1];
   // The task a specialist was given, when its brief names one explicitly
   // ("Tarea: FT-OPP-001", or the progress command's "--task FT-OPP-001").

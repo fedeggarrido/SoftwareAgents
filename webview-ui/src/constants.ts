@@ -289,6 +289,33 @@ export const DEPARTMENT_COLORS: Record<string, string> = {
   Sesiones: '#b7c3d9',
 };
 
+// ── Company backlog panel ──
+export const PHASE_ORDER = [
+  'ACTIVE',
+  'AWAITING_REVIEW',
+  'READY',
+  'BLOCKED',
+  'ANALYSIS',
+  'VERIFIED',
+  'DONE',
+];
+export const PHASE_COLORS: Record<string, string> = {
+  ACTIVE: '#3794ff',
+  AWAITING_REVIEW: '#f1ca80',
+  READY: '#89d185',
+  BLOCKED: '#ff8d14',
+  ANALYSIS: '#b7c3d9',
+  VERIFIED: '#73dfbc',
+  DONE: '#73dfbc',
+  '?': '#b7c3d9',
+};
+export const PRIORITY_COLORS: Record<string, string> = {
+  urgent: '#d14249',
+  high: '#ff8d14',
+  normal: '#3794ff',
+  low: '#4a4a6a',
+};
+
 // ── Pets ────────────────────────────────────────────────────────
 /** Walking speed in world pixels per second (matches character walk speed visually but slower). */
 export const PET_WALK_SPEED_PX_PER_SEC = 32;

@@ -8,6 +8,7 @@
  * Each connecting WebSocket client receives the full state on webviewReady.
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 
 import { RoleResolver } from './agentRoles.js';
@@ -19,6 +20,7 @@ import {
   loadAllFurniture,
   loadAllPets,
 } from './assetReload.js';
+import { BoardWatcher } from './boardWatcher.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
 import { CodexWatcher } from './codexWatcher.js';
 import {
@@ -101,6 +103,34 @@ function copyHookScriptOrReport(packageRoot: string, context = ''): boolean {
   if (copyHookScript(packageRoot)) return true;
   console.error(`[Pixel Agents] Hooks NOT installed${context}: hook script missing.`);
   return false;
+}
+
+/**
+ * Workers run in worktrees inside the workspace (`.worktrees/<name>` or Claude's
+ * `.claude/worktrees/<name>`); Claude files their sessions under a project dir of
+ * their own, named after the workspace's. Track those too, as they appear.
+ */
+function watchWorktreeProjectDirs(projectDir: string, onFound: (dir: string) => void): void {
+  const root = path.dirname(projectDir);
+  const base = path.basename(projectDir).toLowerCase();
+  const prefixes = [`${base}--worktrees-`, `${base}--claude-worktrees-`];
+  const seen = new Set<string>();
+  const scan = () => {
+    let names: string[];
+    try {
+      names = fs.readdirSync(root);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const lower = name.toLowerCase();
+      if (seen.has(lower) || !prefixes.some((p) => lower.startsWith(p))) continue;
+      seen.add(lower);
+      onFound(path.join(root, name));
+    }
+  };
+  scan();
+  setInterval(scan, 5000).unref();
 }
 
 // ── Main ──────────────────────────────────────────────────────
@@ -293,6 +323,10 @@ async function main(): Promise<void> {
       runtime.startProjectScan(projectDir);
       runtime.startExternalScanning(projectDir);
       runtime.startStaleCheck();
+      watchWorktreeProjectDirs(projectDir, (dir) => {
+        console.log(`[Pixel Agents] Scanning worktree project dir: ${dir}`);
+        runtime.startProjectScan(dir);
+      });
     }
 
     // Codex sessions started in this workspace (rollouts under ~/.codex/sessions).
@@ -307,6 +341,10 @@ async function main(): Promise<void> {
     // Who each character is (Manager, Analista, Implementador...).
     const roleResolver = new RoleResolver(store);
     roleResolver.start();
+
+    // The company's backlog (docs/backlog/board.json + claims + progress), if any.
+    const boardWatcher = new BoardWatcher(store, cwd);
+    boardWatcher.start();
 
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
@@ -326,6 +364,7 @@ async function main(): Promise<void> {
       console.log('\nShutting down...');
       codexWatcher.dispose();
       roleResolver.dispose();
+      boardWatcher.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

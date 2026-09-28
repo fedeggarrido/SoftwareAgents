@@ -1,5 +1,6 @@
 import { roleMessage } from './agentRoles.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { latestBoardMessage } from './boardWatcher.js';
 import { hasPromotedBackgroundAgent } from './teamUtils.js';
 
 /**
@@ -16,6 +17,9 @@ export function resendAgentActivity(
   send: (message: Record<string, unknown>) => void,
   store: AgentStateStore,
 ): void {
+  // The company backlog, if this workspace has one.
+  const board = latestBoardMessage();
+  if (board) send(board);
   for (const [id, agent] of store) {
     // 0. Provider label (Codex) -- the webview defaults to "Claude" without it.
     if (agent.providerLabel) {

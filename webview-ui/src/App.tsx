@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
+import { BacklogPanel } from './components/BacklogPanel.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
@@ -104,6 +105,7 @@ function App() {
 
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -517,7 +519,19 @@ function App() {
         onToggleEditMode={editor.handleToggleEditMode}
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+        isBacklogOpen={isBacklogOpen}
+        onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
+      />
+
+      <BacklogPanel
+        isOpen={isBacklogOpen}
+        onClose={() => setIsBacklogOpen(false)}
+        onFocusAgent={(id) => {
+          const os = getOfficeState();
+          os.selectedAgentId = id;
+          os.cameraFollowId = id;
+        }}
       />
 
       <VersionIndicator

@@ -12,6 +12,8 @@ interface BottomToolbarProps {
   onToggleEditMode: () => void;
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
+  isBacklogOpen: boolean;
+  onToggleBacklog: () => void;
   workspaceFolders: WorkspaceFolder[];
 }
 
@@ -21,6 +23,8 @@ export function BottomToolbar({
   onToggleEditMode,
   isSettingsOpen,
   onToggleSettings,
+  isBacklogOpen,
+  onToggleBacklog,
   workspaceFolders,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
@@ -126,6 +130,13 @@ export function BottomToolbar({
         title="Edit office layout"
       >
         Layout
+      </Button>
+      <Button
+        variant={isBacklogOpen ? 'active' : 'default'}
+        onClick={onToggleBacklog}
+        title="Backlog de la empresa de agentes"
+      >
+        Backlog
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

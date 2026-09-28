@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
-import type { BoardEvent, ProviderQuota } from '../office/boardStore.js';
+import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { transport } from '../transport/index.js';
@@ -16,58 +16,55 @@ function clock(epochS: number | null | undefined): string {
   });
 }
 
-/** What the gauge can truthfully say about a provider, never more. */
-function describe(q: ProviderQuota): { text: string; pct: number | null; color: string } {
+/** Keep the status readable without implying an exact value when none was reported. */
+function describe(q: ProviderQuota): { status: string; detail: string; color: string } {
+  const weekly = q.weekly?.usedPercent;
+  const usage = q.usedPercent === null ? 'Menos del 90 % usado' : `${q.usedPercent} % usado`;
+  const weeklyDetail = weekly === null || weekly === undefined ? '' : ` · ${weekly} % esta semana`;
+  const resetAt =
+    weekly !== null && weekly !== undefined && weekly >= 100 ? q.weekly?.resetsAt : q.resetsAt;
+  const resetDetail = resetAt ? ` · se renueva a las ${clock(resetAt)}` : '';
   switch (q.status) {
     case 'rejected':
       return {
-        text: `agotada · vuelve ${clock(q.resetsAt)}`,
-        pct: 100,
+        status: 'Sin cuota',
+        detail: `${weekly !== null && weekly !== undefined && weekly >= 100 ? 'Límite semanal alcanzado' : 'Cuota agotada'}${resetDetail}`,
         color: QUOTA_COLORS.rejected,
       };
     case 'warning':
       return {
-        text: `${q.usedPercent ?? '≥90'}% · reinicia ${clock(q.resetsAt)}`,
-        pct: q.usedPercent,
+        status: 'Cerca del límite',
+        detail: `${q.usedPercent === null ? 'Al menos 90 % usado' : `${q.usedPercent} % usado`}${weeklyDetail}${resetDetail}`,
         color: QUOTA_COLORS.warning,
       };
     case 'allowed':
-      return q.usedPercent !== null
-        ? {
-            text: `${q.usedPercent}% · reinicia ${clock(q.resetsAt)}`,
-            pct: q.usedPercent,
-            color: QUOTA_COLORS.allowed,
-          }
-        : { text: `<90% · reinicia ${clock(q.resetsAt)}`, pct: null, color: QUOTA_COLORS.allowed };
+      return {
+        status: 'Disponible',
+        detail: `${usage}${weeklyDetail}`,
+        color: QUOTA_COLORS.allowed,
+      };
     case 'reset':
-      return { text: 'ventana reiniciada', pct: null, color: QUOTA_COLORS.allowed };
+      return {
+        status: 'Actualizando',
+        detail: 'La cuota se renovó; falta una nueva lectura',
+        color: QUOTA_COLORS.unknown,
+      };
     default:
-      return { text: 'sin datos aún', pct: null, color: QUOTA_COLORS.unknown };
+      return {
+        status: 'Sin datos',
+        detail: 'Aún no hay una lectura de cuota',
+        color: QUOTA_COLORS.unknown,
+      };
   }
 }
 
 function QuotaRow({ name, q }: { name: string; q: ProviderQuota }) {
   const d = describe(q);
   return (
-    <div
-      className="flex items-center gap-6 text-2xs leading-none"
-      title="Claude solo informa del % a partir del 90 %."
-    >
-      <span className="w-50">{name}</span>
-      <span className="w-60 h-6 border border-border bg-bg-dark">
-        <span
-          className="block h-full"
-          style={{
-            width: `${d.pct ?? (q.status === 'unknown' ? 0 : 100)}%`,
-            background: d.color,
-            opacity: d.pct === null ? 0.35 : 1,
-          }}
-        />
-      </span>
-      <span style={{ color: d.color }}>{d.text}</span>
-      {q.weekly && q.weekly.usedPercent !== null && (
-        <span className="text-text-muted">· semana {q.weekly.usedPercent}%</span>
-      )}
+    <div className="grid grid-cols-[52px_160px_minmax(180px,1fr)] items-baseline gap-x-8 text-2xs leading-tight">
+      <span className="text-text">{name}</span>
+      <span style={{ color: d.color }}>● {d.status}</span>
+      <span className="text-text-muted">{d.detail}</span>
     </div>
   );
 }
@@ -87,7 +84,7 @@ interface CompanyHudProps {
   officeState: OfficeState;
 }
 
-/** Project progress, autopilot, owner decisions, quota and who is held by the quota gate. */
+/** Project progress, autopilot, owner decisions and provider availability. */
 export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: CompanyHudProps) {
   const board = useBoard();
   const notice = useCompanyNotice();
@@ -105,7 +102,6 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
   const pct = total ? Math.round((done / total) * 100) : 0;
   const ap = board.autopilot;
   const openDecisions = (board.decisions ?? []).filter((d) => d.status === 'open').length;
-  const waiting: BoardEvent[] = board.waiting ?? [];
   const showNotice = notice && now - notice.at < 8000;
   const active = board.items.filter((i) => i.owner?.state === 'active');
   const working = active.filter((i) =>
@@ -214,28 +210,10 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
         </div>
       )}
       {open && board.quota && (
-        <>
+        <div className="flex flex-col gap-4 border-t border-border pt-5">
+          <div className="text-2xs text-text-muted">Cuota para iniciar agentes</div>
           <QuotaRow name="Claude" q={board.quota.claude} />
           <QuotaRow name="Codex" q={board.quota.codex} />
-        </>
-      )}
-      {open &&
-        waiting.slice(0, 3).map((e, i) => (
-          <div
-            key={`${e.session}-${i}`}
-            className="text-2xs leading-tight overflow-hidden text-ellipsis whitespace-nowrap"
-            style={{ color: QUOTA_COLORS.rejected }}
-            title={e.detail}
-          >
-            ⏸ {e.session} · {e.detail.replace(/^Puerta de cuota: /, '')}
-          </div>
-        ))}
-      {open && waiting.length === 0 && board.gate?.[0] && (
-        <div
-          className="text-2xs leading-tight overflow-hidden text-ellipsis whitespace-nowrap text-text-muted"
-          title={board.gate[0].detail}
-        >
-          ▶ {board.gate[0].session} · {board.gate[0].detail.replace(/^Puerta de cuota: /, '')}
         </div>
       )}
     </div>

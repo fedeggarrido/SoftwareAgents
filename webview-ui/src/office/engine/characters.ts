@@ -75,6 +75,7 @@ export function createCharacter(
     wanderCount: 0,
     wanderLimit: randomInt(WANDER_MOVES_BEFORE_REST_MIN, WANDER_MOVES_BEFORE_REST_MAX),
     isActive: true,
+    isInMeeting: false,
     seatId,
     bubbleType: null,
     bubbleTimer: 0,
@@ -320,6 +321,7 @@ export function updateCharacter(
 export function getCharacterSprite(ch: Character, sprites: CharacterSprites): SpriteData {
   switch (ch.state) {
     case CharacterState.TYPE:
+      if (ch.isInMeeting || ch.hasWorkstation === false) return sprites.walk[ch.dir][1];
       if (isReadingTool(ch.currentTool)) {
         return sprites.reading[ch.dir][ch.frame % 2];
       }

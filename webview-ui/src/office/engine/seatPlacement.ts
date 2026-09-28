@@ -17,6 +17,11 @@ export interface AnchorLike {
   tileRow: number;
 }
 
+/** Social chairs are reserved for the live meeting, not a worker's saved desk. */
+export function isMeetingArea(label: string | null): boolean {
+  return label !== null && /reuni|meeting/i.test(label);
+}
+
 /**
  * The tile a teammate should cluster around: its lead's SEAT when the lead has
  * one, otherwise the lead's live tile. A lead is assigned its seat at creation
@@ -41,11 +46,12 @@ export function closestFreeSeat(
   seats: ReadonlyMap<string, SeatLike>,
   col: number,
   row: number,
+  eligible: (uid: string) => boolean = () => true,
 ): string | null {
   let best: string | null = null;
   let bestDist = Infinity;
   for (const [uid, seat] of seats) {
-    if (seat.assigned) continue;
+    if (seat.assigned || !eligible(uid)) continue;
     const d = Math.abs(seat.seatCol - col) + Math.abs(seat.seatRow - row);
     if (d < bestDist) {
       best = uid;

@@ -41,7 +41,7 @@ import { CharacterState, Direction, PetState, TILE_SIZE } from '../types.js';
 import { createCharacter, updateCharacter } from './characters.js';
 import { advanceMatrixEffect, startMatrixEffect } from './matrixEffectState.js';
 import { createPet, updatePet } from './petEntity.js';
-import { anchorTile, closestFreeSeat } from './seatPlacement.js';
+import { anchorTile, closestFreeSeat, isMeetingArea } from './seatPlacement.js';
 
 /** Internal helper: facing-tile coords for a seat. Returns null for invalid direction. */
 function seatFacingOffset(direction: Direction): { dCol: number; dRow: number } {
@@ -158,7 +158,13 @@ export class OfficeState {
 
     // First pass: try to keep characters at their existing seats
     for (const ch of this.characters.values()) {
-      if (ch.seatId && this.seats.has(ch.seatId)) {
+      if (
+        ch.seatId &&
+        this.seats.has(ch.seatId) &&
+        (ch.isInMeeting ||
+          (!this.isReservedSeat(ch.seatId) &&
+            (this.isWorkstationSeat(ch.seatId) || !this.hasFreeWorkstationSeat())))
+      ) {
         const seat = this.seats.get(ch.seatId)!;
         if (!seat.assigned) {
           seat.assigned = true;
@@ -170,10 +176,12 @@ export class OfficeState {
           ch.x = cx;
           ch.y = cy;
           ch.dir = seat.facingDir;
+          ch.hasWorkstation = this.isWorkstationSeat(ch.seatId);
           continue;
         }
       }
       ch.seatId = null; // will be reassigned below
+      ch.hasWorkstation = false;
     }
 
     // Second pass: assign remaining characters to free seats
@@ -189,6 +197,7 @@ export class OfficeState {
         ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
         ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2;
         ch.dir = seat.facingDir;
+        ch.hasWorkstation = this.isWorkstationSeat(seatId);
       }
     }
 
@@ -294,6 +303,32 @@ export class OfficeState {
     return tiles[idx] ?? null;
   }
 
+  /** Meeting chairs and sofas are social seating, not permanent desks. */
+  private isReservedSeat(uid: string): boolean {
+    if (isMeetingArea(this.seatZone(uid))) return true;
+    const furnitureUid = uid.replace(/:\d+$/, '');
+    return this.layout.furniture.some((f) => f.uid === furnitureUid && f.type.startsWith('SOFA_'));
+  }
+
+  private isWorkstationSeat(uid: string): boolean {
+    const seat = this.seats.get(uid);
+    return !!seat && this.isSeatFacingElectronics(seat, this.buildElectronicsTileSet());
+  }
+
+  private hasFreeWorkstationSeat(): boolean {
+    const electronicsTiles = this.buildElectronicsTileSet();
+    for (const [uid, seat] of this.seats) {
+      if (
+        !seat.assigned &&
+        !this.isReservedSeat(uid) &&
+        this.isSeatFacingElectronics(seat, electronicsTiles)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** A free chair in the named room, if this layout has one. */
   freeSeatInArea(area: RegExp): string | null {
     for (const [uid, seat] of this.seats) {
@@ -333,7 +368,11 @@ export class OfficeState {
    * Random-pick a seat from a candidate list, biased toward seats that face an
    * electronics tile. Returns null when the candidate list is empty.
    */
-  private pickFromSeats(seatUids: string[], electronicsTiles: Set<string>): string | null {
+  private pickFromSeats(
+    seatUids: string[],
+    electronicsTiles: Set<string>,
+    requireWorkstation = false,
+  ): string | null {
     if (seatUids.length === 0) return null;
     const pcSeats: string[] = [];
     const otherSeats: string[] = [];
@@ -347,51 +386,51 @@ export class OfficeState {
       }
     }
     if (pcSeats.length > 0) return pcSeats[Math.floor(Math.random() * pcSeats.length)];
+    if (requireWorkstation) return null;
     if (otherSeats.length > 0) return otherSeats[Math.floor(Math.random() * otherSeats.length)];
     return null;
   }
 
   /**
-   * 3-stage seat picker for top-level agents.
-   *
-   *   Stage 1: If `folderName` is given and `areaMappings[folderName]` lists
-   *            Area labels, prefer free seats whose tile is labeled with one
-   *            of those areas.
-   *   Stage 2: Prefer free seats whose tile has NO area label (unzoned).
-   *   Stage 3: Any free seat.
-   *
-   * Each stage routes through `pickFromSeats` for the PC-bias rule. Returns
-   * null only when every seat is already occupied. Passing `undefined`
-   * preserves pre-Areas single-stage behavior (skips Stage 1; Stage 2 picks
-   * unzoned seats from a layout without `areaTiles`, which is every seat).
+   * Assign workstations first, respecting folder area mappings when possible.
+   * Social seating is never assigned to ordinary work sessions. If every desk
+   * is occupied, a plain non-social chair is allowed; otherwise there is no seat.
    */
   private findFreeSeat(folderName?: string): string | null {
     const electronicsTiles = this.buildElectronicsTileSet();
     const freeSeats: string[] = [];
     for (const [uid, seat] of this.seats) {
-      if (!seat.assigned) freeSeats.push(uid);
+      if (!seat.assigned && !this.isReservedSeat(uid)) freeSeats.push(uid);
     }
     if (freeSeats.length === 0) return null;
 
     const areaLabels = folderName ? this.areaMappings[folderName] : undefined;
 
-    // Stage 1 — in-area seats for the folder's mapped Area labels.
+    // Prefer an actual workstation across the whole office before assigning a
+    // non-PC chair. This also migrates persisted lounge assignments on reload.
+    let inArea: string[] = [];
     if (areaLabels && areaLabels.length > 0) {
       const wanted = new Set(areaLabels);
-      const inArea = freeSeats.filter((uid) => {
+      inArea = freeSeats.filter((uid) => {
         const label = this.seatZone(uid);
         return label !== null && wanted.has(label);
       });
-      const pick = this.pickFromSeats(inArea, electronicsTiles);
-      if (pick) return pick;
+      const mappedWorkstation = this.pickFromSeats(inArea, electronicsTiles, true);
+      if (mappedWorkstation) return mappedWorkstation;
     }
 
-    // Stage 2 — unzoned seats (no area label, or layout has no areas at all).
+    // Unzoned workstations, then workstations in other areas.
     const unzoned = freeSeats.filter((uid) => this.seatZone(uid) === null);
-    const pick2 = this.pickFromSeats(unzoned, electronicsTiles);
-    if (pick2) return pick2;
+    const unzonedWorkstation = this.pickFromSeats(unzoned, electronicsTiles, true);
+    if (unzonedWorkstation) return unzonedWorkstation;
+    const anyWorkstation = this.pickFromSeats(freeSeats, electronicsTiles, true);
+    if (anyWorkstation) return anyWorkstation;
 
-    // Stage 3 — any free seat.
+    // A plain chair is still useful in layouts with no PCs.
+    const mapped = this.pickFromSeats(inArea, electronicsTiles);
+    if (mapped) return mapped;
+    const unzonedChair = this.pickFromSeats(unzoned, electronicsTiles);
+    if (unzonedChair) return unzonedChair;
     return this.pickFromSeats(freeSeats, electronicsTiles);
   }
 
@@ -459,14 +498,25 @@ export class OfficeState {
     const anchor = nearAgentId !== undefined ? this.characters.get(nearAgentId) : undefined;
     const anchorAt = anchorTile(anchor, this.seats);
     let seatId: string | null = null;
-    if (preferredSeatId && this.seats.has(preferredSeatId)) {
+    if (
+      preferredSeatId &&
+      this.seats.has(preferredSeatId) &&
+      !this.isReservedSeat(preferredSeatId) &&
+      (this.isWorkstationSeat(preferredSeatId) || !this.hasFreeWorkstationSeat())
+    ) {
       const seat = this.seats.get(preferredSeatId)!;
       if (!seat.assigned) {
         seatId = preferredSeatId;
       }
     }
     if (!seatId && anchorAt) {
-      seatId = closestFreeSeat(this.seats, anchorAt.col, anchorAt.row);
+      const preferWorkstation = this.hasFreeWorkstationSeat();
+      seatId = closestFreeSeat(
+        this.seats,
+        anchorAt.col,
+        anchorAt.row,
+        (uid) => !this.isReservedSeat(uid) && (!preferWorkstation || this.isWorkstationSeat(uid)),
+      );
     }
     if (!seatId) {
       seatId = this.findFreeSeat(folderName);
@@ -477,6 +527,7 @@ export class OfficeState {
       const seat = this.seats.get(seatId)!;
       seat.assigned = true;
       ch = createCharacter(id, palette, seatId, seat, hueShift);
+      ch.hasWorkstation = this.isWorkstationSeat(seatId);
     } else {
       // No seats — teammates spawn beside their anchor, others at a random walkable tile
       let spawn = anchorAt ? this.closestFreeWalkableTile(anchorAt.col, anchorAt.row) : null;
@@ -487,6 +538,7 @@ export class OfficeState {
             : { col: 1, row: 1 };
       }
       ch = createCharacter(id, palette, null, null, hueShift);
+      ch.hasWorkstation = false;
       ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2;
       ch.y = spawn.row * TILE_SIZE + TILE_SIZE / 2;
       ch.tileCol = spawn.col;
@@ -597,6 +649,7 @@ export class OfficeState {
     // Assign new seat
     seat.assigned = true;
     ch.seatId = seatId;
+    ch.hasWorkstation = this.isWorkstationSeat(seatId);
     // Pathfind to new seat (unblock own seat tile for this query)
     const path = this.withOwnSeatUnblocked(ch, () =>
       findPath(ch.tileCol, ch.tileRow, seat.seatCol, seat.seatRow, this.tileMap, this.blockedTiles),
@@ -633,7 +686,13 @@ export class OfficeState {
     if (!teammate || !lead) return;
     const anchorAt = anchorTile(lead, this.seats);
     if (!anchorAt) return;
-    const target = closestFreeSeat(this.seats, anchorAt.col, anchorAt.row);
+    const preferWorkstation = this.hasFreeWorkstationSeat();
+    const target = closestFreeSeat(
+      this.seats,
+      anchorAt.col,
+      anchorAt.row,
+      (uid) => !this.isReservedSeat(uid) && (!preferWorkstation || this.isWorkstationSeat(uid)),
+    );
     if (!target || target === teammate.seatId) return;
     const targetSeat = this.seats.get(target)!;
     const targetDist =

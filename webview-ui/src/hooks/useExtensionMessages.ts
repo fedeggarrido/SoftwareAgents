@@ -8,6 +8,7 @@ import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingA
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setGhostHeadlessAgents as setRendererGhostHeadlessAgents } from '../office/engine/renderer.js';
+import { isMeetingArea } from '../office/engine/seatPlacement.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
@@ -198,20 +199,26 @@ export function useExtensionMessages(
           os.reassignSeat(id, seats.original);
         }
       }
+      for (const ch of os.characters.values()) ch.isInMeeting = false;
       meetingSeats.clear();
     };
 
     const seatMeetingParticipants = (os: OfficeState) => {
       if (!meetingId) return;
       for (const [id, ch] of os.characters) {
-        if (meetingSeats.has(id)) continue;
         if (getAgentRole(id)?.detail !== `reunión ${meetingId}`) continue;
-        if (/reuni|meeting/i.test(os.seatZone(ch.seatId ?? '') ?? '')) continue;
+        if (meetingSeats.has(id) || isMeetingArea(os.seatZone(ch.seatId ?? ''))) {
+          ch.isInMeeting = true;
+          continue;
+        }
         const seat = os.freeSeatInArea(/reuni|meeting/i);
         if (!seat) continue;
         const original = ch.seatId;
         os.reassignSeat(id, seat);
-        if (ch.seatId === seat) meetingSeats.set(id, { original, meeting: seat });
+        if (ch.seatId === seat) {
+          meetingSeats.set(id, { original, meeting: seat });
+          ch.isInMeeting = true;
+        }
       }
     };
 
@@ -337,11 +344,7 @@ export function useExtensionMessages(
         setCompanyNotice(String(msg.text ?? ''));
       } else if (msg.type === 'boardState') {
         const next = msg as BoardState;
-        const activeMeeting =
-          next.meeting &&
-          (next.meeting.status === 'running' || next.meeting.status === 'waiting_quota')
-            ? next.meeting.id
-            : null;
+        const activeMeeting = next.meeting?.status === 'running' ? next.meeting.id : null;
         if (activeMeeting !== meetingId) {
           restoreMeetingSeats(os);
           meetingId = activeMeeting;

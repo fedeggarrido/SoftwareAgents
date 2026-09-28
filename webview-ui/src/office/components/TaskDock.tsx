@@ -69,8 +69,17 @@ function TaskCard({
       </div>
       <div className="flex gap-4 flex-wrap">
         {item.agentIds.length === 0 && (
-          <span className="text-2xs text-text-muted">
-            {item.owner ? `${item.owner.worker} · ${item.owner.session}` : 'Sin agente asignado'}
+          <span
+            className="text-2xs text-text-muted"
+            title={
+              item.owner
+                ? 'La tarea está reservada, pero su sesión aún no está en la oficina: aparece en cuanto vuelva a escribir en su transcript (p. ej. tras reiniciar la oficina o mientras genera una respuesta larga).'
+                : undefined
+            }
+          >
+            {item.owner
+              ? `○ ${item.owner.worker} · ${item.owner.session} · aún no visible en la oficina`
+              : 'Sin agente asignado'}
           </span>
         )}
         {item.agentIds.map((id) => {

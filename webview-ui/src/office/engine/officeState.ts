@@ -294,6 +294,14 @@ export class OfficeState {
     return tiles[idx] ?? null;
   }
 
+  /** A free chair in the named room, if this layout has one. */
+  freeSeatInArea(area: RegExp): string | null {
+    for (const [uid, seat] of this.seats) {
+      if (!seat.assigned && area.test(this.seatZone(uid) ?? '')) return uid;
+    }
+    return null;
+  }
+
   /**
    * Does this seat face an electronics tile (PC, monitor)? Mirrors the
    * forward-and-flanking scan used by furniture auto-state.
@@ -578,14 +586,15 @@ export class OfficeState {
   reassignSeat(agentId: number, seatId: string): void {
     const ch = this.characters.get(agentId);
     if (!ch) return;
+    const seat = this.seats.get(seatId);
+    if (!seat || (seat.assigned && ch.seatId !== seatId)) return;
+    if (ch.seatId === seatId) return;
     // Unassign old seat
     if (ch.seatId) {
       const old = this.seats.get(ch.seatId);
       if (old) old.assigned = false;
     }
     // Assign new seat
-    const seat = this.seats.get(seatId);
-    if (!seat || seat.assigned) return;
     seat.assigned = true;
     ch.seatId = seatId;
     // Pathfind to new seat (unblock own seat tile for this query)

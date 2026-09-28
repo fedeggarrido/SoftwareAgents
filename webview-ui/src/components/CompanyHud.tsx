@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { BoardEvent, ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
+import type { OfficeState } from '../office/engine/officeState.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 
@@ -82,13 +83,14 @@ const AUTOPILOT_TEXT: Record<string, string> = {
 
 interface CompanyHudProps {
   onOpenDecisions: () => void;
+  officeState: OfficeState;
 }
 
 /** Project progress, autopilot, owner decisions, quota and who is held by the quota gate. */
-export function CompanyHud({ onOpenDecisions }: CompanyHudProps) {
+export function CompanyHud({ onOpenDecisions, officeState }: CompanyHudProps) {
   const board = useBoard();
   const notice = useCompanyNotice();
-  const [open, setOpen] = useState(() => window.innerWidth >= 700);
+  const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 2000);
@@ -104,13 +106,20 @@ export function CompanyHud({ onOpenDecisions }: CompanyHudProps) {
   const openDecisions = (board.decisions ?? []).filter((d) => d.status === 'open').length;
   const waiting: BoardEvent[] = board.waiting ?? [];
   const showNotice = notice && now - notice.at < 8000;
+  const active = board.items.filter((i) => i.owner?.state === 'active');
+  const working = active.filter((i) =>
+    i.agentIds.some((id) => officeState.characters.get(id)?.isActive),
+  ).length;
+  const withoutSignal = active.filter(
+    (i) => i.owner?.stale || !i.agentIds.some((id) => officeState.characters.get(id)?.isActive),
+  ).length;
 
   return (
     <div
-      className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel px-8 py-4 flex flex-col gap-3 max-w-[92vw]"
+      className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel px-8 py-4 flex flex-col gap-3 w-max max-w-[92vw]"
       data-testid="company-hud"
     >
-      <div className="flex items-center gap-8 flex-wrap text-2xs leading-none">
+      <div className="flex items-center gap-8 overflow-x-auto whitespace-nowrap text-2xs leading-none">
         <button
           className="cursor-pointer text-xs"
           onClick={() => setOpen((v) => !v)}
@@ -133,6 +142,17 @@ export function CompanyHud({ onOpenDecisions }: CompanyHudProps) {
         {(by.ACTIVE ?? 0) > 0 && (
           <span style={{ color: PHASE_COLORS.ACTIVE }}>{by.ACTIVE} en curso</span>
         )}
+        {working > 0 && (
+          <span style={{ color: PHASE_COLORS.ACTIVE }}>{working} trabajando ahora</span>
+        )}
+        {withoutSignal > 0 && (
+          <span
+            className="text-text-muted"
+            title="Reserva activa sin actividad visible en la oficina"
+          >
+            {withoutSignal} sin actividad visible
+          </span>
+        )}
         {(by.AWAITING_REVIEW ?? 0) > 0 && (
           <span style={{ color: PHASE_COLORS.AWAITING_REVIEW }}>
             {by.AWAITING_REVIEW} en revisión
@@ -140,6 +160,14 @@ export function CompanyHud({ onOpenDecisions }: CompanyHudProps) {
         )}
         {(by.VERIFIED ?? 0) > 0 && (
           <span style={{ color: PHASE_COLORS.VERIFIED }}>{by.VERIFIED} verificadas</span>
+        )}
+        {board.manager?.stale && (
+          <span
+            style={{ color: PHASE_COLORS.BLOCKED }}
+            title="La reserva del manager sigue activa, pero no recibe latidos"
+          >
+            Manager sin latido
+          </span>
         )}
         {ap && (
           <Button

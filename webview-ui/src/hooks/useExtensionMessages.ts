@@ -18,6 +18,7 @@ import {
   clearAgentRole,
   clearProviderLabel,
   extractToolName,
+  getAgentRole,
   isSubagentToolName,
   setAgentRole,
   setProviderCapabilities,
@@ -118,8 +119,15 @@ interface ExtensionMessageState {
   setShowAreas: (v: boolean) => void;
 }
 
-function saveAgentSeats(os: OfficeState): void {
-  transport.send({ type: 'saveAgentSeats', seats: os.getPersistableSeats() });
+function saveAgentSeats(
+  os: OfficeState,
+  temporary?: Map<number, { original: string | null; meeting: string }>,
+): void {
+  const seats = os.getPersistableSeats();
+  for (const [id, entry] of temporary ?? []) {
+    if (seats[id]) seats[id].seatId = entry.original;
+  }
+  transport.send({ type: 'saveAgentSeats', seats });
 }
 
 export function useExtensionMessages(
@@ -180,6 +188,32 @@ export function useExtensionMessages(
   useEffect(() => {
     // Buffer agents from existingAgents until layout is loaded
     let pendingAgents: PendingAgent[] = [];
+    let meetingId: string | null = null;
+    const meetingSeats = new Map<number, { original: string | null; meeting: string }>();
+
+    const restoreMeetingSeats = (os: OfficeState) => {
+      for (const [id, seats] of meetingSeats) {
+        const ch = os.characters.get(id);
+        if (ch?.seatId === seats.meeting && seats.original) {
+          os.reassignSeat(id, seats.original);
+        }
+      }
+      meetingSeats.clear();
+    };
+
+    const seatMeetingParticipants = (os: OfficeState) => {
+      if (!meetingId) return;
+      for (const [id, ch] of os.characters) {
+        if (meetingSeats.has(id)) continue;
+        if (getAgentRole(id)?.detail !== `reunión ${meetingId}`) continue;
+        if (/reuni|meeting/i.test(os.seatZone(ch.seatId ?? '') ?? '')) continue;
+        const seat = os.freeSeatInArea(/reuni|meeting/i);
+        if (!seat) continue;
+        const original = ch.seatId;
+        os.reassignSeat(id, seat);
+        if (ch.seatId === seat) meetingSeats.set(id, { original, meeting: seat });
+      }
+    };
 
     // Accumulate distinct folderNames seen across agents (never removed during the
     // session): the source for the Areas folder-mapping dropdown, so a folder stays
@@ -248,8 +282,9 @@ export function useExtensionMessages(
           setLayoutWasReset(true);
         }
         if (os.characters.size > 0) {
-          saveAgentSeats(os);
+          saveAgentSeats(os, meetingSeats);
         }
+        seatMeetingParticipants(os);
       } else if (msg.type === 'agentCreated') {
         const id = msg.id as number;
         const folderName = msg.folderName as string | undefined;
@@ -295,21 +330,34 @@ export function useExtensionMessages(
             os.setHeadless(id, true);
           }
         }
-        saveAgentSeats(os);
+        saveAgentSeats(os, meetingSeats);
       } else if (msg.type === 'agentProviderLabel') {
         setProviderLabel(msg.id as number, msg.label as string);
       } else if (msg.type === 'companyNotice') {
         setCompanyNotice(String(msg.text ?? ''));
       } else if (msg.type === 'boardState') {
-        setBoardState(msg as unknown as BoardState);
+        const next = msg as BoardState;
+        const activeMeeting =
+          next.meeting &&
+          (next.meeting.status === 'running' || next.meeting.status === 'waiting_quota')
+            ? next.meeting.id
+            : null;
+        if (activeMeeting !== meetingId) {
+          restoreMeetingSeats(os);
+          meetingId = activeMeeting;
+        }
+        seatMeetingParticipants(os);
+        setBoardState(next);
       } else if (msg.type === 'agentRole') {
         setAgentRole(msg.id as number, {
           label: msg.label as string,
           department: msg.department as string,
           detail: (msg.detail as string | undefined) ?? undefined,
         });
+        seatMeetingParticipants(os);
       } else if (msg.type === 'agentClosed') {
         const id = msg.id as number;
+        meetingSeats.delete(id);
         clearProviderLabel(id);
         clearAgentRole(id);
         setAgents((prev) => prev.filter((a) => a !== id));
@@ -362,7 +410,7 @@ export function useExtensionMessages(
             headlessAgents,
           )
         ) {
-          saveAgentSeats(os);
+          saveAgentSeats(os, meetingSeats);
         }
         setAgents((prev) => {
           const ids = new Set(prev);

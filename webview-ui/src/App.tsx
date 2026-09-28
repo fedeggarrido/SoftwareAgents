@@ -529,7 +529,7 @@ function App() {
         workspaceFolders={workspaceFolders}
       />
 
-      <CompanyHud onOpenDecisions={() => setIsDecisionsOpen((v) => !v)} />
+      <CompanyHud officeState={officeState} onOpenDecisions={() => setIsDecisionsOpen((v) => !v)} />
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
       <MeetingPanel />
 
@@ -545,6 +545,7 @@ function App() {
       <BacklogPanel
         isOpen={isBacklogOpen}
         onClose={() => setIsBacklogOpen(false)}
+        officeState={officeState}
         onFocusAgent={(id) => {
           const os = getOfficeState();
           os.selectedAgentId = id;

@@ -111,7 +111,7 @@ interface TaskDockProps {
  */
 export function TaskDock({ officeState, onFocusAgent }: TaskDockProps) {
   const board = useBoard();
-  const [open, setOpen] = useState(() => window.innerWidth >= 900);
+  const [open, setOpen] = useState(false);
   // Re-render periodically so busy/idle markers follow the characters.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -128,11 +128,11 @@ export function TaskDock({ officeState, onFocusAgent }: TaskDockProps) {
   if (tasks.length === 0) return null;
   return (
     <div
-      className="absolute bottom-10 right-10 z-20 pixel-panel px-8 py-4 flex flex-col gap-4 max-w-[70vw] overflow-x-auto"
+      className="absolute bottom-10 right-10 z-20 pixel-panel px-8 py-4 flex flex-col gap-4 max-w-[70vw] max-h-[32vh] overflow-auto"
       data-testid="task-dock"
     >
       <button className="cursor-pointer text-left text-xs" onClick={() => setOpen((v) => !v)}>
-        {open ? '▾' : '▸'} Tareas en marcha ({tasks.length})
+        {open ? '▾' : '▸'} Tareas en seguimiento ({tasks.length})
       </button>
       {open &&
         tasks.map((item) => (

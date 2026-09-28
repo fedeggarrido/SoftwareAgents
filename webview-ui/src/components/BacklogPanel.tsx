@@ -3,7 +3,22 @@ import { useEffect, useState } from 'react';
 import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
+import type { OfficeState } from '../office/engine/officeState.js';
 import { Button } from './ui/Button.js';
+
+function workStatus(
+  item: BoardItem,
+  board: ReturnType<typeof useBoard>,
+  office: OfficeState,
+): string {
+  if (item.phase === 'AWAITING_REVIEW') return 'esperando revisión';
+  if (item.phase === 'VERIFIED') return 'verificada, pendiente de integrar';
+  if (item.owner?.stale) return 'reserva sin latido';
+  if (board?.waiting?.some((e) => e.session === item.owner?.session)) return 'esperando cuota';
+  if (item.agentIds.some((id) => office.characters.get(id)?.isActive)) return 'trabajando ahora';
+  if (item.owner?.state === 'active') return 'reservada, sin actividad visible';
+  return PHASE_LABELS[item.phase]?.toLowerCase() ?? item.phase.toLowerCase();
+}
 
 const PHASE_LABELS: Record<string, string> = {
   ACTIVE: 'En curso',
@@ -38,10 +53,14 @@ function Card({
   item,
   now,
   onFocusAgent,
+  board,
+  officeState,
 }: {
   item: BoardItem;
   now: number;
   onFocusAgent: (id: number) => void;
+  board: ReturnType<typeof useBoard>;
+  officeState: OfficeState;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -60,8 +79,7 @@ function Card({
           className="text-2xs"
           style={{ color: item.owner.stale ? PHASE_COLORS.BLOCKED : undefined }}
         >
-          {item.owner.worker} · {item.owner.session}
-          {item.owner.stale ? ' · sin latido' : ''}
+          {item.owner.worker} · {item.owner.session} · {workStatus(item, board, officeState)}
         </div>
       )}
       {item.agentIds.length > 0 && (
@@ -105,10 +123,11 @@ interface BacklogPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onFocusAgent: (id: number) => void;
+  officeState: OfficeState;
 }
 
 /** The company's backlog next to the office: phases, owners and last reports. */
-export function BacklogPanel({ isOpen, onClose, onFocusAgent }: BacklogPanelProps) {
+export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: BacklogPanelProps) {
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
@@ -131,7 +150,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent }: BacklogPanelProp
 
   return (
     <div
-      className="absolute top-10 right-10 bottom-60 z-30 w-440 pixel-panel p-8 flex flex-col gap-8"
+      className="absolute top-10 right-10 bottom-60 z-30 w-[min(440px,92vw)] pixel-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
     >
       <div className="flex items-center gap-8">
@@ -170,11 +189,24 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent }: BacklogPanelProp
           <div className="text-2xs text-text-muted">
             Manager:{' '}
             {board.manager
-              ? `${board.manager.session}${board.manager.stale ? ' (sin latido)' : ''}`
+              ? `${board.manager.session}${board.manager.stale ? ' (reserva sin latido)' : ' (ronda reservada)'}`
               : 'sin ronda activa'}
             {!board.sources.claims && ' · reservas no disponibles'}
             {!board.sources.progress && ' · sin registro de progreso'}
           </div>
+
+          {board.summary && (
+            <div
+              className="flex gap-5 flex-wrap text-2xs text-text-muted"
+              data-testid="epic-progress"
+            >
+              {Object.entries(board.summary.byEpic).map(([epic, count]) => (
+                <span key={epic}>
+                  {epic}: {count.done}/{count.total} hechas
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto flex flex-col gap-8 pr-4">
             {[...groups, ...(unknown.length ? [{ phase: '?', items: unknown }] : [])].map((g) => (
@@ -183,7 +215,14 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent }: BacklogPanelProp
                   {PHASE_LABELS[g.phase] ?? g.phase} · {g.items.length}
                 </div>
                 {g.items.map((item) => (
-                  <Card key={item.id} item={item} now={now} onFocusAgent={onFocusAgent} />
+                  <Card
+                    key={item.id}
+                    item={item}
+                    now={now}
+                    onFocusAgent={onFocusAgent}
+                    board={board}
+                    officeState={officeState}
+                  />
                 ))}
               </div>
             ))}

@@ -40,12 +40,23 @@ export interface BoardItem {
   agentIds: number[];
 }
 
+export interface ProviderQuota {
+  provider: 'claude' | 'codex';
+  status: 'allowed' | 'warning' | 'rejected' | 'reset' | 'unknown';
+  usedPercent: number | null;
+  resetsAt: number | null;
+  observedAt: number | null;
+  weekly?: { usedPercent: number | null; resetsAt: number | null; windowMinutes?: number };
+}
+
 export interface BoardState {
   project: string;
   items: BoardItem[];
   manager?: BoardOwner;
   recent: BoardEvent[];
   sources: { board: boolean; claims: boolean; progress: boolean };
+  quota?: { claude: ProviderQuota; codex: ProviderQuota };
+  gate?: BoardEvent[];
   generatedAt: number;
 }
 

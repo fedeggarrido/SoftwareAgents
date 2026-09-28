@@ -9,6 +9,7 @@ import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
+import { QuotaHud } from './components/QuotaHud.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -524,6 +525,8 @@ function App() {
         onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
       />
+
+      <QuotaHud />
 
       <TaskDock
         officeState={officeState}

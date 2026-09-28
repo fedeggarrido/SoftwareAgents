@@ -309,6 +309,12 @@ export const PHASE_COLORS: Record<string, string> = {
   DONE: '#73dfbc',
   '?': '#b7c3d9',
 };
+export const QUOTA_COLORS = {
+  allowed: '#89d185',
+  warning: '#ff8d14',
+  rejected: '#d14249',
+  unknown: '#b7c3d9',
+};
 export const PRIORITY_COLORS: Record<string, string> = {
   urgent: '#d14249',
   high: '#ff8d14',

@@ -217,6 +217,48 @@ export function ToolOverlay({
         const contextRatio = ch.contextTokens / ch.maxContextTokens;
         const showContextGauge = !isSub && ch.contextTokens > 0;
 
+        // Always-on labels stay out of the way: one small pill (role · task and
+        // the status dot). The full panel is for the hovered or selected agent.
+        if (alwaysShowOverlay && !isSelected && !isHovered) {
+          if (isSub) return null;
+          const task = companyRole?.detail?.replace(/^tarea\s+/, '');
+          return (
+            <div
+              key={id}
+              className="absolute -translate-x-1/2"
+              style={{ left: screenX, top: screenY - 16, pointerEvents: 'none', zIndex: 41 }}
+              data-testid="agent-overlay"
+              data-agent-id={id}
+            >
+              <div
+                className="flex items-center gap-3 px-4 py-1 pixel-panel whitespace-nowrap"
+                style={{ opacity: 0.85 }}
+              >
+                {dotColor && (
+                  <span
+                    className="w-5 h-5 rounded-full shrink-0"
+                    style={{ background: dotColor }}
+                  />
+                )}
+                <span
+                  className="text-2xs leading-none"
+                  style={{
+                    color: companyRole
+                      ? (DEPARTMENT_COLORS[companyRole.department] ?? CLAUDE_LABEL_COLOR)
+                      : providerName?.startsWith('Codex')
+                        ? CODEX_LABEL_COLOR
+                        : CLAUDE_LABEL_COLOR,
+                  }}
+                  data-testid="agent-pill"
+                >
+                  {companyRole?.label ?? providerName ?? 'Agente'}
+                  {task ? ` · ${task}` : ''}
+                </span>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div
             key={id}

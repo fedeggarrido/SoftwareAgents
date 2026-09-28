@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { AgentStateStore } from './agentStateStore.js';
+import { claudeQuota, codexQuota } from './quotaReader.js';
 
 /**
  * The agent company's backlog, as the office shows it: which task is in which
@@ -37,6 +38,8 @@ interface BoardFile {
   project?: string;
   claimsDb?: string;
   progressDb?: string;
+  /** Headless run logs (Claude stream-json) under the Git common dir. */
+  runsDir?: string;
   items?: BoardItem[];
 }
 
@@ -232,6 +235,15 @@ export class BoardWatcher {
       manager: manager && manager.state === 'active' ? ownerOf(manager) : undefined,
       recent: (events ?? []).slice(0, RECENT_EVENTS).map(eventView),
       sources: { board: true, claims: claims !== undefined, progress: events !== undefined },
+      quota: {
+        claude: claudeQuota(dir && board.runsDir ? path.join(dir, board.runsDir) : undefined, nowS),
+        codex: codexQuota(nowS),
+      },
+      // The launchers' quota gate decisions (phase QUOTA), newest first.
+      gate: (events ?? [])
+        .filter((e) => e.phase === 'QUOTA')
+        .slice(0, 5)
+        .map(eventView),
       generatedAt: this.now(),
     };
   }

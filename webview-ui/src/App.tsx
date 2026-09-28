@@ -19,7 +19,7 @@ import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
-import { TaskBadges } from './office/components/TaskBadges.js';
+import { TaskDock } from './office/components/TaskDock.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
 import { EditorToolbar } from './office/editor/EditorToolbar.js';
@@ -440,13 +440,6 @@ function App() {
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
           />
-          <TaskBadges
-            officeState={officeState}
-            agents={agents}
-            containerRef={containerRef}
-            zoom={editor.zoom}
-            panRef={editor.panRef}
-          />
         </>
       ) : (
         <DebugView
@@ -530,6 +523,15 @@ function App() {
         isBacklogOpen={isBacklogOpen}
         onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
+      />
+
+      <TaskDock
+        officeState={officeState}
+        onFocusAgent={(id) => {
+          const os = getOfficeState();
+          os.selectedAgentId = id;
+          os.cameraFollowId = id;
+        }}
       />
 
       <BacklogPanel

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
-import { capacityView } from '../office/capacityView.js';
+import { capacityHudView, capacityView } from '../office/capacityView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { getProviderLabel } from '../office/toolUtils.js';
 import { transport } from '../transport/index.js';
@@ -88,7 +88,8 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
   }, []);
   if (!board) return null;
 
-  if (!board.sources.board) {
+  const capacity = capacityHudView(board);
+  if (capacity.minimal) {
     return (
       <div
         className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(600px,calc(100vw-120px))] p-8 flex flex-col gap-6"
@@ -100,7 +101,7 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
             Backlog
           </button>
         </div>
-        <div className="text-2xs text-text-muted">Capacidad observada</div>
+        <div className="text-2xs text-text-muted">{capacity.title}</div>
         {board.quota && (
           <>
             <QuotaRow
@@ -237,7 +238,7 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
           </div>
           {board.quota && (
             <div className="flex flex-col gap-4">
-              <div className="text-2xs text-text-muted">Capacidad observada</div>
+              <div className="text-2xs text-text-muted">{capacity.title}</div>
               <QuotaRow
                 name="Claude"
                 q={board.quota.claude}

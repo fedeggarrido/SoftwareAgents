@@ -39,6 +39,9 @@ Este archivo fija el flujo de colaboración del Development Project.
 
 ## Worktrees y validación segura
 
+- Los tests de webview-ui/test se type-checkean con tsconfig.node.json: nunca importes componentes .tsx; extrae la lógica a módulos DOM-free.
+  Antes de entregar, ejecuta `cd webview-ui && npx tsc -b`.
+
 - Los `node_modules` de los worktrees son junctions al repo principal: no escribas
   en ellos, no los borres recursivamente ni instales dependencias desde el worktree.
 - Antes de `git worktree remove`, verifica las rutas absolutas y que cada

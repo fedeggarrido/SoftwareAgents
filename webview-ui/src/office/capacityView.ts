@@ -1,4 +1,4 @@
-import type { ProviderQuota } from '../../../core/src/messages.js';
+import type { BoardState, ProviderQuota } from '../../../core/src/messages.js';
 import { QUOTA_COLORS } from '../constants.js';
 
 function clock(epochS: number | null | undefined): string {
@@ -80,4 +80,9 @@ export function capacityView(q: ProviderQuota, running: number) {
         return label + ': ' + usage + ' · Reset: ' + reset;
       }) ?? [],
   };
+}
+
+/** Select the minimal HUD when the board source is unavailable. */
+export function capacityHudView(board: BoardState) {
+  return { minimal: !board.sources.board, title: 'Capacidad observada' };
 }

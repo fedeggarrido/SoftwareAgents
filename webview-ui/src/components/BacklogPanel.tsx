@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
+import { backlogView } from '../office/backlogView.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -146,6 +147,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
   })).filter(
     (g) => g.items.length > 0 && (showDone || (g.phase !== 'DONE' && g.phase !== 'VERIFIED')),
   );
+  const view = backlogView(board);
   const unknown = (board?.items ?? []).filter((i) => !PHASE_ORDER.includes(i.phase));
 
   return (
@@ -167,29 +169,20 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
         </Button>
       </div>
 
-      {(!board || !board.sources.board) && (
+      {view.message && (
         <div className="text-xs text-text-muted">
-          {board?.mode === 'invalid'
-            ? 'Configuración de proyecto inválida. Revisa .softwareagents/project.yaml; no se usa el tablero legacy.'
-            : board?.mode === 'project'
-              ? `Modo proyecto: ${board.project} (${board.projectId}). El Backlog local aún no está conectado a ClickUp (SA-053). Para usar un espejo legacy, configura legacy.boardFile en .softwareagents/project.yaml.`
-              : 'Modo legacy: tablero no disponible. Configura docs/backlog/board.json.'}
-          {board?.mode === 'project' && !board.clickupFolderUrl && (
-            <div>
-              Configura clickup.workspaceId y clickup.folderId en .softwareagents/project.yaml.
-            </div>
-          )}
+          {view.message}
+          {view.configurationHint && <div>{view.configurationHint}</div>}
         </div>
       )}
-
-      {board?.clickupFolderUrl && (
+      {view.clickupLink && (
         <a
           className="text-xs text-accent-bright underline"
-          href={board.clickupFolderUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={view.clickupLink.href}
+          target={view.clickupLink.target}
+          rel={view.clickupLink.rel}
         >
-          Abrir carpeta de ClickUp
+          {view.clickupLink.label}
         </a>
       )}
 

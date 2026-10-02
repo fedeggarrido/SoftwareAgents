@@ -1,20 +1,9 @@
-﻿import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { BoardState } from '../../core/src/messages.js';
-import { BacklogPanel } from '../src/components/BacklogPanel.js';
-import { CompanyHud } from '../src/components/CompanyHud.js';
-import type { OfficeState } from '../src/office/engine/officeState.js';
+import { backlogView } from '../src/office/backlogView.js';
+import { capacityHudView, capacityView } from '../src/office/capacityView.js';
 
-const state = vi.hoisted(() => ({ board: null as BoardState | null }));
-vi.mock('../src/office/boardStore.js', () => ({
-  useBoard: () => state.board,
-  useCompanyNotice: () => null,
-}));
-vi.mock('../src/transport/index.js', () => ({ transport: { send: vi.fn() } }));
-const officeState = { characters: new Map() } as OfficeState;
-const noop = () => {};
 function board(mode: 'project' | 'invalid' | 'legacy'): BoardState {
   const quota = (provider: 'claude' | 'codex') => ({
     provider,
@@ -40,38 +29,54 @@ function board(mode: 'project' | 'invalid' | 'legacy'): BoardState {
   };
 }
 describe('office without a board', () => {
-  it('shows both providers and unknown capacity without legacy controls', () => {
-    state.board = board('project');
-    const html = renderToStaticMarkup(
-      createElement(CompanyHud, { officeState, onOpenBacklog: noop, onOpenDecisions: noop }),
+  it('selects the minimal HUD with unknown provider capacity', () => {
+    const state = board('project');
+    expect(capacityHudView(state)).toEqual({ minimal: true, title: 'Capacidad observada' });
+    for (const provider of ['claude', 'codex'] as const) {
+      expect(state.quota![provider].provider).toBe(provider);
+      expect(capacityView(state.quota![provider], 0)).toMatchObject({
+        status: 'Desconocida',
+        detail: 'Aún no hay una lectura de cuota',
+        windows: [],
+      });
+    }
+    expect(capacityHudView({ ...state, sources: { ...state.sources, board: true } }).minimal).toBe(
+      false,
     );
-    expect(html).toContain('Capacidad observada');
-    expect(html).toContain('Claude');
-    expect(html).toContain('Codex');
-    expect(html).not.toContain('progressbar');
-    expect(html).not.toContain('Piloto');
   });
   it.each(['project', 'legacy', 'invalid'] as const)('explains %s mode', (mode) => {
-    state.board = board(mode);
-    const html = renderToStaticMarkup(
-      createElement(BacklogPanel, { officeState, isOpen: true, onClose: noop, onFocusAgent: noop }),
-    );
-    expect(html).toContain(
+    const view = backlogView(board(mode));
+    expect(view.message).toContain(
       mode === 'project'
         ? 'softwareagents'
         : mode === 'legacy'
           ? 'docs/backlog/board.json'
           : 'inválida',
     );
-    expect(html).not.toContain('sin ronda activa');
+    expect(view.message).not.toContain('sin ronda activa');
+    expect(view.configurationHint !== null).toBe(mode === 'project');
+    expect(view.clickupLink).toBeNull();
   });
   it('links the configured ClickUp folder', () => {
-    state.board = { ...board('project'), clickupFolderUrl: 'https://app.clickup.com/123/v/f/456' };
-    const html = renderToStaticMarkup(
-      createElement(BacklogPanel, { officeState, isOpen: true, onClose: noop, onFocusAgent: noop }),
-    );
-    expect(html).toContain('href="https://app.clickup.com/123/v/f/456"');
-    expect(html).toContain('noopener noreferrer');
-    expect(html).toContain('SA-053');
+    const view = backlogView({
+      ...board('project'),
+      clickupFolderUrl: 'https://app.clickup.com/123/v/f/456',
+    });
+    expect(view.clickupLink).toEqual({
+      href: 'https://app.clickup.com/123/v/f/456',
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      label: 'Abrir carpeta de ClickUp',
+    });
+    expect(view.configurationHint).toBeNull();
+    expect(view.message).toContain('SA-053');
+  });
+  it('handles absent and available board sources', () => {
+    expect(backlogView(null).message).toContain('Modo legacy');
+    const state = board('project');
+    expect(backlogView({ ...state, sources: { ...state.sources, board: true } })).toMatchObject({
+      message: null,
+      configurationHint: null,
+    });
   });
 });

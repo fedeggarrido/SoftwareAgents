@@ -22,14 +22,30 @@ function clock(epochS: number | null | undefined): string {
   });
 }
 
+function buildResetDetail(epochS: number | null | undefined, now: Date): string {
+  if (!epochS) return '';
+  const d = new Date(epochS * 1000);
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = clock(epochS);
+  if (sameDay) return ` · se renueva a las ${time}`;
+  const date = d.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' });
+  return ` · se renueva el ${date} a las ${time}`;
+}
+
 /** Keep the status readable without implying an exact value when none was reported. */
-function describeQuota(q: ProviderQuota): { status: string; detail: string; color: string } {
+function describeQuota(
+  q: ProviderQuota,
+  now = new Date(),
+): { status: string; detail: string; color: string } {
   const weekly = q.weekly?.usedPercent;
   const usage = q.usedPercent === null ? 'Menos del 90 % usado' : `${q.usedPercent} % usado`;
   const weeklyDetail = weekly === null || weekly === undefined ? '' : ` · ${weekly} % esta semana`;
   const resetAt =
     weekly !== null && weekly !== undefined && weekly >= 100 ? q.weekly?.resetsAt : q.resetsAt;
-  const resetDetail = resetAt ? ` · se renueva a las ${clock(resetAt)}` : '';
+  const resetDetail = buildResetDetail(resetAt, now);
   switch (q.status) {
     case 'rejected':
       return {
@@ -65,9 +81,9 @@ function describeQuota(q: ProviderQuota): { status: string; detail: string; colo
 }
 
 /** Presentation only: no React, transport or browser dependencies. */
-export function capacityView(q: ProviderQuota, running: number) {
+export function capacityView(q: ProviderQuota, running: number, now = new Date()) {
   return {
-    ...describeQuota(q),
+    ...describeQuota(q, now),
     provenance:
       running +
       (running === 1 ? ' agente en marcha · Fuente: ' : ' agentes en marcha · Fuente: ') +

@@ -97,9 +97,11 @@ describe('capacity view', () => {
     ]);
   });
   it('uses the weekly reset when the weekly limit is exhausted', () => {
+    const now = new Date(200 * 1000); // same day as resetsAt: 200
     const view = capacityView(
       { ...quota, status: 'rejected', resetsAt: 100, weekly: { usedPercent: 100, resetsAt: 200 } },
       0,
+      now,
     );
     expect(view.detail).toBe(
       'Límite semanal alcanzado · se renueva a las ' +
@@ -109,6 +111,34 @@ describe('capacity view', () => {
           hour12: false,
         }),
     );
+  });
+  it('shows only the time in resetDetail when reset is today', () => {
+    const now = new Date(2026, 9, 2, 12, 0, 0);
+    const resetEpoch = Math.floor(new Date(2026, 9, 2, 20, 0, 0).getTime() / 1000);
+    const view = capacityView({ ...quota, status: 'rejected', resetsAt: resetEpoch }, 0, now);
+    expect(view.detail).toBe(
+      'Cuota agotada · se renueva a las ' +
+        new Date(resetEpoch * 1000).toLocaleTimeString('es-ES', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+    );
+  });
+  it('shows date and time in resetDetail when reset is not today', () => {
+    const now = new Date(2026, 9, 2, 12, 0, 0);
+    const resetEpoch = Math.floor(new Date(2026, 9, 8, 20, 0, 0).getTime() / 1000);
+    const view = capacityView({ ...quota, status: 'rejected', resetsAt: resetEpoch }, 0, now);
+    const date = new Date(resetEpoch * 1000).toLocaleDateString('es-ES', {
+      day: 'numeric',
+      month: 'numeric',
+    });
+    const time = new Date(resetEpoch * 1000).toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    expect(view.detail).toBe(`Cuota agotada · se renueva el ${date} a las ${time}`);
   });
   it('preserves warning and healthy usage details', () => {
     expect(capacityView({ ...quota, status: 'warning' }, 0).detail).toBe('Al menos 90 % usado');

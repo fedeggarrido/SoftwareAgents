@@ -147,4 +147,39 @@ describe('capacity view', () => {
         .detail,
     ).toBe('42 % usado · 60 % esta semana');
   });
+  it('switches from date to time when a midnight reset becomes today', () => {
+    const reset = new Date(2026, 9, 3, 0, 0);
+    const q = { ...quota, status: 'rejected' as const, resetsAt: reset.getTime() / 1000 };
+    const time = reset.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const date = reset.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' });
+    expect(capacityView(q, 0, new Date(2026, 9, 2, 23, 59)).detail).toBe(
+      `Cuota agotada · se renueva el ${date} a las ${time}`,
+    );
+    expect(capacityView(q, 0, reset).detail).toBe(`Cuota agotada · se renueva a las ${time}`);
+  });
+  it('shows the weekly reset date on another day instead of the five-hour reset', () => {
+    const now = new Date(2026, 9, 2, 12);
+    const reset = new Date(2026, 9, 8, 20);
+    const view = capacityView(
+      {
+        ...quota,
+        status: 'rejected',
+        resetsAt: now.getTime() / 1000,
+        weekly: { usedPercent: 100, resetsAt: reset.getTime() / 1000 },
+      },
+      0,
+      now,
+    );
+    const date = reset.toLocaleDateString('es-ES', { day: 'numeric', month: 'numeric' });
+    const time = reset.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    expect(view.detail).toBe(`Límite semanal alcanzado · se renueva el ${date} a las ${time}`);
+  });
 });

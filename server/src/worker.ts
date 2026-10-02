@@ -23,6 +23,19 @@ export interface WorkerArgs {
   brief: string;
 }
 
+/** Use the brief heading as written, with the task key only in the commit scope. */
+export function workerCommitSubject(task: string, brief: string): string {
+  const heading = (brief.split(/\r?\n/).find((line) => line.trim()) ?? '')
+    .trim()
+    .replace(/^#+\s*/, '')
+    .replace(/[\x00-\x1f\x7f]/g, ' ');
+  const summary = heading
+    .replace(new RegExp(`^${task}(?=\\s|[·:—–-]|$)\\s*[·:—–-]?\\s*`, 'i'), '')
+    .trim()
+    .slice(0, 100);
+  return `feat(${task}): ${summary || 'implementar tarea supervisada'}`;
+}
+
 export function parseWorkerArgs(argv: string[]): WorkerArgs {
   if (argv[0] !== 'run')
     throw new Error('Usage: pixel-agents worker run --task SA-### --brief <file>');
@@ -192,21 +205,12 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       log('require_human: rutas protegidas: ' + gate.paths.join(', ') + '\nRama: ' + tree.branch);
       return { branch: tree.branch, commit: null, stat: '', policyDecision: gate.decision };
     }
-    const summary =
-      brief
-        .split(/\r?\n/)
-        .find((line) => line.trim())
-        ?.replace(/^#+\s*/, '')
-        .replace(/[\x00-\x1f\x7f]/g, ' ')
-        .trim()
-        .toLowerCase()
-        .slice(0, 100) || 'implementar tarea supervisada';
     git(tree.path, [
       '-c',
       'core.hooksPath=',
       'commit',
       '-m',
-      `feat(${args.task}): ${summary}\n\nSoftwareAgents-Execution: ${executionId}`,
+      `${workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
     ]);
     const commit = git(tree.path, ['rev-parse', 'HEAD']);
     const stat = git(tree.path, ['diff', '--stat', base, commit]);

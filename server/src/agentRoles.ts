@@ -36,6 +36,7 @@ export type Department =
   'Dirección' | 'Ingeniería' | 'Diseño' | 'Calidad' | 'Análisis' | 'Sesiones';
 
 const SPECIALISTS: Record<string, [string, Department]> = {
+  developer: ['DEV', 'Ingeniería'],
   'company-manager': ['Manager', 'Dirección'],
   'delivery-lead': ['Delivery', 'Dirección'],
   'implementation-lead': ['Tech Lead', 'Ingeniería'],

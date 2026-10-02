@@ -181,6 +181,21 @@ describe('transcript and rollout readers', () => {
 });
 
 describe('worktree task labels', () => {
+  it.each(['claude', 'codex'])('labels a registered %s Developer as DEV', (providerId) => {
+    const store = new AgentStateStore();
+    store.broadcast = () => {};
+    store.set(1, { id: 1, sessionId: 'session', jsonlFile: '', providerId } as AgentState);
+    new RoleResolver(
+      store,
+      2000,
+      () => new Map([['session', { executionId: 'exec', role: 'developer', taskKey: 'SA-081' }]]),
+    ).tick();
+    expect(store.get(1)?.role).toEqual({
+      label: 'DEV',
+      department: 'Ingeniería',
+      detail: 'tarea SA-081',
+    });
+  });
   it('uses registry metadata for a session without a transcript', () => {
     const store = new AgentStateStore();
     store.broadcast = () => {};

@@ -2,9 +2,14 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { WorktreeManager } from '../src/executors/worktreeManager.js';
+
+vi.mock('fs', async (original) => {
+  const actual = await original<typeof import('fs')>();
+  return { ...actual, rmdirSync: vi.fn(actual.rmdirSync) };
+});
 
 describe('Task worktree manager (real Git)', () => {
   let temp: string;
@@ -125,6 +130,36 @@ describe('Task worktree manager (real Git)', () => {
     );
     await expect(manager.create('SA-032', 'escape')).rejects.toThrow('inside');
     fs.unlinkSync(path.join(root, '.worktrees'));
+  });
+
+  it('cleans an empty residual directory later but refuses unregistered content', async () => {
+    const tree = await manager.create('SA-032', 'worktrees');
+    await manager.cleanup('SA-032', 'worktrees');
+    fs.mkdirSync(tree.path);
+    fs.writeFileSync(path.join(tree.path, 'keep.txt'), 'unmanaged');
+    await expect(manager.cleanup('SA-032', 'worktrees')).rejects.toThrow('unregistered');
+    expect(fs.readFileSync(path.join(tree.path, 'keep.txt'), 'utf8')).toBe('unmanaged');
+    fs.unlinkSync(path.join(tree.path, 'keep.txt'));
+    await manager.cleanup('SA-032', 'worktrees');
+    expect(fs.existsSync(tree.path)).toBe(false);
+  });
+
+  it('reports a locked empty residual and allows a later cleanup retry', async () => {
+    const directory = path.join(root, '.worktrees', 'SA-032');
+    fs.mkdirSync(directory, { recursive: true });
+    const remove = vi.spyOn(fs, 'rmdirSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('Watcher lock'), { code: 'EPERM' });
+    });
+    try {
+      await expect(manager.cleanup('SA-032', 'worktrees')).rejects.toThrow(
+        'Close watchers and retry',
+      );
+      expect(fs.existsSync(directory)).toBe(true);
+    } finally {
+      remove.mockRestore();
+    }
+    await manager.cleanup('SA-032', 'worktrees');
+    expect(fs.existsSync(directory)).toBe(false);
   });
 
   it('refuses inherited push URLs because Git pushes to every configured URL', async () => {

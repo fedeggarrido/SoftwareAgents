@@ -30,6 +30,19 @@ configurada por el Operator. Imprime «rama lista para revisión», rama, SHA y
 push, PR, merge, ni invoca `gh`. Los fallos retienen los cambios para inspección.
 Las dependencias y los tests quedan para preparación y revisión humanas.
 
+El asunto conserva las mayúsculas del primer título no vacío del brief y quita
+su key inicial y separador: `# SA-081 · HUD: mostrar Capacidad` produce
+`feat(SA-081): HUD: mostrar Capacidad`. La key permanece en el scope.
+
+En Windows, la oficina u otro watcher puede bloquear el directorio vacío después
+de que `git worktree remove` lo haya desregistrado. `WorktreeManager.cleanup`
+intenta retirar ese residuo sin borrado recursivo; si sigue bloqueado informa
+de su ruta. Cerrar los watchers y repetir cleanup más tarde. Un directorio no
+registrado con contenido o un enlace se rechaza siempre. Antes de la retirada
+manual, seguir las reglas de junctions de AGENTS.md; no usar borrado recursivo
+sobre node_modules compartidos. El worker conserva su rama para revisión y no
+llama a cleanup automáticamente.
+
 ## Lock y recuperación
 
 El lock exclusivo `<git-common-dir>/softwareagents/locks/SA-###.lock` contiene

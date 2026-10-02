@@ -93,7 +93,7 @@ export class WorktreeManager {
       await this.assertMainRepository();
       if (!(await this.registered(directory))) {
         if (fs.existsSync(directory)) {
-          throw new Error('Refusing to remove an unregistered directory');
+          this.removeEmptyResidual(directory);
         }
         await this.git(this.root, ['worktree', 'prune']);
         return;
@@ -105,7 +105,13 @@ export class WorktreeManager {
       }
       // Never let recursive removal follow a junction, including links installed by scripts.
       this.visitLinks(directory, (link) => fs.unlinkSync(link));
-      await this.git(this.root, ['worktree', 'remove', '--force', directory]);
+      try {
+        await this.git(this.root, ['worktree', 'remove', '--force', directory]);
+      } catch (error) {
+        // Windows watchers can hold the empty directory after Git unregisters it.
+        if (await this.registered(directory)) throw error;
+      }
+      if (fs.existsSync(directory)) this.removeEmptyResidual(directory);
       await this.git(this.root, ['worktree', 'prune']);
     });
   }
@@ -114,6 +120,20 @@ export class WorktreeManager {
     const result = this.queue.then(operation);
     this.queue = result.catch(() => undefined);
     return result;
+  }
+
+  private removeEmptyResidual(directory: string): void {
+    if (fs.lstatSync(directory).isSymbolicLink() || fs.readdirSync(directory).length) {
+      throw new Error('Refusing to remove an unregistered directory with content or a link');
+    }
+    try {
+      // Non-recursive: a concurrent write must prevent removal, never be discarded.
+      fs.rmdirSync(directory);
+    } catch {
+      throw new Error(
+        `Empty worktree directory is locked: ${directory}. Close watchers and retry cleanup.`,
+      );
+    }
   }
 
   private target(taskKey: string, slug: string): { directory: string; branch: string } {

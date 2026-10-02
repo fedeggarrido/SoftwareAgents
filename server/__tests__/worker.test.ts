@@ -10,7 +10,7 @@ import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
-import { acquireTaskLock, parseWorkerArgs, runWorker } from '../src/worker.js';
+import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
@@ -61,6 +61,17 @@ afterEach(() => {
 });
 
 describe('supervised worker', () => {
+  it.each([
+    ['\n# SA-999 · HUD: mostrar Capacidad\nDetails', 'HUD: mostrar Capacidad'],
+    ['# sa-999: HUD', 'HUD'],
+    ['# SA-999 — HUD', 'HUD'],
+    ['# SA-9999 · HUD', 'SA-9999 · HUD'],
+    ['Correct documentation.', 'Correct documentation.'],
+    ['# SA-999', 'implementar tarea supervisada'],
+    ['', 'implementar tarea supervisada'],
+  ])('formats the runtime subject from %s', (brief, summary) => {
+    expect(workerCommitSubject('SA-999', brief)).toBe(`feat(SA-999): ${summary}`);
+  });
   it('dispatches default and --port to the server, worker to its own handler', async () => {
     const server = vi.fn(async () => {});
     const worker = vi.fn(async () => ({ branch: '', commit: null, stat: '' }));
@@ -116,6 +127,7 @@ describe('supervised worker', () => {
       'softwareagents-push-disabled://origin',
     );
     expect(git(tree, 'status', '--porcelain')).toBe('');
+    expect(git(tree, 'log', '-1', '--format=%s')).toBe('feat(SA-999): Correct documentation.');
     expect(git(tree, 'log', '-1', '--format=%B')).toContain('SoftwareAgents-Execution:');
     expect(new ExecutionRegistry(tree).sessionMap().values().next().value).toMatchObject({
       role: 'developer',

@@ -167,13 +167,33 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
         </Button>
       </div>
 
-      {!board && (
+      {(!board || !board.sources.board) && (
         <div className="text-xs text-text-muted">
-          Este workspace no tiene tablero (docs/backlog/board.json).
+          {board?.mode === 'invalid'
+            ? 'Configuración de proyecto inválida. Revisa .softwareagents/project.yaml; no se usa el tablero legacy.'
+            : board?.mode === 'project'
+              ? `Modo proyecto: ${board.project} (${board.projectId}). El Backlog local aún no está conectado a ClickUp (SA-053). Para usar un espejo legacy, configura legacy.boardFile en .softwareagents/project.yaml.`
+              : 'Modo legacy: tablero no disponible. Configura docs/backlog/board.json.'}
+          {board?.mode === 'project' && !board.clickupFolderUrl && (
+            <div>
+              Configura clickup.workspaceId y clickup.folderId en .softwareagents/project.yaml.
+            </div>
+          )}
         </div>
       )}
 
-      {board && (
+      {board?.clickupFolderUrl && (
+        <a
+          className="text-xs text-accent-bright underline"
+          href={board.clickupFolderUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Abrir carpeta de ClickUp
+        </a>
+      )}
+
+      {board?.sources.board && (
         <>
           <div className="flex gap-6 flex-wrap text-2xs">
             {PHASE_ORDER.map((phase) => {

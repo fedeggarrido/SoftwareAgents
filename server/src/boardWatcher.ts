@@ -238,14 +238,27 @@ export class BoardWatcher {
   }
 
   build(): BoardState | undefined {
-    let board: BoardFile;
+    let board: BoardFile = {};
+    let hasBoard = false;
     try {
       const boardPath = this.sources.boardFile();
-      if (!boardPath) return undefined;
-      board = JSON.parse(fs.readFileSync(boardPath, 'utf-8')) as BoardFile;
+      if (boardPath) {
+        const parsed = JSON.parse(fs.readFileSync(boardPath, 'utf-8')) as BoardFile;
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          (parsed.items !== undefined && !Array.isArray(parsed.items))
+        )
+          throw new Error('Invalid board');
+        board = parsed;
+        hasBoard = true;
+      }
     } catch {
-      return undefined; // this workspace has no company board
+      // Capacity remains observable even without a readable board.
     }
+    const selection = this.sources.selection;
+    const project = selection.kind === 'project' ? selection.project.project : undefined;
     const items = board.items ?? [];
     const dir = this.commonDir;
     const claimsFile = this.sources.source(dir, board.claimsDb);
@@ -328,11 +341,16 @@ export class BoardWatcher {
     const decisionsFile = this.sources.source(this.workspaceDir, board.decisionsFile);
     return {
       type: 'boardState',
-      project: board.project ?? path.basename(this.workspaceDir),
+      project: project?.name ?? board.project ?? path.basename(this.workspaceDir),
+      mode: selection.kind,
+      projectId: project?.id,
+      clickupFolderUrl: project?.clickup
+        ? `https://app.clickup.com/${encodeURIComponent(project.clickup.workspaceId)}/v/f/${encodeURIComponent(project.clickup.folderId)}`
+        : undefined,
       items: view,
       manager: manager && manager.state === 'active' ? ownerOf(manager) : undefined,
       recent: (events ?? []).slice(0, RECENT_EVENTS).map(eventView),
-      sources: { board: true, claims: claims !== undefined, progress: events !== undefined },
+      sources: { board: hasBoard, claims: claims !== undefined, progress: events !== undefined },
       quota: {
         claude: claudeQuota(this.sources.runsDir(dir, board.runsDir), nowS),
         codex: codexQuota(nowS),
@@ -346,7 +364,7 @@ export class BoardWatcher {
       waiting,
       decisions: decisionsFile ? openDecisions(decisionsFile) : [],
       meeting: latestMeeting(this.sources.source(dir, board.meetingsDir), nowS),
-      autopilot: readAutopilot() as AutopilotState | undefined,
+      autopilot: hasBoard ? (readAutopilot() as AutopilotState | undefined) : undefined,
       generatedAt: this.now(),
     };
   }

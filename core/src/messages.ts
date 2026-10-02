@@ -319,6 +319,9 @@ export interface WorkspaceFolder {
 export interface BoardState {
   type: 'boardState';
   project: string;
+  mode?: BoardMode;
+  projectId?: string;
+  clickupFolderUrl?: string;
   items: BoardItem[];
   manager?: BoardOwner;
   recent: BoardEvent[];
@@ -332,6 +335,8 @@ export interface BoardState {
   autopilot?: AutopilotState;
   generatedAt: number;
 }
+
+export type BoardMode = 'legacy' | 'project' | 'invalid';
 
 export interface BoardItem {
   id: string;

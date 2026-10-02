@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { BoardWatcher } from '../src/boardWatcher.js';
-import { claudeQuota } from '../src/quotaReader.js';
+import { claudeQuota, codexQuota } from '../src/quotaReader.js';
 
 vi.mock('fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('fs')>()),
@@ -17,7 +17,7 @@ vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('../src/companyControl.js', () => ({ readAutopilot: () => undefined }));
 vi.mock('../src/quotaReader.js', () => ({
   claudeQuota: vi.fn(() => undefined),
-  codexQuota: () => undefined,
+  codexQuota: vi.fn(() => undefined),
 }));
 
 let DatabaseSync: typeof import('node:sqlite').DatabaseSync | undefined;
@@ -123,8 +123,12 @@ describe('BoardWatcher characterization', () => {
     const invalidWatcher = new BoardWatcher(store, workspace);
     try {
       expect(() => invalidWatcher.start()).not.toThrow();
-      expect(invalidWatcher.build()).toBeUndefined();
-      expect(send).not.toHaveBeenCalled();
+      expect(invalidWatcher.build()).toMatchObject({
+        mode: 'invalid',
+        sources: { board: false },
+        items: [],
+      });
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ mode: 'invalid' }));
       expect(write).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledWith(expect.stringContaining(field));
     } finally {
@@ -145,6 +149,7 @@ describe('BoardWatcher characterization', () => {
         name: 'Sample',
         repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
         brain: { path: '.softwareagents/brain' },
+        clickup: { workspaceId: '123', folderId: '456', listIds: [] },
         ...(boardPath ? { legacy: { boardFile: boardPath } } : {}),
       }),
     );
@@ -188,7 +193,54 @@ describe('BoardWatcher characterization', () => {
 
   it('does not use the default board for a manifest without a legacy binding', () => {
     bindBoard(null);
-    expect(new BoardWatcher(store, workspace).build()).toBeUndefined();
+    const bound = new BoardWatcher(store, workspace, () => nowS * 1000);
+    bound.start();
+    bound.dispose();
+    expect(bound.build()).toMatchObject({
+      mode: 'project',
+      project: 'Sample',
+      projectId: 'sample',
+      clickupFolderUrl: 'https://app.clickup.com/123/v/f/456',
+      sources: { board: false },
+      items: [],
+    });
+    expect(claudeQuota).toHaveBeenLastCalledWith(
+      path.join(commonDir, 'softwareagents', 'runs'),
+      nowS,
+    );
+  });
+
+  it('broadcasts provider capacity without a board and retains it for late clients', async () => {
+    bindBoard(null);
+    const quota = (provider: 'claude' | 'codex') => ({
+      provider,
+      status: 'warning' as const,
+      usedPercent: 95,
+      resetsAt: nowS + 60,
+      observedAt: nowS,
+      capacity: {
+        provider,
+        status: 'warning' as const,
+        observedAt: nowS,
+        source: 'estimated' as const,
+        confidence: 'low' as const,
+        windows: [],
+      },
+    });
+    vi.mocked(claudeQuota).mockReturnValueOnce(quota('claude'));
+    vi.mocked(codexQuota).mockReturnValueOnce(quota('codex'));
+    const send = vi.spyOn(store, 'broadcast');
+    const bound = new BoardWatcher(store, workspace, () => nowS * 1000);
+    bound.start();
+    bound.dispose();
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sources: { board: false, claims: false, progress: false },
+        quota: { claude: quota('claude'), codex: quota('codex') },
+      }),
+    );
+    const { latestBoardMessage } = await import('../src/boardWatcher.js');
+    expect(latestBoardMessage()?.quota.claude.capacity?.status).toBe('warning');
   });
 
   it.skipIf(!DatabaseSync)('reads claims and progress from the bound board', () => {
@@ -216,7 +268,7 @@ describe('BoardWatcher characterization', () => {
     const link = path.join(workspace, 'custom');
     fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
     try {
-      expect(bound.build()).toBeUndefined();
+      expect(bound.build()).toMatchObject({ sources: { board: false }, items: [] });
     } finally {
       fs.unlinkSync(link);
     }
@@ -364,6 +416,6 @@ describe('BoardWatcher characterization', () => {
 
   it('returns no board when board.json is missing', () => {
     fs.unlinkSync(boardFile);
-    expect(watcher.build()).toBeUndefined();
+    expect(watcher.build()).toMatchObject({ mode: 'legacy', sources: { board: false }, items: [] });
   });
 });

@@ -1539,6 +1539,9 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/EpicSummary'
+    BoardMode:
+      type: string
+      enum: [legacy, project, invalid]
     BoardState:
       type: object
       additionalProperties: false
@@ -1558,6 +1561,12 @@ components:
         type:
           const: boardState
         project:
+          type: string
+        mode:
+          $ref: '#/components/schemas/BoardMode'
+        projectId:
+          type: string
+        clickupFolderUrl:
           type: string
         items:
           type: array

@@ -88,6 +88,45 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
   }, []);
   if (!board) return null;
 
+  if (!board.sources.board) {
+    return (
+      <div
+        className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(600px,calc(100vw-120px))] p-8 flex flex-col gap-6"
+        data-testid="company-hud"
+      >
+        <div className="flex justify-between gap-8 text-xs">
+          <span>{board.project}</span>
+          <button className={actionClass} onClick={onOpenBacklog}>
+            Backlog
+          </button>
+        </div>
+        <div className="text-2xs text-text-muted">Capacidad observada</div>
+        {board.quota && (
+          <>
+            <QuotaRow
+              name="Claude"
+              q={board.quota.claude}
+              running={
+                [...officeState.characters.values()].filter(
+                  (c) => c.isActive && c.id > 0 && getProviderLabel(c.id) === 'Claude',
+                ).length
+              }
+            />
+            <QuotaRow
+              name="Codex"
+              q={board.quota.codex}
+              running={
+                [...officeState.characters.values()].filter(
+                  (c) => c.isActive && c.id > 0 && getProviderLabel(c.id).startsWith('Codex'),
+                ).length
+              }
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+
   const total = board.summary?.total ?? board.items.length;
   const by = board.summary?.byPhase ?? {};
   const done = by.DONE ?? 0;

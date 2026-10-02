@@ -12,6 +12,8 @@ import {
 import * as companyControl from '../src/companyControl.js';
 import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
+import * as policy from '../src/policy.js';
+import * as projectConfig from '../src/projectConfig.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 import type { AgentState } from '../src/types.js';
 
@@ -98,6 +100,81 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   });
 
   // ── saveAreaMappings ─────────────────────────────────────────
+
+  it.each([
+    ['companyAutopilot', 'autopilot_toggle', 'setAutopilot'],
+    ['companyDecision', 'answer_decision', 'answerDecision'],
+  ] as const)('applies operator policy before %s effects', (type, action, effect) => {
+    const root = vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(tempHome);
+    const load = vi.spyOn(projectConfig, 'loadProjectConfig').mockReturnValue({
+      project: {
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'test',
+        name: 'Test',
+        repo: { remote: 'https://example.com/test.git', defaultBranch: 'main' },
+        brain: { path: '.softwareagents/brain' },
+      },
+      repoRoot: tempHome,
+      paths: { brain: path.join(tempHome, '.softwareagents/brain') },
+      operator: { autonomyLevel: 'A3', allowedExecutors: [] },
+    });
+    const evaluate = vi.spyOn(policy, 'evaluatePolicy');
+    const perform = vi.spyOn(companyControl, effect).mockReturnValue('ok');
+    try {
+      ctx.privileged = true;
+      const message = {
+        type,
+        enabled: true,
+        id: 'd',
+        answer: 'yes',
+        autonomyLevel: 'A4',
+        actor: 'agent',
+      };
+      handleClientMessage(message, (m) => sent.push(m), ctx);
+      expect(load).toHaveBeenCalledWith(tempHome);
+      expect(evaluate).toHaveBeenCalledWith(action, 'human', 'A3');
+      expect(perform).toHaveBeenCalledTimes(1);
+      expect(sent.pop()).toEqual({ type: 'companyNotice', text: 'ok' });
+      perform.mockClear();
+      for (const outcome of ['require_human', 'deny'] as const) {
+        evaluate.mockReturnValue({ outcome, reason: 'test gate' });
+        handleClientMessage(message, (m) => sent.push(m), ctx);
+        expect(perform).not.toHaveBeenCalled();
+        expect(sent.pop()).toEqual({ type: 'companyNotice', text: 'Acción rechazada: test gate' });
+      }
+      load.mockImplementation(() => {
+        throw new Error('invalid manifest');
+      });
+      handleClientMessage(message, (m) => sent.push(m), ctx);
+      expect(perform).not.toHaveBeenCalled();
+      expect(sent.pop()?.text).toContain('no se pudo validar');
+    } finally {
+      root.mockRestore();
+      load.mockRestore();
+      evaluate.mockRestore();
+      perform.mockRestore();
+    }
+  });
+
+  it.each(['companyAutopilot', 'companyDecision'])('uses A0 for legacy %s', (type) => {
+    const root = vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(tempHome);
+    const load = vi.spyOn(projectConfig, 'loadProjectConfig').mockReturnValue(null);
+    const evaluate = vi.spyOn(policy, 'evaluatePolicy');
+    const autopilot = vi.spyOn(companyControl, 'setAutopilot').mockReturnValue('ok');
+    const answer = vi.spyOn(companyControl, 'answerDecision').mockReturnValue('ok');
+    try {
+      ctx.privileged = true;
+      handleClientMessage({ type }, (m) => sent.push(m), ctx);
+      expect(evaluate).toHaveBeenCalledWith(expect.any(String), 'human', 'A0');
+    } finally {
+      root.mockRestore();
+      load.mockRestore();
+      evaluate.mockRestore();
+      autopilot.mockRestore();
+      answer.mockRestore();
+    }
+  });
 
   it.each([false, undefined])('rejects companyDecision when privileged is %s', (privileged) => {
     const answer = vi.spyOn(companyControl, 'answerDecision');

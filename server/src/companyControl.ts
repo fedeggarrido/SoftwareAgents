@@ -24,6 +24,11 @@ interface BoardConfig {
 let workspace: string | undefined;
 let sources: BoardSources | undefined;
 
+/** Server-bound workspace; never take a policy target from a client message. */
+export function companyWorkspaceRoot(): string | undefined {
+  return workspace;
+}
+
 export function configureCompanyControl(dir: string, selection?: BoardSelection): void {
   const resolved = path.resolve(dir);
   const binding = new BoardSources(resolved, selection ?? loadBoardSelection(resolved));

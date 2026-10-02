@@ -5,7 +5,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
-import { answerDecision, setAutopilot } from './companyControl.js';
+import { answerDecision, companyWorkspaceRoot, setAutopilot } from './companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -15,6 +15,8 @@ import {
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import { evaluatePolicy, type PolicyAction } from './policy.js';
+import { loadProjectConfig } from './projectConfig.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -56,8 +58,7 @@ export interface ClientMessageContext {
   onReloadAssets?: ReloadAssetsSideEffect;
   /**
    * Whether this client may send messages that reach OUTSIDE `~/.pixel-agents/`
-   * — today only `setHooksEnabled`, which grants machine-wide consent to modify
-   * `~/.claude/settings.json`. Decided per-connection by the transport
+   * — including hooks consent and company controls. Decided per-connection by the transport
    * (httpServer's standaloneTokenValid, or the embedded Bearer token); defaults
    * to false so a caller that forgets to pass it gets the safe answer.
    */
@@ -184,6 +185,7 @@ export function handleClientMessage(
         } satisfies CompanyNotice);
         break;
       }
+      if (!allowCompanyAction('autopilot_toggle', send)) break;
       send({
         type: 'companyNotice',
         text: setAutopilot(msg.enabled === true),
@@ -198,6 +200,7 @@ export function handleClientMessage(
         } satisfies CompanyNotice);
         break;
       }
+      if (!allowCompanyAction('answer_decision', send)) break;
       send({
         type: 'companyNotice',
         text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? '')),
@@ -308,6 +311,30 @@ export function handleClientMessage(
       // require IDE-specific handling (not yet implemented for standalone)
       break;
   }
+}
+
+function allowCompanyAction(action: PolicyAction, send: WsSend): boolean {
+  try {
+    const root = companyWorkspaceRoot();
+    const level = (root ? loadProjectConfig(root)?.operator.autonomyLevel : undefined) ?? 'A0';
+    // This operator UI uses the transport-verified privileged token as human
+    // authority. Future Agent ingress must authenticate a separate server-owned
+    // identity and call policy as agent; neither msg.actor nor a token shared
+    // with an Executor can establish human identity.
+    const decision = evaluatePolicy(action, 'human', level);
+    if (decision.outcome === 'allow') return true;
+    // SA-028 is not available: no queued approval and no side effect.
+    send({
+      type: 'companyNotice',
+      text: `Acción rechazada: ${decision.reason}`,
+    } satisfies CompanyNotice);
+  } catch {
+    send({
+      type: 'companyNotice',
+      text: 'Acción rechazada: no se pudo validar la configuración del proyecto (invalid .softwareagents/project.yaml).',
+    } satisfies CompanyNotice);
+  }
+  return false;
 }
 
 /**

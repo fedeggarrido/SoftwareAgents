@@ -11,6 +11,7 @@ import {
   setHooksEnabled,
   writeConfig,
 } from '../src/configPersistence.js';
+import { evaluatePolicy } from '../src/policy.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { SchemaValidationError } from '../src/schemaValidation.js';
 
@@ -88,6 +89,22 @@ describe('Project config authority boundary', () => {
       autonomyLevel: 'A0',
       allowedExecutors: [],
     });
+  });
+  it('never grants repo-authored autonomy to the policy engine', () => {
+    const config = readConfig();
+    config.projects['sample-project'] = { ...policy, autonomyLevel: 'A0' };
+    writeConfig(config);
+    writeManifest({ ...manifest(), autonomyLevel: 'A4' });
+    expect(() => loadProjectConfig(repo)).toThrow('/autonomyLevel');
+    expect(readConfig().projects['sample-project'].autonomyLevel).toBe('A0');
+    // Repo-authored board metadata also cannot grant authority.
+    fs.mkdirSync(path.join(repo, 'docs/backlog'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'docs/backlog/board.json'), '{"autonomyLevel":"A4"}');
+    writeManifest(manifest());
+    const loaded = loadProjectConfig(repo)!;
+    expect(evaluatePolicy('launch_execution', 'agent', loaded.operator.autonomyLevel).outcome).toBe(
+      'require_human',
+    );
   });
   it('reports nested invalid fields and missing fields without coercing ClickUp ids', () => {
     const value = manifest();

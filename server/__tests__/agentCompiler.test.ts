@@ -39,6 +39,41 @@ for (const role of Object.keys(ROLE_PROFILES)) {
     }
   });
 }
+it.each(['reviewer', 'qa', 'requirements-analyst', 'architect'])(
+  'permits Codex shell reads for %s while keeping writes and unsafe actions forbidden',
+  (role) => {
+    const compiled = compileAgent(template(role), role, { task: 'Summarize README.md' });
+    expect(compiled.codex.sandbox).toBe('read-only');
+    expect(codexCompilerFlags(compiled)).toContain('read-only');
+    expect(compiled.codex.instructions).toContain('Use Codex shell commands to read');
+    for (const command of ['cat', 'Get-Content', 'rg', 'git diff', 'git log', 'git show'])
+      expect(compiled.codex.instructions).toContain(command);
+    expect(compiled.codex.instructions).not.toContain('No shell');
+    expect(compiled.codex.instructions).toContain('Do not create, modify or delete files');
+    expect(compiled.codex.instructions).toContain('Brain changes must be returned as proposals');
+    expect(compiled.codex.instructions).toContain(
+      'No network access, git push, MCP or delegated agents',
+    );
+    expect(compiled.codex.instructions).toContain('Never bypass the sandbox or approvals');
+    expect(compiled.claude.appendSystemPrompt).toContain('No shell');
+    expect(compiled.claude.disallowedTools).toEqual(
+      expect.arrayContaining(['Bash', 'Edit', 'Write']),
+    );
+  },
+);
+it('permits Codex Developer edits only in its workspace and respects a narrowed profile', () => {
+  const spec = template('developer');
+  const compiled = compileAgent(spec, 'developer', { task: '' });
+  expect(compiled.codex.sandbox).toBe('workspace-write');
+  expect(compiled.codex.instructions).toContain(
+    'file edits only within the assigned task branch/worktree',
+  );
+  expect(compiled.codex.instructions).not.toContain('No shell');
+  spec.permissions.profile = 'read_only';
+  const narrowed = compileAgent(spec, 'developer', { task: '' });
+  expect(narrowed.codex.sandbox).toBe('read-only');
+  expect(narrowed.codex.instructions).toContain('Do not create, modify or delete files');
+});
 it('hashes a stable system prompt and canonicalizes schemas regardless of key order', () => {
   const spec = template('developer');
   const a = compileAgent(spec, 'developer', {

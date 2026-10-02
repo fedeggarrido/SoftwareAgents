@@ -109,6 +109,9 @@ it('uses compiler sandbox/config/schema and optional policy model without bypass
     expect(report.args).not.toContain(flag);
   expect(report.cwd).toBe(req.worktreePath);
   expect(report.input).toContain('SoftwareAgents constitution');
+  expect(report.input).toContain('Use Codex shell commands to read');
+  expect(report.input).not.toContain('No shell');
+  expect(report.input).toContain('Do not create, modify or delete files');
   expect(events.at(-1)).toMatchObject({
     exitCode: 1,
     resultSummary: 'Codex output failed schema validation',

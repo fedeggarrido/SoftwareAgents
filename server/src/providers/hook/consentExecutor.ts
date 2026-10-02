@@ -5,6 +5,7 @@
  * error modal, standalone logs), so they supply `ConsentEffects` and share the ORDER of the writes.
  */
 
+import { recordAudit } from '../../auditLog.js';
 import {
   clearHooksAnswer,
   clearHooksConsent,
@@ -58,14 +59,40 @@ export function applyConsentChoice(
   choice: unknown,
   effects: ConsentEffects,
 ): Promise<void> {
-  const next = consentQueue.then(() =>
-    runConsentChoice(providerId, choice, effects).catch((err: unknown) => {
+  const next = consentQueue.then(async () => {
+    try {
+      await runConsentChoice(providerId, choice, effects);
+      const installed = await effects.areHooksInstalled();
+      const consent = getHooksConsent(providerId);
+      const status =
+        choice === 'install'
+          ? installed && consent === 'granted'
+            ? 'success'
+            : 'failure'
+          : choice === 'never'
+            ? !installed && consent === 'declined'
+              ? 'success'
+              : 'failure'
+            : choice === 'notNow'
+              ? !installed && consent === 'unanswered'
+                ? 'success'
+                : 'failure'
+              : 'ignored';
+      recordAudit(
+        'hooksConsentResponse',
+        'hookProvider',
+        providerId,
+        { status },
+        { input: { choice } },
+      );
+    } catch (err: unknown) {
+      recordAudit('hooksConsentResponse', 'hookProvider', providerId, { status: 'failure' });
       // Backstop, not a handler: every effect surfaces its own failure and resolves, so nothing should reach this
       // catch. It exists because the returned promise is fire-and-forget — an escaping rejection would surface only
       // as an unhandled-rejection crash log, and one broken effect must not block every later answer in the queue.
       console.error('[Pixel Agents] Consent action failed:', err);
-    }),
-  );
+    }
+  });
   consentQueue = next;
   return next;
 }

@@ -5,6 +5,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
+import { recordAudit } from './auditLog.js';
 import { answerDecision, companyWorkspaceRoot, setAutopilot } from './companyControl.js';
 import {
   getHooksConsent,
@@ -15,7 +16,7 @@ import {
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
-import { evaluatePolicy, type PolicyAction } from './policy.js';
+import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
@@ -179,31 +180,47 @@ export function handleClientMessage(
     // Only the operator (tokened URL) may change what the company does.
     case 'companyAutopilot': {
       if (!ctx.privileged) {
+        recordAudit(
+          'companyAutopilot',
+          'authorization',
+          null,
+          { status: 'rejected' },
+          { actorType: 'unknown', actorId: null },
+        );
         send({
           type: 'companyNotice',
           text: 'Abre la URL con token para controlar el piloto.',
         } satisfies CompanyNotice);
         break;
       }
-      if (!allowCompanyAction('autopilot_toggle', send)) break;
+      const decision = allowCompanyAction('autopilot_toggle', send);
+      if (!decision) break;
       send({
         type: 'companyNotice',
-        text: setAutopilot(msg.enabled === true),
+        text: setAutopilot(msg.enabled === true, decision),
       } satisfies CompanyNotice);
       break;
     }
     case 'companyDecision': {
       if (!ctx.privileged) {
+        recordAudit(
+          'companyDecision',
+          'authorization',
+          null,
+          { status: 'rejected' },
+          { actorType: 'unknown', actorId: null },
+        );
         send({
           type: 'companyNotice',
           text: 'Abre la URL con token para responder decisiones.',
         } satisfies CompanyNotice);
         break;
       }
-      if (!allowCompanyAction('answer_decision', send)) break;
+      const decision = allowCompanyAction('answer_decision', send);
+      if (!decision) break;
       send({
         type: 'companyNotice',
-        text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? '')),
+        text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? ''), decision),
       } satisfies CompanyNotice);
       break;
     }
@@ -222,6 +239,13 @@ export function handleClientMessage(
       const provider = hookProviderById(msg.providerId);
       if (!provider) break;
       if (!ctx.privileged) {
+        recordAudit(
+          'setHooksEnabled',
+          'authorization',
+          null,
+          { status: 'rejected' },
+          { actorType: 'unknown', actorId: null },
+        );
         // No server token on this connection: the toggle would grant durable
         // consent to modify a settings file on THIS machine, and only the
         // operator — who was handed the tokened URL — gets to decide that.
@@ -244,6 +268,13 @@ export function handleClientMessage(
       // response from an untokened one is a crafted message — ignored, same
       // reasoning as setHooksEnabled above.
       if (!ctx.privileged) {
+        recordAudit(
+          'hooksConsentResponse',
+          'authorization',
+          null,
+          { status: 'rejected' },
+          { actorType: 'unknown', actorId: null },
+        );
         console.warn(
           '[Pixel Agents] Ignoring hooksConsentResponse from an untokened client — installing hooks needs approval from this machine (open the tokened URL the CLI printed).',
         );
@@ -313,7 +344,7 @@ export function handleClientMessage(
   }
 }
 
-function allowCompanyAction(action: PolicyAction, send: WsSend): boolean {
+function allowCompanyAction(action: PolicyAction, send: WsSend): PolicyDecision | null {
   try {
     const root = companyWorkspaceRoot();
     const level = (root ? loadProjectConfig(root)?.operator.autonomyLevel : undefined) ?? 'A0';
@@ -322,19 +353,21 @@ function allowCompanyAction(action: PolicyAction, send: WsSend): boolean {
     // identity and call policy as agent; neither msg.actor nor a token shared
     // with an Executor can establish human identity.
     const decision = evaluatePolicy(action, 'human', level);
-    if (decision.outcome === 'allow') return true;
+    if (decision.outcome === 'allow') return decision;
+    recordAudit(action, 'policy', null, { status: 'rejected' }, { policyDecision: decision });
     // SA-028 is not available: no queued approval and no side effect.
     send({
       type: 'companyNotice',
       text: `Acción rechazada: ${decision.reason}`,
     } satisfies CompanyNotice);
   } catch {
+    recordAudit(action, 'policy', null, { status: 'failure' });
     send({
       type: 'companyNotice',
       text: 'Acción rechazada: no se pudo validar la configuración del proyecto (invalid .softwareagents/project.yaml).',
     } satisfies CompanyNotice);
   }
-  return false;
+  return null;
 }
 
 /**
@@ -364,8 +397,22 @@ async function applyHooksPreference(
     }
     // Always report the ACTUAL install state — the toggle expresses intent,
     // not outcome (the installer refuses to touch an unparseable file).
+    recordAudit(
+      'setHooksEnabled',
+      'hookProvider',
+      provider.id,
+      { status: installed === enabled ? 'success' : 'failure' },
+      { input: { enabled } },
+    );
     send({ type: 'hooksStatus', providerId: provider.id, installed });
   } catch (err) {
+    recordAudit(
+      'setHooksEnabled',
+      'hookProvider',
+      provider.id,
+      { status: 'failure' },
+      { input: { enabled } },
+    );
     console.error('[Pixel Agents] Applying the hooks preference failed:', err);
   }
 }

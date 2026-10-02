@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
+import { AuditLog } from '../src/auditLog.js';
 import { type ClientMessageContext, handleClientMessage } from '../src/clientMessageHandler.js';
 import {
   getHooksConsent,
@@ -180,6 +181,7 @@ describe('clientMessageHandler: hooks consent flow', () => {
       let sideEffect: { providerId: string; enabled: boolean } | undefined;
       ctx.onSetHooksEnabled = (providerId, enabled) => {
         sideEffect = { providerId, enabled };
+        grantHooksConsent(providerId); // the real CLI records the grant before installation
         seedInstalledHooks(); // the install landed
       };
 
@@ -188,6 +190,14 @@ describe('clientMessageHandler: hooks consent flow', () => {
 
       expect(sideEffect).toEqual({ providerId: 'claude', enabled: true });
       expect(getHooksEnabled('claude')).toBe(true);
+      expect(
+        new AuditLog()
+          .read(null)
+          .map((line) => (line.corrupt ? null : [line.entry.action, line.entry.outcome.status])),
+      ).toEqual([
+        ['setHooksEnabled', 'success'],
+        ['hooksConsentResponse', 'success'],
+      ]);
       expect(sent.find((m) => m.type === 'hooksStatus')).toEqual({
         type: 'hooksStatus',
         providerId: 'claude',
@@ -208,6 +218,11 @@ describe('clientMessageHandler: hooks consent flow', () => {
       await settle();
 
       expect(getHooksEnabled('claude')).toBe(false);
+      expect(
+        new AuditLog()
+          .read(null)
+          .filter((line) => !line.corrupt && line.entry.outcome.status === 'failure'),
+      ).toHaveLength(2);
       expect(sent.filter((m) => m.type === 'hooksStatus').at(-1)).toEqual({
         type: 'hooksStatus',
         providerId: 'claude',

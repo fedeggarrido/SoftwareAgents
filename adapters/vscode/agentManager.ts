@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import type { StateAdapter } from '../../core/src/adapter.js';
 import { resendAgentActivity } from '../../server/src/agentActivityResend.js';
 import { AgentStateStore } from '../../server/src/agentStateStore.js';
+import { recordAudit } from '../../server/src/auditLog.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS, JSONL_POLL_INTERVAL_MS } from '../../server/src/constants.js';
 import {
   ensureProjectScan,
@@ -15,6 +16,7 @@ import {
 } from '../../server/src/fileWatcher.js';
 import { loadLayout } from '../../server/src/layoutPersistence.js';
 import { assignPaletteIfNeeded } from '../../server/src/paletteAssigner.js';
+import { loadProjectConfig } from '../../server/src/projectConfig.js';
 import { CLAUDE_TERMINAL_NAME_PREFIX } from '../../server/src/providers/hook/claude/constants.js';
 import { claudeProvider } from '../../server/src/providers/index.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from '../../server/src/timerManager.js';
@@ -51,181 +53,200 @@ export async function launchNewTerminal(
   bypassPermissions?: boolean,
   suppressShow?: boolean,
 ): Promise<void> {
-  const folders = vscode.workspace.workspaceFolders;
-  // Use home directory as fallback cwd when no workspace is open (common on Linux/macOS).
-  // This ensures the terminal starts in a predictable location that matches the project
-  // dir hash Claude Code will use for JSONL transcript files.
-  const cwd = folderPath || folders?.[0]?.uri.fsPath || os.homedir();
-  const isMultiRoot = !!(folders && folders.length > 1);
-  const idx = nextTerminalIndexRef.current++;
-  const terminal = vscode.window.createTerminal({
-    name: `${CLAUDE_TERMINAL_NAME_PREFIX} #${idx}`,
-    cwd,
-  });
-  // When suppressShow is set (auto-spawn + autoShowPanel), keep the panel view
-  // on Pixel Agents instead of switching to Terminal. Claude Code still runs
-  // via sendText below; user can click the character to focus the terminal via
-  // the existing focusAgent message handler.
-  if (!suppressShow) {
-    terminal.show();
-  }
-
-  const sessionId = crypto.randomUUID();
-  const launch = claudeProvider.buildLaunchCommand?.(sessionId, cwd, { bypassPermissions });
-  if (!launch) {
-    throw new Error('claudeProvider.buildLaunchCommand is not implemented');
-  }
-  terminal.sendText([launch.command, ...launch.args].join(' '));
-
-  const projectDir = getProjectDirPath(cwd);
-
-  // Pre-register expected JSONL file so project scan won't treat it as a /clear file
-  const expectedFile = path.join(projectDir, `${sessionId}.jsonl`);
-  knownJsonlFiles.add(expectedFile);
-
-  // Create agent immediately (before JSONL file exists)
-  const id = nextAgentIdRef.current++;
-  // areaMappings is keyed by WorkspaceFolder.name, which can differ from the dir
-  // basename, so seat placement needs that name. Pick the most specific containing
-  // folder (longest path wins for nested folders).
-  const owningFolder = (folders ?? [])
-    .filter((f) => cwd === f.uri.fsPath || cwd.startsWith(f.uri.fsPath + path.sep))
-    .sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0];
-  const folderName = isMultiRoot
-    ? (owningFolder?.name ?? (cwd ? path.basename(cwd) : undefined))
-    : undefined;
-  const agent: AgentState = {
-    id,
-    sessionId,
-    terminalRef: terminal,
-    isExternal: false,
-    projectDir,
-    jsonlFile: expectedFile,
-    fileOffset: 0,
-    lineBuffer: '',
-    activeToolIds: new Set(),
-    activeToolStatuses: new Map(),
-    activeToolNames: new Map(),
-    activeSubagentToolIds: new Map(),
-    activeSubagentToolNames: new Map(),
-    backgroundAgentToolIds: new Set(),
-    isWaiting: false,
-    permissionSent: false,
-    hadToolsInTurn: false,
-    lastDataAt: 0,
-    linesProcessed: 0,
-    seenUnknownRecordTypes: new Set(),
-    folderName,
-    hookDelivered: false,
-    contextTokens: 0,
-    maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
-  };
-
-  assignPaletteIfNeeded(agent, agents);
-  agents.set(id, agent);
-  activeAgentIdRef.current = id;
-  persistAgents();
-  console.log(`[Pixel Agents] Terminal: Agent ${id} - created for terminal ${terminal.name}`);
-
-  ensureProjectScan(
-    projectDir,
-    knownJsonlFiles,
-    projectScanTimerRef,
-    activeAgentIdRef,
-    nextAgentIdRef,
-    agents,
-    fileWatchers,
-    pollingTimers,
-    waitingTimers,
-    permissionTimers,
-    persistAgents,
-  );
-
-  // Poll for the specific JSONL file to appear
-  const createdAt = Date.now();
-  let pollCount = 0;
-  console.log(`[Pixel Agents] Terminal: Agent ${id} - waiting for JSONL at ${agent.jsonlFile}`);
-  const pollTimer = setInterval(() => {
-    pollCount++;
-    try {
-      if (fs.existsSync(agent.jsonlFile)) {
-        console.log(
-          `[Pixel Agents] Terminal: Agent ${id} - found JSONL file ${path.basename(agent.jsonlFile)} (after ${pollCount}s)`,
-        );
-        clearInterval(pollTimer);
-        jsonlPollTimers.delete(id);
-        startFileWatching(
-          id,
-          agent.jsonlFile,
-          agents,
-          fileWatchers,
-          pollingTimers,
-          waitingTimers,
-          permissionTimers,
-        );
-        readNewLines(id, agents, waitingTimers, permissionTimers);
-      } else if (pollCount === 10) {
-        // After 10s of polling, warn with path details to help diagnose path encoding mismatches
-        const dirExists = fs.existsSync(projectDir);
-        let dirContents = '';
-        if (dirExists) {
-          try {
-            const files = fs.readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
-            dirContents =
-              files.length > 0
-                ? `Dir has ${files.length} JSONL file(s): ${files.slice(0, 3).join(', ')}${files.length > 3 ? '...' : ''}`
-                : 'Dir exists but has no JSONL files';
-          } catch {
-            dirContents = 'Dir exists but unreadable';
-          }
-        } else {
-          dirContents = 'Dir does not exist';
-        }
-        console.warn(
-          `[Pixel Agents] Terminal: Agent ${id} - JSONL file not found after 10s. ` +
-            `Expected: ${agent.jsonlFile}. ${dirContents}`,
-        );
-      } else if (pollCount > 10) {
-        // Possible /resume: terminal started a different session than expected.
-        // Check every tick for a file modified after the agent was created.
-        try {
-          const trackedFiles = new Set([...agents.values()].map((a) => path.resolve(a.jsonlFile)));
-          const candidates = fs
-            .readdirSync(projectDir)
-            .filter((f) => f.endsWith('.jsonl'))
-            .map((f) => {
-              const full = path.join(projectDir, f);
-              return { file: full, mtime: fs.statSync(full).mtimeMs };
-            })
-            .filter((c) => !trackedFiles.has(path.resolve(c.file)) && c.mtime > createdAt)
-            .sort((a, b) => b.mtime - a.mtime); // newest first
-
-          if (candidates.length > 0) {
-            console.log(
-              `[Pixel Agents] Terminal: Agent ${id} - /resume detected, reassigning to ${path.basename(candidates[0].file)}`,
-            );
-            clearInterval(pollTimer);
-            jsonlPollTimers.delete(id);
-            reassignAgentToFile(
-              id,
-              candidates[0].file,
-              agents,
-              fileWatchers,
-              pollingTimers,
-              waitingTimers,
-              permissionTimers,
-              persistAgents,
-            );
-          }
-        } catch {
-          /* ignore scan errors */
-        }
-      }
-    } catch {
-      /* file may not exist yet */
+  let auditProjectId: string | null = null;
+  let auditSessionId: string | null = null;
+  let auditStatus = 'failure';
+  try {
+    const folders = vscode.workspace.workspaceFolders;
+    // Use home directory as fallback cwd when no workspace is open (common on Linux/macOS).
+    // This ensures the terminal starts in a predictable location that matches the project
+    // dir hash Claude Code will use for JSONL transcript files.
+    const cwd = folderPath || folders?.[0]?.uri.fsPath || os.homedir();
+    auditProjectId = loadProjectConfig(cwd)?.project.id ?? null;
+    const isMultiRoot = !!(folders && folders.length > 1);
+    const idx = nextTerminalIndexRef.current++;
+    const terminal = vscode.window.createTerminal({
+      name: `${CLAUDE_TERMINAL_NAME_PREFIX} #${idx}`,
+      cwd,
+    });
+    // When suppressShow is set (auto-spawn + autoShowPanel), keep the panel view
+    // on Pixel Agents instead of switching to Terminal. Claude Code still runs
+    // via sendText below; user can click the character to focus the terminal via
+    // the existing focusAgent message handler.
+    if (!suppressShow) {
+      terminal.show();
     }
-  }, JSONL_POLL_INTERVAL_MS);
-  jsonlPollTimers.set(id, pollTimer);
+
+    const sessionId = crypto.randomUUID();
+    auditSessionId = sessionId;
+    const launch = claudeProvider.buildLaunchCommand?.(sessionId, cwd, { bypassPermissions });
+    if (!launch) {
+      throw new Error('claudeProvider.buildLaunchCommand is not implemented');
+    }
+    terminal.sendText([launch.command, ...launch.args].join(' '));
+
+    const projectDir = getProjectDirPath(cwd);
+
+    // Pre-register expected JSONL file so project scan won't treat it as a /clear file
+    const expectedFile = path.join(projectDir, `${sessionId}.jsonl`);
+    knownJsonlFiles.add(expectedFile);
+
+    // Create agent immediately (before JSONL file exists)
+    const id = nextAgentIdRef.current++;
+    // areaMappings is keyed by WorkspaceFolder.name, which can differ from the dir
+    // basename, so seat placement needs that name. Pick the most specific containing
+    // folder (longest path wins for nested folders).
+    const owningFolder = (folders ?? [])
+      .filter((f) => cwd === f.uri.fsPath || cwd.startsWith(f.uri.fsPath + path.sep))
+      .sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0];
+    const folderName = isMultiRoot
+      ? (owningFolder?.name ?? (cwd ? path.basename(cwd) : undefined))
+      : undefined;
+    const agent: AgentState = {
+      id,
+      sessionId,
+      terminalRef: terminal,
+      isExternal: false,
+      projectDir,
+      jsonlFile: expectedFile,
+      fileOffset: 0,
+      lineBuffer: '',
+      activeToolIds: new Set(),
+      activeToolStatuses: new Map(),
+      activeToolNames: new Map(),
+      activeSubagentToolIds: new Map(),
+      activeSubagentToolNames: new Map(),
+      backgroundAgentToolIds: new Set(),
+      isWaiting: false,
+      permissionSent: false,
+      hadToolsInTurn: false,
+      lastDataAt: 0,
+      linesProcessed: 0,
+      seenUnknownRecordTypes: new Set(),
+      folderName,
+      hookDelivered: false,
+      contextTokens: 0,
+      maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
+    };
+
+    assignPaletteIfNeeded(agent, agents);
+    agents.set(id, agent);
+    activeAgentIdRef.current = id;
+    persistAgents();
+    console.log(`[Pixel Agents] Terminal: Agent ${id} - created for terminal ${terminal.name}`);
+
+    ensureProjectScan(
+      projectDir,
+      knownJsonlFiles,
+      projectScanTimerRef,
+      activeAgentIdRef,
+      nextAgentIdRef,
+      agents,
+      fileWatchers,
+      pollingTimers,
+      waitingTimers,
+      permissionTimers,
+      persistAgents,
+    );
+
+    // Poll for the specific JSONL file to appear
+    const createdAt = Date.now();
+    let pollCount = 0;
+    console.log(`[Pixel Agents] Terminal: Agent ${id} - waiting for JSONL at ${agent.jsonlFile}`);
+    const pollTimer = setInterval(() => {
+      pollCount++;
+      try {
+        if (fs.existsSync(agent.jsonlFile)) {
+          console.log(
+            `[Pixel Agents] Terminal: Agent ${id} - found JSONL file ${path.basename(agent.jsonlFile)} (after ${pollCount}s)`,
+          );
+          clearInterval(pollTimer);
+          jsonlPollTimers.delete(id);
+          startFileWatching(
+            id,
+            agent.jsonlFile,
+            agents,
+            fileWatchers,
+            pollingTimers,
+            waitingTimers,
+            permissionTimers,
+          );
+          readNewLines(id, agents, waitingTimers, permissionTimers);
+        } else if (pollCount === 10) {
+          // After 10s of polling, warn with path details to help diagnose path encoding mismatches
+          const dirExists = fs.existsSync(projectDir);
+          let dirContents = '';
+          if (dirExists) {
+            try {
+              const files = fs.readdirSync(projectDir).filter((f) => f.endsWith('.jsonl'));
+              dirContents =
+                files.length > 0
+                  ? `Dir has ${files.length} JSONL file(s): ${files.slice(0, 3).join(', ')}${files.length > 3 ? '...' : ''}`
+                  : 'Dir exists but has no JSONL files';
+            } catch {
+              dirContents = 'Dir exists but unreadable';
+            }
+          } else {
+            dirContents = 'Dir does not exist';
+          }
+          console.warn(
+            `[Pixel Agents] Terminal: Agent ${id} - JSONL file not found after 10s. ` +
+              `Expected: ${agent.jsonlFile}. ${dirContents}`,
+          );
+        } else if (pollCount > 10) {
+          // Possible /resume: terminal started a different session than expected.
+          // Check every tick for a file modified after the agent was created.
+          try {
+            const trackedFiles = new Set(
+              [...agents.values()].map((a) => path.resolve(a.jsonlFile)),
+            );
+            const candidates = fs
+              .readdirSync(projectDir)
+              .filter((f) => f.endsWith('.jsonl'))
+              .map((f) => {
+                const full = path.join(projectDir, f);
+                return { file: full, mtime: fs.statSync(full).mtimeMs };
+              })
+              .filter((c) => !trackedFiles.has(path.resolve(c.file)) && c.mtime > createdAt)
+              .sort((a, b) => b.mtime - a.mtime); // newest first
+
+            if (candidates.length > 0) {
+              console.log(
+                `[Pixel Agents] Terminal: Agent ${id} - /resume detected, reassigning to ${path.basename(candidates[0].file)}`,
+              );
+              clearInterval(pollTimer);
+              jsonlPollTimers.delete(id);
+              reassignAgentToFile(
+                id,
+                candidates[0].file,
+                agents,
+                fileWatchers,
+                pollingTimers,
+                waitingTimers,
+                permissionTimers,
+                persistAgents,
+              );
+            }
+          } catch {
+            /* ignore scan errors */
+          }
+        }
+      } catch {
+        /* file may not exist yet */
+      }
+    }, JSONL_POLL_INTERVAL_MS);
+    jsonlPollTimers.set(id, pollTimer);
+    auditStatus = 'dispatched';
+  } finally {
+    // Session identity is not a SoftwareAgents Execution identity.
+    recordAudit(
+      'launchAgent',
+      'session',
+      auditSessionId,
+      { status: auditStatus },
+      { projectId: auditProjectId, input: { bypassPermissions: bypassPermissions === true } },
+    );
+  }
 }
 
 export function removeAgent(

@@ -2,9 +2,12 @@ import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { recordAudit } from './auditLog.js';
 import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
 import { resolveInside } from './pathGuard.js';
+import type { PolicyDecision } from './policy.js';
+import { loadProjectConfig } from './projectConfig.js';
 
 /**
  * The two things the office may change in the agent company, both declared by the
@@ -107,7 +110,7 @@ export function readAutopilot(): Record<string, unknown> | undefined {
   }
 }
 
-export function setAutopilot(enabled: boolean): string {
+function performAutopilot(enabled: boolean, result: { status: string }): string {
   if (sources?.selection.kind === 'invalid') return sources.selection.notice;
   const cfg = boardConfig();
   if (!workspace) return 'Este workspace no declara piloto automático.';
@@ -139,6 +142,7 @@ export function setAutopilot(enabled: boolean): string {
     /* first use */
   }
   writeJsonAtomic(file, { intervalMinutes: 20, ...state, enabled, updatedAt: Date.now() / 1000 });
+  result.status = 'success';
   const command = authorized?.command;
   if (enabled && !alive(state.pid) && Array.isArray(command) && command.length > 0) {
     const child = spawn(command[0], command.slice(1), {
@@ -155,7 +159,7 @@ export function setAutopilot(enabled: boolean): string {
     : 'Piloto automático en pausa tras la ronda actual.';
 }
 
-export function answerDecision(id: string, answer: string): string {
+function performDecision(id: string, answer: string, result: { status: string }): string {
   if (sources?.selection.kind === 'invalid') return sources.selection.notice;
   const cfg = boardConfig();
   if (!workspace || !cfg?.decisionsFile) return 'Este workspace no declara bandeja de decisiones.';
@@ -179,5 +183,64 @@ export function answerDecision(id: string, answer: string): string {
   decision.status = 'answered';
   decision.answeredAt = new Date().toISOString();
   writeJsonAtomic(file, data);
+  result.status = 'success';
   return `${id}: «${answer}» guardada. El manager la aplicará en su próxima ronda.`;
+}
+
+/** Policy comes from authenticated ingress, never from a client payload. */
+export function setAutopilot(
+  enabled: boolean,
+  policyDecision: PolicyDecision | null = null,
+): string {
+  return auditCompany(
+    'companyAutopilot',
+    'autopilot',
+    null,
+    { enabled },
+    policyDecision,
+    (result) => performAutopilot(enabled, result),
+  );
+}
+
+export function answerDecision(
+  id: string,
+  answer: string,
+  policyDecision: PolicyDecision | null = null,
+): string {
+  return auditCompany('companyDecision', 'decision', id, { answer }, policyDecision, (result) =>
+    performDecision(id, answer, result),
+  );
+}
+
+function auditCompany(
+  action: string,
+  resourceType: string,
+  resourceId: string | null,
+  input: unknown,
+  policyDecision: PolicyDecision | null,
+  perform: (result: { status: string }) => string,
+): string {
+  const result = { status: 'rejected' };
+  try {
+    return perform(result);
+  } catch (error) {
+    result.status = 'failure';
+    throw error;
+  } finally {
+    let projectId: string | null = null;
+    try {
+      projectId = workspace ? (loadProjectConfig(workspace)?.project.id ?? null) : null;
+    } catch {
+      /* Invalid manifest: machine audit. */
+    }
+    recordAudit(
+      action,
+      resourceType,
+      resourceId,
+      // Notices can repeat free-form decision answers. Keep them out of the
+      // audit record; only their redacted input hash and result are needed.
+      { status: result.status },
+      { projectId, policyDecision, input },
+    );
+  }
 }

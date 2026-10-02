@@ -5,6 +5,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
+import { AuditLog } from '../src/auditLog.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
 import {
   answerDecision,
@@ -92,6 +93,34 @@ describe('companyControl authorization and containment', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it('audits successful controls with the real policy verdict and rejected answers with their outcome', () => {
+    authorize('state.json');
+    fs.writeFileSync(
+      path.join(workspace, 'decisions.json'),
+      JSON.stringify({
+        decisions: [{ id: 'D1', options: ['yes'] }],
+      }),
+    );
+    const ctx = { store: new AgentStateStore(), cache: null, privileged: true };
+    handleClientMessage({ type: 'companyAutopilot', enabled: false }, vi.fn(), ctx);
+    handleClientMessage({ type: 'companyDecision', id: 'D1', answer: 'yes' }, vi.fn(), ctx);
+    handleClientMessage({ type: 'companyDecision', id: 'D1', answer: 'invalid' }, vi.fn(), ctx);
+    const lines = new AuditLog().read(null);
+    expect(lines).toHaveLength(3);
+    expect(
+      lines.map((line) =>
+        line.corrupt
+          ? null
+          : [line.entry.action, line.entry.outcome.status, line.entry.policyDecision?.outcome],
+      ),
+    ).toEqual([
+      ['companyAutopilot', 'success', 'allow'],
+      ['companyDecision', 'success', 'allow'],
+      ['companyDecision', 'rejected', 'allow'],
+    ]);
+    ctx.store.dispose();
+  });
+
   it.each([
     ['broken YAML', 'brain: [', '/project.yaml'],
     ['invalid schema', '{}', '/apiVersion'],
@@ -128,7 +157,9 @@ describe('companyControl authorization and containment', () => {
       type: 'companyNotice',
       text: expect.stringContaining('invalid .softwareagents/project.yaml'),
     });
-    expect(write).not.toHaveBeenCalled();
+    // Denied controls may append audit entries, but may not write company state.
+    expect(write.mock.calls.every(([target]) => typeof target === 'number')).toBe(true);
+    expect(new AuditLog().read(null)).toHaveLength(4);
     expect(childProcess.spawn).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining(field));
     expect(fs.readdirSync(gitDir)).toEqual([]);

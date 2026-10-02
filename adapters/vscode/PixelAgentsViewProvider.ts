@@ -26,6 +26,7 @@ import {
   sendWallTilesToWebview,
 } from '../../server/src/assetLoader.js';
 import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
+import { recordAudit } from '../../server/src/auditLog.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -309,6 +310,13 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     try {
       installed = await provider.areHooksInstalled();
     } catch {
+      recordAudit(
+        'setHooksEnabled',
+        'hookProvider',
+        provider.id,
+        { status: 'failure' },
+        { input: { enabled } },
+      );
       return; // the failure was already surfaced; do not also persist on a guess
     }
     if (installed === enabled) {
@@ -321,6 +329,13 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     }
     // Report the truth either way: on failure the entries are still on disk and
     // still firing, and a checkbox stuck "off" over live hooks offers no retry.
+    recordAudit(
+      'setHooksEnabled',
+      'hookProvider',
+      provider.id,
+      { status: installed === enabled ? 'success' : 'failure' },
+      { input: { enabled } },
+    );
     this.sendOrBuffer({ type: 'hooksStatus', providerId: provider.id, installed });
   }
 

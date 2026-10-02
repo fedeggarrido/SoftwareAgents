@@ -111,3 +111,8 @@ export const PALETTE_COUNT = 6;
  *  clientMessageHandler to guard saveAgentSeats payloads from a remote or
  *  hand-edited source corrupting the stored values with out-of-range values. */
 export const HUE_SHIFT_MAX_DEG = 360;
+
+// Operational WorkStore defaults; transition policy belongs to SA-025.
+export const WORKSTORE_BUSY_TIMEOUT_MS = 5000;
+export const WORKSTORE_INITIAL_TASK_STATUS = 'pending';
+export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;

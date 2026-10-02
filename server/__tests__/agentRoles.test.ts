@@ -10,6 +10,7 @@ import {
   roleFromBrief,
   RoleResolver,
   specialistRole,
+  taskFromCwd,
 } from '../src/agentRoles.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import type { AgentState } from '../src/types.js';
@@ -177,6 +178,80 @@ describe('transcript and rollout readers', () => {
     );
     expect(claudeRoleFromTranscript(file)?.detail).toBe('tarea abc1');
   });
+});
+
+describe('worktree task labels', () => {
+  it('uses registry metadata for a session without a transcript', () => {
+    const store = new AgentStateStore();
+    store.broadcast = () => {};
+    store.set(1, { id: 1, sessionId: 'session', jsonlFile: '' } as AgentState);
+    const resolver = new RoleResolver(
+      store,
+      2000,
+      () => new Map([['session', { executionId: 'exec', role: 'integrator', taskKey: 'SA-078' }]]),
+    );
+    resolver.tick();
+    expect(store.get(1)?.role).toEqual({
+      label: 'integrator',
+      department: 'Sesiones',
+      detail: 'tarea SA-078',
+    });
+  });
+  it.each([
+    ['D:\\repo\\.worktrees\\SA-035b', 'SA-035'],
+    ['/repo/.worktrees/SA-078-slug/server', 'SA-078'],
+    ['/repo/.worktrees/SA-0350', undefined],
+    ['/repo/SA-035b', undefined],
+    ['/repo', undefined],
+  ])('extracts a task only from a worktree cwd %s', (cwd, key) => {
+    expect(taskFromCwd(cwd)).toBe(key);
+  });
+
+  it.each(['claude', 'codex'])(
+    'labels %s and refreshes when registry metadata arrives',
+    (provider) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roles-'));
+      try {
+        const file = path.join(dir, 'session.jsonl');
+        const cwd = 'D:\\repo\\.worktrees\\SA-035b';
+        fs.writeFileSync(
+          file,
+          provider === 'codex'
+            ? line({ type: 'session_meta', payload: { cwd } })
+            : line({ type: 'user', cwd, message: { content: 'Trabaja en esto' } }),
+        );
+        const store = new AgentStateStore();
+        const sent: unknown[] = [];
+        store.broadcast = (m) => void sent.push(m);
+        store.set(1, {
+          id: 1,
+          sessionId: 'session',
+          providerId: provider,
+          jsonlFile: file,
+        } as AgentState);
+        const sessions = new Map<string, { executionId: string; role: string; taskKey: string }>();
+        const resolver = new RoleResolver(store, 2000, () => sessions);
+        resolver.tick();
+        expect(store.get(1)?.role).toEqual({
+          label: 'DEV',
+          department: 'Ingeniería',
+          detail: 'tarea SA-035',
+        });
+        resolver.tick();
+        expect(sent).toHaveLength(1);
+        sessions.set('session', { executionId: 'exec', role: 'code-reviewer', taskKey: 'SA-078' });
+        resolver.tick();
+        expect(store.get(1)?.role).toEqual({
+          label: 'QA Código',
+          department: 'Calidad',
+          detail: 'tarea SA-078',
+        });
+        expect(sent).toHaveLength(2);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('RoleResolver', () => {

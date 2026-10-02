@@ -211,6 +211,9 @@ export function ToolOverlay({
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const providerName = isSub ? null : getProviderLabel(id);
         const companyRole = isSub ? undefined : getAgentRole(id);
+        const rawTask = companyRole?.detail?.replace(/^tarea\s+/, '');
+        const boardTask = board?.items.find((i) => i.clickupId === rawTask || i.id === rawTask);
+        const taskDetail = boardTask ? `${boardTask.id} · ${boardTask.title}` : companyRole?.detail;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel || providerName || companyRole);
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
@@ -223,10 +226,8 @@ export function ToolOverlay({
         // the status dot). The full panel is for the hovered or selected agent.
         if (alwaysShowOverlay && !isSelected && !isHovered) {
           if (isSub) return null;
-          const rawTask = companyRole?.detail?.replace(/^tarea\s+/, '');
           // Show the backlog id (FT-OPP-001) rather than the ClickUp one.
-          const task =
-            board?.items.find((i) => i.clickupId === rawTask || i.id === rawTask)?.id ?? rawTask;
+          const task = boardTask?.id ?? rawTask;
           return (
             <div
               key={id}
@@ -255,6 +256,7 @@ export function ToolOverlay({
                         : CLAUDE_LABEL_COLOR,
                   }}
                   data-testid="agent-pill"
+                  title={taskDetail}
                 >
                   {companyRole?.label ?? providerName ?? 'Agente'}
                   {task ? ` · ${task}` : ''}
@@ -298,10 +300,7 @@ export function ToolOverlay({
                   >
                     {companyRole.label}
                     {companyRole.detail && (
-                      <span style={{ fontWeight: 'normal', opacity: 0.8 }}>
-                        {' '}
-                        · {companyRole.detail}
-                      </span>
+                      <span style={{ fontWeight: 'normal', opacity: 0.8 }}> · {taskDetail}</span>
                     )}
                   </span>
                 )}

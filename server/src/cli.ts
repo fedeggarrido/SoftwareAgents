@@ -32,6 +32,7 @@ import {
   readConfig,
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
+import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
@@ -343,7 +344,11 @@ async function main(): Promise<void> {
     console.log(`[Pixel Agents] Watching Codex sessions for: ${cwd}`);
 
     // Who each character is (Manager, Analista, DEV, QA...).
-    const roleResolver = new RoleResolver(store);
+    let executionRegistry: ExecutionRegistry | undefined;
+    const roleResolver = new RoleResolver(store, 2000, () => {
+      executionRegistry ??= new ExecutionRegistry(cwd);
+      return executionRegistry.sessionMap();
+    });
     roleResolver.start();
 
     // The company's backlog (docs/backlog/board.json + claims + progress), if any.

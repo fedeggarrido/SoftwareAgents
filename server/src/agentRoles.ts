@@ -2,6 +2,7 @@ import * as fs from 'fs';
 
 import type { AgentRole as AgentRoleMessage } from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import type { SessionExecution } from './executors/executionRegistry.js';
 
 /**
  * Who each character is inside an agent "mini company" (NEMESIS, FUNDTRINSIC...):
@@ -233,6 +234,38 @@ export function codexRoleFromRollout(file: string): AgentRole | undefined {
   return undefined;
 }
 
+/** A task key comes only from a cwd component beneath .worktrees. */
+export function taskFromCwd(cwd: string): string | undefined {
+  const key = /(?:^|[\\/])\.worktrees[\\/](SA-\d{3})(?!\d)[^\\/]*(?:[\\/]|$)/i.exec(cwd)?.[1];
+  return key?.toUpperCase();
+}
+
+/** Read recorded cwd rather than encoded project paths or prompt text. */
+export function sessionTask(file: string, provider: string | undefined): string | undefined {
+  for (const line of readHead(file) ?? []) {
+    try {
+      const rec = JSON.parse(line) as {
+        type?: string;
+        cwd?: unknown;
+        isSidechain?: boolean;
+        payload?: { cwd?: unknown };
+      };
+      const cwd =
+        provider === 'codex'
+          ? rec.type === 'session_meta'
+            ? rec.payload?.cwd
+            : undefined
+          : !rec.isSidechain
+            ? rec.cwd
+            : undefined;
+      if (typeof cwd === 'string') return taskFromCwd(cwd);
+    } catch {
+      // Partial appends are retried on the next tick.
+    }
+  }
+  return undefined;
+}
+
 /** The webview message for a role. The webview colors it by department. */
 export function roleMessage(id: number, role: AgentRole): AgentRoleMessage {
   return {
@@ -258,6 +291,7 @@ export class RoleResolver {
   constructor(
     private readonly store: AgentStateStore,
     private readonly intervalMs = 2000,
+    private readonly sessions: () => ReadonlyMap<string, SessionExecution> = () => new Map(),
   ) {}
 
   start(): void {
@@ -271,14 +305,42 @@ export class RoleResolver {
   }
 
   tick(): void {
+    let sessions: ReadonlyMap<string, SessionExecution>;
+    try {
+      sessions = this.sessions();
+    } catch {
+      // Registry availability cannot block observational labels. Retry next tick.
+      sessions = new Map();
+    }
     for (const [id, agent] of this.store) {
-      if (agent.role || !agent.jsonlFile) continue;
+      const recorded = sessions.get(agent.sessionId);
+      if (!agent.jsonlFile && !recorded) continue;
       if (agent.spawnToolUseId || agent.leadAgentId !== undefined) continue;
-      const role =
+      const base =
         agent.providerId === 'codex'
           ? codexRoleFromRollout(agent.jsonlFile)
           : claudeRoleFromTranscript(agent.jsonlFile);
-      if (!role) continue;
+      const task = sessionTask(agent.jsonlFile, agent.providerId);
+      const role: AgentRole | undefined = recorded
+        ? {
+            ...(specialistRole(recorded.role) ?? { label: recorded.role, department: 'Sesiones' }),
+            detail: `tarea ${recorded.taskKey}`,
+          }
+        : task
+          ? {
+              ...(base && base.label !== 'Dueño'
+                ? base
+                : { label: 'DEV', department: 'Ingeniería' }),
+              detail: `tarea ${task}`,
+            }
+          : base;
+      if (
+        !role ||
+        (agent.role?.label === role.label &&
+          agent.role.department === role.department &&
+          agent.role.detail === role.detail)
+      )
+        continue;
       agent.role = role;
       this.store.broadcast({ ...roleMessage(id, role) });
     }

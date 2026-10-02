@@ -1,0 +1,22 @@
+apiVersion: softwareagents.io/v1alpha1
+kind: Project
+id: softwareagents
+name: SoftwareAgents
+repo:
+  remote: https://github.com/fedeggarrido/SoftwareAgents.git
+  defaultBranch: main
+brain:
+  path: .softwareagents/brain
+clickup:
+  workspaceId: '90121540513'
+  folderId: '901215250275'
+  listIds:
+    - '901222825471'
+    - '901222825474'
+    - '901222825475'
+    - '901222825477'
+    - '901222825478'
+    - '901222825479'
+    - '901222825480'
+    - '901222825482'
+    - '901222825483'

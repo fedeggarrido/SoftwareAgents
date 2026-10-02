@@ -1,3 +1,11 @@
+---
+Status: Proposed
+Date: 2026-10-02
+Owner: Fede
+Related Feature: []
+Supersedes: []
+---
+
 # ADR-0002: Evolución incremental del fork y relación con upstream
 
 ## Status

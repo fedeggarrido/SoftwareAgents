@@ -1,0 +1,138 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "softwareagents.io/v1alpha1"
+    },
+    "kind": {
+      "const": "FeatureSpec"
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^FEAT-[0-9]{3}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
+    },
+    "status": {
+      "enum": ["draft", "proposed", "approved", "superseded"]
+    },
+    "title": {
+      "$ref": "#/definitions/text"
+    },
+    "goal": {
+      "$ref": "#/definitions/text"
+    },
+    "userValue": {
+      "$ref": "#/definitions/text"
+    },
+    "actors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "flows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "edgeCases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^AC-[0-9]{3}$"
+          },
+          "given": {
+            "$ref": "#/definitions/text"
+          },
+          "when": {
+            "$ref": "#/definitions/text"
+          },
+          "then": {
+            "$ref": "#/definitions/text"
+          }
+        },
+        "required": ["id", "given", "when", "then"]
+      }
+    },
+    "openQuestions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adr": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        },
+        "clickup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["adr", "clickup"]
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "key",
+    "version",
+    "status",
+    "title",
+    "goal",
+    "userValue",
+    "actors",
+    "flows",
+    "rules",
+    "edgeCases",
+    "acceptance",
+    "openQuestions",
+    "links"
+  ],
+  "definitions": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Declarative behavior only; links are references, never authority or automatic fetch targets."
+}

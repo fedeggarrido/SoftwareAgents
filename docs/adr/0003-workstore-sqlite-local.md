@@ -1,3 +1,11 @@
+---
+Status: Proposed
+Date: 2026-10-02
+Owner: Fede
+Related Feature: []
+Supersedes: []
+---
+
 # ADR-0003: Estado operativo en SQLite local tras una interfaz WorkStore
 
 ## Status
@@ -15,6 +23,10 @@ La arquitectura incremental de ADR-0002 conserva TypeScript, Fastify, AsyncAPI y
 Según la [documentación de Node](https://nodejs.org/api/sqlite.html), `node:sqlite` apareció en 22.5.0 y dejó de requerir `--experimental-sqlite` en 22.13.0 (también en 23.4.0). Ausencia de flag no significa API estable; el runtime local aún emite un aviso experimental. Para usar WorkStore sin flags se requiere Node 22.13+ con el módulo disponible; Node 20 sigue siendo válido para las funcionalidades existentes.
 
 Se usa el [glosario SoftwareAgents](../../CONTEXT.md#softwareagents): Agent es una instancia persistente de AgentSpec; Session y Character son representaciones de ejecución y oficina. WorkStore designa aquí la interfaz de persistencia del estado operativo de un Project, no el `AgentStateStore` visual legacy.
+
+## Constraints
+
+Conservar compatibilidad con Node 20 para funciones existentes, las capas actuales y Fundtrinsic fuera de alcance. La apertura de WorkStore requiere soporte explícito del runtime y autorización externa al Project Brain.
 
 ## Options considered
 
@@ -93,6 +105,10 @@ try {
 El binario emitió además un aviso de acceso denegado de Crashpad en el sandbox; las consultas terminaron correctamente. Esta evidencia corresponde al Electron instalado en modo Node, no a una prueba de activación en Extension Host, ni demuestra soporte en el mínimo VS Code 1.105 o en instalaciones remotas/web. Por eso no condiciona la extensión a SQLite.
 
 `npm-package-node20` permanece sin cambios: ejecuta `npm run test:package-contract && npm run verify:npm-package` bajo Node 20. Este ADR solo cambia documentación; no añade carga perezosa ejecutable. No se declara el job remoto verde a partir de una inspección o de pruebas en Node 24. La implementación deberá demostrar arranque del paquete sin WorkStore en Node 20, error claro al solicitarlo sin módulo y apertura/transacciones con Node compatible, además de concurrencia y recuperación en Windows. La aceptación de esa carga perezosa queda pendiente de esas pruebas.
+
+## Why
+
+SQLite aporta transacciones y recuperación local sin distribuir un addon nativo. La carga perezosa y la interfaz WorkStore mantienen la compatibilidad legacy y acotan la dependencia del driver, según la evidencia y límites registrados arriba.
 
 ## Consequences
 

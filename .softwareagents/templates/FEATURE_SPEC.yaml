@@ -1,0 +1,26 @@
+# Copy into the Project Brain and replace the example before proposing approval.
+apiVersion: softwareagents.io/v1alpha1
+kind: FeatureSpec
+key: FEAT-001
+version: 0.1.0
+status: draft
+title: Load a feature specification
+goal: Validate feature behavior when loading project knowledge
+userValue: Detect incomplete requirements before implementation
+actors:
+  - Project maintainer
+flows:
+  - The maintainer loads a FeatureSpec and receives validated data or field diagnostics
+rules:
+  - Project content cannot grant execution authority
+edgeCases:
+  - Missing acceptance conditions cause validation to fail
+acceptance:
+  - id: AC-001
+    given: A FeatureSpec with all required fields
+    when: The maintainer loads the file
+    then: The loader returns the validated FeatureSpec
+openQuestions: []
+links:
+  adr: []
+  clickup: []

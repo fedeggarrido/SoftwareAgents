@@ -4,6 +4,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - main
     paths-ignore:
@@ -231,6 +232,36 @@ jobs:
           done
           exit "$failed"
 
+  unit-tests-windows:
+    name: Unit Tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      # CLI and hook integration tests exercise the freshly built bundles.
+      - name: Build Extension and Webview
+        shell: bash
+        run: npm run build:extension && npm run build:webview
+
+      - name: Server Tests
+        run: npm run test:server
+
+      - name: Webview Tests
+        if: ${{ !cancelled() }}
+        run: npm run test:webview
+
   npm-package-node20:
     name: npm Package Smoke (Node 20)
     runs-on: ubuntu-latest
@@ -256,21 +287,12 @@ jobs:
 
   e2e:
     name: ${{ matrix.target.label }} E2E (shard ${{ matrix.shard }}/3)
-    # One matrix replaces the former linux-e2e / macos-e2e / windows-e2e jobs:
-    # 3 OSes x 3 shards = 9 runs. Shard distribution is test-level (Playwright
-    # `fullyParallel` in playwright.config.ts), so each shard runs ~1/3 of the
-    # suite at --workers=1 (the safe ceiling; CI runners flake with more).
-    # Public repo, so macOS/Windows minutes are free. The Linux-only system-deps
-    # install is gated by `runner.os` inside the install step. Artifact names use
-    # matrix.target.label (linux/macos/windows) so downstream download patterns
-    # stay stable.
+    # Normal PRs run Linux + Windows (6 shards). Pushes to main and PRs with
+    # the `e2e-macos` label also run macOS (9 shards). Artifact names stay stable.
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - { os: ubuntu-latest, label: linux }
-          - { os: macos-latest, label: macos }
-          - { os: windows-latest, label: windows }
+        target: ${{ fromJSON((github.event_name == 'push' && github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'e2e-macos')) && '[{"os":"ubuntu-latest","label":"linux"},{"os":"macos-latest","label":"macos"},{"os":"windows-latest","label":"windows"}]' || '[{"os":"ubuntu-latest","label":"linux"},{"os":"windows-latest","label":"windows"}]') }}
         shard: [1, 2, 3]
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 60
@@ -425,14 +447,15 @@ jobs:
 
   # Single aggregate status check to require in branch protection, instead of
   # pinning every job/shard name (which silently breaks when a shard is renamed
-  # or the shard count changes). Green only when ci, npm-package-node20, and the
-  # whole e2e matrix all succeed.
+  # or the shard count changes). Green only when ci, npm-package-node20,
+  # unit-tests-windows, and the whole e2e matrix all succeed.
   required-checks:
     name: Required Checks
     if: always()
     needs:
       - ci
       - npm-package-node20
+      - unit-tests-windows
       - e2e
     runs-on: ubuntu-latest
     steps:
@@ -440,9 +463,11 @@ jobs:
         run: |
           echo "ci=${{ needs.ci.result }}"
           echo "npm-package-node20=${{ needs.npm-package-node20.result }}"
+          echo "unit-tests-windows=${{ needs.unit-tests-windows.result }}"
           echo "e2e=${{ needs.e2e.result }}"
           if [ "${{ needs.ci.result }}" != "success" ] \
             || [ "${{ needs.npm-package-node20.result }}" != "success" ] \
+            || [ "${{ needs.unit-tests-windows.result }}" != "success" ] \
             || [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "::error::One or more required jobs did not succeed"
             exit 1
@@ -451,7 +476,7 @@ jobs:
 
   deploy-preview-precheck:
     name: Deploy Precheck
-    if: always() && github.event_name == 'pull_request'
+    if: always() && github.repository == 'pixel-agents-hq/pixel-agents' && github.event_name == 'pull_request'
     needs:
       - ci
       - e2e
@@ -550,7 +575,7 @@ jobs:
   deploy-preview:
     name: Deploy Preview
     needs: deploy-preview-precheck
-    if: always() && needs.deploy-preview-precheck.outputs.ready == 'true'
+    if: always() && github.repository == 'pixel-agents-hq/pixel-agents' && needs.deploy-preview-precheck.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

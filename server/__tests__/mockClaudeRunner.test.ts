@@ -11,7 +11,8 @@ let tmpHome: string;
 let workspaceDir: string;
 
 function makeNodeCommand(scriptPath: string): string {
-  return `${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}`;
+  // JSON escaping doubles Windows backslashes; these are shell arguments.
+  return `"${process.execPath.replace(/\\/g, '/')}" "${scriptPath.replace(/\\/g, '/')}"`;
 }
 
 function writeHookScript(scriptPath: string, outputPath: string): void {
@@ -54,6 +55,8 @@ function runMockClaude(
       env: {
         ...process.env,
         HOME: tmpHome,
+        // os.homedir() uses USERPROFILE on Windows, including in child processes.
+        USERPROFILE: tmpHome,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     });

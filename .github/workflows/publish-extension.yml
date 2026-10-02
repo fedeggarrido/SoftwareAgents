@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.repository == 'pixel-agents-hq/pixel-agents'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:

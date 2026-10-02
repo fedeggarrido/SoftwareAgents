@@ -1,8 +1,17 @@
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { claudeTeamProvider } from '../src/providers/hook/claude/claudeTeamProvider.js';
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    // Windows ignores HOME; keep provider reads and test writes in the same sandbox.
+    homedir: vi.fn(() => process.env.HOME ?? actual.homedir()),
+  };
+});
 
 describe('claudeTeamProvider', () => {
   describe('identity', () => {
@@ -388,20 +397,22 @@ describe('claudeTeamProvider', () => {
   });
 
   describe('getTeamMembers', () => {
-    // Writes under ~/.claude/teams/<TEAM_NAME>/ and cleans up in afterEach.
+    // Never read or write the operator's real ~/.claude/teams directory.
     const fs = require('fs') as typeof import('fs');
     const TEAM_NAME = 'test-team-' + Date.now();
+    let tmpHome: string;
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+      tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-team-home-'));
+      originalHome = process.env.HOME;
+      process.env.HOME = tmpHome;
+    });
 
     afterEach(() => {
-      // Cleanup any test artifacts
-      try {
-        fs.rmSync(path.join(os.homedir(), '.claude', 'teams', TEAM_NAME), {
-          recursive: true,
-          force: true,
-        });
-      } catch {
-        /* ignore */
-      }
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      fs.rmSync(tmpHome, { recursive: true, force: true });
     });
 
     it('returns null when the team config does not exist', () => {

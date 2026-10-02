@@ -421,7 +421,9 @@ describe('dist/cli.js entry-point guard', () => {
         string,
         unknown
       >;
-      expect(JSON.stringify(settings)).toContain(installedHook);
+      // JSON.stringify escapes Windows backslashes; inspect the parsed command.
+      const hooks = settings.hooks as Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+      expect(hooks.SessionStart[0].hooks[0].command).toBe(`node "${installedHook}"`);
     } finally {
       await stopChild(child);
       fs.rmSync(tmpHome, { recursive: true, force: true });

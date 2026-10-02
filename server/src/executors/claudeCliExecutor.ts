@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
 
+import { compileAgent, validateAgentOutput } from '../agentCompiler.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
@@ -20,15 +21,43 @@ export interface ClaudeCliExecutorOptions {
   hookCommand?: string;
 }
 
-/** Configuration isolation is not an OS sandbox. No arbitrary compiled flags until SA-020. */
+/** Configuration isolation is not an OS sandbox. Caller argv never grants authority. */
 export class ClaudeCliExecutor implements Executor {
   readonly id = 'claude' as const;
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
   start(req: ExecutionRequest): ExecutionHandle {
-    if (req.flags.length || req.role.toLowerCase() !== 'developer') {
-      throw new Error('Only the fixed Developer profile is supported until SA-020');
+    if (req.flags.length || (!req.agentSpec && req.role !== 'developer')) {
+      throw new Error('Caller flags are forbidden; non-Developer roles require an AgentSpec');
     }
+    // Compatibility with the SA-033 smoke: its explicitly selected Developer ceiling
+    // goes through the same compiler, without loading project or user configuration.
+    const compiled = compileAgent(
+      req.agentSpec ?? {
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'AgentSpec',
+        metadata: {
+          id: 'developer',
+          version: '1.0.0',
+          displayName: 'Developer',
+          department: 'engineering',
+        },
+        identity: {
+          role: 'developer',
+          mission: 'Implement the assigned task',
+          principles: [],
+          antiPatterns: [],
+        },
+        outputs: ['changes', 'verification'],
+        permissions: { profile: 'branch_write' },
+        modelPolicy: { capabilityClass: 'coding', fallbackAllowed: false },
+        context: { brainPaths: [] },
+        gates: { mayBlock: [] },
+        escalation: { humanRequired: [] },
+      },
+      req.role,
+      req.taskData ?? { task: { key: req.taskKey, content: req.prompt } },
+    );
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
     const sessionId = randomUUID();
     let child: ChildProcess | undefined;
@@ -80,7 +109,7 @@ export class ClaudeCliExecutor implements Executor {
             throw new Error('Runtime settings must be outside the worktree');
           }
           directory = fs.mkdtempSync(path.join(options.runtimeDirectory, 'claude-'));
-          const settings = path.join(directory, 'settings.json');
+          const settings = path.join(directory, compiled.claude.settingsFile);
           const mcp = path.join(directory, 'mcp.json');
           const hooksAvailable = fs.existsSync(getHookScriptPath());
           fs.writeFileSync(
@@ -94,12 +123,12 @@ export class ClaudeCliExecutor implements Executor {
                     ]),
                   )
                 : undefined,
-              permissions: { defaultMode: 'dontAsk' },
+              permissions: { defaultMode: compiled.claude.permissionMode },
             }),
             { mode: 0o600 },
           );
           fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }), { mode: 0o600 });
-          const tools = 'Read,Glob,Grep,Edit,Write';
+          const tools = compiled.claude.allowedTools.join(',');
           const args = [
             ...(options.binaryArgs ?? []),
             '-p',
@@ -119,8 +148,12 @@ export class ClaudeCliExecutor implements Executor {
             tools,
             '--tools',
             tools,
+            '--disallowedTools',
+            compiled.claude.disallowedTools.join(','),
+            '--append-system-prompt',
+            compiled.claude.appendSystemPrompt,
             '--permission-mode',
-            'dontAsk',
+            compiled.claude.permissionMode,
             '--no-chrome',
             '--disable-slash-commands',
             ...(req.model ? ['--model', req.model] : []),
@@ -142,7 +175,7 @@ export class ClaudeCliExecutor implements Executor {
           processChild.stdin!.on('error', () => {
             /* premature process exit */
           });
-          processChild.stdin!.end(req.prompt);
+          processChild.stdin!.end(compiled.context);
           timer = setTimeout(() => {
             try {
               cancel();
@@ -204,6 +237,17 @@ export class ClaudeCliExecutor implements Executor {
                     });
                   summary = record.result ?? record.errors?.join('\n') ?? '';
                   resultError = record.is_error === true;
+                  if (compiled.outputSchema) {
+                    try {
+                      const output = record.structured_output ?? JSON.parse(summary);
+                      if (!validateAgentOutput(compiled.outputSchema, output))
+                        throw new Error('Schema mismatch');
+                      summary = JSON.stringify(output);
+                    } catch {
+                      resultError = true;
+                      summary = 'Claude output failed schema validation';
+                    }
+                  }
                   if (summary) push({ type: 'output', text: summary, stream });
                 }
                 if (record.type === 'rate_limit_event') {

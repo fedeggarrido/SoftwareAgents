@@ -65,6 +65,7 @@ if (!valid) {
             type: 'result',
             subtype: 'success',
             result: 'Fake result',
+            ...(args.includes('--typed-valid') ? { structured_output: { ok: true } } : {}),
             session_id: 'fake-claude-session',
             usage: { input_tokens: 10, output_tokens: 5 },
           },

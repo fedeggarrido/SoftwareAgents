@@ -1,7 +1,9 @@
+import type { AgentSpec } from '../../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../../core/src/capacity.js';
+import type { AgentCompilerTask } from '../agentCompiler.js';
 export type ExecutorId = 'claude' | 'codex';
 
-/** Already compiled input; policy and prompt compilation belong to the caller. */
+/** Caller must authorize execution externally; CLI adapters compile bounded AgentSpec input. */
 export interface ExecutionRequest {
   executionId: string;
   projectId: string;
@@ -9,6 +11,9 @@ export interface ExecutionRequest {
   role: string;
   prompt: string;
   flags: readonly string[];
+  agentSpec?: AgentSpec;
+  /** Optional prepared context; legacy Developer requests use prompt as untrusted task data. */
+  taskData?: AgentCompilerTask;
   worktreePath: string;
   model?: string;
   timeoutMin: number;

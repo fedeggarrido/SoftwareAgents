@@ -622,6 +622,7 @@ Supporting: `wall-tile-editor.html` (wall sprite editing), `jsonl-viewer.html` (
 
 ## Key Decisions
 
+- **Incremental evolution of this fork (Proposed)** — [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md): keep the current stack, LLM execution only through the local Claude Code/Codex CLIs, heavy platform pieces deferred with explicit revisit conditions, upstream via selective cherry-picks. Pending Fede's approval.
 - **Layered codebase** (core → server → adapters; core → webview-ui). Standalone CLI never imports `adapters/vscode/` and vice versa.
 - **AsyncAPI 3.0 contract**, generated TS bindings, CI drift check. Single source of truth for the wire protocol.
 - **AgentRuntime** shared lifecycle core, composed by both surfaces.

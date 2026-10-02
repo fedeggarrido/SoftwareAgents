@@ -684,8 +684,8 @@ Supporting: `wall-tile-editor.html` (wall sprite editing), `jsonl-viewer.html` (
 
 ## Key Decisions
 
-- **Local operational WorkStore (Proposed)** — [ADR-0003](docs/adr/0003-workstore-sqlite-local.md): lazily load `node:sqlite` in standalone, share WAL-backed state across worktrees via the Git common dir, keep Node engines unchanged; Git is declarative, WorkStore operational, ClickUp a mirror with the transitional human backlog. Pending Fede's approval.
-- **Incremental evolution of this fork (Proposed)** — [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md): keep the current stack, LLM execution only through the local Claude Code/Codex CLIs, heavy platform pieces deferred with explicit revisit conditions, upstream via selective cherry-picks. Pending Fede's approval.
+- **Local operational WorkStore (Accepted)** — [ADR-0003](docs/adr/0003-workstore-sqlite-local.md): lazily load `node:sqlite` in standalone, share WAL-backed state across worktrees via the Git common dir, keep Node engines unchanged; Git is declarative, WorkStore operational, ClickUp a mirror with the transitional human backlog.
+- **Incremental evolution of this fork (Accepted)** — [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md): keep the current stack, LLM execution only through the local Claude Code/Codex CLIs, heavy platform pieces deferred with explicit revisit conditions, upstream via selective cherry-picks.
 - **Layered codebase** (core → server → adapters; core → webview-ui). Standalone CLI never imports `adapters/vscode/` and vice versa.
 - **AsyncAPI 3.0 contract**, generated TS bindings, CI drift check. Single source of truth for the wire protocol.
 - **AgentRuntime** shared lifecycle core, composed by both surfaces.

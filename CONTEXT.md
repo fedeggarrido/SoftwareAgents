@@ -218,7 +218,7 @@ _Avoid_: API
 
 ## SoftwareAgents
 
-These terms extend the Pixel Agents vocabulary for the incremental fork described in [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md). They describe domain concepts, not a claim that every component is implemented; ADR-0002 remains Proposed pending Fede's approval.
+These terms extend the Pixel Agents vocabulary for the incremental fork described in [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md). They describe domain concepts, not a claim that every component is implemented; ADR-0002 is Accepted.
 
 ### Naming rule: Agent ≠ Model
 

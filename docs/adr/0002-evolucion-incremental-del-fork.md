@@ -1,5 +1,5 @@
 ---
-Status: Proposed
+Status: Accepted
 Date: 2026-10-02
 Owner: Fede
 Related Feature: []
@@ -10,9 +10,9 @@ Supersedes: []
 
 ## Status
 
-**Proposed** · Fecha: 2026-10-02 · Tarea: SA-001 (incluye la decisión de upstream del antiguo SA-008).
+**Accepted** · Fecha: 2026-10-02 · Tarea: SA-001 (incluye la decisión de upstream del antiguo SA-008).
 
-Claude revisó esta decisión el 2026-10-02 y sus comentarios están resueltos. Sigue en **Proposed** hasta la aprobación explícita de Fede para cambiar el estado a **Accepted**; la revisión documental no sustituye ese gate humano.
+Claude revisó esta decisión el 2026-10-02 y sus comentarios están resueltos. **Aceptada por Fede el 2026-10-02** («lo apruebo todo», en la sesión de trabajo con Claude).
 
 ## Context
 

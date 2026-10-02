@@ -7,7 +7,7 @@ SoftwareAgents es su primer Managed Project. Este brain contiene conocimiento de
 - [CLAUDE.md](../../CLAUDE.md): arquitectura, módulos y validación.
 - [CONTEXT.md](../../CONTEXT.md#softwareagents): glosario canónico; Agent ≠ Model.
 - [AGENTS.md](../../AGENTS.md): colaboración, revisión cruzada e integración.
-- [docs/adr/](../../docs/adr/): decisiones en sus rutas existentes. [ADR-0002](../../docs/adr/0002-evolucion-incremental-del-fork.md) y [ADR-0003](../../docs/adr/0003-workstore-sqlite-local.md) siguen Proposed, pendientes de Fede.
+- [docs/adr/](../../docs/adr/): decisiones en sus rutas existentes. [ADR-0002](../../docs/adr/0002-evolucion-incremental-del-fork.md) y [ADR-0003](../../docs/adr/0003-workstore-sqlite-local.md) están Accepted (Fede, 2026-10-02).
 - [Informe de investigación](../../docs/research/softwareagents-deep-research-report.md): visión, checklist PROJECT BRAIN y layout recomendado; ya versionado por SA-001. ADR-0002 adapta su propuesta al roadmap incremental.
 - [Threat model](../../docs/security/threat-model.md): riesgos aceptados y condiciones de revisión.
 - [VISION.md](VISION.md): objetivo y entregas incrementales.

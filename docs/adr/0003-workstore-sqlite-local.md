@@ -1,5 +1,5 @@
 ---
-Status: Proposed
+Status: Accepted
 Date: 2026-10-02
 Owner: Fede
 Related Feature: []
@@ -10,9 +10,9 @@ Supersedes: []
 
 ## Status
 
-**Proposed** · Fecha: 2026-10-02 · Tarea: SA-023 · Depende de: SA-001 / [ADR-0002](0002-evolucion-incremental-del-fork.md).
+**Accepted** · Fecha: 2026-10-02 (aceptada por Fede el 2026-10-02) · Tarea: SA-023 · Depende de: SA-001 / [ADR-0002](0002-evolucion-incremental-del-fork.md).
 
-Decisor: **Fede**. Codex redacta y comprueba esta propuesta; Claude realizará la revisión cruzada e integración. La aceptación explícita de Fede está pendiente. Este ADR no implementa el WorkStore ni acredita pruebas de una implementación futura.
+Decisor: **Fede**. Codex la redactó y comprobó; Claude hizo la revisión cruzada y la integró. Fede la aceptó el 2026-10-02. Este ADR no implementa el WorkStore ni acredita pruebas de una implementación futura.
 
 ## Context
 

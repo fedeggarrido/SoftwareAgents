@@ -6,7 +6,7 @@ SoftwareAgents será el primer Managed Project de la Platform. Agent es una inst
 
 ## Plan incremental
 
-El [informe](../../docs/research/softwareagents-deep-research-report.md) aporta la visión de extremo a extremo. [ADR-0002](../../docs/adr/0002-evolucion-incremental-del-fork.md), todavía Proposed, adapta esa visión al fork y al roadmap local:
+El [informe](../../docs/research/softwareagents-deep-research-report.md) aporta la visión de extremo a extremo. [ADR-0002](../../docs/adr/0002-evolucion-incremental-del-fork.md), aceptado, adapta esa visión al fork y al roadmap local:
 
 1. F2: Developer → PR draft supervisada, con worktree por Task, contratos, permisos, evidencia y control de ejecución antes de ampliar el flujo.
 2. F5: Requirements → Architect → Developer → Reviewer con Executor cruzado → QA, secuencialmente y con Gates humanos. FeatureSpec, TechnicalDesign y Task DAG estructuran el trabajo correspondiente.

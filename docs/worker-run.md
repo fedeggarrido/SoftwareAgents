@@ -14,8 +14,7 @@ mediante `recordAudit`, también en fallos y resultados sin cambios. A1 es
 supervisado: el lanzamiento manual identifica al actor como `human`.
 
 El runtime crea o reutiliza `.worktrees/SA-###`, rama `sa/SA-###-worker`, desde
-la rama base declarada. Rechaza worktrees sucios antes de lanzar. No instala
-dependencias ni modifica configuración Git. El Developer usa la plantilla
+la rama base declarada. Rechaza worktrees sucios antes de lanzar. No instala dependencias, pero mantiene el bloqueo de push del agente: activa `extensions.worktreeConfig` y fija un `remote.origin.pushurl` inválido solo para ese worktree. El Developer usa la plantilla
 distribuida `agents/templates/developer.yaml`, validada y compilada por
 `compileAgent` y el Executor, con Read/Glob/Grep/Edit/Write, sin Bash, git,
 red, MCP ni delegación. La plantilla conserva su contrato genérico de commits;

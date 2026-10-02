@@ -4,6 +4,8 @@ Pixel art office where AI agents (Claude Code terminals today, any tool tomorrow
 
 `CONTEXT.md` is the canonical glossary — read it for what terms like Agent, Sub-agent, Teammate, Lead, Adopt, or Headless agent mean here, and use its vocabulary in code, comments, and docs.
 
+For fork domain work, read [CONTEXT.md → SoftwareAgents](CONTEXT.md#softwareagents): Agent = a persistent AgentSpec instance in a Project; Session / Character describe the legacy CLI / visual concepts. Agent ≠ Model. Existing code identifiers retain their legacy meaning; [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md) defines the incremental scope.
+
 ## Architecture
 
 Strict layering: `core/` depends on nothing; `server/` depends only on `core/`; `webview-ui/` depends only on `core/`; `adapters/vscode/` depends on `core/` and `server/`. The standalone CLI never imports `adapters/vscode/` and vice versa.

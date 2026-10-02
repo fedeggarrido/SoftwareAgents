@@ -20,7 +20,8 @@ _Avoid_: CLI (that's the entry command, not the adapter), browser mode
 
 **Agent**:
 An AI coding session tracked by Pixel Agents, whether spawned from the office or adopted from an external terminal.
-_Avoid_: bot, terminal (as a synonym), session (as a synonym)
+This is the legacy Pixel Agents meaning; in SoftwareAgents domain documentation, use **Session** for this concept and reserve **Agent** for an AgentSpec instance (see [SoftwareAgents](#softwareagents)).
+_Avoid_: bot, terminal (as a synonym), session (as a synonym in legacy Pixel Agents terminology)
 
 **Headless agent**:
 An agent with no terminal — a non-interactive run adopted from outside the office, for example. A full citizen: it has a seat and can be selected, but there is no terminal to focus. Agents it spawns are sub-agents or teammates like anyone else's. Optionally drawn as a Ghost.
@@ -214,3 +215,109 @@ _Avoid_: connection, socket
 **Protocol**:
 The message contract between the office UI and the runtime, shared by every adapter and defined in a single source of truth.
 _Avoid_: API
+
+## SoftwareAgents
+
+These terms extend the Pixel Agents vocabulary for the incremental fork described in [ADR-0002](docs/adr/0002-evolucion-incremental-del-fork.md). They describe domain concepts, not a claim that every component is implemented; ADR-0002 remains Proposed pending Fede's approval.
+
+### Naming rule: Agent ≠ Model
+
+In SoftwareAgents domain documentation, **Agent** (Spanish: **Agente**) means a persistent instance of an AgentSpec in a project. Use **Session** (**Sesión**) for the CLI interaction tracked by the legacy runtime and **Character** (**Personaje**) for its visual figure. Existing Pixel Agents sections and code identifiers such as `AgentRuntime` and `AgentEvent` retain their legacy meanings; this glossary does not rename code or protocol fields.
+
+For example, a project's Developer Agent instantiated from `developer@v1` can perform one Execution through Codex CLI and a later Execution through Claude Code CLI. The Agent retains its project identity and role across those executions; their CLI sessions and office characters are representations, not its identity. An adopted external CLI session with a seated character does not automatically become an AgentSpec instance.
+
+**Agent ≠ Model**: the Agent defines a project role and bounded authority, the Executor runs the CLI, and the Model is the underlying LLM selected for an execution. Changing the executor or model does not create a new Agent or grant more permissions. Permissions, quotas, and gates are enforced deterministically outside the LLM.
+
+### Domain glossary
+
+**Platform**:
+The SoftwareAgents product that coordinates supervised software work across projects, including execution, orchestration, and user interfaces.
+_Do not confuse with_: Host (the machine), Adapter (an application integration), or Pixel Office (one interface).
+
+**Development Project**:
+The SoftwareAgents ClickUp project that organizes development of the Platform itself.
+_Do not confuse with_: a Managed Project served by the Platform or the fork's source repository.
+
+**Managed Project**:
+A user's software project developed or managed through the Platform, with its own context, agents, tasks, and policies.
+_Do not confuse with_: the Development Project or a workspace folder used by the legacy office.
+
+**Fundtrinsic**:
+An independent project whose files, data, and processes are outside this Development Project's scope; its legacy integration remains compatible without requiring migration.
+_Do not confuse with_: the Platform, its Development Project, or an automatically migrated Managed Project.
+
+**Pixel Office**:
+The visual interface projecting real work as characters, activity, and office state; it is not the authority for operational state or permissions.
+_Do not confuse with_: the whole Platform, the operational store, or Layout (the spatial arrangement).
+
+**Command Center**:
+The interface for inspecting project details and controlling work, including tasks, executions, decisions, and gates.
+_Do not confuse with_: Pixel Office (the visual overview) or the runtime enforcing a requested action.
+
+**Project**:
+The domain entity representing a Managed Project and tying its repository, Project Brain, agents, tasks, and policies to a stable identity.
+_Do not confuse with_: the Development Project in ClickUp, a repository alone, or a CLI's session-directory naming convention.
+
+**Project Brain**:
+The project's shared, Git-versioned declarative knowledge: requirements, designs, decisions, and other reviewed project context.
+_Do not confuse with_: mutable execution state, a session's context window, or operator secrets; `CONTEXT.md` and `CLAUDE.md` keep their existing paths.
+
+**AgentSpec**:
+A versioned declarative specification of an agent's role, mission, capabilities, permission profile, knowledge sources, and expected outputs.
+_Do not confuse with_: its instantiated Agent, a Model, or a CLI launch command.
+
+**Agent (Agente)**:
+A persistent instance of a particular AgentSpec version within a Project, with project identity, role, lifecycle, and bounded authority across executions.
+_Do not confuse with_: the legacy Pixel Agents Agent (a Session), a Character, an Executor, or a Model.
+
+**Executor**:
+The local Claude Code CLI or Codex CLI integration that performs an Execution using the operator's subscription and authentication, under externally enforced policy.
+_Do not confuse with_: an Agent, its underlying Model, or a Provider that normalizes activity for the office.
+
+**Execution**:
+One traceable attempt to perform assigned work through an Executor, with its input context, lifecycle, result, and artifacts.
+_Do not confuse with_: the persistent Agent, the Task (which may require multiple attempts), or a CLI Session or turn.
+
+**FeatureSpec**:
+A versioned definition of a feature's intended behavior and user value, including rules, edge cases, and verifiable acceptance criteria.
+_Do not confuse with_: TechnicalDesign (how to build it), an implementation Task, or an unvalidated feature idea.
+
+**TechnicalDesign**:
+A technical plan translating a FeatureSpec into implementation choices, component boundaries, and validation approach.
+_Do not confuse with_: FeatureSpec (required behavior), an ADR (a recorded architectural decision), or the Task DAG.
+
+**Task**:
+A bounded unit of project work with an objective, acceptance criteria, dependencies, assignment, and operational status.
+_Do not confuse with_: an Execution attempt, a CLI's `Task` tool, or the office's Subtask label.
+
+**Task DAG**:
+A directed acyclic graph of Tasks and their dependency edges, defining which work becomes eligible after prerequisites are satisfied.
+_Do not confuse with_: a flat backlog, an agent Team, or a scheduler's choice of when eligible work actually runs.
+
+**Lease**:
+A time-bounded claim on work by a particular execution owner, renewed while that owner remains responsible and recoverable after expiry.
+_Do not confuse with_: permanent assignment, permission to execute, or a guarantee that the previous process has stopped.
+
+**CapacitySnapshot**:
+A timestamped observation of executor/account capacity, with available quota dimensions, reset times, source, and confidence; unknown capacity remains explicitly unknown.
+_Do not confuse with_: the Context gauge, a guaranteed reservation, or a single universal quota percentage.
+
+**Human Decision**:
+A recorded human response to an escalated question or approval request, tied to its scope and the work or gate it resolves.
+_Do not confuse with_: an agent recommendation, a visual click alone, or blanket authorization for later actions.
+
+**Gate**:
+A policy-enforced condition that blocks a transition or action until required evidence or approval is present; a human gate requires a Human Decision.
+_Do not confuse with_: an office status indicator, a CLI Permission request, or every gate being a human approval.
+
+**DomainEvent**:
+A recorded fact about a meaningful domain change, such as a Task being leased or a Human Decision being recorded, correlated with the affected project and work.
+_Do not confuse with_: legacy `AgentEvent` activity notifications, raw CLI hooks, or a command requesting a change.
+
+**Audit log**:
+A durable chronological record of consequential actions, decisions, policy outcomes, and their actors and references, allowing work to be reconstructed.
+_Do not confuse with_: a CLI Transcript, debug output, or DomainEvent alone (one fact rather than the audit history).
+
+**Operator config**:
+Trusted operator-controlled settings outside project-authored content, defining allowed executors, commands, and machine-level limits; the existing company command allowlist lives in `~/.pixel-agents/config.json`.
+_Do not confuse with_: Project Brain, `board.json` requests, or AgentSpec declarations; project content cannot grant itself execution authority.

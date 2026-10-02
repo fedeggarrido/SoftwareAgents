@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveInside } from '../src/pathGuard.js';
 
@@ -20,7 +20,26 @@ describe('resolveInside canonical containment', () => {
     fs.writeFileSync(path.join(root, 'nested', 'file.txt'), 'inside');
   });
 
-  afterEach(() => fs.rmSync(temp, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  it('resolves a directory created between realpath and lstat', () => {
+    const directory = path.join(root, 'concurrent');
+    const realpath = fs.realpathSync.native;
+    let created = false;
+    vi.spyOn(fs.realpathSync, 'native').mockImplementation((candidate, options) => {
+      if (candidate === directory && !created) {
+        created = true;
+        fs.mkdirSync(directory);
+        throw Object.assign(new Error('not found before concurrent mkdir'), { code: 'ENOENT' });
+      }
+      return realpath(candidate, options);
+    });
+    expect(resolveInside(root, 'concurrent')).toBe(realpath(directory));
+    expect(created).toBe(true);
+  });
 
   it.each(['nested/file.txt', 'nested\\file.txt', './nested/file.txt'])('accepts %s', (rel) => {
     expect(resolveInside(root, rel)).toBe(

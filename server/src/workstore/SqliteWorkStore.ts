@@ -10,6 +10,7 @@ import {
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
 import { runMigrations } from './migrations.js';
+import { retryBusy } from './retryBusy.js';
 import type {
   ExecutionRecord,
   FeatureRecord,
@@ -68,13 +69,20 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
   const db = new sqlite.DatabaseSync(filename);
   try {
     db.exec(`PRAGMA busy_timeout = ${WORKSTORE_BUSY_TIMEOUT_MS}; PRAGMA foreign_keys = ON;`);
-    const mode = db.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode;
-    if (mode !== 'wal') throw new Error('WorkStore requires SQLite WAL journal mode');
-    runMigrations(db);
-    db.prepare('INSERT OR IGNORE INTO projects(project_id, created_at) VALUES (?, ?)').run(
-      options.projectId,
-      new Date().toISOString(),
+    const deadline = performance.now() + WORKSTORE_BUSY_TIMEOUT_MS;
+    const mode = await retryBusy(
+      db,
+      deadline,
+      () => db.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode,
     );
+    if (mode !== 'wal') throw new Error('WorkStore requires SQLite WAL journal mode');
+    await retryBusy(db, deadline, () => runMigrations(db));
+    await retryBusy(db, deadline, () =>
+      db
+        .prepare('INSERT OR IGNORE INTO projects(project_id, created_at) VALUES (?, ?)')
+        .run(options.projectId, new Date().toISOString()),
+    );
+    db.exec(`PRAGMA busy_timeout = ${WORKSTORE_BUSY_TIMEOUT_MS}`);
     return new SqliteWorkStore(db, options.projectId);
   } catch (error) {
     db.close();

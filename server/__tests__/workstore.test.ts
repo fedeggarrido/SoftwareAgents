@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { retryBusy } from '../src/workstore/retryBusy.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
@@ -37,7 +38,7 @@ describe('WorkStore (real SQLite)', () => {
     first.createTask({ key: 'task', type: 'implementation' });
     const second = await open();
     expect(
-      configure.mock.calls.filter(([sql]) => sql.includes('PRAGMA busy_timeout = 5000')),
+      configure.mock.calls.filter(([sql]) => sql.includes('PRAGMA foreign_keys = ON')),
     ).toHaveLength(2);
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
@@ -156,6 +157,74 @@ describe('WorkStore (real SQLite)', () => {
     fs.writeFileSync(path.join(root, '.git/softwareagents/work.sqlite3'), 'not a database');
     await expect(open()).rejects.toThrow(/not a database/);
   });
+  it('retries opening WAL and rolls back a busy migration before retrying', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const prepare = DatabaseSync.prototype.prepare;
+    const exec = DatabaseSync.prototype.exec;
+    let walAttempts = 0;
+    let migrationAttempts = 0;
+    let rollbacks = 0;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (
+      this: import('node:sqlite').DatabaseSync,
+      sql,
+    ) {
+      if (sql === 'PRAGMA journal_mode = WAL' && ++walAttempts <= 2) {
+        throw Object.assign(new Error('database is locked'), { errcode: 5 });
+      }
+      return prepare.call(this, sql);
+    });
+    vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (
+      this: import('node:sqlite').DatabaseSync,
+      sql,
+    ) {
+      if (sql === 'ROLLBACK') rollbacks++;
+      if (sql.includes('CREATE TABLE IF NOT EXISTS schema_version') && ++migrationAttempts === 1) {
+        exec.call(this, sql);
+        throw Object.assign(new Error('database table is locked'), { errcode: 6 });
+      }
+      return exec.call(this, sql);
+    });
+    const store = await open();
+    expect(walAttempts).toBe(3);
+    expect(migrationAttempts).toBe(2);
+    expect(rollbacks).toBe(1);
+    expect(store.getProject().project_id).toBe('a');
+    const db = await inspect();
+    try {
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 1 }]);
+    } finally {
+      db.close();
+    }
+  });
+  it('bounds retries by the shared deadline and preserves other errors', async () => {
+    await open();
+    const db = await inspect();
+    const busy = Object.assign(new Error('busy'), { errcode: 5 });
+    const operation = vi.fn(() => {
+      throw busy;
+    });
+    try {
+      await expect(retryBusy(db, performance.now() + 25, operation)).rejects.toBe(busy);
+      expect(operation.mock.calls.length).toBeGreaterThan(1);
+      const expired = vi.fn(() => {
+        throw busy;
+      });
+      await expect(retryBusy(db, performance.now() - 1, expired)).rejects.toBe(busy);
+      expect(expired).toHaveBeenCalledTimes(1);
+      for (const error of [
+        new Error('other'),
+        Object.assign(new Error('constraint'), { errcode: 19 }),
+      ]) {
+        const fail = vi.fn(() => {
+          throw error;
+        });
+        await expect(retryBusy(db, performance.now() + 5000, fail)).rejects.toBe(error);
+        expect(fail).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      db.close();
+    }
+  });
   it('keeps SQLite external and lazy in a real bundle when the builtin is disabled', () => {
     const bundle = path.join(root, 'workstore.cjs');
     buildSync({
@@ -188,11 +257,20 @@ describe('WorkStore (real SQLite)', () => {
     expect(fs.readdirSync(outside)).toEqual([]);
     fs.unlinkSync(path.join(root, '.git/softwareagents'));
   });
-  it('two real Node processes simultaneously migrate and write without lock errors', async () => {
-    const worker = path.join(root, 'worker.cjs');
-    buildSync({
-      stdin: {
-        contents: `
+  it.each([false, true])(
+    'two real Node processes simultaneously migrate and write without lock errors (opening reader lock: %s)',
+    async (holdReader) => {
+      let reader: import('node:sqlite').DatabaseSync | undefined;
+      if (holdReader) {
+        fs.mkdirSync(path.join(root, '.git/softwareagents'));
+        reader = await inspect();
+        reader.exec('BEGIN; SELECT * FROM sqlite_master;');
+        expect(reader.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('delete');
+      }
+      const worker = path.join(root, 'worker.cjs');
+      buildSync({
+        stdin: {
+          contents: `
       import { openWorkStore } from './server/src/workstore/SqliteWorkStore.ts';
       process.send('ready');
       process.once('message', async () => {
@@ -204,46 +282,58 @@ describe('WorkStore (real SQLite)', () => {
           store.close(); process.disconnect();
         } catch (error) { console.error(error); process.exit(1); }
       });`,
-        resolveDir: path.resolve('..'),
-      },
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      outfile: worker,
-    });
-    const children = ['one', 'two'].map((id) =>
-      fork(worker, [root, id], {
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-        execArgv: [],
-      }),
-    );
-    const exits = children.map(
-      (child) =>
-        new Promise<void>((resolve, reject) => {
-          let stderr = '';
-          child.stderr!.on('data', (chunk) => {
-            stderr += chunk;
-          });
-          child.once('error', reject);
-          child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
-        }),
-    );
-    try {
-      await Promise.all(
-        children.map(
-          (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
-        ),
-      );
-      children.forEach((child) => child.send('start'));
-      await Promise.all(exits);
-      expect((await open('shared')).listTasks()).toHaveLength(200);
-    } finally {
-      children.forEach((child) => {
-        if (child.exitCode === null) child.kill();
+          resolveDir: path.resolve('..'),
+        },
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        outfile: worker,
       });
-      await Promise.allSettled(exits);
-    }
-  }, 20_000);
+      const children = ['one', 'two'].map((id) =>
+        fork(worker, [root, id], {
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+          execArgv: [],
+        }),
+      );
+      const exits = children.map(
+        (child) =>
+          new Promise<void>((resolve, reject) => {
+            let stderr = '';
+            child.stderr!.on('data', (chunk) => {
+              stderr += chunk;
+            });
+            child.once('error', reject);
+            child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
+          }),
+      );
+      try {
+        await Promise.all(
+          children.map(
+            (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
+          ),
+        );
+        children.forEach((child) => child.send('start'));
+        // A real rollback-journal reader prevents either child switching to WAL.
+        // Release from the parent: the child's synchronous SQLite calls cannot
+        // prevent this timer firing, unlike a timer inside the opening process.
+        const release = setTimeout(() => {
+          reader?.close();
+          reader = undefined;
+        }, 250);
+        release.unref();
+        await Promise.all(exits);
+        expect((await open('shared')).listTasks()).toHaveLength(200);
+      } finally {
+        reader?.close();
+        reader = undefined;
+        children.forEach((child) => {
+          if (child.exitCode === null) child.kill();
+        });
+        await Promise.allSettled(exits);
+      }
+    },
+    20_000,
+  );
 });
 
 describe('lazy SQLite availability boundary', () => {

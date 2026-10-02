@@ -27,8 +27,9 @@ function canonicalPath(candidate: string): string {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       // A dangling link exists according to lstat and must fail closed.
+      let stat: fs.Stats;
       try {
-        fs.lstatSync(ancestor);
+        stat = fs.lstatSync(ancestor);
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
         const parent = path.dirname(ancestor);
@@ -36,6 +37,16 @@ function canonicalPath(candidate: string): string {
         suffix.unshift(path.basename(ancestor));
         ancestor = parent;
         continue;
+      }
+      // Another opener can create a regular directory/file between realpath
+      // and lstat. Resolve it once more rather than treating it as a dangling
+      // link. Still fail closed for links and propagate a second failure.
+      if (!stat.isSymbolicLink()) {
+        const real = fs.realpathSync.native(ancestor);
+        if (suffix.length && !fs.statSync(real).isDirectory()) {
+          throw new Error('Path parent must be a directory');
+        }
+        return path.join(real, ...suffix);
       }
       throw error;
     }

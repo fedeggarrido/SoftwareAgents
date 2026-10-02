@@ -9,6 +9,7 @@ import {
   type ClientMessageContext,
   handleClientMessage,
 } from '../src/clientMessageHandler.js';
+import * as companyControl from '../src/companyControl.js';
 import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
@@ -97,6 +98,24 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   });
 
   // ── saveAreaMappings ─────────────────────────────────────────
+
+  it.each([false, undefined])('rejects companyDecision when privileged is %s', (privileged) => {
+    const answer = vi.spyOn(companyControl, 'answerDecision');
+    try {
+      ctx.privileged = privileged;
+      handleClientMessage(
+        { type: 'companyDecision', id: 'decision-4', answer: 'approved' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      expect(answer).not.toHaveBeenCalled();
+      expect(sent).toEqual([
+        { type: 'companyNotice', text: 'Abre la URL con token para responder decisiones.' },
+      ]);
+    } finally {
+      answer.mockRestore();
+    }
+  });
 
   describe('saveAreaMappings', () => {
     it('persists a valid mapping payload to cfg.standalone.areaMappings', () => {

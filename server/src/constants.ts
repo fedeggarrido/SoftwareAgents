@@ -114,5 +114,8 @@ export const HUE_SHIFT_MAX_DEG = 360;
 
 // Operational WorkStore defaults; transition policy lives in workstore/taskStateMachine.
 export const WORKSTORE_BUSY_TIMEOUT_MS = 5000;
+/** --ignore-user-config also drops the operator's Windows sandbox mode. Without the
+ *  elevated sandbox, codex exec rejects every shell command (even reads) on Windows. */
+export const CODEX_WINDOWS_SANDBOX = 'elevated';
 export const WORKSTORE_INITIAL_TASK_STATUS = 'DRAFT';
 export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;

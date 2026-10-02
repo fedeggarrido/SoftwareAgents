@@ -5,6 +5,7 @@ import { createInterface } from 'readline';
 
 import type { ProjectOperatorConfig } from '../../../core/src/project.js';
 import { codexCompilerFlags, compileAgent, validateAgentOutput } from '../agentCompiler.js';
+import { CODEX_WINDOWS_SANDBOX } from '../constants.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 
@@ -135,6 +136,9 @@ export class CodexCliExecutor implements Executor {
             'exec',
             '--json',
             ...codexCompilerFlags(compiled, schemaFile),
+            ...(process.platform === 'win32'
+              ? ['-c', `windows.sandbox="${CODEX_WINDOWS_SANDBOX}"`]
+              : []),
             '-C',
             req.worktreePath,
             ...(req.model ? ['-m', req.model] : []),

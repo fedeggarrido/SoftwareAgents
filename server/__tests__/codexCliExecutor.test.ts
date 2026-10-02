@@ -100,6 +100,8 @@ it('uses compiler sandbox/config/schema and optional policy model without bypass
       '--output-schema',
     ]),
   );
+  if (process.platform === 'win32')
+    expect(report.args).toEqual(expect.arrayContaining(['-c', 'windows.sandbox="elevated"']));
   expect(report.args).not.toEqual(expect.arrayContaining(['--ephemeral']));
   for (const flag of [
     '--dangerously-bypass-approvals-and-sandbox',

@@ -182,50 +182,8 @@ export function codexQuota(
       } catch {
         continue;
       }
-      const p = limits.primary;
-      if (!p) continue;
-      const win = (w: Record<string, number> | undefined): QuotaWindow | undefined => {
-        if (!w) return undefined;
-        const resetsAt =
-          typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) ? w.resets_at : null;
-        const reset = resetsAt !== null && resetsAt <= nowS;
-        return {
-          usedPercent: reset
-            ? null
-            : typeof w.used_percent === 'number' &&
-                Number.isFinite(w.used_percent) &&
-                w.used_percent >= 0 &&
-                w.used_percent <= 100
-              ? w.used_percent
-              : null,
-          resetsAt,
-          windowMinutes: w.window_minutes,
-        };
-      };
-      const primary = win(p)!;
-      const weekly = win(limits.secondary);
-      const observedAt = Math.round(fs.statSync(file).mtimeMs / 1000);
-      const exhausted = (primary.usedPercent ?? 0) >= 100 || (weekly?.usedPercent ?? 0) >= 100;
-      const status = exhausted
-        ? 'rejected'
-        : (primary.usedPercent ?? 0) >= 90 || (weekly?.usedPercent ?? 0) >= 90
-          ? 'warning'
-          : primary.usedPercent === null
-            ? primary.resetsAt !== null && primary.resetsAt <= nowS
-              ? 'reset'
-              : 'unknown'
-            : 'allowed';
-      return capacity(
-        {
-          provider: 'codex',
-          status,
-          usedPercent: primary.usedPercent,
-          resetsAt: primary.resetsAt,
-          observedAt,
-          weekly,
-        },
-        p.window_minutes === 300 ? 'five_hour' : 'other',
-      );
+      if (!limits.primary) continue;
+      return parseCodexRateLimits(limits, nowS, Math.round(fs.statSync(file).mtimeMs / 1000));
     }
   }
   return unknown('codex');
@@ -275,5 +233,57 @@ export function parseClaudeRateLimit(
       : info.rateLimitType === 'seven_day'
         ? 'weekly'
         : 'other',
+  );
+}
+
+/** Shared Codex normalization for observed token_count rate_limits. */
+export function parseCodexRateLimits(
+  limits: Record<string, Record<string, number> | undefined>,
+  nowS: number,
+  observedAt = nowS,
+): ProviderQuota {
+  const p = limits.primary;
+  if (!p) return unknown('codex');
+  const win = (w: Record<string, number> | undefined): QuotaWindow | undefined => {
+    if (!w) return undefined;
+    const resetsAt =
+      typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) ? w.resets_at : null;
+    const reset = resetsAt !== null && resetsAt <= nowS;
+    return {
+      usedPercent: reset
+        ? null
+        : typeof w.used_percent === 'number' &&
+            Number.isFinite(w.used_percent) &&
+            w.used_percent >= 0 &&
+            w.used_percent <= 100
+          ? w.used_percent
+          : null,
+      resetsAt,
+      windowMinutes: w.window_minutes,
+    };
+  };
+  const primary = win(p)!;
+  const weekly = win(limits.secondary);
+
+  const exhausted = (primary.usedPercent ?? 0) >= 100 || (weekly?.usedPercent ?? 0) >= 100;
+  const status = exhausted
+    ? 'rejected'
+    : (primary.usedPercent ?? 0) >= 90 || (weekly?.usedPercent ?? 0) >= 90
+      ? 'warning'
+      : primary.usedPercent === null
+        ? primary.resetsAt !== null && primary.resetsAt <= nowS
+          ? 'reset'
+          : 'unknown'
+        : 'allowed';
+  return capacity(
+    {
+      provider: 'codex',
+      status,
+      usedPercent: primary.usedPercent,
+      resetsAt: primary.resetsAt,
+      observedAt,
+      weekly,
+    },
+    p.window_minutes === 300 ? 'five_hour' : 'other',
   );
 }

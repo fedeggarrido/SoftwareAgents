@@ -4,7 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
+import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
 import { FakeExecutor } from '../src/executors/fakeExecutor.js';
@@ -188,3 +190,30 @@ it.each(['claude', 'codex'] as const)(
     ).toBe(true);
   },
 );
+
+it('persists the real Codex thread before delivering started for office role resolution', async () => {
+  const registry = new ExecutionRegistry(root);
+  req.worktreePath = path.join(root, 'worktree');
+  fs.mkdirSync(req.worktreePath);
+  req.role = 'reviewer';
+  req.taskKey = 'SA-034';
+  req.agentSpec = parse(
+    fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+  );
+  const executor = new CodexCliExecutor({
+    operator: { binaryPaths: { codex: process.execPath } },
+    runtimeDirectory: path.join(root, 'runtime'),
+    binaryArgs: [path.join(__dirname, 'fixtures/codex-cli.cjs')],
+  });
+  const handle = registry.executor(executor).start(req);
+  expect(handle.sessionId).toBeUndefined();
+  for await (const event of handle.events) {
+    if (event.type === 'started')
+      expect(registry.sessionMap().get(event.sessionId)).toEqual({
+        executionId: req.executionId,
+        role: 'reviewer',
+        taskKey: 'SA-034',
+      });
+    if (event.type === 'finished') expect(event.exitCode).toBe(0);
+  }
+});

@@ -98,7 +98,7 @@ describe('FeatureSpec v1alpha1', () => {
       const source = fs.readFileSync(path.join(root, 'docs/adr', name), 'utf8');
       const frontMatter = parseDocument(source.split('---')[1]).toJS();
       expect(frontMatter).toEqual({
-        Status: 'Proposed',
+        Status: 'Accepted',
         Date: '2026-10-02',
         Owner: 'Fede',
         'Related Feature': [],

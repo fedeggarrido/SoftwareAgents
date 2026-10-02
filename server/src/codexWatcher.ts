@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { AgentProviderLabel } from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from './constants.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
@@ -359,7 +360,7 @@ export class CodexWatcher {
     this.readNew(file, t, agent);
     this.tracked.set(file, t);
     this.store.set(id, agent);
-    this.store.broadcast({ type: 'agentProviderLabel', id, label });
+    this.store.broadcast({ type: 'agentProviderLabel', id, label } satisfies AgentProviderLabel);
     for (const [toolId, status] of agent.activeToolStatuses) {
       this.store.broadcast({
         type: 'agentToolStart',

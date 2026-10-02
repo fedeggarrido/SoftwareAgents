@@ -1,3 +1,4 @@
+import type { AgentProviderLabel } from '../../core/src/messages.js';
 import { roleMessage } from './agentRoles.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { latestBoardMessage } from './boardWatcher.js';
@@ -19,14 +20,18 @@ export function resendAgentActivity(
 ): void {
   // The company backlog, if this workspace has one.
   const board = latestBoardMessage();
-  if (board) send(board);
+  if (board) send({ ...board });
   for (const [id, agent] of store) {
     // 0. Provider label (Codex) -- the webview defaults to "Claude" without it.
     if (agent.providerLabel) {
-      send({ type: 'agentProviderLabel', id, label: agent.providerLabel });
+      send({
+        type: 'agentProviderLabel',
+        id,
+        label: agent.providerLabel,
+      } satisfies AgentProviderLabel);
     }
     // 0b. Role in the agent company (Manager, Analista...), once resolved.
-    if (agent.role) send(roleMessage(id, agent.role));
+    if (agent.role) send({ ...roleMessage(id, agent.role) });
     // 1. Team metadata first — webview uses this to route tool messages correctly.
     // Derived teams (named background spawns) have a name and a lead link but NO
     // teamName, so gate on any team field.

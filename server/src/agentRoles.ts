@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 
+import type { AgentRole as AgentRoleMessage } from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
 
 /**
@@ -230,7 +231,7 @@ export function codexRoleFromRollout(file: string): AgentRole | undefined {
 }
 
 /** The webview message for a role. The webview colors it by department. */
-export function roleMessage(id: number, role: AgentRole): Record<string, unknown> {
+export function roleMessage(id: number, role: AgentRole): AgentRoleMessage {
   return {
     type: 'agentRole',
     id,
@@ -276,7 +277,7 @@ export class RoleResolver {
           : claudeRoleFromTranscript(agent.jsonlFile);
       if (!role) continue;
       agent.role = role;
-      this.store.broadcast(roleMessage(id, role));
+      this.store.broadcast({ ...roleMessage(id, role) });
     }
   }
 }

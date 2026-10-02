@@ -1,3 +1,4 @@
+import type { CompanyNotice } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
@@ -177,21 +178,30 @@ export function handleClientMessage(
     // Only the operator (tokened URL) may change what the company does.
     case 'companyAutopilot': {
       if (!ctx.privileged) {
-        send({ type: 'companyNotice', text: 'Abre la URL con token para controlar el piloto.' });
+        send({
+          type: 'companyNotice',
+          text: 'Abre la URL con token para controlar el piloto.',
+        } satisfies CompanyNotice);
         break;
       }
-      send({ type: 'companyNotice', text: setAutopilot(msg.enabled === true) });
+      send({
+        type: 'companyNotice',
+        text: setAutopilot(msg.enabled === true),
+      } satisfies CompanyNotice);
       break;
     }
     case 'companyDecision': {
       if (!ctx.privileged) {
-        send({ type: 'companyNotice', text: 'Abre la URL con token para responder decisiones.' });
+        send({
+          type: 'companyNotice',
+          text: 'Abre la URL con token para responder decisiones.',
+        } satisfies CompanyNotice);
         break;
       }
       send({
         type: 'companyNotice',
         text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? '')),
-      });
+      } satisfies CompanyNotice);
       break;
     }
 

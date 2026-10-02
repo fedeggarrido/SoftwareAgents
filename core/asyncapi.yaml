@@ -116,6 +116,11 @@ components:
         - $ref: '#/components/schemas/ExternalAssetDirectoriesUpdated'
         - $ref: '#/components/schemas/AreaMappingsLoaded'
         - $ref: '#/components/schemas/WorkspaceFolders'
+        # Company board and agent identity
+        - $ref: '#/components/schemas/BoardState'
+        - $ref: '#/components/schemas/AgentRole'
+        - $ref: '#/components/schemas/AgentProviderLabel'
+        - $ref: '#/components/schemas/CompanyNotice'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
       discriminator: type
@@ -1222,3 +1227,414 @@ components:
           type: string
         frame:
           type: integer
+
+    # File-backed records (meetings and their transcript lines, decisions, autopilot
+    # state) keep whatever extra fields their source file carries.
+    BoardEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - at
+        - session
+        - phase
+        - state
+        - detail
+        - task
+      properties:
+        at:
+          type: number
+        session:
+          type: string
+        phase:
+          type: string
+        state:
+          type: string
+        detail:
+          type: string
+        task:
+          type: string
+        provider:
+          type: string
+    BoardOwner:
+      type: object
+      additionalProperties: false
+      required:
+        - worker
+        - session
+        - state
+        - stale
+        - heartbeatAt
+      properties:
+        worker:
+          type: string
+        session:
+          type: string
+        state:
+          type: string
+        stale:
+          type: boolean
+        heartbeatAt:
+          type: number
+        worktree:
+          type: string
+    BoardItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - phase
+        - agentIds
+      properties:
+        id:
+          type: string
+        clickupId:
+          type: string
+        title:
+          type: string
+        epic:
+          type: string
+        priority:
+          type: string
+        size:
+          type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        implementer:
+          type: string
+        phase:
+          type: string
+        note:
+          type: string
+        owner:
+          $ref: '#/components/schemas/BoardOwner'
+        lastEvent:
+          $ref: '#/components/schemas/BoardEvent'
+        agentIds:
+          type: array
+          items:
+            type: number
+    ProviderQuota:
+      type: object
+      additionalProperties: false
+      required:
+        - provider
+        - status
+        - usedPercent
+        - resetsAt
+        - observedAt
+      properties:
+        provider:
+          $ref: '#/components/schemas/QuotaProvider'
+        status:
+          $ref: '#/components/schemas/QuotaStatus'
+        usedPercent:
+          type:
+            - number
+            - 'null'
+        resetsAt:
+          type:
+            - number
+            - 'null'
+        observedAt:
+          type:
+            - number
+            - 'null'
+        weekly:
+          $ref: '#/components/schemas/QuotaWindow'
+    MeetingLine:
+      type: object
+      additionalProperties: true
+      required:
+        - at
+        - round
+        - role
+        - stance
+      properties:
+        at:
+          type: number
+        round:
+          type: string
+        role:
+          type: string
+        stance:
+          type: string
+    MeetingState:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+        - format
+        - topic
+        - question
+        - participants
+        - status
+        - round
+        - lines
+      properties:
+        id:
+          type: string
+        format:
+          type: string
+        topic:
+          type: string
+        question:
+          type: string
+        participants:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        round:
+          type: string
+        decision:
+          type:
+            - string
+            - 'null'
+        waitReason:
+          type: string
+        task:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeetingLine'
+    AutopilotState:
+      type: object
+      additionalProperties: true
+      required:
+        - enabled
+        - running
+      properties:
+        enabled:
+          type: boolean
+        running:
+          type: boolean
+        status:
+          type: string
+        waitReason:
+          type: string
+        nextRound:
+          type:
+            - number
+            - 'null'
+        lastRound:
+          type: number
+        intervalMinutes:
+          type: number
+    QuotaWindow:
+      type: object
+      additionalProperties: false
+      required:
+        - usedPercent
+        - resetsAt
+      properties:
+        usedPercent:
+          type:
+            - number
+            - 'null'
+        resetsAt:
+          type:
+            - number
+            - 'null'
+        windowMinutes:
+          type: number
+    BoardSources:
+      type: object
+      additionalProperties: false
+      required:
+        - board
+        - claims
+        - progress
+      properties:
+        board:
+          type: boolean
+        claims:
+          type: boolean
+        progress:
+          type: boolean
+    BoardQuota:
+      type: object
+      additionalProperties: false
+      required:
+        - claude
+        - codex
+      properties:
+        claude:
+          $ref: '#/components/schemas/ProviderQuota'
+        codex:
+          $ref: '#/components/schemas/ProviderQuota'
+    EpicSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - done
+        - total
+      properties:
+        done:
+          type: number
+        total:
+          type: number
+    BoardSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - total
+        - byPhase
+        - byEpic
+      properties:
+        total:
+          type: number
+        byPhase:
+          type: object
+          additionalProperties:
+            type: number
+        byEpic:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/EpicSummary'
+    BoardState:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - project
+        - items
+        - recent
+        - sources
+        - quota
+        - gate
+        - summary
+        - waiting
+        - decisions
+        - generatedAt
+      properties:
+        type:
+          const: boardState
+        project:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardItem'
+        manager:
+          $ref: '#/components/schemas/BoardOwner'
+        recent:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardEvent'
+        sources:
+          $ref: '#/components/schemas/BoardSources'
+        quota:
+          $ref: '#/components/schemas/BoardQuota'
+        gate:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardEvent'
+        summary:
+          $ref: '#/components/schemas/BoardSummary'
+        waiting:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardEvent'
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardDecision'
+        meeting:
+          $ref: '#/components/schemas/MeetingState'
+        autopilot:
+          $ref: '#/components/schemas/AutopilotState'
+        generatedAt:
+          type: number
+    AgentRole:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - label
+        - department
+      properties:
+        type:
+          const: agentRole
+        id:
+          type: integer
+        label:
+          type: string
+        department:
+          type: string
+        detail:
+          type: string
+    AgentProviderLabel:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - label
+      properties:
+        type:
+          const: agentProviderLabel
+        id:
+          type: integer
+        label:
+          type: string
+    CompanyNotice:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - text
+      properties:
+        type:
+          const: companyNotice
+        text:
+          type: string
+    BoardDecision:
+      type: object
+      additionalProperties: true
+      required:
+        - id
+        - question
+        - options
+        - status
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        context:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        recommendation:
+          type: string
+        blocks:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        answer:
+          type:
+            - string
+            - 'null'
+    QuotaProvider:
+      type: string
+      enum:
+        - claude
+        - codex
+    QuotaStatus:
+      type: string
+      enum:
+        - allowed
+        - warning
+        - rejected
+        - reset
+        - unknown

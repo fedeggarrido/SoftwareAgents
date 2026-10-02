@@ -38,6 +38,10 @@ export type ServerMessage =
   | ExternalAssetDirectoriesUpdated
   | AreaMappingsLoaded
   | WorkspaceFolders
+  | BoardState
+  | AgentRole
+  | AgentProviderLabel
+  | CompanyNotice
   | AgentDiagnostics;
 
 export type ClientMessage =
@@ -310,6 +314,164 @@ export interface WorkspaceFolders {
 export interface WorkspaceFolder {
   name: string;
   path: string;
+}
+
+export interface BoardState {
+  type: 'boardState';
+  project: string;
+  items: BoardItem[];
+  manager?: BoardOwner;
+  recent: BoardEvent[];
+  sources: BoardSources;
+  quota: BoardQuota;
+  gate: BoardEvent[];
+  summary: BoardSummary;
+  waiting: BoardEvent[];
+  decisions: BoardDecision[];
+  meeting?: MeetingState;
+  autopilot?: AutopilotState;
+  generatedAt: number;
+}
+
+export interface BoardItem {
+  id: string;
+  clickupId?: string;
+  title: string;
+  epic?: string;
+  priority?: string;
+  size?: string;
+  dependsOn?: string[];
+  implementer?: string;
+  phase: string;
+  note?: string;
+  owner?: BoardOwner;
+  lastEvent?: BoardEvent;
+  agentIds: number[];
+}
+
+export interface BoardOwner {
+  worker: string;
+  session: string;
+  state: string;
+  stale: boolean;
+  heartbeatAt: number;
+  worktree?: string;
+}
+
+export interface BoardEvent {
+  at: number;
+  session: string;
+  phase: string;
+  state: string;
+  detail: string;
+  task: string;
+  provider?: string;
+}
+
+export interface BoardSources {
+  board: boolean;
+  claims: boolean;
+  progress: boolean;
+}
+
+export interface BoardQuota {
+  claude: ProviderQuota;
+  codex: ProviderQuota;
+}
+
+export interface ProviderQuota {
+  provider: QuotaProvider;
+  status: QuotaStatus;
+  usedPercent: number | null;
+  resetsAt: number | null;
+  observedAt: number | null;
+  weekly?: QuotaWindow;
+}
+
+export type QuotaProvider = 'claude' | 'codex';
+
+export type QuotaStatus = 'allowed' | 'warning' | 'rejected' | 'reset' | 'unknown';
+
+export interface QuotaWindow {
+  usedPercent: number | null;
+  resetsAt: number | null;
+  windowMinutes?: number;
+}
+
+export interface BoardSummary {
+  total: number;
+  byPhase: Record<string, number>;
+  byEpic: Record<string, EpicSummary>;
+}
+
+export interface EpicSummary {
+  done: number;
+  total: number;
+}
+
+export interface BoardDecision {
+  id: string;
+  question: string;
+  context?: string;
+  options: string[];
+  recommendation?: string;
+  blocks?: string[];
+  status: string;
+  answer?: string | null;
+  additionalProperties?: Record<string, any>;
+}
+
+export interface MeetingState {
+  id: string;
+  format: string;
+  topic: string;
+  question: string;
+  participants: string[];
+  status: string;
+  round: string;
+  decision?: string | null;
+  waitReason?: string;
+  task?: string;
+  lines: MeetingLine[];
+  additionalProperties?: Record<string, any>;
+}
+
+export interface MeetingLine {
+  at: number;
+  round: string;
+  role: string;
+  stance: string;
+  additionalProperties?: Record<string, any>;
+}
+
+export interface AutopilotState {
+  enabled: boolean;
+  running: boolean;
+  status?: string;
+  waitReason?: string;
+  nextRound?: number | null;
+  lastRound?: number;
+  intervalMinutes?: number;
+  additionalProperties?: Record<string, any>;
+}
+
+export interface AgentRole {
+  type: 'agentRole';
+  id: number;
+  label: string;
+  department: string;
+  detail?: string;
+}
+
+export interface AgentProviderLabel {
+  type: 'agentProviderLabel';
+  id: number;
+  label: string;
+}
+
+export interface CompanyNotice {
+  type: 'companyNotice';
+  text: string;
 }
 
 export interface AgentDiagnostics {

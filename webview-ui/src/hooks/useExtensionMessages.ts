@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { HooksConsentRequest } from '../../../core/src/messages.js';
+import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
-import type { BoardState } from '../office/boardStore.js';
 import { setBoardState, setCompanyNotice } from '../office/boardStore.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
@@ -230,8 +229,15 @@ export function useExtensionMessages(
       setAgentFolderNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handler = (msg: any) => {
+    // Legacy agentCreated teammate fields are consumed by the office today.
+    const handler = (
+      msg: ServerMessage & {
+        isTeammate?: boolean;
+        teammateName?: string;
+        parentAgentId?: number;
+        teamName?: string;
+      },
+    ) => {
       const os = getOfficeState();
       // CI / e2e diagnostic: record every received transport message on the
       // window-side log. The fixture reads window.__pixelAgentsTestHooks.
@@ -246,11 +252,11 @@ export function useExtensionMessages(
         window.__pixelAgentsTestHooks.messageLog.push({
           at: Date.now(),
           type: msg.type,
-          id: msg.id,
-          toolName: msg.toolName,
-          status: msg.status,
-          toolId: msg.toolId,
-          parentToolId: msg.parentToolId,
+          id: 'id' in msg ? msg.id : undefined,
+          toolName: 'toolName' in msg ? msg.toolName : undefined,
+          status: 'status' in msg ? msg.status : undefined,
+          toolId: 'toolId' in msg ? msg.toolId : undefined,
+          parentToolId: 'parentToolId' in msg ? msg.parentToolId : undefined,
         });
       }
 
@@ -339,11 +345,11 @@ export function useExtensionMessages(
         }
         saveAgentSeats(os, meetingSeats);
       } else if (msg.type === 'agentProviderLabel') {
-        setProviderLabel(msg.id as number, msg.label as string);
+        setProviderLabel(msg.id, msg.label);
       } else if (msg.type === 'companyNotice') {
-        setCompanyNotice(String(msg.text ?? ''));
+        setCompanyNotice(msg.text);
       } else if (msg.type === 'boardState') {
-        const next = msg as BoardState;
+        const next = msg;
         const activeMeeting = next.meeting?.status === 'running' ? next.meeting.id : null;
         if (activeMeeting !== meetingId) {
           restoreMeetingSeats(os);
@@ -352,10 +358,10 @@ export function useExtensionMessages(
         seatMeetingParticipants(os);
         setBoardState(next);
       } else if (msg.type === 'agentRole') {
-        setAgentRole(msg.id as number, {
-          label: msg.label as string,
-          department: msg.department as string,
-          detail: (msg.detail as string | undefined) ?? undefined,
+        setAgentRole(msg.id, {
+          label: msg.label,
+          department: msg.department,
+          detail: msg.detail,
         });
         seatMeetingParticipants(os);
       } else if (msg.type === 'agentClosed') {

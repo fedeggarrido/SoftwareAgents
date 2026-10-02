@@ -2,6 +2,13 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type {
+  AutopilotState,
+  BoardDecision,
+  BoardEvent,
+  BoardState,
+  MeetingState,
+} from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { readAutopilot } from './companyControl.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
@@ -49,7 +56,7 @@ interface BoardFile {
 }
 
 /** The newest meeting (running, or ended less than two hours ago) with its last lines. */
-function latestMeeting(dir: string | undefined, nowS: number): Record<string, unknown> | undefined {
+function latestMeeting(dir: string | undefined, nowS: number): MeetingState | undefined {
   if (!dir) return undefined;
   let best: { path: string; mtime: number } | undefined;
   try {
@@ -72,27 +79,27 @@ function latestMeeting(dir: string | undefined, nowS: number): Record<string, un
     ) as Record<string, unknown>;
     const ended = typeof meeting.endedAt === 'number' ? meeting.endedAt : null;
     if (ended !== null && nowS - ended > 2 * 3600) return undefined;
-    let lines: Array<Record<string, unknown>> = [];
+    let lines: MeetingState['lines'] = [];
     try {
       lines = fs
         .readFileSync(path.join(best.path, 'transcript.jsonl'), 'utf-8')
         .split('\n')
         .filter((l) => l.trim())
         .map((l) => JSON.parse(l) as Record<string, unknown>)
-        .map(({ text: _text, ...rest }) => rest);
+        .map(({ text: _text, ...rest }) => rest as unknown as MeetingState['lines'][number]);
     } catch {
       /* no lines yet */
     }
-    return { ...meeting, lines: lines.slice(-12) };
+    return { ...meeting, lines: lines.slice(-12) } as unknown as MeetingState;
   } catch {
     return undefined;
   }
 }
 
-function openDecisions(file: string): Array<Record<string, unknown>> {
+function openDecisions(file: string): BoardDecision[] {
   try {
     const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
-      decisions?: Array<Record<string, unknown>>;
+      decisions?: BoardDecision[];
     };
     return (data.decisions ?? []).filter((d) => d.status === 'open' || d.status === 'answered');
   } catch {
@@ -131,10 +138,10 @@ const STALE_AFTER_S = 1800;
 const POLL_MS = 3000;
 const RECENT_EVENTS = 12;
 
-let latest: Record<string, unknown> | undefined;
+let latest: BoardState | undefined;
 
 /** The last board sent, for a client that connects later. */
-export function latestBoardMessage(): Record<string, unknown> | undefined {
+export function latestBoardMessage(): BoardState | undefined {
   return latest;
 }
 
@@ -179,7 +186,7 @@ function gitCommonDir(workspace: string): string | undefined {
   }
 }
 
-function eventView(e: ProgressRow): Record<string, unknown> {
+function eventView(e: ProgressRow): BoardEvent {
   return {
     at: Math.round(e.at * 1000),
     session: e.session,
@@ -222,10 +229,10 @@ export class BoardWatcher {
     latest = message;
     if (key === this.lastSent) return;
     this.lastSent = key;
-    this.store.broadcast(message);
+    this.store.broadcast({ ...message });
   }
 
-  build(): Record<string, unknown> | undefined {
+  build(): BoardState | undefined {
     const boardPath = path.join(this.workspaceDir, 'docs', 'backlog', 'board.json');
     let board: BoardFile;
     try {
@@ -291,7 +298,7 @@ export class BoardWatcher {
 
     const manager = claimByTask.get('__manager__');
     // Sessions whose newest quota-gate decision is WAIT and that have not started since.
-    const waiting: Record<string, unknown>[] = [];
+    const waiting: BoardEvent[] = [];
     const seenSessions = new Set<string>();
     for (const e of events ?? []) {
       if (seenSessions.has(e.session)) continue;
@@ -337,7 +344,7 @@ export class BoardWatcher {
         dir && board.meetingsDir ? path.join(dir, board.meetingsDir) : undefined,
         nowS,
       ),
-      autopilot: readAutopilot(),
+      autopilot: readAutopilot() as AutopilotState | undefined,
       generatedAt: this.now(),
     };
   }

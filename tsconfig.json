@@ -12,7 +12,8 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"allowUnreachableCode": false,
-		"noFallthroughCasesInSwitch": true
+		"noFallthroughCasesInSwitch": true,
+		"resolveJsonModule": true
 	},
 	"include": [
 		"adapters/vscode",

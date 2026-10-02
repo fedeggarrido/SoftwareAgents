@@ -2,7 +2,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { CONFIG_FILE_MODE, CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import { compileSchema } from './schemaValidation.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -47,6 +49,8 @@ export interface CompanyAutopilotConfig {
 }
 
 export interface PixelAgentsConfig {
+  /** Policies authored by the operator, keyed by Project id. */
+  projects: Record<string, ProjectOperatorConfig>;
   /** Operator-owned commands, keyed by absolute workspace path. */
   companyAutopilot: Record<string, CompanyAutopilotConfig>;
   vscode: AdapterSettings;
@@ -72,6 +76,62 @@ const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
   showAreas: false,
   areaMappings: {},
 };
+
+const nonEmptyString = { type: 'string', minLength: 1, pattern: '^[^\\u0000]+$' };
+const nonNegativeNumber = { type: 'number', minimum: 0 };
+const concurrencyLimit = { type: 'integer', minimum: 0 };
+const numberMap = (value: object) => ({ type: 'object', additionalProperties: value });
+const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
+  type: 'object',
+  additionalProperties: false,
+  required: ['autonomyLevel', 'allowedExecutors'],
+  properties: {
+    autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
+    allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
+    binaryPaths: numberMap(nonEmptyString),
+    quotaThresholds: numberMap({ ...nonNegativeNumber, maximum: 100 }),
+    concurrency: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['maxExecutions'],
+      properties: { maxExecutions: concurrencyLimit, perExecutor: numberMap(concurrencyLimit) },
+    },
+    budgets: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxTokens: concurrencyLimit,
+        maxCostUsd: nonNegativeNumber,
+        maxExecutionSeconds: nonNegativeNumber,
+      },
+    },
+    autopilot: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['command'],
+      properties: {
+        command: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'string', pattern: '^[^\\u0000]*$' },
+        },
+        stateFile: nonEmptyString,
+      },
+    },
+  },
+});
+
+/** Invalid policies are rejected as a whole, never repaired into new authority. */
+export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfig> {
+  const out: Record<string, ProjectOperatorConfig> = Object.create(null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [id, policy] of Object.entries(raw)) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || !validateProjectOperator(policy)) continue;
+    if (policy.autopilot && !policy.autopilot.command[0]) continue;
+    out[id] = structuredClone(policy);
+  }
+  return out;
+}
 
 function getConfigFilePath(): string {
   return path.join(os.homedir(), LAYOUT_FILE_DIR, CONFIG_FILE_NAME);
@@ -195,6 +255,7 @@ export function readConfig(): PixelAgentsConfig {
         hooksConsent: {},
         hooksEnabled: {},
         companyAutopilot: {},
+        projects: {},
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -208,6 +269,7 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
       companyAutopilot: parseCompanyAutopilot(parsed.companyAutopilot),
+      projects: parseProjects(parsed.projects),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -218,6 +280,7 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: {},
       hooksEnabled: {},
       companyAutopilot: {},
+      projects: {},
     };
   }
 }

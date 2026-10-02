@@ -160,6 +160,46 @@ server/                              npm workspace
 webview-ui/                          npm workspace
 ```
 
+## Módulos del fork (company)
+
+El flujo de trabajo Claude ↔ Codex está en [AGENTS.md](AGENTS.md). Estos módulos
+proyectan Sessions y trabajo observado en Pixel Office; no constituyen por sí
+solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
+
+### Runtime (`server/src/`)
+
+- `boardWatcher.ts`: lectura del espejo `docs/backlog/board.json`, claims y
+  progreso SQLite del Git common dir; publica `BoardState` con tareas, propiedad,
+  eventos, cuotas, decisiones y reuniones. Las fuentes ausentes quedan explícitas;
+  no inventa estado ni escribe en ellas.
+- `codexWatcher.ts`: descubre y sigue rollouts de `~/.codex/sessions` del workspace,
+  traduce actividad y contexto al protocolo compartido y etiqueta los Characters
+  como Codex. Funciona junto al runtime Claude; redescubre las Sessions sin
+  persistirlas mediante el parser Claude.
+- `companyControl.ts`: controla autopilot y respuestas a Human Decisions para
+  clientes privilegiados. Solo ejecuta argv autorizado por Operator config;
+  `board.json` no concede autoridad. Las rutas de estado y decisiones pasan por
+  `pathGuard.ts` (`resolveInside`, con realpath para contener enlaces).
+- `quotaReader.ts`: obtiene cuotas observadas de logs Claude y rollouts Codex,
+  incluida la ventana semanal; distingue datos desconocidos y ventanas renovadas.
+  Es una lectura observacional, no una reserva de capacidad.
+- `agentRoles.ts`: extrae etiquetas de rol y departamento de metadatos y briefs
+  explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar
+  prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.
+
+### Paneles (`webview-ui/src/components/`)
+
+Consumen la proyección compartida de `webview-ui/src/office/boardStore.ts`.
+Las acciones se envían por Transport y el runtime valida su autoridad.
+
+- `CompanyHud.tsx`: resumen de actividad, cuotas observadas y control de autopilot.
+- `BacklogPanel.tsx`: tareas por fase, prioridad, propiedad y eventos recientes,
+  con acceso a las Sessions asociadas.
+- `DecisionsPanel.tsx`: preguntas, recomendaciones y opciones para Human Decisions;
+  envía la respuesta elegida para que el manager la aplique.
+- `MeetingPanel.tsx`: reunión reciente, rondas, intervenciones, espera de cuota y
+  decisión o escalado al propietario.
+
 ## Distribution
 
 Two artifacts from one source tree:
@@ -642,7 +682,7 @@ Supporting: `wall-tile-editor.html` (wall sprite editing), `jsonl-viewer.html` (
 - **`hooksStatus` is install state, `hooksEnabled` is preference.** The Settings checkbox binds to `hooksInstalled` and toggles the _displayed_ state with no optimistic local update, so it can't read "on" over an untouched settings.json and lands correct rather than flickering when an install fails. Every failure path re-derives and broadcasts the truth (standalone via `clientMessageHandler`, VS Code via `reportHooksStatus`). The hook script is copied BEFORE the entries are written; a failed copy aborts the install (entries pointing at a missing script spawn a dead `node` per event). **Hooks-off is persisted only AFTER a successful uninstall** — flipping it first strands the user: the entries keep firing while the persisted preference makes the next start skip the gate entirely.
 - **Never rewrite a shape we did not author.** The unparseable-file abort generalizes: a non-object `hooks`, a non-array `hooks.<Event>`, and junk entries inside an event array are all refused or passed through, never replaced. An array `hooks` was the sharp case — string keys assigned onto it vanish from `JSON.stringify`, so the write committed and reported `installed: true` over a file with no hooks in it. Emptied event keys are deleted only when _our_ removal emptied them. **Internal sentinels must not be values user JSON can hold**: `null` marked "this entry is now empty", so a user-authored `null` inside a hooks array was silently deleted (a file with no Pixel Agents command anywhere came back rewritten and logged as "Hooks removed") — it is a `Symbol` now.
 - **Hook identity is anchored at both ends, not a substring.** `includes('claude-hook.js') && includes('.pixel-agents')` claimed — and `uninstallHooks` then DELETED — a `.backup` copy of our script, a shell comment naming our path, a wrapper passing it as an argument, `/opt/evil.pixel-agents/hooks/claude-hook.js`, and `my-pixel-agents-hook.js`. Ours = the `/.pixel-agents/hooks/claude-hook.js` suffix, ending the command's FIRST token, matched **case-insensitively** (the token is normalized to lower case). Case-sensitive matching is what shipped, and on the case-insensitive volumes this runs on (macOS, Windows) a differently-cased path is the SAME INODE as our script and genuinely firing: reinstall appended a duplicate and uninstall left the cased entry as an orphan our own `areHooksInstalled` could no longer see — a live hook with no removal route. The folding is unconditional (no filesystem case-sensitivity probe), so the accepted trade is a Linux-only false positive that is **not** a mere dedup: on a case-sensitive volume `~/.Pixel-Agents/hooks/claude-hook.js` is a genuinely DIFFERENT file, we classify it as ours, and uninstall **deletes** it (`claudeHookInstaller.test.ts` pins that removal). Nothing creates that path, and the trade is deliberate — the alternative is a guaranteed unremovable live hook on the two platforms this actually ships to. A symlink alias to our script is deliberately _not_ recognized — the cost is one duplicate entry, versus deleting a stranger's hook if we resolved paths.
-- **The workspace never authorizes a command.** Company autopilot runs only the argv the operator put in `~/.pixel-agents/config.json` (`companyAutopilot[<workspace>]`, case-insensitive keys on Windows); a `board.json` `autopilot.command` must match it exactly or nothing is written or spawned. Pausing needs only a privileged client. `stateFile`/`decisionsFile` go through `resolveInside` (`server/src/pathGuard.ts`, lexical; SA-060 hardens links). Setup and Windows ACL notes: [docs/company-autopilot.md](docs/company-autopilot.md).
+- **The workspace never authorizes a command.** Company autopilot runs only the argv the operator put in `~/.pixel-agents/config.json` (`companyAutopilot[<workspace>]`, case-insensitive keys on Windows); a `board.json` `autopilot.command` must match it exactly or nothing is written or spawned. Pausing needs only a privileged client. `stateFile`/`decisionsFile` go through `resolveInside` (`server/src/pathGuard.ts`, lexical + realpath containment, including symlinks and junctions). Setup and Windows ACL notes: [docs/company-autopilot.md](docs/company-autopilot.md).
 - **E2E over webview unit tests** for OSS friction. Community PRs change webview internals constantly; unit tests would force contributors to update internals tests on top of feature work. E2E pins user-facing behavior, which is stable across internal refactors.
 
 ## Project Identity

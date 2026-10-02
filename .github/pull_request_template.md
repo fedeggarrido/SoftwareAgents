@@ -1,3 +1,20 @@
+<!-- Solo abrir/pushear cuando Fede lo pida. Título: feat(SA-012): crear project brain -->
+
+## SoftwareAgents task
+
+- **Key:** SA-###
+- **ClickUp:** <!-- Enlace manual a https://app.clickup.com/t/<id> hasta SA-053 -->
+- **Implementador:** <!-- Codex por defecto / Claude -->
+- **Revisor cruzado:** <!-- Claude si implementó Codex; Codex si implementó Claude -->
+- **Informe de revisión:** <!-- Enlace al comentario o ReviewReport en esta PR y resultado -->
+
+<!-- Misma cuenta de GitHub: la revisión cruzada se registra como comentario o
+ReviewReport, no como aprobación de GitHub. Flujo completo en AGENTS.md. -->
+
+## Riesgo
+
+<!-- Bajo / medio / alto: impacto, limitaciones y cómo revertir el cambio. -->
+
 ## Description
 
 <!-- What does this PR do and why? -->

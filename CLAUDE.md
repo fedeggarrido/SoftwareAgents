@@ -8,6 +8,8 @@ For fork domain work, read [CONTEXT.md → SoftwareAgents](CONTEXT.md#softwareag
 
 ## Architecture
 
+Read the [initial SoftwareAgents threat model](docs/security/threat-model.md) before launching Executors or changing execution authority.
+
 Strict layering: `core/` depends on nothing; `server/` depends only on `core/`; `webview-ui/` depends only on `core/`; `adapters/vscode/` depends on `core/` and `server/`. The standalone CLI never imports `adapters/vscode/` and vice versa.
 
 ```

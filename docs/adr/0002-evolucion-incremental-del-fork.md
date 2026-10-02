@@ -14,13 +14,13 @@ El repositorio ya ofrece TypeScript, Fastify, un contrato AsyncAPI, React/Vite, 
 
 Terminología del informe, complementaria al glosario canónico de [CONTEXT.md](../../CONTEXT.md):
 
-| Término | Significado en esta decisión |
-|---|---|
-| SoftwareAgents **Platform** | El producto que construimos; no designa un Host ni un Adapter. |
-| SoftwareAgents **Development Project** | El proyecto de ClickUp que organiza la construcción de SoftwareAgents. |
-| **Managed Project** | Un proyecto que la Platform desarrolla o gestiona para un usuario. |
-| **Fundtrinsic** | Proyecto independiente; no forma parte de este repositorio ni se migra desde este backlog. |
-| **Pixel Office** | Interfaz visual del trabajo real; no es toda la Platform ni la fuente de verdad operacional. |
+| Término                                | Significado en esta decisión                                                                 |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| SoftwareAgents **Platform**            | El producto que construimos; no designa un Host ni un Adapter.                               |
+| SoftwareAgents **Development Project** | El proyecto de ClickUp que organiza la construcción de SoftwareAgents.                       |
+| **Managed Project**                    | Un proyecto que la Platform desarrolla o gestiona para un usuario.                           |
+| **Fundtrinsic**                        | Proyecto independiente; no forma parte de este repositorio ni se migra desde este backlog.   |
+| **Pixel Office**                       | Interfaz visual del trabajo real; no es toda la Platform ni la fuente de verdad operacional. |
 
 Referencias usadas: [informe de investigación](../research/softwareagents-deep-research-report.md) (Resumen ejecutivo, Stack recomendado, ADR, Secuencia de construcción y Riesgos principales) y documento «SoftwareAgents · Roadmap incremental» de la carpeta SoftwareAgents en ClickUp (roadmap incremental acordado, decisiones 11 y 14 y tabla de aplazados). El roadmap prevalece sobre la propuesta de crear un repositorio nuevo del informe.
 
@@ -48,17 +48,17 @@ La evidencia permite identificar especialización funcional, aunque no reconstru
 
 ## Options considered
 
-| Evolución del producto | Ventajas | Costes y límites |
-|---|---|---|
-| Repo/monorepo nuevo con el stack del informe | Estructura diseñada para la plataforma objetivo. | Migración y operación antes de demostrar el primer flujo; descarta integraciones que ya funcionan. |
-| Evolución incremental del fork (elegida) | Reutiliza runtime, protocolo y oficina; valida Windows y el flujo con pasos pequeños. | Hereda deuda y exige mantener límites, recuperación y compatibilidad explícitos. |
-| Mantener solo el visor actual | Poco trabajo estructural. | No satisface el objetivo de ejecutar un ciclo de ingeniería trazable. |
+| Evolución del producto                       | Ventajas                                                                              | Costes y límites                                                                                   |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Repo/monorepo nuevo con el stack del informe | Estructura diseñada para la plataforma objetivo.                                      | Migración y operación antes de demostrar el primer flujo; descarta integraciones que ya funcionan. |
+| Evolución incremental del fork (elegida)     | Reutiliza runtime, protocolo y oficina; valida Windows y el flujo con pasos pequeños. | Hereda deuda y exige mantener límites, recuperación y compatibilidad explícitos.                   |
+| Mantener solo el visor actual                | Poco trabajo estructural.                                                             | No satisface el objetivo de ejecutar un ciclo de ingeniería trazable.                              |
 
-| Relación con upstream | Ventajas | Costes y límites |
-|---|---|---|
-| Sincronización regular mediante merges | Incorpora conjuntamente mantenimiento y nuevas funciones. | Acopla el roadmap a cambios generales; aumenta conflictos con HUD, roles y compañía. |
-| Cherry-pick puntual (elegida) | Conserva mejoras útiles de seguridad, runtime y oficina con alcance revisable. | Exige evaluar dependencias, adaptar parches y vigilar correcciones omitidas. |
-| Cortar la relación | Independencia completa del roadmap upstream. | Asume todo el mantenimiento y pierde una fuente útil de correcciones pese a compartir todavía la base técnica. |
+| Relación con upstream                  | Ventajas                                                                       | Costes y límites                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Sincronización regular mediante merges | Incorpora conjuntamente mantenimiento y nuevas funciones.                      | Acopla el roadmap a cambios generales; aumenta conflictos con HUD, roles y compañía.                           |
+| Cherry-pick puntual (elegida)          | Conserva mejoras útiles de seguridad, runtime y oficina con alcance revisable. | Exige evaluar dependencias, adaptar parches y vigilar correcciones omitidas.                                   |
+| Cortar la relación                     | Independencia completa del roadmap upstream.                                   | Asume todo el mantenimiento y pierde una fuente útil de correcciones pese a compartir todavía la base técnica. |
 
 ## Decision
 
@@ -78,6 +78,8 @@ El fork tiene 19 cambios funcionales propios visibles sobre una base de contenid
 
 ## Consequences
 
+- El [threat model inicial (SA-067)](../security/threat-model.md) registra riesgos aceptados, controles y disparadores de revisión antes de ampliar la ejecución de los CLIs; no implementa las mitigaciones.
+
 - Se entrega valor en pasos verificables: **F2**, esqueleto Developer → PR draft supervisada; **F5**, Requirements → Architect → Developer → Reviewer con ejecutor cruzado → QA, secuencial y con gates humanos; **F6**, robustez, recuperación y paralelismo limitado a 2 tras ledger y topes. Las bases de seguridad y contrato preceden a la ejecución correspondiente; no se construyen todos los agentes o integraciones antes del primer flujo.
 - El estado operativo y la recuperación deben persistirse y probarse aun sin Temporal. Se evita inventar un motor general de workflows: máquina de estados, leases y reintentos acotados para el slice.
 - Las suscripciones y formatos de CLI son dependencias externas. Se necesitan ejecutores aislados de la configuración del usuario, pruebas de contrato, tratamiento explícito de cuota desconocida/agotada y límites por ejecutor a nivel de máquina, porque la cuenta puede compartirse con Fundtrinsic.
@@ -90,17 +92,17 @@ El fork tiene 19 cambios funcionales propios visibles sobre una base de contenid
 
 Cumplir una condición abre una evaluación y, si cambia la arquitectura, un nuevo ADR aprobado por Fede; no activa automáticamente una migración.
 
-| Pieza aplazada o decisión | Condición concreta de revisión |
-|---|---|
-| **Postgres** | El WorkStore requiere escritores desde varias máquinas, operación multiusuario, RLS o recuperación/backup con requisitos que SQLite local no satisface; documentar evidencia de concurrencia o recuperación. |
-| **Temporal** | La máquina de estados y leases no cubren recuperación demostrada tras fallos, o aparecen workflows distribuidos de larga duración con señales humanas, timers y reintentos cuyo mantenimiento excede el worker acotado. |
-| **Sandbox Docker** | Se necesita ejecutar código no confiable o limitar filesystem, red y recursos con una frontera que las guardias locales no pueden garantizar; revisar antes de ampliar la autonomía a ese caso, validando Windows y autenticación CLI. |
-| **Kubernetes** | El sandbox Docker local ya no satisface concurrencia/aislamiento, o existen multi-tenancy y autoscaling reales; no introducirlo solo para preparar una escala hipotética. |
-| **Next.js** | Hay una app web multiusuario con necesidades reales de SSR/auth que React/Vite y Fastify no cubren razonablemente. |
-| **Phaser** | Mediciones o requisitos de escenas/input muestran que el canvas propio no alcanza el rendimiento o funcionalidad necesarios; evaluar esta migración separadamente de Next.js. |
-| **LangChain** | Los dos ejecutores locales dejan de cubrir una necesidad concreta y recurrente de composición de herramientas/modelos; comparar una integración mínima con el coste del framework antes de adoptarlo. |
-| **Gateway API de modelos** | Se necesitan proveedores/modelos fuera de los dos CLIs o ejecución independiente de las suscripciones locales; Fede debe autorizar explícitamente API keys, costes y tratamiento de secretos antes de cambiar esta restricción. |
-| **Cherry-pick de upstream** | Los parches útiles se vuelven frecuentes e independientes de la compañía (evaluar sincronización), o adaptar sus dependencias cuesta más que mantenerlas y las arquitecturas dejan de ser compatibles (evaluar corte). Usar historial completo y referencias actualizadas al reevaluar. |
-| **Evolución de este repo** | Un requisito demostrado no puede satisfacerse dentro de las capas actuales a coste razonable; comparar entonces extracción/migración con continuidad, sin crear un monorepo nuevo por defecto. |
-| **Licencias/procedencia y renombrado** | Antes de publicar SoftwareAgents en npm/Marketplace o renombrar paquete, binario o ID de extensión. |
-| **Migración de Fundtrinsic** | Solo si Fundtrinsic lo decide mediante su propio proceso; nunca como consecuencia automática de este backlog. |
+| Pieza aplazada o decisión              | Condición concreta de revisión                                                                                                                                                                                                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Postgres**                           | El WorkStore requiere escritores desde varias máquinas, operación multiusuario, RLS o recuperación/backup con requisitos que SQLite local no satisface; documentar evidencia de concurrencia o recuperación.                                                                            |
+| **Temporal**                           | La máquina de estados y leases no cubren recuperación demostrada tras fallos, o aparecen workflows distribuidos de larga duración con señales humanas, timers y reintentos cuyo mantenimiento excede el worker acotado.                                                                 |
+| **Sandbox Docker**                     | Se necesita ejecutar código no confiable o limitar filesystem, red y recursos con una frontera que las guardias locales no pueden garantizar; revisar antes de ampliar la autonomía a ese caso, validando Windows y autenticación CLI.                                                  |
+| **Kubernetes**                         | El sandbox Docker local ya no satisface concurrencia/aislamiento, o existen multi-tenancy y autoscaling reales; no introducirlo solo para preparar una escala hipotética.                                                                                                               |
+| **Next.js**                            | Hay una app web multiusuario con necesidades reales de SSR/auth que React/Vite y Fastify no cubren razonablemente.                                                                                                                                                                      |
+| **Phaser**                             | Mediciones o requisitos de escenas/input muestran que el canvas propio no alcanza el rendimiento o funcionalidad necesarios; evaluar esta migración separadamente de Next.js.                                                                                                           |
+| **LangChain**                          | Los dos ejecutores locales dejan de cubrir una necesidad concreta y recurrente de composición de herramientas/modelos; comparar una integración mínima con el coste del framework antes de adoptarlo.                                                                                   |
+| **Gateway API de modelos**             | Se necesitan proveedores/modelos fuera de los dos CLIs o ejecución independiente de las suscripciones locales; Fede debe autorizar explícitamente API keys, costes y tratamiento de secretos antes de cambiar esta restricción.                                                         |
+| **Cherry-pick de upstream**            | Los parches útiles se vuelven frecuentes e independientes de la compañía (evaluar sincronización), o adaptar sus dependencias cuesta más que mantenerlas y las arquitecturas dejan de ser compatibles (evaluar corte). Usar historial completo y referencias actualizadas al reevaluar. |
+| **Evolución de este repo**             | Un requisito demostrado no puede satisfacerse dentro de las capas actuales a coste razonable; comparar entonces extracción/migración con continuidad, sin crear un monorepo nuevo por defecto.                                                                                          |
+| **Licencias/procedencia y renombrado** | Antes de publicar SoftwareAgents en npm/Marketplace o renombrar paquete, binario o ID de extensión.                                                                                                                                                                                     |
+| **Migración de Fundtrinsic**           | Solo si Fundtrinsic lo decide mediante su propio proceso; nunca como consecuencia automática de este backlog.                                                                                                                                                                           |

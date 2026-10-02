@@ -40,7 +40,9 @@
     "dist/uninstall.js",
     "dist/assets/",
     "dist/webview/",
-    "icon.png"
+    "icon.png",
+    "agents/",
+    "dist/agents/"
   ],
   "contributes": {
     "commands": [

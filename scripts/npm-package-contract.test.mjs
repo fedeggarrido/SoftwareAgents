@@ -122,3 +122,10 @@ test('rejects a tarball changed after its metadata was created', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+test('rejects a tarball missing any platform AgentSpec or its CLI copy', () => {
+  for (const required of REQUIRED_PACKAGE_FILES.filter((file) => file.includes('agents/'))) {
+    assert.throws(() =>
+      validatePackageFiles(validFiles().filter((file) => file.path !== required)),
+    );
+  }
+});

@@ -23,6 +23,12 @@ export const REQUIRED_PACKAGE_FILES = [
   'dist/webview/index.html',
   'icon.png',
   'package.json',
+  'agents/README.md',
+  'dist/agents/README.md',
+  ...['requirements-analyst', 'architect', 'developer', 'reviewer', 'qa'].flatMap((role) => [
+    'agents/templates/' + role + '.yaml',
+    'dist/agents/templates/' + role + '.yaml',
+  ]),
 ];
 
 export const REQUIRED_PACKAGE_PREFIXES = [

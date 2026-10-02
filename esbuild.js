@@ -34,6 +34,13 @@ function copyAssets() {
   }
 }
 
+/** Copy platform AgentSpecs alongside the bundled CLI. */
+function copyAgentTemplates() {
+  fs.cpSync(path.join(__dirname, 'agents'), path.join(__dirname, 'dist', 'agents'), {
+    recursive: true,
+  });
+}
+
 /**
  * Bundle hook scripts (TypeScript) to dist/hooks via esbuild.
  * Produces a self-contained CJS file with shebang for Claude Code to execute.
@@ -107,6 +114,7 @@ async function main() {
     await ctx.dispose();
     // Copy assets and hooks after build
     copyAssets();
+    copyAgentTemplates();
     buildHooks();
     await buildCli();
     await buildUninstall();

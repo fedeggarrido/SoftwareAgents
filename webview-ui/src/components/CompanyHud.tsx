@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
+import { capacityView } from '../office/capacityView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { getProviderLabel } from '../office/toolUtils.js';
 import { transport } from '../transport/index.js';
@@ -16,48 +17,6 @@ function clock(epochS: number | null | undefined): string {
   });
 }
 
-/** Keep the status readable without implying an exact value when none was reported. */
-function describe(q: ProviderQuota): { status: string; detail: string; color: string } {
-  const weekly = q.weekly?.usedPercent;
-  const usage = q.usedPercent === null ? 'Menos del 90 % usado' : `${q.usedPercent} % usado`;
-  const weeklyDetail = weekly === null || weekly === undefined ? '' : ` · ${weekly} % esta semana`;
-  const resetAt =
-    weekly !== null && weekly !== undefined && weekly >= 100 ? q.weekly?.resetsAt : q.resetsAt;
-  const resetDetail = resetAt ? ` · se renueva a las ${clock(resetAt)}` : '';
-  switch (q.status) {
-    case 'rejected':
-      return {
-        status: 'Agotada',
-        detail: `${weekly !== null && weekly !== undefined && weekly >= 100 ? 'Límite semanal alcanzado' : 'Cuota agotada'}${resetDetail}`,
-        color: QUOTA_COLORS.rejected,
-      };
-    case 'warning':
-      return {
-        status: 'Limitada',
-        detail: `${q.usedPercent === null ? 'Al menos 90 % usado' : `${q.usedPercent} % usado`}${weeklyDetail}${resetDetail}`,
-        color: QUOTA_COLORS.warning,
-      };
-    case 'allowed':
-      return {
-        status: 'Sana',
-        detail: `${usage}${weeklyDetail}`,
-        color: QUOTA_COLORS.allowed,
-      };
-    case 'reset':
-      return {
-        status: 'Desconocida',
-        detail: 'La cuota se renovó; falta una nueva lectura',
-        color: QUOTA_COLORS.unknown,
-      };
-    default:
-      return {
-        status: 'Desconocida',
-        detail: 'Aún no hay una lectura de cuota',
-        color: QUOTA_COLORS.unknown,
-      };
-  }
-}
-
 export function QuotaRow({
   name,
   q,
@@ -67,30 +26,17 @@ export function QuotaRow({
   q: ProviderQuota;
   running: number;
 }) {
-  const d = describe(q);
+  const d = capacityView(q, running);
   return (
     <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-x-8 text-2xs leading-tight">
       <span className="text-text-muted">{name}</span>
       <span>
         <span style={{ color: d.color }}>● {d.status}</span>
         <span className="block text-text-muted mt-2">{d.detail}</span>
-        <span className="block text-text-muted mt-2">
-          {running} agentes en marcha · Fuente: {q.capacity?.source ?? 'estimated'} · Confianza:{' '}
-          {q.capacity?.confidence ?? 'unknown'}
-        </span>
-        {q.capacity?.windows.map((w, i) => (
+        <span className="block text-text-muted mt-2">{d.provenance}</span>
+        {d.windows.map((text, i) => (
           <span key={i} className="block text-text-muted mt-2">
-            {w.kind === 'five_hour' ? '5 horas' : w.kind === 'weekly' ? 'Semanal' : 'Otra ventana'}:{' '}
-            {w.usedRatio === null ? 'uso desconocido' : Math.round(w.usedRatio * 100) + ' % usado'}{' '}
-            · Reset:{' '}
-            {w.resetsAt === null
-              ? '—'
-              : new Date(w.resetsAt * 1000).toLocaleString('es-ES', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+            {text}
           </span>
         ))}
       </span>

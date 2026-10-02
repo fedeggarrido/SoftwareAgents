@@ -11,6 +11,12 @@ if (!valid) {
   process.stderr.write('Expected claude -p --output-format stream-json or codex exec --json\n');
   process.exitCode = 2;
 } else {
+  if (args.includes('--write-doc')) {
+    require('fs').writeFileSync('worker-result.md', 'Synthetic documentation correction\n');
+  }
+  if (args.includes('--fail')) {
+    process.exitCode = 1;
+  }
   if (args.includes('--inspect')) {
     const fs = require('fs');
     process.stdout.write(

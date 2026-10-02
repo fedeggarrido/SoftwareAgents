@@ -24,6 +24,8 @@ export interface WorktreeManagerOptions {
   protectedBranches?: readonly string[];
   /** Trusted operator path; invoking node avoids npm.cmd shell quoting on Windows. */
   npmCliPath?: string;
+  /** Supervised worker: skip the dependency install; agent pushes stay blocked. */
+  manualPreparation?: boolean;
 }
 
 /** Serializes operations in this instance. The runtime must hold the Project Lease across processes. */
@@ -72,7 +74,10 @@ export class WorktreeManager {
         'remote.origin.pushurl',
         BLOCKED_PUSH_URL,
       ]);
-      const bootstrap = await this.bootstrap(directory);
+      // A supervised worker skips the dependency install, never the push block.
+      const bootstrap = this.options.manualPreparation
+        ? { durationMs: 0, cached: false, skipped: true }
+        : await this.bootstrap(directory);
       return { path: directory, branch, reused: existing, bootstrap };
     });
   }

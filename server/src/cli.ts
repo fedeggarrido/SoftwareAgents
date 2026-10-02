@@ -36,6 +36,7 @@ import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
+import { parseWorkerArgs, runWorker } from './worker.js';
 
 // ── Argument parsing ──────────────────────────────────────────
 
@@ -138,10 +139,21 @@ function watchWorktreeProjectDirs(projectDir: string, onFound: (dir: string) => 
 
 // ── Main ──────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function dispatchCli(
+  argv: string[],
+  handlers = { server: startServer, worker: runWorker },
+): Promise<void> {
+  if (argv[0] === 'worker') {
+    await handlers.worker(parseWorkerArgs(argv.slice(1)));
+  } else {
+    await handlers.server(argv);
+  }
+}
+
+async function startServer(argv: string[]): Promise<void> {
   let args: CliArgs;
   try {
-    args = parseArgs(process.argv.slice(2));
+    args = parseArgs(argv);
   } catch (err) {
     console.error(`[Pixel Agents] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
@@ -393,7 +405,7 @@ async function main(): Promise<void> {
 // it unconditionally used to start a real server and install real Claude
 // hooks as a side effect of module load.
 if (require.main === module) {
-  main().catch((err) => {
+  dispatchCli(process.argv.slice(2)).catch((err) => {
     console.error(err);
     process.exit(1);
   });

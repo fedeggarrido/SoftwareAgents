@@ -88,6 +88,7 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
   properties: {
     autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
     allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
+    protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
     binaryPaths: numberMap(nonEmptyString),
     quotaThresholds: numberMap({ ...nonNegativeNumber, maximum: 100 }),
     concurrency: {

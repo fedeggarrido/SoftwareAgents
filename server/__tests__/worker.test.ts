@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
+import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
+import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
+import { loadProjectConfig } from '../src/projectConfig.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker } from '../src/worker.js';
 
 vi.mock('os', async (original) => {
@@ -130,6 +133,107 @@ describe('supervised worker', () => {
       },
     ]);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('rama lista para revisión'));
+  });
+  it('blocks protected changes before commit and audits require_human', async () => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'claude', '--write-protected'],
+        log: vi.fn(),
+      },
+    );
+    expect(result).toMatchObject({ commit: null, policyDecision: { outcome: 'require_human' } });
+    expect(git(repo, 'rev-parse', result.branch)).toBe(base);
+    expect(new AuditLog().read('test')).toMatchObject([
+      {
+        entry: {
+          action: 'touch_protected_path',
+          actorType: 'system',
+          taskKey: 'SA-999',
+          policyDecision: { outcome: 'require_human' },
+          outcome: { status: 'require_human' },
+        },
+      },
+    ]);
+  });
+  it('checks committed and staged changes, scripts and additive operator paths', () => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const config = loadProjectConfig(repo)!;
+    const check = (staged = true) =>
+      guardProtectedPaths({
+        cwd: repo,
+        base,
+        staged,
+        operator: config.operator,
+        projectId: 'test',
+      });
+    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'test' }));
+    git(repo, 'add', '.');
+    expect(check().decision.outcome).toBe('allow');
+    fs.writeFileSync(
+      path.join(repo, 'package.json'),
+      JSON.stringify({ scripts: { test: 'evil' } }),
+    );
+    git(repo, 'add', '.');
+    expect(check().paths).toEqual(['package.json']);
+    git(repo, 'commit', '-m', 'scripts');
+    expect(check(false).decision.outcome).toBe('require_human');
+    config.operator.protectedPaths = [];
+    fs.writeFileSync(path.join(repo, '.softwareagents/project.yaml'), 'protectedPaths: []');
+    git(repo, 'add', '.');
+    expect(check().paths).toContain('.softwareagents/project.yaml');
+    config.operator.protectedPaths = ['brief.md'];
+    fs.writeFileSync(path.join(repo, 'brief.md'), 'changed');
+    git(repo, 'add', '.');
+    expect(check().paths).toContain('brief.md');
+    expect(
+      guardProtectedPaths({
+        cwd: repo,
+        base,
+        staged: true,
+        operator: config.operator,
+        projectId: 'test',
+        actor: 'human',
+      }).decision.outcome,
+    ).toBe('allow');
+  });
+  it('protects every default, renames out of protected paths, and fails closed on audit errors', () => {
+    const files = [
+      '.github/workflows/ci.yml',
+      '.claude/settings.json',
+      '.softwareagents/agents/developer.yaml',
+      'agents/templates/developer.yaml',
+      'CODEOWNERS',
+      'esbuild.js',
+      'scripts/run.js',
+    ];
+    for (const file of files) {
+      fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+      fs.writeFileSync(path.join(repo, file), 'original');
+    }
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'protected base');
+    const base = git(repo, 'rev-parse', 'HEAD');
+    for (const file of files) fs.writeFileSync(path.join(repo, file), 'changed');
+    git(repo, 'mv', 'scripts/run.js', 'ordinary.js');
+    git(repo, 'add', '.');
+    const operator = loadProjectConfig(repo)!.operator;
+    expect(
+      parseProjects({ test: { ...operator, protectedPaths: ['extra/**'] } }).test.protectedPaths,
+    ).toEqual(['extra/**']);
+    const options = { cwd: repo, base, staged: true, operator, projectId: 'test' };
+    expect(guardProtectedPaths(options).paths).toEqual(expect.arrayContaining(files));
+    expect(() => guardProtectedPaths({ ...options, base: 'missing-base' })).toThrow();
+    const append = vi.spyOn(AuditLog.prototype, 'append').mockImplementation(() => {
+      throw new Error('audit unavailable');
+    });
+    try {
+      expect(() => guardProtectedPaths(options)).toThrow('audit unavailable');
+    } finally {
+      append.mockRestore();
+    }
   });
   it('does not commit an execution with no changes', async () => {
     const base = git(repo, 'rev-parse', 'HEAD');

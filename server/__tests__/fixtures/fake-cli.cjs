@@ -14,6 +14,11 @@ if (!valid) {
   if (args.includes('--write-doc')) {
     require('fs').writeFileSync('worker-result.md', 'Synthetic documentation correction\n');
   }
+  if (args.includes('--write-protected')) {
+    const fs = require('fs');
+    fs.mkdirSync('.github/workflows', { recursive: true });
+    fs.writeFileSync('.github/workflows/ci.yml', 'synthetic: true\n');
+  }
   if (args.includes('--fail')) {
     process.exitCode = 1;
   }

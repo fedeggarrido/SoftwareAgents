@@ -21,6 +21,8 @@ export interface ProjectAutopilotConfig {
 export interface ProjectOperatorConfig {
   autonomyLevel: AutonomyLevel;
   allowedExecutors: string[];
+  /** Additive protected paths/globs from Operator config only. */
+  protectedPaths?: string[];
   binaryPaths?: Record<string, string>;
   /** Minimum remaining quota percentages, by executor. */
   quotaThresholds?: Record<string, number>;

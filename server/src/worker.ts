@@ -11,6 +11,7 @@ import { recordAudit } from './auditLog.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import type { ExecutionHandle } from './executors/executor.js';
+import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
@@ -178,6 +179,19 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       return { branch: tree.branch, commit: null, stat: '' };
     }
     git(tree.path, ['add', '--all']);
+    const gate = guardProtectedPaths({
+      cwd: tree.path,
+      base,
+      staged: true,
+      operator: config.operator,
+      projectId: config.project.id,
+      taskKey: args.task,
+      executionId,
+    });
+    if (gate.decision.outcome !== 'allow') {
+      log('require_human: rutas protegidas: ' + gate.paths.join(', ') + '\nRama: ' + tree.branch);
+      return { branch: tree.branch, commit: null, stat: '', policyDecision: gate.decision };
+    }
     const summary =
       brief
         .split(/\r?\n/)

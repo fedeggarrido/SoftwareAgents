@@ -1,3 +1,5 @@
+import type { TaskStatus } from './taskStateMachine.js';
+
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
 export interface ProjectRecord {
   project_id: string;
@@ -17,7 +19,7 @@ export interface TaskRecord {
   feature_key: string | null;
   key: string;
   type: string;
-  status: string;
+  status: TaskStatus;
   priority: number;
   agent_role: string | null;
   version: number;
@@ -69,7 +71,20 @@ export interface HumanDecisionRecord {
 export type NewTask = Pick<TaskRecord, 'key' | 'type'> &
   Partial<Omit<TaskRecord, 'project_id' | 'key' | 'type' | 'created_at' | 'updated_at'>>;
 
-/** One Project per handle; no SQL/connection escape hatch or status transitions. */
+export interface DomainEventRecord {
+  id: number;
+  project_id: string;
+  task_key: string;
+  type: 'TASK_TRANSITIONED';
+  from_status: TaskStatus;
+  to_status: TaskStatus;
+  task_version: number;
+  attempt: number;
+  reason: string;
+  actor: string;
+  created_at: string;
+}
+/** One Project per handle; no SQL/connection escape hatch. */
 export interface WorkStore {
   readonly projectId: string;
   getProject(): ProjectRecord;
@@ -79,6 +94,15 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
+  canStart(taskId: string): boolean;
+  transition(
+    taskId: string,
+    expectedVersion: number,
+    to: TaskStatus,
+    reason: string,
+    actor: string,
+  ): Promise<TaskRecord>;
+  listDomainEvents(taskId?: string): DomainEventRecord[];
   addTaskDependency(taskKey: string, dependsOnKey: string): void;
   listTaskDependencies(taskKey: string): TaskDependencyRecord[];
   createExecution(execution: Omit<ExecutionRecord, 'project_id'>): void;

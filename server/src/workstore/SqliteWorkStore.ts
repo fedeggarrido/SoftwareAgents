@@ -11,7 +11,17 @@ import {
 import { resolveInside } from '../pathGuard.js';
 import { runMigrations } from './migrations.js';
 import { retryBusy } from './retryBusy.js';
+import type { TaskStatus } from './taskStateMachine.js';
+import {
+  attemptIncrement,
+  canStart,
+  canTransition,
+  isTaskStatus,
+  TaskTransitionError,
+  TaskVersionConflictError,
+} from './taskStateMachine.js';
 import type {
+  DomainEventRecord,
   ExecutionRecord,
   FeatureRecord,
   HumanDecisionRecord,
@@ -151,6 +161,80 @@ class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as TaskRecord[];
+  }
+  canStart(taskId: string): boolean {
+    if (!this.getTask(taskId)) return false;
+    return canStart({
+      dependencies: this.listTaskDependencies(taskId).map((edge) =>
+        this.getTask(edge.depends_on_key),
+      ),
+    });
+  }
+  async transition(
+    taskId: string,
+    expectedVersion: number,
+    to: TaskStatus,
+    reason: string,
+    actor: string,
+  ): Promise<TaskRecord> {
+    return retryBusy(this.db, performance.now() + WORKSTORE_BUSY_TIMEOUT_MS, () => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const task = this.getTask(taskId);
+        if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
+        if (task.version !== expectedVersion)
+          throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
+        if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
+          throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+        if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
+          throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
+        const now = new Date().toISOString();
+        const attempt = task.attempt + attemptIncrement(task.status, to);
+        this.db
+          .prepare(
+            `UPDATE tasks SET status = ?, version = version + 1, attempt = ?, blocked_reason = ?, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?`,
+          )
+          .run(
+            to,
+            attempt,
+            to === 'BLOCKED' ? reason : null,
+            now,
+            this.projectId,
+            taskId,
+            expectedVersion,
+          );
+        this.db
+          .prepare(
+            `INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            this.projectId,
+            taskId,
+            task.status,
+            to,
+            task.version + 1,
+            attempt,
+            reason,
+            actor,
+            now,
+          );
+        const updated = this.getTask(taskId)!;
+        this.db.exec('COMMIT');
+        return updated;
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+  listDomainEvents(taskId?: string): DomainEventRecord[] {
+    return (taskId === undefined
+      ? this.db
+          .prepare('SELECT * FROM domain_events WHERE project_id = ? ORDER BY id')
+          .all(this.projectId)
+      : this.db
+          .prepare('SELECT * FROM domain_events WHERE project_id = ? AND task_key = ? ORDER BY id')
+          .all(this.projectId, taskId)) as unknown as DomainEventRecord[];
   }
   addTaskDependency(taskKey: string, dependsOnKey: string): void {
     this.db

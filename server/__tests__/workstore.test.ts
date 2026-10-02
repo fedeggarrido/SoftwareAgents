@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { retryBusy } from '../src/workstore/retryBusy.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import {
+  TaskTransitionError,
+  TaskVersionConflictError,
+} from '../src/workstore/taskStateMachine.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
 describe('WorkStore (real SQLite)', () => {
@@ -43,10 +47,10 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 1 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 2 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
-        7,
+        8,
       );
     } finally {
       db.close();
@@ -145,6 +149,107 @@ describe('WorkStore (real SQLite)', () => {
     expect(b.getTask('injected')?.project_id).toBe('b');
     expect(a.getTask('injected')).toBeUndefined();
   });
+  it('enforces dependencies, versions, rework and Project isolation', async () => {
+    const a = await open();
+    const b = await open('b');
+    a.createTask({ key: 'A', type: 'implementation', status: 'QA' });
+    a.createTask({ key: 'B', type: 'implementation', status: 'READY' });
+    a.addTaskDependency('B', 'A');
+    b.createTask({ key: 'A', type: 'implementation', status: 'DONE' });
+    expect(a.canStart('B')).toBe(false);
+    await expect(a.transition('B', 1, 'QUEUED', 'schedule', 'operator')).rejects.toBeInstanceOf(
+      TaskTransitionError,
+    );
+    expect(a.getTask('B')).toMatchObject({ version: 1, status: 'READY' });
+    expect(a.listDomainEvents()).toEqual([]);
+    await a.transition('A', 1, 'RUNNING', 'rework', 'reviewer');
+    expect(a.getTask('A')).toMatchObject({ version: 2, attempt: 1 });
+    await a.transition('A', 2, 'REVIEW', 'ready', 'developer');
+    await a.transition('A', 3, 'RUNNING', 'rework', 'reviewer');
+    expect(a.getTask('A')?.attempt).toBe(2);
+    await a.transition('A', 4, 'REVIEW', 'ready', 'developer');
+    await a.transition('A', 5, 'QA', 'reviewed', 'reviewer');
+    await a.transition('A', 6, 'DONE', 'tested', 'qa');
+    expect(a.canStart('B')).toBe(true);
+    const other = await open();
+    const results = await Promise.allSettled([
+      a.transition('B', 1, 'QUEUED', 'schedule', 'operator'),
+      other.transition('B', 1, 'QUEUED', 'schedule', 'operator'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const failed = results.find((result) => result.status === 'rejected');
+    expect(failed?.status === 'rejected' && failed.reason).toBeInstanceOf(TaskVersionConflictError);
+    expect(a.listDomainEvents('B')).toHaveLength(1);
+    expect(a.listDomainEvents('B')[0]).toMatchObject({
+      from_status: 'READY',
+      to_status: 'QUEUED',
+      task_version: 2,
+      actor: 'operator',
+      reason: 'schedule',
+    });
+    expect(b.listDomainEvents()).toEqual([]);
+    await expect(b.transition('B', 1, 'QUEUED', '', '')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+  it('retries a busy transition after rolling back its partial write', async () => {
+    const store = await open();
+    store.createTask({ key: 'task', type: 'implementation' });
+    const { DatabaseSync } = await import('node:sqlite');
+    const prepare = DatabaseSync.prototype.prepare;
+    let inserts = 0;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (
+      this: import('node:sqlite').DatabaseSync,
+      sql,
+    ) {
+      if (sql.includes('INSERT INTO domain_events') && ++inserts === 1)
+        throw Object.assign(new Error('busy'), { errcode: 5 });
+      return prepare.call(this, sql);
+    });
+    await store.transition('task', 1, 'READY', 'ready', 'operator');
+    expect(inserts).toBe(2);
+    expect(store.getTask('task')).toMatchObject({ status: 'READY', version: 2 });
+    expect(store.listDomainEvents()).toHaveLength(1);
+  });
+  it('rolls back the Task when event insertion fails and rejects event mutation', async () => {
+    const store = await open();
+    store.createTask({ key: 'task', type: 'implementation' });
+    const before = store.getTask('task');
+    const db = await inspect();
+    try {
+      db.exec(
+        "CREATE TRIGGER fail_event AFTER INSERT ON domain_events BEGIN SELECT RAISE(ABORT, 'event failure'); END;",
+      );
+      await expect(store.transition('task', 1, 'READY', 'ready', 'operator')).rejects.toThrow(
+        'event failure',
+      );
+      expect(store.getTask('task')).toEqual(before);
+      expect(store.listDomainEvents()).toEqual([]);
+      db.exec('DROP TRIGGER fail_event');
+      await store.transition('task', 1, 'READY', 'ready', 'operator');
+      expect(() => db.exec('DELETE FROM domain_events')).toThrow('append-only');
+      expect(() => db.exec("UPDATE domain_events SET actor = 'other'")).toThrow('append-only');
+    } finally {
+      db.close();
+    }
+  });
+  it('migrates v1 pending tasks without changing version or attempt', async () => {
+    await open();
+    const db = await inspect();
+    try {
+      db.exec(
+        'DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; UPDATE schema_version SET version = 1;',
+      );
+      db.prepare(
+        `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
+      ).run();
+    } finally {
+      db.close();
+    }
+    const store = await open();
+    expect(store.getTask('old')).toMatchObject({ status: 'DRAFT', version: 4, attempt: 2 });
+    expect(store.listDomainEvents()).toEqual([]);
+  });
   it('rejects a schema newer than this implementation', async () => {
     await open();
     const db = await inspect();
@@ -191,7 +296,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 1 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 2 }]);
     } finally {
       db.close();
     }

@@ -48,6 +48,25 @@ const migrations = [
     FOREIGN KEY(project_id, task_key) REFERENCES tasks(project_id, key),
     FOREIGN KEY(project_id, execution_key) REFERENCES executions(project_id, key)
   ) STRICT;`,
+  `UPDATE tasks SET status = CASE WHEN status = 'pending' THEN 'DRAFT' ELSE upper(status) END;
+  CREATE TRIGGER tasks_status_insert BEFORE INSERT ON tasks WHEN NEW.status NOT IN ('DRAFT','READY','QUEUED','LEASED','RUNNING','REVIEW','QA','DONE','BLOCKED','FAILED_RETRYABLE','FAILED_FINAL','WAITING_HUMAN','WAITING_QUOTA','CANCELLED')
+    BEGIN SELECT RAISE(ABORT, 'Invalid Task status'); END;
+  CREATE TRIGGER tasks_status_update BEFORE UPDATE OF status ON tasks WHEN NEW.status NOT IN ('DRAFT','READY','QUEUED','LEASED','RUNNING','REVIEW','QA','DONE','BLOCKED','FAILED_RETRYABLE','FAILED_FINAL','WAITING_HUMAN','WAITING_QUOTA','CANCELLED')
+    BEGIN SELECT RAISE(ABORT, 'Invalid Task status'); END;
+  UPDATE tasks SET status = status;
+  CREATE TABLE domain_events (
+    id INTEGER PRIMARY KEY, project_id TEXT NOT NULL, task_key TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type = 'TASK_TRANSITIONED'),
+    from_status TEXT NOT NULL, to_status TEXT NOT NULL,
+    task_version INTEGER NOT NULL, attempt INTEGER NOT NULL,
+    reason TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE(project_id, task_key, task_version),
+    FOREIGN KEY(project_id, task_key) REFERENCES tasks(project_id, key)
+  ) STRICT;
+  CREATE TRIGGER domain_events_no_update BEFORE UPDATE ON domain_events
+    BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;
+  CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events
+    BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

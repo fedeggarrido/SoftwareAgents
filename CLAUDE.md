@@ -202,6 +202,24 @@ Las acciones se envían por Transport y el runtime valida su autoridad.
 - `MeetingPanel.tsx`: reunión reciente, rondas, intervenciones, espera de cuota y
   decisión o escalado al propietario.
 
+### AgentSpec v1alpha1 permission profiles
+
+`core/schemas/agent-spec.schema.json` and `core/src/agentSpec.ts` define the minimal
+role declaration. All sections are required; lists may be empty. Model IDs,
+`model`, `models`, `autonomyLevel` and unknown fields are rejected. `capabilityClass`
+describes a capability (for example `high_reasoning`), not a specific model.
+Autonomy remains in Operator config.
+
+- `read_only`: read project context; no project file edits.
+- `brain_write`: also propose edits to the Git-versioned Project Brain.
+- `branch_write`: also edit code in the assigned task branch/worktree.
+
+Each role declares one requested permission ceiling. These profiles grant no
+merge, deployment, Operator config writes or unrestricted tools. External policy
+must authorize and enforce access; declaring a profile does not confine an Executor.
+`context.brainPaths` is declarative: consumers must validate path containment before
+reading. The canonical domain vocabulary remains in `CONTEXT.md`.
+
 ## Distribution
 
 Two artifacts from one source tree:

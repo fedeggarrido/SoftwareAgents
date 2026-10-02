@@ -1,0 +1,171 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "softwareagents.io/v1alpha1"
+    },
+    "kind": {
+      "const": "AgentSpec"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            }
+          ]
+        },
+        "version": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
+            }
+          ]
+        },
+        "displayName": {
+          "$ref": "#/definitions/text"
+        },
+        "department": {
+          "$ref": "#/definitions/text"
+        }
+      },
+      "required": ["id", "version", "displayName", "department"]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "$ref": "#/definitions/text"
+        },
+        "mission": {
+          "$ref": "#/definitions/text"
+        },
+        "principles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        },
+        "antiPatterns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["role", "mission", "principles", "antiPatterns"]
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      },
+      "uniqueItems": true
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "enum": ["read_only", "brain_write", "branch_write"],
+          "$comment": "Requested ceiling only: read_only reads project context; brain_write also proposes Project Brain edits; branch_write also edits code in the assigned task branch/worktree. No merge, deployment, Operator config writes or unrestricted tools. External policy must authorize and enforce access."
+        }
+      },
+      "required": ["profile"]
+    },
+    "modelPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilityClass": {
+          "$ref": "#/definitions/text"
+        },
+        "fallbackAllowed": {
+          "type": "boolean"
+        }
+      },
+      "required": ["capabilityClass", "fallbackAllowed"]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brainPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["brainPaths"]
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mayBlock": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["mayBlock"]
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "humanRequired": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["humanRequired"]
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "identity",
+    "outputs",
+    "permissions",
+    "modelPolicy",
+    "context",
+    "gates",
+    "escalation"
+  ],
+  "definitions": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "not": {
+        "pattern": "(^|[^A-Za-z0-9])([cC][lL][aA][uU][dD][eE]-|[gG][pP][tT]-|[oO]-|[oO][0-9]+($|[^A-Za-z0-9])|[sS][oO][nN][nN][eE][tT]($|[^A-Za-z0-9])|[oO][pP][uU][sS]($|[^A-Za-z0-9])|[hH][aA][iI][kK][uU]($|[^A-Za-z0-9]))"
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Agent is not Model. Closed objects reject model, models, autonomyLevel and deferred fields at every level. Text rejects known model ID patterns case-insensitively. Autonomy belongs to Operator config. Paths are declarative; consumers must enforce containment."
+}

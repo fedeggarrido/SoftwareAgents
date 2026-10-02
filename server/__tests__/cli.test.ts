@@ -145,6 +145,41 @@ describe('dist/cli.js entry-point guard', () => {
    *  exercised anything. */
   const itBuilt = it.skipIf(!fs.existsSync(CLI_BUNDLE));
 
+  itBuilt.each([
+    ['broken YAML', 'brain: [', '/project.yaml'],
+    ['invalid schema', '{}', '/apiVersion'],
+    [
+      'escaping path',
+      JSON.stringify({
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'sample',
+        name: 'Sample',
+        repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
+        brain: { path: '../outside' },
+      }),
+      '/brain/path',
+    ],
+  ])('starts the office with %s in project.yaml', async (_name, manifest, field) => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-invalid-'));
+    await runCliServer(
+      tmpHome,
+      async ({ output }) => {
+        expect(output()).toContain(
+          '[Pixel Agents] Ignoring company board: invalid .softwareagents/project.yaml: ',
+        );
+        expect(output()).toContain(field);
+      },
+      '127.0.0.1',
+      (workspace) => {
+        fs.mkdirSync(path.join(workspace, '.softwareagents'));
+        fs.writeFileSync(path.join(workspace, '.softwareagents/project.yaml'), manifest);
+        fs.mkdirSync(path.join(workspace, 'docs/backlog'), { recursive: true });
+        fs.writeFileSync(path.join(workspace, 'docs/backlog/board.json'), '{"items":[]}');
+      },
+    );
+  });
+
   // 11. Direct execution still runs main() (--help exits 0 with usage)
   itBuilt('runs main() when executed directly: --help prints usage and exits 0', async () => {
     const { code, stdout } = await runCli(['--help']);
@@ -170,8 +205,10 @@ describe('dist/cli.js entry-point guard', () => {
     tmpHome: string,
     body: (ctx: { output: () => string; port: number }) => Promise<void>,
     host = '127.0.0.1',
+    seedWorkspace?: (workspace: string) => void,
   ): Promise<void> {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-workspace-'));
+    seedWorkspace?.(workspaceDir);
     const port = await getFreePort();
     const child = spawn(process.execPath, [CLI_BUNDLE, '--port', port.toString(), '--host', host], {
       cwd: workspaceDir,

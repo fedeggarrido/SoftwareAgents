@@ -10,6 +10,7 @@ import type {
   MeetingState,
 } from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { readAutopilot } from './companyControl.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
 
@@ -202,12 +203,16 @@ export class BoardWatcher {
   private timer: NodeJS.Timeout | undefined;
   private lastSent = '';
   private commonDir: string | undefined;
+  private readonly sources: BoardSources;
 
   constructor(
     private readonly store: AgentStateStore,
     private readonly workspaceDir: string,
     private readonly now: () => number = Date.now,
-  ) {}
+    selection?: BoardSelection,
+  ) {
+    this.sources = new BoardSources(workspaceDir, selection ?? loadBoardSelection(workspaceDir));
+  }
 
   start(): void {
     this.commonDir = gitCommonDir(this.workspaceDir);
@@ -233,23 +238,24 @@ export class BoardWatcher {
   }
 
   build(): BoardState | undefined {
-    const boardPath = path.join(this.workspaceDir, 'docs', 'backlog', 'board.json');
     let board: BoardFile;
     try {
+      const boardPath = this.sources.boardFile();
+      if (!boardPath) return undefined;
       board = JSON.parse(fs.readFileSync(boardPath, 'utf-8')) as BoardFile;
     } catch {
       return undefined; // this workspace has no company board
     }
     const items = board.items ?? [];
     const dir = this.commonDir;
-    const claims =
-      dir && board.claimsDb
-        ? readRows<ClaimRow>(
-            path.join(dir, board.claimsDb),
-            'SELECT task_id, worker, session, worktree, state, heartbeat_at FROM claims',
-          )
-        : undefined;
-    const progressFile = dir && board.progressDb ? path.join(dir, board.progressDb) : undefined;
+    const claimsFile = this.sources.source(dir, board.claimsDb);
+    const claims = claimsFile
+      ? readRows<ClaimRow>(
+          claimsFile,
+          'SELECT task_id, worker, session, worktree, state, heartbeat_at FROM claims',
+        )
+      : undefined;
+    const progressFile = this.sources.source(dir, board.progressDb);
     const events = progressFile
       ? readRows<ProgressRow>(progressFile, 'SELECT * FROM progress ORDER BY id DESC LIMIT 400')
       : undefined;
@@ -319,6 +325,7 @@ export class BoardWatcher {
       byEpic[epic].total += 1;
       if (it.phase === 'DONE') byEpic[epic].done += 1;
     }
+    const decisionsFile = this.sources.source(this.workspaceDir, board.decisionsFile);
     return {
       type: 'boardState',
       project: board.project ?? path.basename(this.workspaceDir),
@@ -327,7 +334,7 @@ export class BoardWatcher {
       recent: (events ?? []).slice(0, RECENT_EVENTS).map(eventView),
       sources: { board: true, claims: claims !== undefined, progress: events !== undefined },
       quota: {
-        claude: claudeQuota(dir && board.runsDir ? path.join(dir, board.runsDir) : undefined, nowS),
+        claude: claudeQuota(this.sources.source(dir, board.runsDir), nowS),
         codex: codexQuota(nowS),
       },
       // The launchers' quota gate decisions (phase QUOTA), newest first.
@@ -337,13 +344,8 @@ export class BoardWatcher {
         .map(eventView),
       summary: { total: view.length, byPhase, byEpic },
       waiting,
-      decisions: board.decisionsFile
-        ? openDecisions(path.join(this.workspaceDir, board.decisionsFile))
-        : [],
-      meeting: latestMeeting(
-        dir && board.meetingsDir ? path.join(dir, board.meetingsDir) : undefined,
-        nowS,
-      ),
+      decisions: decisionsFile ? openDecisions(decisionsFile) : [],
+      meeting: latestMeeting(this.sources.source(dir, board.meetingsDir), nowS),
       autopilot: readAutopilot() as AutopilotState | undefined,
       generatedAt: this.now(),
     };

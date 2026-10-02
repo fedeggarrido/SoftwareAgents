@@ -31,6 +31,10 @@ vi.mock('os', async (importOriginal) => {
   };
 });
 
+vi.mock('fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('fs')>()),
+}));
+
 vi.mock('child_process', () => ({ execFileSync: vi.fn(), spawn: vi.fn() }));
 
 describe('companyControl authorization and containment', () => {
@@ -86,6 +90,78 @@ describe('companyControl authorization and containment', () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['broken YAML', 'brain: [', '/project.yaml'],
+    ['invalid schema', '{}', '/apiVersion'],
+    [
+      'escaping path',
+      JSON.stringify({
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'sample',
+        name: 'Sample',
+        repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
+        brain: { path: '../outside' },
+      }),
+      '/brain/path',
+    ],
+  ])('disables company control for %s even with operator authority', (_name, manifest, field) => {
+    authorize('state.json');
+    fs.mkdirSync(path.join(workspace, '.softwareagents'));
+    fs.writeFileSync(path.join(workspace, '.softwareagents/project.yaml'), manifest);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const write = vi.spyOn(fs, 'writeFileSync');
+    expect(() => configureCompanyControl(workspace)).not.toThrow();
+    expect(autopilotStatePath()).toBeUndefined();
+    expect(readAutopilot()).toBeUndefined();
+    for (const enabled of [true, false]) expect(setAutopilot(enabled)).toContain(field);
+    expect(answerDecision('D1', 'yes')).toContain(field);
+    const send = vi.fn();
+    handleClientMessage({ type: 'companyAutopilot', enabled: true }, send, {
+      store: new AgentStateStore(),
+      cache: null,
+      privileged: true,
+    });
+    expect(send).toHaveBeenCalledWith({
+      type: 'companyNotice',
+      text: expect.stringContaining('invalid .softwareagents/project.yaml'),
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(field));
+    expect(fs.readdirSync(gitDir)).toEqual([]);
+  });
+
+  it('answers decisions from the board selected by project.yaml', () => {
+    fs.mkdirSync(path.join(workspace, '.softwareagents'));
+    fs.mkdirSync(path.join(workspace, 'custom'));
+    fs.writeFileSync(
+      path.join(workspace, '.softwareagents/project.yaml'),
+      JSON.stringify({
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'sample',
+        name: 'Sample',
+        repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
+        brain: { path: '.softwareagents/brain' },
+        legacy: { boardFile: 'custom/board.json' },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(workspace, 'custom/board.json'),
+      JSON.stringify({
+        decisionsFile: 'custom/decisions.json',
+        autopilot: { stateFile: 'custom-state.json' },
+      }),
+    );
+    const inbox = path.join(workspace, 'custom/decisions.json');
+    fs.writeFileSync(inbox, JSON.stringify({ decisions: [{ id: 'opaque', options: ['yes'] }] }));
+    configureCompanyControl(workspace);
+    expect(answerDecision('opaque', 'yes')).toContain('guardada');
+    expect(JSON.parse(fs.readFileSync(inbox, 'utf8')).decisions[0].status).toBe('answered');
+    expect(autopilotStatePath()).toBe(path.join(gitDir, 'custom-state.json'));
   });
 
   it('lets a privileged client pause after authorization is revoked despite changed board argv', () => {

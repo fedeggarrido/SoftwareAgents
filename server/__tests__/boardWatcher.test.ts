@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { BoardWatcher } from '../src/boardWatcher.js';
 
+vi.mock('fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('fs')>()),
+}));
+
 vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('../src/companyControl.js', () => ({ readAutopilot: () => undefined }));
 vi.mock('../src/quotaReader.js', () => ({
@@ -92,6 +96,132 @@ describe('BoardWatcher characterization', () => {
     store.dispose();
     vi.clearAllMocks();
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['broken YAML', 'brain: [', '/project.yaml'],
+    ['invalid schema', '{}', '/apiVersion'],
+    [
+      'escaping path',
+      JSON.stringify({
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'sample',
+        name: 'Sample',
+        repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
+        brain: { path: '../outside' },
+      }),
+      '/brain/path',
+    ],
+  ])('disables the board for %s without writes', (_name, manifest, field) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fs.mkdirSync(path.join(workspace, '.softwareagents'));
+    fs.writeFileSync(path.join(workspace, '.softwareagents/project.yaml'), manifest);
+    const write = vi.spyOn(fs, 'writeFileSync');
+    const send = vi.spyOn(store, 'broadcast');
+    const invalidWatcher = new BoardWatcher(store, workspace);
+    try {
+      expect(() => invalidWatcher.start()).not.toThrow();
+      expect(invalidWatcher.build()).toBeUndefined();
+      expect(send).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(field));
+    } finally {
+      invalidWatcher.dispose();
+      write.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  function bindBoard(boardPath: string | null = 'custom/board.json'): void {
+    fs.mkdirSync(path.join(workspace, '.softwareagents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, '.softwareagents/project.yaml'),
+      JSON.stringify({
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'sample',
+        name: 'Sample',
+        repo: { remote: 'https://example.com/sample.git', defaultBranch: 'main' },
+        brain: { path: '.softwareagents/brain' },
+        ...(boardPath ? { legacy: { boardFile: boardPath } } : {}),
+      }),
+    );
+  }
+
+  it('reads the bound board and keeps task ids opaque', () => {
+    bindBoard();
+    fs.mkdirSync(path.join(workspace, 'custom'));
+    fs.writeFileSync(
+      path.join(workspace, 'custom/board.json'),
+      JSON.stringify({
+        decisionsFile: 'custom/decisions.json',
+        items: [{ id: 'opaque_task', title: 'Bound task' }],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(workspace, 'custom/decisions.json'),
+      JSON.stringify({
+        decisions: [{ id: 'choice', status: 'open', options: ['yes'] }],
+      }),
+    );
+    const bound = new BoardWatcher(store, workspace);
+    expect(bound.build()?.items.map((item) => item.id)).toEqual(['opaque_task']);
+    expect(bound.build()?.decisions?.map((decision) => decision.id)).toEqual(['choice']);
+  });
+
+  it('does not use the default board for a manifest without a legacy binding', () => {
+    bindBoard(null);
+    expect(new BoardWatcher(store, workspace).build()).toBeUndefined();
+  });
+
+  it.skipIf(!DatabaseSync)('reads claims and progress from the bound board', () => {
+    bindBoard('custom/board.json');
+    fs.mkdirSync(path.join(workspace, 'custom'));
+    fs.copyFileSync(boardFile, path.join(workspace, 'custom/board.json'));
+    fs.unlinkSync(boardFile);
+    seedDatabases();
+    const bound = new BoardWatcher(store, workspace, () => nowS * 1000);
+    bound.start();
+    bound.dispose();
+    expect(bound.build()?.sources).toEqual({ board: true, claims: true, progress: true });
+    expect(bound.build()?.items[0].owner?.session).toBe('session-4');
+    expect(bound.build()?.items[0].lastEvent?.detail).toBe('Tests added');
+  });
+
+  it('revalidates the bound board when a directory is replaced by a link', () => {
+    bindBoard('custom/board.json');
+    fs.mkdirSync(path.join(workspace, 'custom'));
+    const bound = new BoardWatcher(store, workspace);
+    const outside = path.join(root, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'board.json'), JSON.stringify({ items: [] }));
+    fs.rmdirSync(path.join(workspace, 'custom'));
+    const link = path.join(workspace, 'custom');
+    fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      expect(bound.build()).toBeUndefined();
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it('rejects escaping paths declared by the bound board', () => {
+    bindBoard('docs/backlog/board.json');
+    fs.writeFileSync(
+      boardFile,
+      JSON.stringify({
+        claimsDb: '../claims.sqlite',
+        progressDb: '../progress.sqlite',
+        decisionsFile: '../decisions.json',
+        items: [],
+      }),
+    );
+    const bound = new BoardWatcher(store, workspace);
+    bound.start();
+    bound.dispose();
+    expect(bound.build()?.sources).toEqual({ board: true, claims: false, progress: false });
+    expect(bound.build()?.decisions).toEqual([]);
   });
 
   it.skipIf(!DatabaseSync).each([

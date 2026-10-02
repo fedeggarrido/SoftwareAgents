@@ -20,6 +20,7 @@ import {
   loadAllFurniture,
   loadAllPets,
 } from './assetReload.js';
+import { loadBoardSelection } from './boardSources.js';
 import { BoardWatcher } from './boardWatcher.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
 import { CodexWatcher } from './codexWatcher.js';
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
     console.error(`[Pixel Agents] ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
+
+  const cwd = process.cwd();
+  const boardSelection = loadBoardSelection(cwd);
 
   // dist/ contains both the CLI bundle and the assets/ + webview/ directories
   const distRoot = __dirname;
@@ -316,7 +320,6 @@ async function main(): Promise<void> {
     }
 
     // Start scanning for external sessions (Claude running in user's terminal)
-    const cwd = process.cwd();
     const dirs = claudeProvider.getSessionDirs?.(cwd);
     if (dirs && dirs[0]) {
       const projectDir = dirs[0];
@@ -344,8 +347,8 @@ async function main(): Promise<void> {
     roleResolver.start();
 
     // The company's backlog (docs/backlog/board.json + claims + progress), if any.
-    configureCompanyControl(cwd);
-    const boardWatcher = new BoardWatcher(store, cwd);
+    configureCompanyControl(cwd, boardSelection);
+    const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
 
     // The URL the operator opens has to be REACHABLE (a wildcard bind address

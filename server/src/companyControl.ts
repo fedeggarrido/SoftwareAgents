@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
 import { resolveInside } from './pathGuard.js';
 
@@ -21,17 +22,21 @@ interface BoardConfig {
 }
 
 let workspace: string | undefined;
+let sources: BoardSources | undefined;
 
-export function configureCompanyControl(dir: string): void {
-  workspace = path.resolve(dir);
+export function configureCompanyControl(dir: string, selection?: BoardSelection): void {
+  const resolved = path.resolve(dir);
+  const binding = new BoardSources(resolved, selection ?? loadBoardSelection(resolved));
+  workspace = resolved;
+  sources = binding;
 }
 
 function boardConfig(): BoardConfig | undefined {
   if (!workspace) return undefined;
   try {
-    return JSON.parse(
-      fs.readFileSync(path.join(workspace, 'docs', 'backlog', 'board.json'), 'utf-8'),
-    ) as BoardConfig;
+    const file = sources?.boardFile();
+    if (!file) return undefined;
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as BoardConfig;
   } catch {
     return undefined;
   }
@@ -67,6 +72,7 @@ function alive(pid: unknown): boolean {
 }
 
 function statePath(cfg: BoardConfig | undefined): string | undefined {
+  if (sources?.selection.kind === 'invalid') return undefined;
   if (!workspace) return undefined;
   const file =
     readConfig().companyAutopilot[companyAutopilotKey(workspace)]?.stateFile ??
@@ -97,6 +103,7 @@ export function readAutopilot(): Record<string, unknown> | undefined {
 }
 
 export function setAutopilot(enabled: boolean): string {
+  if (sources?.selection.kind === 'invalid') return sources.selection.notice;
   const cfg = boardConfig();
   if (!workspace) return 'Este workspace no declara piloto automático.';
   const authorized = readConfig().companyAutopilot[companyAutopilotKey(workspace)];
@@ -144,6 +151,7 @@ export function setAutopilot(enabled: boolean): string {
 }
 
 export function answerDecision(id: string, answer: string): string {
+  if (sources?.selection.kind === 'invalid') return sources.selection.notice;
   const cfg = boardConfig();
   if (!workspace || !cfg?.decisionsFile) return 'Este workspace no declara bandeja de decisiones.';
   let file: string;

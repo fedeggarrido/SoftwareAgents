@@ -48,6 +48,17 @@ describe('specialistRole', () => {
 });
 
 describe('roleFromBrief', () => {
+  it.each(['.', ',', ';', ':', ')', ']', '\u00bb', '"', "'"])(
+    'trims closing punctuation %s from opaque task identifiers',
+    (closing) => {
+      expect(
+        roleFromBrief('Act\u00faa como code-reviewer Tarea: opaque_task' + closing, 'codex').detail,
+      ).toBe('tarea opaque_task');
+      expect(roleFromBrief('Act\u00faa como code-reviewer --task (SA-012),', 'codex').detail).toBe(
+        'tarea SA-012',
+      );
+    },
+  );
   it('recognises the manager of any project', () => {
     expect(roleFromBrief('Usa $fundtrinsic-company-manager y revisa la cola', 'codex')).toEqual({
       label: 'Manager',
@@ -83,11 +94,14 @@ describe('roleFromBrief', () => {
     expect(
       roleFromBrief('Actúa como fundtrinsic-code-reviewer. Tarea: FT-OPP-022', 'claude').detail,
     ).toBe('tarea FT-OPP-022');
-    // A template placeholder is not a task.
+    // Task identifiers are opaque, including values without numeric suffixes.
     expect(
       roleFromBrief('Actúa como fundtrinsic-acceptance-reviewer --task FT-OPP-NNN', 'claude')
         .detail,
-    ).toBeUndefined();
+    ).toBe('tarea FT-OPP-NNN');
+    expect(roleFromBrief('Actúa como code-reviewer --task opaque_task', 'codex').detail).toBe(
+      'tarea opaque_task',
+    );
   });
 
   it('falls back to a session with the owner', () => {

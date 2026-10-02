@@ -106,7 +106,10 @@ export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'c
   // The task a specialist was given, when its brief names one explicitly
   // ("Tarea: FT-OPP-001", or the progress command's "--task FT-OPP-001").
   const meeting = /Reunión:\s*([A-Za-z0-9_-]+)/.exec(text)?.[1];
-  const briefTask = /(?:Tarea:|--task)\s+([A-Za-z0-9]+-[A-Za-z0-9-]*\d)\b/.exec(text)?.[1];
+  const briefTask = /(?:Tarea:|--task)\s+([^\s]+)/
+    .exec(text)?.[1]
+    ?.replace(/[.,;:)\]\u00bb"']+$/, '')
+    .replace(/^\(/, '');
   const specialist = specialistRole(
     named?.toLowerCase(),
     meeting ? `reunión ${meeting}` : briefTask ? `tarea ${briefTask}` : undefined,

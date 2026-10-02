@@ -92,7 +92,23 @@ export class ExecutionRegistry {
         fs.mkdirSync(path.dirname(runPath), { recursive: true });
         fs.closeSync(fs.openSync(resolveInside(registry.root, run), 'wx', 0o600));
         const handle = inner.start(req);
+        if (handle.sessionId) {
+          registry.append('softwareagents/executions.jsonl', {
+            executionId: req.executionId,
+            projectId: req.projectId,
+            role: req.role,
+            taskKey: req.taskKey,
+            executor: inner.id,
+            model: req.model ?? null,
+            sessionId: handle.sessionId,
+            pid: 0,
+            startedAt: new Date().toISOString(),
+            promptHash: createHash('sha256').update(req.prompt).digest('hex'),
+            baseSha,
+          });
+        }
         return {
+          sessionId: handle.sessionId,
           cancel: () => handle.cancel(),
           events: (async function* () {
             try {

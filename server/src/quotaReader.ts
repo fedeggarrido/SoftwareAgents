@@ -94,16 +94,7 @@ export function claudeQuota(runsDir: string | undefined, nowS: number): Provider
       } catch {
         continue;
       }
-      const resetsAt = typeof info.resetsAt === 'number' ? info.resetsAt : null;
-      const util = typeof info.utilization === 'number' ? Math.round(info.utilization * 100) : null;
-      const observedAt = Math.round(fs.statSync(file).mtimeMs / 1000);
-      if (resetsAt !== null && resetsAt <= nowS) {
-        return { provider: 'claude', status: 'reset', usedPercent: null, resetsAt, observedAt };
-      }
-      const raw = String(info.status ?? '');
-      const status =
-        raw === 'rejected' ? 'rejected' : raw === 'allowed_warning' ? 'warning' : 'allowed';
-      return { provider: 'claude', status, usedPercent: util, resetsAt, observedAt };
+      return parseClaudeRateLimit(info, nowS, Math.round(fs.statSync(file).mtimeMs / 1000));
     }
   }
   return unknown('claude');
@@ -159,4 +150,22 @@ export function codexQuota(
     }
   }
   return unknown('codex');
+}
+
+/** Shared normalization for headless stream events and observed run logs. */
+export function parseClaudeRateLimit(
+  info: Record<string, unknown>,
+  nowS: number,
+  observedAt: number,
+): ProviderQuota {
+  const resetsAt = typeof info.resetsAt === 'number' ? info.resetsAt : null;
+  const util = typeof info.utilization === 'number' ? Math.round(info.utilization * 100) : null;
+
+  if (resetsAt !== null && resetsAt <= nowS) {
+    return { provider: 'claude', status: 'reset', usedPercent: null, resetsAt, observedAt };
+  }
+  const raw = String(info.status ?? '');
+  const status =
+    raw === 'rejected' ? 'rejected' : raw === 'allowed_warning' ? 'warning' : 'allowed';
+  return { provider: 'claude', status, usedPercent: util, resetsAt, observedAt };
 }

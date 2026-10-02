@@ -22,6 +22,8 @@ export type ExecutionEvent =
   | { type: 'finished'; exitCode: number; resultSummary: string };
 
 export interface ExecutionHandle {
+  /** Reserved before a lazy CLI launch; registry persists it before draining events. */
+  readonly sessionId?: string;
   /** One consumer must drain events through finished; persistence precedes delivery. */
   readonly events: AsyncIterable<ExecutionEvent>;
   /** Idempotent; harmless after finished. Cancellation is reported by finished. */

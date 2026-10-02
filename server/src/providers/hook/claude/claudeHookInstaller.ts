@@ -37,7 +37,7 @@ function getClaudeSettingsPath(): string {
 }
 
 /** Returns the destination path for the hook script (~/.pixel-agents/hooks/claude-hook.js). */
-function getHookScriptPath(): string {
+export function getHookScriptPath(): string {
   return path.join(os.homedir(), HOOK_SCRIPTS_DIR, CLAUDE_HOOK_SCRIPT_NAME);
 }
 
@@ -533,13 +533,13 @@ function makeHookCommand(): string {
 }
 
 /** Create a hook entry object for Claude's settings.json. Matcher is empty (catch-all). */
-function makeHookEntry(): ClaudeHookEntry {
+export function makeHookEntry(command = makeHookCommand()): ClaudeHookEntry {
   return {
     matcher: '',
     hooks: [
       {
         type: 'command',
-        command: makeHookCommand(),
+        command,
         timeout: 5,
       },
     ],

@@ -11,6 +11,28 @@ if (!valid) {
   process.stderr.write('Expected claude -p --output-format stream-json or codex exec --json\n');
   process.exitCode = 2;
 } else {
+  if (args.includes('--inspect')) {
+    const fs = require('fs');
+    process.stdout.write(
+      JSON.stringify({
+        args,
+        cwd: process.cwd(),
+        settings: JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1])),
+        mcp: JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1])),
+      }) + '\n',
+    );
+    return;
+  }
+  if (args.includes('--child')) {
+    const child = require('child_process').spawn(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 3000)'],
+      { stdio: 'ignore' },
+    );
+    process.stdout.write(String(child.pid) + '\n');
+    setTimeout(() => {}, 3000);
+    return;
+  }
   const records =
     executor === 'claude'
       ? [
@@ -33,7 +55,9 @@ if (!valid) {
             type: 'rate_limit_event',
             rate_limit_info: {
               status: 'rejected',
-              resetsAt: 1767225601,
+              resetsAt: args.includes('--future-limit')
+                ? Math.ceil(Date.now() / 1000) + 60
+                : 1767225601,
               rateLimitType: 'five_hour',
             },
           },

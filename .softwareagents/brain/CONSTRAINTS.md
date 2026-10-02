@@ -30,3 +30,29 @@ SA-032 midió el fixture de bootstrap de worktree: **935 ms en frío y 70 ms con
 Los `node_modules` de los worktrees son junctions al repo principal: no instalar dependencias, escribir en ellas ni borrarlas recursivamente. Aplicar AGENTS.md, guardar sin BOM y ejecutar Prettier, ESLint cuando aplique, `npm run check-types` y pruebas pertinentes. En tests usar TEMP/TMP dentro del worktree y limpiar al terminar; aislar `os.homedir()` para no escribir en `~/.pixel-agents` o `~/.claude` reales.
 
 Conservar Fastify, AsyncAPI, React/Vite, canvas y las capas existentes. No mover ADRs ni duplicar CLAUDE.md/CONTEXT.md. Secretos, transcripts, estado operativo mutable y config del Operator no se versionan en el brain.
+
+## ClaudeCliExecutor (SA-033)
+
+Mínimo soportado: **Claude Code 2.1.161**. Verificados `claude --version` y
+`claude --help` el 2026-10-02: `-p --output-format stream-json --verbose`,
+`--session-id`, `--strict-mcp-config`, `--mcp-config`, `--settings`,
+`--setting-sources`, `--allowedTools`, `--tools`, `--permission-mode`,
+`--no-chrome`, `--disable-slash-commands` y `--model`. No se usa `--max-turns`
+(no figura en esa ayuda); timeout externo y cancelación del árbol por PID.
+
+El perfil provisional Developer usa `dontAsk` y `Read,Glob,Grep,Edit,Write`;
+Bash, herramientas de red y delegación quedan fuera hasta el compilador SA-020.
+No acepta flags arbitrarios ni modos de bypass. MCP vacío con configuración
+estricta; `--setting-sources ""` excluye user/project/local y los hooks propios
+se generan con el instalador. El directorio temporal de settings debe estar
+fuera del worktree y bajo control del Operator. Esto no confina el filesystem.
+
+La reserva del UUID se persiste en executions antes de consumir eventos y
+lanzar el proceso. `pid: 0` identifica la reserva pendiente; el registro started
+posterior contiene el PID efectivo. Los consumidores deben usar el último
+registro por Session. El prompt viaja por stdin, no por argv.
+
+No se cambia HOME/CLAUDE_CONFIG_DIR ni se usa `--bare` (su ayuda indica que
+omite OAuth/keychain). La autenticación por suscripción y la recepción de hooks
+en Pixel Office requieren smoke real por el revisor; no se ha consumido cuota
+para validarlos en el sandbox. La ayuda acredita los flags, no ese resultado.

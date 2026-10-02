@@ -529,6 +529,7 @@ function App() {
       />
 
       <CompanyHud
+        agents={agents}
         officeState={officeState}
         onOpenBacklog={() => setIsBacklogOpen(true)}
         onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}

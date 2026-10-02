@@ -1,5 +1,17 @@
 import type { BoardState, ProviderQuota } from '../../../core/src/messages.js';
 import { QUOTA_COLORS } from '../constants.js';
+import { getProviderLabel } from './toolUtils.js';
+
+/** Count tracked office sessions, including idle ones; subtask characters are not sessions. */
+export function visibleProviderCounts(agents: readonly number[]) {
+  const counts = { claude: 0, codex: 0 };
+  for (const id of new Set(agents)) {
+    const label = getProviderLabel(id);
+    if (label === 'Claude') counts.claude++;
+    else if (label.startsWith('Codex')) counts.codex++;
+  }
+  return counts;
+}
 
 function clock(epochS: number | null | undefined): string {
   if (!epochS) return '—';
@@ -58,7 +70,7 @@ export function capacityView(q: ProviderQuota, running: number) {
     ...describeQuota(q),
     provenance:
       running +
-      ' agentes en marcha · Fuente: ' +
+      (running === 1 ? ' agente en marcha · Fuente: ' : ' agentes en marcha · Fuente: ') +
       (q.capacity?.source ?? 'estimated') +
       ' · Confianza: ' +
       (q.capacity?.confidence ?? 'unknown'),

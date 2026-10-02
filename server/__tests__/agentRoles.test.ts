@@ -255,6 +255,34 @@ describe('worktree task labels', () => {
 });
 
 describe('RoleResolver', () => {
+  it('labels a main-checkout Claude session without a readable brief as owner, then retries', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roles-'));
+    try {
+      const file = path.join(dir, 'main.jsonl');
+      fs.writeFileSync(
+        file,
+        line({ type: 'user', cwd: 'D:/repo', isMeta: true, message: { content: '<context>' } }),
+      );
+      const store = new AgentStateStore();
+      store.broadcast = () => {};
+      store.set(1, { id: 1, sessionId: 'main', jsonlFile: file } as AgentState);
+      const resolver = new RoleResolver(store);
+      resolver.tick();
+      expect(store.get(1)?.role).toEqual({ label: 'Due\u00f1o', department: 'Sesiones' });
+      fs.appendFileSync(
+        file,
+        line({
+          type: 'user',
+          cwd: 'D:/repo',
+          message: { content: 'Act\u00faa como code-reviewer' },
+        }),
+      );
+      resolver.tick();
+      expect(store.get(1)?.role?.label).toBe('QA C\u00f3digo');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('assigns and broadcasts a role once, skipping sub-agent characters', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roles-'));
     try {

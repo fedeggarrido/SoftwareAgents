@@ -333,7 +333,7 @@ export class RoleResolver {
                 : { label: 'DEV', department: 'Ingeniería' }),
               detail: `tarea ${task}`,
             }
-          : base;
+          : (base ?? OWNER_SESSION);
       if (
         !role ||
         (agent.role?.label === role.label &&

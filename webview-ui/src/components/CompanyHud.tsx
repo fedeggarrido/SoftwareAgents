@@ -3,9 +3,8 @@ import { useEffect, useState } from 'react';
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
-import { capacityHudView, capacityView } from '../office/capacityView.js';
+import { capacityHudView, capacityView, visibleProviderCounts } from '../office/capacityView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
-import { getProviderLabel } from '../office/toolUtils.js';
 import { transport } from '../transport/index.js';
 
 function clock(epochS: number | null | undefined): string {
@@ -74,10 +73,16 @@ interface CompanyHudProps {
   onOpenDecisions: () => void;
   onOpenBacklog: () => void;
   officeState: OfficeState;
+  agents: number[];
 }
 
 /** Project progress, autopilot, owner decisions and provider availability. */
-export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: CompanyHudProps) {
+export function CompanyHud({
+  onOpenDecisions,
+  onOpenBacklog,
+  officeState,
+  agents,
+}: CompanyHudProps) {
   const board = useBoard();
   const notice = useCompanyNotice();
   const [open, setOpen] = useState(false);
@@ -89,39 +94,33 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
   if (!board) return null;
 
   const capacity = capacityHudView(board);
+  const counts = visibleProviderCounts(agents);
   if (capacity.minimal) {
     return (
       <div
-        className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(600px,calc(100vw-120px))] p-8 flex flex-col gap-6"
+        className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(460px,calc(100vw-120px))] p-8 flex flex-col gap-6"
         data-testid="company-hud"
       >
         <div className="flex justify-between gap-8 text-xs">
-          <span>{board.project}</span>
+          <button
+            className="min-w-0 truncate text-left cursor-pointer"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            title={open ? 'Ocultar detalles' : 'Ver detalles de la oficina'}
+          >
+            {open ? '▾' : '▸'} {board.project}
+          </button>
           <button className={actionClass} onClick={onOpenBacklog}>
             Backlog
           </button>
         </div>
-        <div className="text-2xs text-text-muted">{capacity.title}</div>
-        {board.quota && (
+        <div className="text-2xs text-text-muted">
+          Claude {counts.claude} · Codex {counts.codex} · {capacity.title}
+        </div>
+        {open && board.quota && (
           <>
-            <QuotaRow
-              name="Claude"
-              q={board.quota.claude}
-              running={
-                [...officeState.characters.values()].filter(
-                  (c) => c.isActive && c.id > 0 && getProviderLabel(c.id) === 'Claude',
-                ).length
-              }
-            />
-            <QuotaRow
-              name="Codex"
-              q={board.quota.codex}
-              running={
-                [...officeState.characters.values()].filter(
-                  (c) => c.isActive && c.id > 0 && getProviderLabel(c.id).startsWith('Codex'),
-                ).length
-              }
-            />
+            <QuotaRow name="Claude" q={board.quota.claude} running={counts.claude} />
+            <QuotaRow name="Codex" q={board.quota.codex} running={counts.codex} />
           </>
         )}
       </div>
@@ -146,7 +145,7 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
 
   return (
     <div
-      className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(600px,calc(100vw-120px))] min-w-0 p-8 flex flex-col gap-6"
+      className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(460px,calc(100vw-120px))] min-w-0 p-8 flex flex-col gap-6"
       data-testid="company-hud"
     >
       <div className="flex items-center justify-between gap-8 min-w-0">
@@ -239,24 +238,8 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
           {board.quota && (
             <div className="flex flex-col gap-4">
               <div className="text-2xs text-text-muted">{capacity.title}</div>
-              <QuotaRow
-                name="Claude"
-                q={board.quota.claude}
-                running={
-                  [...officeState.characters.values()].filter(
-                    (c) => c.isActive && c.id > 0 && getProviderLabel(c.id) === 'Claude',
-                  ).length
-                }
-              />
-              <QuotaRow
-                name="Codex"
-                q={board.quota.codex}
-                running={
-                  [...officeState.characters.values()].filter(
-                    (c) => c.isActive && c.id > 0 && getProviderLabel(c.id).startsWith('Codex'),
-                  ).length
-                }
-              />
+              <QuotaRow name="Claude" q={board.quota.claude} running={counts.claude} />
+              <QuotaRow name="Codex" q={board.quota.codex} running={counts.codex} />
             </div>
           )}
         </div>

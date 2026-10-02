@@ -2,7 +2,23 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProviderQuota } from '../../core/src/messages.js';
 import { QUOTA_COLORS } from '../src/constants.js';
-import { capacityView } from '../src/office/capacityView.js';
+import { capacityView, visibleProviderCounts } from '../src/office/capacityView.js';
+import { clearProviderLabel, setProviderLabel } from '../src/office/toolUtils.js';
+
+describe('visible provider counts', () => {
+  it('counts tracked sessions regardless of turn activity, excluding untracked labels', () => {
+    setProviderLabel(2, 'Codex');
+    setProviderLabel(3, 'Codex ? worker');
+    setProviderLabel(4, 'Other');
+    setProviderLabel(99, 'Codex');
+    try {
+      expect(visibleProviderCounts([1, 2, 3, 4, 1])).toEqual({ claude: 1, codex: 2 });
+      expect(visibleProviderCounts([])).toEqual({ claude: 0, codex: 0 });
+    } finally {
+      [2, 3, 4, 99].forEach(clearProviderLabel);
+    }
+  });
+});
 
 describe('capacity view', () => {
   const quota: ProviderQuota = {
@@ -20,6 +36,15 @@ describe('capacity view', () => {
       windows: [{ kind: 'five_hour', usedRatio: null, resetsAt: 200 }],
     },
   };
+  it.each([
+    [0, 'agentes'],
+    [1, 'agente'],
+    [2, 'agentes'],
+  ])('uses the correct noun for %s sessions', (count, noun) => {
+    expect(capacityView(quota, Number(count)).provenance).toContain(
+      count + ' ' + noun + ' en marcha',
+    );
+  });
   it('shows provenance, confidence, running sessions and unmeasured windows', () => {
     const view = capacityView(quota, 2);
     expect(view.status).toBe('Sana');

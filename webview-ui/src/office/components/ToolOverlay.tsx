@@ -232,7 +232,7 @@ export function ToolOverlay({
             <div
               key={id}
               className="absolute -translate-x-1/2"
-              style={{ left: screenX, top: screenY - 16, pointerEvents: 'none', zIndex: 41 }}
+              style={{ left: screenX, top: screenY - 16, pointerEvents: 'none', zIndex: 20 }}
               data-testid="agent-overlay"
               data-agent-id={id}
             >
@@ -275,7 +275,7 @@ export function ToolOverlay({
               top: screenY - (hasExtraLines ? 34 : 28),
               pointerEvents: isSelected ? 'auto' : 'none',
               opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
-              zIndex: isSelected ? 42 : 41,
+              zIndex: isSelected ? 21 : 20,
             }}
             data-testid="agent-overlay"
             data-agent-id={id}

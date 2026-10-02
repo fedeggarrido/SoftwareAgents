@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { BoardWatcher } from '../src/boardWatcher.js';
+import { claudeQuota } from '../src/quotaReader.js';
 
 vi.mock('fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('fs')>()),
@@ -15,7 +16,7 @@ vi.mock('fs', async (importOriginal) => ({
 vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('../src/companyControl.js', () => ({ readAutopilot: () => undefined }));
 vi.mock('../src/quotaReader.js', () => ({
-  claudeQuota: () => undefined,
+  claudeQuota: vi.fn(() => undefined),
   codexQuota: () => undefined,
 }));
 
@@ -149,6 +150,21 @@ describe('BoardWatcher characterization', () => {
     );
   }
 
+  it('uses registry runs for a bound project and retains the legacy source', () => {
+    const board = JSON.parse(fs.readFileSync(boardFile, 'utf8'));
+    board.runsDir = 'legacy-runs';
+    fs.writeFileSync(boardFile, JSON.stringify(board));
+    watcher.build();
+    expect(claudeQuota).toHaveBeenLastCalledWith(path.join(commonDir, 'legacy-runs'), nowS);
+    bindBoard('docs/backlog/board.json');
+    const bound = new BoardWatcher(store, workspace, () => nowS * 1000);
+    bound.start();
+    bound.dispose();
+    expect(claudeQuota).toHaveBeenLastCalledWith(
+      path.join(commonDir, 'softwareagents', 'runs'),
+      nowS,
+    );
+  });
   it('reads the bound board and keeps task ids opaque', () => {
     bindBoard();
     fs.mkdirSync(path.join(workspace, 'custom'));

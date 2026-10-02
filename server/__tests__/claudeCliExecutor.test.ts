@@ -71,7 +71,14 @@ it('reserves UUID before launch and normalizes cumulative usage and quota', asyn
   expect(events.filter((event) => event.type === 'usage')).toEqual([
     { type: 'usage', inputTokens: 10, outputTokens: 5 },
   ]);
-  expect(events).toContainEqual({ type: 'rateLimit', retryAfterSec: 0, message: 'reset' });
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'rateLimit',
+      retryAfterSec: 0,
+      message: 'reset',
+      capacity: expect.objectContaining({ source: 'claude_stream_json', confidence: 'unknown' }),
+    }),
+  );
   expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 0, resultSummary: 'Fake result' });
   expect(fs.readdirSync(path.join(root, 'runtime'))).toEqual([]);
 });

@@ -334,7 +334,7 @@ export class BoardWatcher {
       recent: (events ?? []).slice(0, RECENT_EVENTS).map(eventView),
       sources: { board: true, claims: claims !== undefined, progress: events !== undefined },
       quota: {
-        claude: claudeQuota(this.sources.source(dir, board.runsDir), nowS),
+        claude: claudeQuota(this.sources.runsDir(dir, board.runsDir), nowS),
         codex: codexQuota(nowS),
       },
       // The launchers' quota gate decisions (phase QUOTA), newest first.

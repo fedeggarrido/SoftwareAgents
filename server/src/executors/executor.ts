@@ -1,3 +1,4 @@
+import type { CapacitySnapshot } from '../../../core/src/capacity.js';
 export type ExecutorId = 'claude' | 'codex';
 
 /** Already compiled input; policy and prompt compilation belong to the caller. */
@@ -17,7 +18,7 @@ export type ExecutionEvent =
   | { type: 'started'; sessionId: string; pid: number; startedAt: string }
   | { type: 'toolUse'; toolId: string; toolName: string; input: unknown }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
-  | { type: 'rateLimit'; retryAfterSec: number; message: string }
+  | { type: 'rateLimit'; retryAfterSec: number; message: string; capacity?: CapacitySnapshot }
   | { type: 'output'; text: string; stream: 'stdout' | 'stderr' }
   | { type: 'finished'; exitCode: number; resultSummary: string };
 

@@ -385,12 +385,34 @@ export interface ProviderQuota {
   usedPercent: number | null;
   resetsAt: number | null;
   observedAt: number | null;
+  capacity?: CapacitySnapshot;
   weekly?: QuotaWindow;
 }
 
 export type QuotaProvider = 'claude' | 'codex';
 
 export type QuotaStatus = 'allowed' | 'warning' | 'rejected' | 'reset' | 'unknown';
+
+export interface CapacitySnapshot {
+  provider: QuotaProvider;
+  status: QuotaStatus;
+  windows: CapacityWindow[];
+  source: CapacitySource;
+  confidence: CapacityConfidence;
+  observedAt: number | null;
+}
+
+export interface CapacityWindow {
+  kind: CapacityWindowKind;
+  usedRatio: number | null;
+  resetsAt: number | null;
+}
+
+export type CapacityWindowKind = 'five_hour' | 'weekly' | 'other';
+
+export type CapacitySource = 'claude_stream_json' | 'codex_session_log' | 'estimated';
+
+export type CapacityConfidence = 'exact' | 'high' | 'low' | 'unknown';
 
 export interface QuotaWindow {
   usedPercent: number | null;

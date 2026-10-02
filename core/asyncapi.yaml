@@ -1316,6 +1316,47 @@ components:
           type: array
           items:
             type: number
+    CapacitySource:
+      type: string
+      enum: [claude_stream_json, codex_session_log, estimated]
+    CapacityConfidence:
+      type: string
+      enum: [exact, high, low, unknown]
+    CapacityWindowKind:
+      type: string
+      enum: [five_hour, weekly, other]
+    CapacitySnapshot:
+      type: object
+      additionalProperties: false
+      required: [provider, status, windows, source, confidence, observedAt]
+      properties:
+        provider:
+          $ref: '#/components/schemas/QuotaProvider'
+        status:
+          $ref: '#/components/schemas/QuotaStatus'
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CapacityWindow'
+        source:
+          $ref: '#/components/schemas/CapacitySource'
+        confidence:
+          $ref: '#/components/schemas/CapacityConfidence'
+        observedAt:
+          type: [number, 'null']
+    CapacityWindow:
+      type: object
+      additionalProperties: false
+      required: [kind, usedRatio, resetsAt]
+      properties:
+        kind:
+          $ref: '#/components/schemas/CapacityWindowKind'
+        usedRatio:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+        resetsAt:
+          type: [number, 'null']
     ProviderQuota:
       type: object
       additionalProperties: false
@@ -1342,6 +1383,8 @@ components:
           type:
             - number
             - 'null'
+        capacity:
+          $ref: '#/components/schemas/CapacitySnapshot'
         weekly:
           $ref: '#/components/schemas/QuotaWindow'
     MeetingLine:

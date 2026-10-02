@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { CapacitySnapshot } from '../../core/src/capacity.js';
+
 /**
  * Last observed quota of each provider. Mirrors the company's own gate
  * (scripts/<project>_quota.py) so the office and the launchers agree:
@@ -26,6 +28,7 @@ export interface ProviderQuota {
   resetsAt: number | null;
   observedAt: number | null;
   weekly?: QuotaWindow;
+  capacity?: CapacitySnapshot;
 }
 
 function tailLines(file: string, maxBytes: number): string[] {
@@ -72,25 +75,88 @@ function newestFiles(dir: string, limit: number, recursive = false): string[] {
     .map((x) => x.file);
 }
 
-const unknown = (provider: 'claude' | 'codex'): ProviderQuota => ({
-  provider,
-  status: 'unknown',
-  usedPercent: null,
-  resetsAt: null,
-  observedAt: null,
-});
+function capacity(
+  q: ProviderQuota,
+  kind: 'five_hour' | 'weekly' | 'other' = 'other',
+): ProviderQuota {
+  q.capacity = {
+    provider: q.provider,
+    status: q.status,
+    observedAt: q.observedAt,
+    source:
+      q.status === 'unknown'
+        ? 'estimated'
+        : q.provider === 'claude'
+          ? 'claude_stream_json'
+          : 'codex_session_log',
+    confidence:
+      q.status === 'unknown' || q.status === 'reset'
+        ? 'unknown'
+        : q.usedPercent === null
+          ? 'low'
+          : 'high',
+    windows:
+      q.status === 'unknown'
+        ? []
+        : [
+            {
+              kind,
+              usedRatio: q.usedPercent === null ? null : q.usedPercent / 100,
+              resetsAt: q.resetsAt,
+            },
+            ...(q.weekly
+              ? [
+                  {
+                    kind: 'weekly' as const,
+                    usedRatio: q.weekly.usedPercent === null ? null : q.weekly.usedPercent / 100,
+                    resetsAt: q.weekly.resetsAt,
+                  },
+                ]
+              : []),
+          ],
+  };
+  return q;
+}
+const unknown = (provider: 'claude' | 'codex'): ProviderQuota =>
+  capacity({
+    provider,
+    status: 'unknown',
+    usedPercent: null,
+    resetsAt: null,
+    observedAt: null,
+  });
 
 export function claudeQuota(runsDir: string | undefined, nowS: number): ProviderQuota {
   if (!runsDir) return unknown('claude');
   for (const file of newestFiles(runsDir, 30)) {
     const lines = tailLines(file, 2_000_000);
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].includes('"rate_limit_event"')) continue;
+      if (!lines[i].includes('"rate_limit_event"') && !lines[i].includes('"rateLimit"')) continue;
       let info: Record<string, unknown>;
       try {
-        info =
-          (JSON.parse(lines[i]) as { rate_limit_info?: Record<string, unknown> }).rate_limit_info ??
-          {};
+        const record = JSON.parse(lines[i]);
+        if (record.type === 'rateLimit') {
+          const c = record.capacity;
+          const observed =
+            typeof c?.observedAt === 'number' && Number.isFinite(c.observedAt)
+              ? c.observedAt
+              : Math.round(fs.statSync(file).mtimeMs / 1000);
+          const status = c?.status ?? record.message;
+          if (!['allowed', 'warning', 'rejected', 'reset'].includes(status)) continue;
+          info = {
+            status: status === 'warning' ? 'allowed_warning' : status,
+            utilization: c?.windows?.[0]?.usedRatio,
+            rateLimitType: c?.windows?.[0]?.kind === 'weekly' ? 'seven_day' : c?.windows?.[0]?.kind,
+            resetsAt:
+              c?.windows?.[0]?.resetsAt ??
+              (record.retryAfterSec > 0 ? observed + record.retryAfterSec : null),
+          };
+          const q = parseClaudeRateLimit(info, nowS, observed);
+          if (!c) q.capacity!.confidence = q.status === 'reset' ? 'unknown' : 'low';
+          return q;
+        }
+        if (record.type !== 'rate_limit_event') continue;
+        info = record.rate_limit_info ?? {};
       } catch {
         continue;
       }
@@ -120,10 +186,18 @@ export function codexQuota(
       if (!p) continue;
       const win = (w: Record<string, number> | undefined): QuotaWindow | undefined => {
         if (!w) return undefined;
-        const resetsAt = typeof w.resets_at === 'number' ? w.resets_at : null;
+        const resetsAt =
+          typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) ? w.resets_at : null;
         const reset = resetsAt !== null && resetsAt <= nowS;
         return {
-          usedPercent: reset ? null : (w.used_percent ?? null),
+          usedPercent: reset
+            ? null
+            : typeof w.used_percent === 'number' &&
+                Number.isFinite(w.used_percent) &&
+                w.used_percent >= 0 &&
+                w.used_percent <= 100
+              ? w.used_percent
+              : null,
           resetsAt,
           windowMinutes: w.window_minutes,
         };
@@ -134,19 +208,24 @@ export function codexQuota(
       const exhausted = (primary.usedPercent ?? 0) >= 100 || (weekly?.usedPercent ?? 0) >= 100;
       const status = exhausted
         ? 'rejected'
-        : primary.usedPercent === null
-          ? 'reset'
-          : primary.usedPercent >= 90
-            ? 'warning'
+        : (primary.usedPercent ?? 0) >= 90 || (weekly?.usedPercent ?? 0) >= 90
+          ? 'warning'
+          : primary.usedPercent === null
+            ? primary.resetsAt !== null && primary.resetsAt <= nowS
+              ? 'reset'
+              : 'unknown'
             : 'allowed';
-      return {
-        provider: 'codex',
-        status,
-        usedPercent: primary.usedPercent,
-        resetsAt: primary.resetsAt,
-        observedAt,
-        weekly,
-      };
+      return capacity(
+        {
+          provider: 'codex',
+          status,
+          usedPercent: primary.usedPercent,
+          resetsAt: primary.resetsAt,
+          observedAt,
+          weekly,
+        },
+        p.window_minutes === 300 ? 'five_hour' : 'other',
+      );
     }
   }
   return unknown('codex');
@@ -158,14 +237,43 @@ export function parseClaudeRateLimit(
   nowS: number,
   observedAt: number,
 ): ProviderQuota {
-  const resetsAt = typeof info.resetsAt === 'number' ? info.resetsAt : null;
-  const util = typeof info.utilization === 'number' ? Math.round(info.utilization * 100) : null;
+  const resetsAt =
+    typeof info.resetsAt === 'number' && Number.isFinite(info.resetsAt) ? info.resetsAt : null;
+  const util =
+    typeof info.utilization === 'number' &&
+    Number.isFinite(info.utilization) &&
+    info.utilization >= 0 &&
+    info.utilization <= 1
+      ? Math.round(info.utilization * 100)
+      : null;
 
-  if (resetsAt !== null && resetsAt <= nowS) {
-    return { provider: 'claude', status: 'reset', usedPercent: null, resetsAt, observedAt };
-  }
   const raw = String(info.status ?? '');
+  const reportedStatus =
+    raw === 'rejected'
+      ? 'rejected'
+      : raw === 'allowed_warning' || raw === 'warning'
+        ? 'warning'
+        : raw === 'allowed'
+          ? 'allowed'
+          : raw === 'reset'
+            ? 'reset'
+            : 'unknown';
   const status =
-    raw === 'rejected' ? 'rejected' : raw === 'allowed_warning' ? 'warning' : 'allowed';
-  return { provider: 'claude', status, usedPercent: util, resetsAt, observedAt };
+    reportedStatus !== 'unknown' && resetsAt !== null && resetsAt <= nowS
+      ? 'reset'
+      : reportedStatus;
+  return capacity(
+    {
+      provider: 'claude',
+      status,
+      usedPercent: status === 'allowed' || status === 'unknown' || status === 'reset' ? null : util,
+      resetsAt,
+      observedAt,
+    },
+    info.rateLimitType === 'five_hour'
+      ? 'five_hour'
+      : info.rateLimitType === 'seven_day'
+        ? 'weekly'
+        : 'other',
+  );
 }

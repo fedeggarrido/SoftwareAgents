@@ -216,6 +216,7 @@ export class ClaudeCliExecutor implements Executor {
                         ? Math.max(0, Math.ceil(quota.resetsAt - now))
                         : 0,
                     message: quota.status,
+                    capacity: quota.capacity,
                   });
                 }
               } catch {

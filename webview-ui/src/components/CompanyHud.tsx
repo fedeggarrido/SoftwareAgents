@@ -4,6 +4,7 @@ import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import { getProviderLabel } from '../office/toolUtils.js';
 import { transport } from '../transport/index.js';
 
 function clock(epochS: number | null | undefined): string {
@@ -26,38 +27,46 @@ function describe(q: ProviderQuota): { status: string; detail: string; color: st
   switch (q.status) {
     case 'rejected':
       return {
-        status: 'Sin cuota',
+        status: 'Agotada',
         detail: `${weekly !== null && weekly !== undefined && weekly >= 100 ? 'Límite semanal alcanzado' : 'Cuota agotada'}${resetDetail}`,
         color: QUOTA_COLORS.rejected,
       };
     case 'warning':
       return {
-        status: 'Cerca del límite',
+        status: 'Limitada',
         detail: `${q.usedPercent === null ? 'Al menos 90 % usado' : `${q.usedPercent} % usado`}${weeklyDetail}${resetDetail}`,
         color: QUOTA_COLORS.warning,
       };
     case 'allowed':
       return {
-        status: 'Disponible',
+        status: 'Sana',
         detail: `${usage}${weeklyDetail}`,
         color: QUOTA_COLORS.allowed,
       };
     case 'reset':
       return {
-        status: 'Actualizando',
+        status: 'Desconocida',
         detail: 'La cuota se renovó; falta una nueva lectura',
         color: QUOTA_COLORS.unknown,
       };
     default:
       return {
-        status: 'Sin datos',
+        status: 'Desconocida',
         detail: 'Aún no hay una lectura de cuota',
         color: QUOTA_COLORS.unknown,
       };
   }
 }
 
-function QuotaRow({ name, q }: { name: string; q: ProviderQuota }) {
+export function QuotaRow({
+  name,
+  q,
+  running,
+}: {
+  name: string;
+  q: ProviderQuota;
+  running: number;
+}) {
   const d = describe(q);
   return (
     <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-x-8 text-2xs leading-tight">
@@ -65,6 +74,25 @@ function QuotaRow({ name, q }: { name: string; q: ProviderQuota }) {
       <span>
         <span style={{ color: d.color }}>● {d.status}</span>
         <span className="block text-text-muted mt-2">{d.detail}</span>
+        <span className="block text-text-muted mt-2">
+          {running} agentes en marcha · Fuente: {q.capacity?.source ?? 'estimated'} · Confianza:{' '}
+          {q.capacity?.confidence ?? 'unknown'}
+        </span>
+        {q.capacity?.windows.map((w, i) => (
+          <span key={i} className="block text-text-muted mt-2">
+            {w.kind === 'five_hour' ? '5 horas' : w.kind === 'weekly' ? 'Semanal' : 'Otra ventana'}:{' '}
+            {w.usedRatio === null ? 'uso desconocido' : Math.round(w.usedRatio * 100) + ' % usado'}{' '}
+            · Reset:{' '}
+            {w.resetsAt === null
+              ? '—'
+              : new Date(w.resetsAt * 1000).toLocaleString('es-ES', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+          </span>
+        ))}
       </span>
     </div>
   );
@@ -224,9 +252,25 @@ export function CompanyHud({ onOpenDecisions, onOpenBacklog, officeState }: Comp
           </div>
           {board.quota && (
             <div className="flex flex-col gap-4">
-              <div className="text-2xs text-text-muted">Cuota para iniciar agentes</div>
-              <QuotaRow name="Claude" q={board.quota.claude} />
-              <QuotaRow name="Codex" q={board.quota.codex} />
+              <div className="text-2xs text-text-muted">Capacidad observada</div>
+              <QuotaRow
+                name="Claude"
+                q={board.quota.claude}
+                running={
+                  [...officeState.characters.values()].filter(
+                    (c) => c.isActive && c.id > 0 && getProviderLabel(c.id) === 'Claude',
+                  ).length
+                }
+              />
+              <QuotaRow
+                name="Codex"
+                q={board.quota.codex}
+                running={
+                  [...officeState.characters.values()].filter(
+                    (c) => c.isActive && c.id > 0 && getProviderLabel(c.id).startsWith('Codex'),
+                  ).length
+                }
+              />
             </div>
           )}
         </div>

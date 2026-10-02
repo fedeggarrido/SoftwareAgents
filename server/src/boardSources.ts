@@ -36,6 +36,12 @@ export class BoardSources {
     const file = project.project.legacy?.boardFile;
     return file ? resolveInside(project.repoRoot, file) : undefined;
   }
+  runsDir(commonDir: string | undefined, legacy: string | undefined): string | undefined {
+    return this.source(
+      commonDir,
+      this.selection.kind === 'project' ? 'softwareagents/runs' : legacy,
+    );
+  }
   /** Revalidate optional source paths on every read. */
   source(root: string | undefined, file: string | undefined): string | undefined {
     if (this.selection.kind === 'invalid' || !root || !file) return undefined;

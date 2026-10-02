@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import {
@@ -13,6 +13,15 @@ import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersi
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 import type { AgentState } from '../src/types.js';
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    // Windows os.homedir() ignores HOME; honor it to avoid writing to the real user profile.
+    homedir: vi.fn(() => process.env.HOME ?? actual.homedir()),
+  };
+});
 
 /** Let the setHooksEnabled dispatch's async chain (side effect →
  *  areHooksInstalled → persist → send) run to completion. */

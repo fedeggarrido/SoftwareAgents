@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import { CONFIG_FILE_MODE, CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -41,7 +41,14 @@ export type ConfigNamespace = 'vscode' | 'standalone';
  *  unanswered, the ask is still open. */
 export type HooksConsentState = 'granted' | 'declined';
 
+export interface CompanyAutopilotConfig {
+  command: string[];
+  stateFile?: string;
+}
+
 export interface PixelAgentsConfig {
+  /** Operator-owned commands, keyed by absolute workspace path. */
+  companyAutopilot: Record<string, CompanyAutopilotConfig>;
   vscode: AdapterSettings;
   standalone: AdapterSettings;
   externalAssetDirectories: string[];
@@ -68,6 +75,35 @@ const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
 
 function getConfigFilePath(): string {
   return path.join(os.homedir(), LAYOUT_FILE_DIR, CONFIG_FILE_NAME);
+}
+
+/** Windows workspace keys are case-insensitive; POSIX keys retain their case. */
+export function companyAutopilotKey(workspace: string): string {
+  const resolved = path.resolve(workspace);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/** Drop invalid authorizations entirely; never repair them into a different argv. */
+export function parseCompanyAutopilot(raw: unknown): Record<string, CompanyAutopilotConfig> {
+  const out: Record<string, CompanyAutopilotConfig> = Object.create(null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [workspace, value] of Object.entries(raw)) {
+    if (!path.isAbsolute(workspace) || !value || typeof value !== 'object') continue;
+    const { command, stateFile } = value as Partial<CompanyAutopilotConfig>;
+    if (
+      !Array.isArray(command) ||
+      !command.length ||
+      !command[0] ||
+      !command.every((arg) => typeof arg === 'string' && !arg.includes('\0')) ||
+      (stateFile !== undefined && typeof stateFile !== 'string')
+    )
+      continue;
+    out[companyAutopilotKey(workspace)] = {
+      command: [...command],
+      ...(stateFile !== undefined ? { stateFile } : {}),
+    };
+  }
+  return out;
 }
 
 /** Coerce a loose object into the per-provider consent map, dropping entries whose value is not exactly 'granted' or
@@ -158,6 +194,7 @@ export function readConfig(): PixelAgentsConfig {
         externalAssetDirectories: [],
         hooksConsent: {},
         hooksEnabled: {},
+        companyAutopilot: {},
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -170,6 +207,7 @@ export function readConfig(): PixelAgentsConfig {
         : [],
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
+      companyAutopilot: parseCompanyAutopilot(parsed.companyAutopilot),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -179,6 +217,7 @@ export function readConfig(): PixelAgentsConfig {
       externalAssetDirectories: [],
       hooksConsent: {},
       hooksEnabled: {},
+      companyAutopilot: {},
     };
   }
 }
@@ -291,7 +330,8 @@ export function writeConfig(config: PixelAgentsConfig): void {
     }
     const json = JSON.stringify(config, null, 2);
     const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, json, 'utf-8');
+    fs.writeFileSync(tmpPath, json, { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
+    if (process.platform !== 'win32') fs.chmodSync(tmpPath, CONFIG_FILE_MODE);
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     console.error('[Pixel Agents] Failed to write config file:', err);

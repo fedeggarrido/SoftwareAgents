@@ -2,11 +2,14 @@ import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { companyAutopilotKey, readConfig } from './configPersistence.js';
+import { resolveInside } from './pathGuard.js';
+
 /**
  * The two things the office may change in the agent company, both declared by the
  * workspace's own docs/backlog/board.json and only for privileged (tokened) clients:
  *  - autopilot on/off: flips `enabled` in the supervisor's state file and, when
- *    turning it on with no live supervisor, starts the board's `autopilot.command`
+ *    turning it on with no live supervisor, starts the operator-authorized command
  *    detached in the workspace. The supervisor itself decides everything else.
  *  - answering an owner decision in `decisionsFile`: only one of its listed options.
  * Nothing else is executable from the office.
@@ -20,7 +23,7 @@ interface BoardConfig {
 let workspace: string | undefined;
 
 export function configureCompanyControl(dir: string): void {
-  workspace = dir;
+  workspace = path.resolve(dir);
 }
 
 function boardConfig(): BoardConfig | undefined {
@@ -63,11 +66,23 @@ function alive(pid: unknown): boolean {
   }
 }
 
-export function autopilotStatePath(): string | undefined {
-  const cfg = boardConfig();
+function statePath(cfg: BoardConfig | undefined): string | undefined {
+  if (!workspace) return undefined;
+  const file =
+    readConfig().companyAutopilot[companyAutopilotKey(workspace)]?.stateFile ??
+    cfg?.autopilot?.stateFile;
+  if (file === undefined) return undefined;
+  resolveInside(workspace, file);
   const dir = commonDir();
-  const file = cfg?.autopilot?.stateFile;
-  return dir && file ? path.join(dir, file) : undefined;
+  return dir ? resolveInside(dir, file) : undefined;
+}
+
+export function autopilotStatePath(): string | undefined {
+  try {
+    return statePath(boardConfig());
+  } catch {
+    return undefined;
+  }
 }
 
 export function readAutopilot(): Record<string, unknown> | undefined {
@@ -83,8 +98,28 @@ export function readAutopilot(): Record<string, unknown> | undefined {
 
 export function setAutopilot(enabled: boolean): string {
   const cfg = boardConfig();
-  const file = autopilotStatePath();
-  if (!workspace || !cfg?.autopilot || !file) return 'Este workspace no declara piloto automático.';
+  if (!workspace) return 'Este workspace no declara piloto automático.';
+  const authorized = readConfig().companyAutopilot[companyAutopilotKey(workspace)];
+  if (enabled && !authorized)
+    return 'Piloto automático no autorizado: configura companyAutopilot en ~/.pixel-agents/config.json.';
+  const declared = cfg?.autopilot?.command;
+  if (
+    enabled &&
+    authorized &&
+    declared !== undefined &&
+    (!Array.isArray(declared) ||
+      declared.length !== authorized.command.length ||
+      !declared.every((arg, index) => arg === authorized.command[index]))
+  ) {
+    return 'Piloto automático no autorizado: el comando del board no coincide exactamente con el del operador.';
+  }
+  let file: string | undefined;
+  try {
+    file = statePath(cfg);
+  } catch {
+    return 'Ruta stateFile rechazada: debe ser relativa y no contener ..';
+  }
+  if (!file) return 'Este workspace no declara piloto automático.';
   let state: Record<string, unknown> = {};
   try {
     state = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>;
@@ -92,7 +127,7 @@ export function setAutopilot(enabled: boolean): string {
     /* first use */
   }
   writeJsonAtomic(file, { intervalMinutes: 20, ...state, enabled, updatedAt: Date.now() / 1000 });
-  const command = cfg.autopilot.command;
+  const command = authorized?.command;
   if (enabled && !alive(state.pid) && Array.isArray(command) && command.length > 0) {
     const child = spawn(command[0], command.slice(1), {
       cwd: workspace,
@@ -111,7 +146,12 @@ export function setAutopilot(enabled: boolean): string {
 export function answerDecision(id: string, answer: string): string {
   const cfg = boardConfig();
   if (!workspace || !cfg?.decisionsFile) return 'Este workspace no declara bandeja de decisiones.';
-  const file = path.join(workspace, cfg.decisionsFile);
+  let file: string;
+  try {
+    file = resolveInside(workspace, cfg.decisionsFile);
+  } catch {
+    return 'Ruta decisionsFile rechazada: debe ser relativa y no contener ..';
+  }
   let data: { decisions?: Array<Record<string, unknown>> };
   try {
     data = JSON.parse(fs.readFileSync(file, 'utf-8')) as typeof data;

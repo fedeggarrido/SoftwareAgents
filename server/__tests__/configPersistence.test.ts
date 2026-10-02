@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   clearHooksAnswer,
@@ -16,6 +16,15 @@ import {
   setHooksEnabled,
   writeConfig,
 } from '../src/configPersistence.js';
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    // Windows os.homedir() ignores HOME; honor it to avoid writing to the real user profile.
+    homedir: vi.fn(() => process.env.HOME ?? actual.homedir()),
+  };
+});
 
 describe('configPersistence: areas', () => {
   let tempHome: string;

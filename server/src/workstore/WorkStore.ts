@@ -149,6 +149,13 @@ export interface WorkStore {
     actor: string,
     beforeCommit: () => void,
   ): Promise<HumanDecision>;
+  /** Trusted ingress only: explicitly reconcile an expired gate with an audited human answer. */
+  reconcileDecision(
+    id: string,
+    answer: string,
+    actor: string,
+    beforeCommit: () => void,
+  ): Promise<HumanDecision>;
   listDecisions(): HumanDecision[];
   close(): void;
 }

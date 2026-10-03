@@ -77,7 +77,8 @@ describe('WorkStore (real SQLite)', () => {
         executor: 'claude',
         model_id: store.projectId,
         session_id: 'session',
-        pid: 123,
+        // Historical metadata has no operational process and needs no lease.
+        pid: null,
         started_at: '2026-10-02T00:00:00Z',
         system_prompt_hash: 'hash',
         project_brain_sha: 'sha',

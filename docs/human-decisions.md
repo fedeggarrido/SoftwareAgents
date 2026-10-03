@@ -28,11 +28,37 @@ Execution nueva requiere registro nuevo. No se ejecuta automáticamente la acci�
 escalada, tampoco al elegir la opción recomendada.
 
 La respuesta, `answeredBy`, timestamp, restauraciones y eventos se confirman en una
-transacción que exige persistir la auditoría antes del commit. Un fallo de auditoría
-revierte esos cambios SQLite. Responder o expirar una decisión comprueba que ningún
-bloque tenga una reserva de recuperación: una respuesta no elimina ni elude tokens.
-Expirar conserva WAITING_HUMAN y no registra una respuesta humana; cualquier salida
-posterior requiere recuperación explícita del gate.
+transacción que exige persistir una **intención `pending`** en el JSONL antes del
+commit. Solo después de confirmar SQLite se escribe `answered`; ambos registros
+comparten `attemptId` en `outcome.detail`, junto con el actor y el indicador
+`reconcile`. Un fallo de la intención revierte SQLite. Un fallo del COMMIT deja
+`pending` y un rechazo, nunca un éxito. Si falla la confirmación JSONL después del
+COMMIT, o el proceso cae en esa ventana, la intención sigue pendiente: consultar
+la decisión persistida en WorkStore antes de reintentar. El servicio informa
+explícitamente de la respuesta ya confirmada si falla ese segundo append; no
+registra un rechazo de una respuesta que ya se confirmó. Esta alternativa no es
+una outbox ni garantiza exportación automática de confirmaciones pendientes.
+
+Responder o expirar comprueba que ningún bloque tenga una reserva de recuperación:
+una respuesta no elimina ni elude tokens. Responder o reconciliar comprueba además,
+dentro de la transacción, que ninguna Execution con PID esté pendiente de cierre,
+incluidas generaciones antiguas. Registrar una Execution con PID requiere una lease
+vigente LEASED/RUNNING; se captura la identidad fuera del lock y se vuelve a comprobar
+la lease, versión, owner y reservas dentro de la transacción. Los registros con
+`pid: null` son metadatos sin proceso operativo y conservan su compatibilidad.
+
+Expirar conserva WAITING_HUMAN y no registra una respuesta humana. Los gates `open`
+y `expired` impiden transiciones y claims ordinarios. La salida de uno expirado
+exige `HumanDecisions.reconcile(id, answer, privileged, answeredBy, level)` desde
+un ingreso confiable: comprueba privilegio autenticado y política, exige una opción
+válida y registra intención/confirmación con `reconcile: true`. WorkStore realiza
+la restauración atómica y un DomainEvent con motivo de reconciliación explícito.
+No se expone una reconciliación implícita en la respuesta ordinaria ni un mensaje
+nuevo de UI; una segunda respuesta ordinaria a una decisión expirada se rechaza.
+
+El HUD mínimo en modo proyecto muestra `Decisiones (N)` cuando hay decisiones,
+aunque no exista board legacy. Abre el mismo DecisionsPanel y usa el mismo mensaje
+de respuesta, cuya autoridad sigue dependiendo del token autenticado del servidor.
 
 ## Fallos y límites
 

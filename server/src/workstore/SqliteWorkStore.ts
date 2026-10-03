@@ -327,6 +327,7 @@ class SqliteWorkStore implements WorkStore {
       this.assertNotRecovering(taskId);
       const task = this.getTask(taskId);
       if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
+      this.assertNoDecisionGate(taskId);
       if (reworkVersion !== undefined && task.version !== reworkVersion)
         throw new TaskVersionConflictError(taskId, reworkVersion, task.version);
       if (
@@ -545,12 +546,7 @@ class SqliteWorkStore implements WorkStore {
       throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
     if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
       throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
-    // SA-028: a task blocked by an open Human Decision only leaves WAITING_HUMAN when it is answered.
-    if (
-      task.status === 'WAITING_HUMAN' &&
-      this.listDecisions().some((d) => d.status === 'open' && d.blocks.includes(taskId))
-    )
-      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+    this.assertNoDecisionGate(taskId);
     if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
       throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
     if (
@@ -618,9 +614,15 @@ class SqliteWorkStore implements WorkStore {
   async createExecution(
     execution: Omit<ExecutionRecord, 'project_id' | 'tree_closed_at'>,
   ): Promise<void> {
+    execution = { ...execution };
     this.assertNotRecovering(execution.task_key);
     const task = this.getTask(execution.task_key);
     let identity = execution.pid_started_at ?? null;
+    if (execution.pid !== null) {
+      if (!Number.isSafeInteger(execution.pid) || execution.pid <= 0)
+        throw new Error('Execution PID must be a positive integer');
+      this.owned(execution.task_key, task?.lease_owner ?? '');
+    }
     if (task && ['LEASED', 'RUNNING'].includes(task.status)) {
       this.owned(task.key, task.lease_owner ?? '');
       if (execution.task_version !== task.version)
@@ -633,7 +635,7 @@ class SqliteWorkStore implements WorkStore {
     // Capture OS identity outside a transaction, then fence the insertion atomically.
     // Recovery on another connection may have advanced the Task during that query.
     const guard = task
-      ? " WHERE EXISTS (SELECT 1 FROM tasks WHERE project_id = ? AND key = ? AND version = ? AND lease_owner IS ? AND (lease_owner IS NULL OR (status IN ('LEASED', 'RUNNING') AND lease_expires_at > ?))) AND NOT EXISTS (SELECT 1 FROM lease_recoveries WHERE project_id = ? AND task_key = ?)"
+      ? " WHERE EXISTS (SELECT 1 FROM tasks WHERE project_id = ? AND key = ? AND version = ? AND lease_owner IS ? AND (lease_owner IS NULL OR (status IN ('LEASED', 'RUNNING') AND lease_expires_at > ?)) AND (? IS NULL OR (lease_owner IS NOT NULL AND status IN ('LEASED', 'RUNNING') AND lease_expires_at > ?))) AND NOT EXISTS (SELECT 1 FROM lease_recoveries WHERE project_id = ? AND task_key = ?)"
       : '';
     const result = await this.write(() =>
       this.db
@@ -659,6 +661,8 @@ class SqliteWorkStore implements WorkStore {
                 task.key,
                 execution.task_version,
                 task.lease_owner,
+                new Date().toISOString(),
+                execution.pid,
                 new Date().toISOString(),
                 this.projectId,
                 task.key,
@@ -713,6 +717,15 @@ class SqliteWorkStore implements WorkStore {
       )
       .all(this.projectId)
       .map((row) => JSON.parse(row.escalation as string) as HumanDecision);
+  }
+  private assertNoDecisionGate(taskId: string): void {
+    // Expiry retains the gate; only explicit decision resolution/reconciliation releases it.
+    if (
+      this.listDecisions().some(
+        (d) => ['open', 'expired'].includes(d.status) && d.blocks.includes(taskId),
+      )
+    )
+      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
   }
   /** Decision suspension/restoration preserves attempts and blocked_reason, but never a lease. */
   private decisionTask(
@@ -822,6 +835,23 @@ class SqliteWorkStore implements WorkStore {
     actor: string,
     beforeCommit: () => void,
   ): Promise<HumanDecision> {
+    return this.finishDecision(id, answer, actor, beforeCommit, false);
+  }
+  async reconcileDecision(
+    id: string,
+    answer: string,
+    actor: string,
+    beforeCommit: () => void,
+  ): Promise<HumanDecision> {
+    return this.finishDecision(id, answer, actor, beforeCommit, true);
+  }
+  private finishDecision(
+    id: string,
+    answer: string | null,
+    actor: string,
+    beforeCommit: () => void,
+    reconcile: boolean,
+  ): Promise<HumanDecision> {
     return this.write(() => {
       const row = this.db
         .prepare(
@@ -830,7 +860,9 @@ class SqliteWorkStore implements WorkStore {
         .get(this.projectId, id);
       if (!row?.escalation) throw new Error('Unknown structured decision');
       const decision = JSON.parse(row.escalation as string) as HumanDecision;
-      if (decision.status !== 'open') throw new Error('Decision is closed');
+      if (decision.status !== (reconcile ? 'expired' : 'open'))
+        throw new Error('Decision is closed');
+      if (reconcile && answer === null) throw new Error('Reconciliation requires a human answer');
       if (answer !== null && !decision.options.some((o) => o.id === answer))
         throw new Error('Answer must be a listed option');
       const states = JSON.parse(row.previous_states as string) as Record<string, TaskStatus>;
@@ -838,6 +870,15 @@ class SqliteWorkStore implements WorkStore {
         this.assertNotRecovering(key);
         const task = this.getTask(key);
         if (!task || task.status !== 'WAITING_HUMAN') throw new Error('Blocked task state changed');
+        if (
+          answer !== null &&
+          this.db
+            .prepare(
+              'SELECT 1 FROM executions WHERE project_id = ? AND task_key = ? AND pid IS NOT NULL AND tree_closed_at IS NULL LIMIT 1',
+            )
+            .get(this.projectId, key)
+        )
+          throw new Error('Blocked task has Executions pending closure');
         // Expiry is not a human answer: retain the gate until explicit recovery.
         // A human answer is no lease owner and starts no Execution. Active work must re-claim.
         if (answer !== null)
@@ -845,7 +886,7 @@ class SqliteWorkStore implements WorkStore {
             task,
             ['LEASED', 'RUNNING'].includes(status) ? 'READY' : status,
             actor,
-            id,
+            reconcile ? `Reconcile expired decision: ${id}` : id,
           );
       }
       decision.status = answer === null ? 'expired' : 'answered';

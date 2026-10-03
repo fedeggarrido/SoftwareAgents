@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { BoardState } from '../../core/src/messages.js';
 import { backlogView } from '../src/office/backlogView.js';
 import { capacityHudView, capacityView } from '../src/office/capacityView.js';
+import { decisionsHudView } from '../src/office/decisionsHudView.js';
 
 function board(mode: 'project' | 'invalid' | 'legacy'): BoardState {
   const quota = (provider: 'claude' | 'codex') => ({
@@ -29,6 +30,25 @@ function board(mode: 'project' | 'invalid' | 'legacy'): BoardState {
   };
 }
 describe('office without a board', () => {
+  it.each([false, true])(
+    'shows decisions independently of the legacy board source (board=%s)',
+    (hasBoard) => {
+      const state = board('project');
+      state.sources.board = hasBoard;
+      state.decisions = [
+        { id: 'open', status: 'open', question: 'Review protected change?', options: ['review'] },
+        { id: 'answered', status: 'answered', question: 'Previous?', options: [] },
+        { id: 'expired', status: 'expired', question: 'Expired gate?', options: [] },
+      ];
+      expect(capacityHudView(state).minimal).toBe(!hasBoard);
+      expect(decisionsHudView(state)).toEqual({ visible: true, open: 1, label: 'Decisiones (1)' });
+      state.decisions[0].status = 'answered';
+      expect(decisionsHudView(state)).toEqual({ visible: true, open: 0, label: 'Decisiones (0)' });
+      state.decisions = [];
+      expect(decisionsHudView(state).visible).toBe(false);
+      expect(decisionsHudView({}).visible).toBe(false);
+    },
+  );
   it('selects the minimal HUD with unknown provider capacity', () => {
     const state = board('project');
     expect(capacityHudView(state)).toEqual({ minimal: true, title: 'Capacidad observada' });

@@ -64,6 +64,8 @@ Este archivo fija el flujo de colaboración del Development Project.
   (también los de los workspaces, si existen). Así conservas el `node_modules` real.
 - Guarda archivos sin BOM; ejecuta Prettier sobre lo tocado, ESLint cuando aplique,
   `npm run check-types` y las pruebas pertinentes antes de entregar a revisión.
+- No modifiques `tsconfig*.json`, `vitest.config.ts` ni otra configuración del repo para
+  esquivar el sandbox (cachés, buildinfo); usa redirecciones temporales y restáuralas.
 - En tests del sandbox usa `$env:TEMP="$PWD\.vitest-tmp"; $env:TMP=$env:TEMP`
   y elimina ese directorio al acabar. Nunca mockees `os.tmpdir()` hacia el repo.
 - Para tests que escriban en `~/.pixel-agents` o `~/.claude`, mockea `os.homedir()`

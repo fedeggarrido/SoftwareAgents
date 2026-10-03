@@ -77,8 +77,12 @@ describe('lease fencing across real Node processes', () => {
         resolveDir: path.resolve('..'),
         contents: `
         import {openWorkStore} from './server/src/workstore/SqliteWorkStore.ts';
+        import {HumanDecisions} from './server/src/humanDecisions.ts';
+        import os from 'node:os';
         import {DatabaseSync} from 'node:sqlite';
         import {configure} from 'controlled-process-recovery';
+        // Windows ignores HOME for os.homedir(): isolate audit files in this fixture.
+        os.homedir=()=>process.argv[2];
         const RealDate=Date; let now=Date.parse('2026-10-03T10:00:00Z');
         global.Date=class extends RealDate { constructor(...args) { super(...(args.length ? args : [now])); } static now(){return now;} };
         openWorkStore({repositoryPath:process.argv[2],projectId:'shared'}).then(store=>{
@@ -86,6 +90,7 @@ describe('lease fencing across real Node processes', () => {
             try {
               let value;
               if(op==='time') now=args[0];
+              else if(op==='answer') value=await new HumanDecisions(store).answer(args[0], args[1], true, args[2], 'A0');
               else if(op==='control') configure(args[0]);
               else if(op==='recoverStale') {
                 // An old candidate list, delivered after a renewal of the SAME generation.
@@ -154,6 +159,65 @@ describe('lease fencing across real Node processes', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
   const time = Date.parse('2026-10-03T10:00:00Z');
+  const decision = {
+    id: 'decision',
+    context: 'Review protected work?',
+    blocks: ['task'],
+    requestedBy: 'worker',
+    options: [
+      { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+      { id: 'stop', label: 'Stop', benefit: 'Gate', cost: 'Pending', risk: 'Delay' },
+    ],
+    recommendation: 'Review',
+    disagreement: [],
+    impact: 'Blocks task',
+    urgency: 'high',
+  };
+  it('only one real process confirms a human response and restoration', async () => {
+    const [a, b] = peers;
+    await a.call('claim', ['task', 'worker', 1000]);
+    await a.call('openDecision', [decision]);
+    const results = await Promise.allSettled([
+      a.call('answer', ['decision', 'review', 'first']),
+      b.call('answer', ['decision', 'stop', 'second']),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    const winner = store.listDecisions()[0];
+    expect(winner.status).toBe('answered');
+    expect(winner.answer).toBe(winner.answeredBy === 'first' ? 'review' : 'stop');
+    expect(store.getTask('task')).toMatchObject({ status: 'READY', attempt: 0, lease_owner: null });
+    expect(store.listDomainEvents().filter((e) => e.from_status === 'WAITING_HUMAN')).toHaveLength(
+      1,
+    );
+    const audit = fs
+      .readFileSync(path.join(root, '.pixel-agents/audit/shared.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(audit.filter((entry) => entry.outcome.status === 'answered')).toHaveLength(1);
+    expect(audit.find((entry) => entry.outcome.status === 'answered').actorId).toBe(
+      winner.answeredBy,
+    );
+  });
+  it('a real sweeper with a stale candidate cannot race a human response or kill a new lease', async () => {
+    const [a, b] = peers;
+    await b.call('claim', ['task', 'worker', 1000]);
+    await b.call('execution', ['original']);
+    await b.call('openDecision', [decision]);
+    await a.call('time', [time + 1000]);
+    const [, sweep] = await Promise.all([
+      b.call('answer', ['decision', 'review', 'fede']),
+      a.call('recoverStale'),
+    ]);
+    expect(sweep).toEqual([]);
+    expect(store.getTask('task')).toMatchObject({ status: 'READY', attempt: 0 });
+    expect(await b.call('claim', ['task', 'next', 2000])).toMatchObject({ lease_owner: 'next' });
+    expect(await a.call('recoverStale')).toEqual([]);
+    expect(a.events).not.toContain('kill');
+    expect(store.listLeaseRecoveries()).toEqual([]);
+    expect(store.listDomainEvents().filter((e) => e.actor === 'lease-sweeper')).toEqual([]);
+  });
   it('only one actual process wins a simultaneous claim', async () => {
     const results = await Promise.allSettled(
       peers.map((p, i) => p.call('claim', ['task', `worker-${i}`, 1000])),

@@ -19,7 +19,30 @@ export class HumanDecisions {
     answeredBy: string,
     level: AutonomyLevel,
   ) {
+    return this.respond(id, answer, privileged, answeredBy, level, false);
+  }
+
+  /** Expiry is released only by a new, explicit authenticated operator action. */
+  async reconcile(
+    id: string,
+    answer: string,
+    privileged: boolean,
+    answeredBy: string,
+    level: AutonomyLevel,
+  ) {
+    return this.respond(id, answer, privileged, answeredBy, level, true);
+  }
+
+  private async respond(
+    id: string,
+    answer: string,
+    privileged: boolean,
+    answeredBy: string,
+    level: AutonomyLevel,
+    reconcile: boolean,
+  ) {
     const policy = evaluatePolicy('answer_decision', privileged ? 'human' : 'system', level);
+    const attemptId = randomUUID();
     const append = (status: string) =>
       this.audit.append({
         action: 'answer_decision',
@@ -30,8 +53,15 @@ export class HumanDecisions {
         actorId: privileged ? answeredBy : null,
         policyDecision: policy,
         riskLevel: 'high',
-        input: { id, answer },
-        outcome: { status, detail: privileged ? JSON.stringify({ answeredBy }) : undefined },
+        input: { id, answer, reconcile },
+        outcome: {
+          status,
+          detail: JSON.stringify({
+            attemptId,
+            reconcile,
+            answeredBy: privileged ? answeredBy : null,
+          }),
+        },
         taskKey: null,
         executionId: null,
       });
@@ -39,12 +69,26 @@ export class HumanDecisions {
       append('rejected');
       throw new Error('Authenticated operator token required');
     }
+    let decision;
     try {
-      return await this.store.resolveDecision(id, answer, answeredBy, () => append('answered'));
+      decision = await (reconcile
+        ? this.store.reconcileDecision(id, answer, answeredBy, () => append('pending'))
+        : this.store.resolveDecision(id, answer, answeredBy, () => append('pending')));
     } catch (error) {
       append('rejected');
       throw error;
     }
+    // A durable intent is not success. Only append confirmation after SQLite COMMIT.
+    // Failure here must never produce a rejected record for an already committed answer.
+    try {
+      append('answered');
+    } catch (cause) {
+      throw new Error(
+        'Decision committed; audit confirmation pending. Inspect WorkStore before retrying.',
+        { cause },
+      );
+    }
+    return decision;
   }
 
   /** Persist require_human; a later answer does not execute this action. */

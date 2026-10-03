@@ -4,6 +4,7 @@ import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import { capacityHudView, capacityView, visibleProviderCounts } from '../office/capacityView.js';
+import { decisionsHudView } from '../office/decisionsHudView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { transport } from '../transport/index.js';
 
@@ -94,6 +95,7 @@ export function CompanyHud({
   if (!board) return null;
 
   const capacity = capacityHudView(board);
+  const decisions = decisionsHudView(board);
   const counts = visibleProviderCounts(agents);
   if (capacity.minimal) {
     return (
@@ -113,6 +115,11 @@ export function CompanyHud({
           <button className={actionClass} onClick={onOpenBacklog}>
             Backlog
           </button>
+          {decisions.visible && (
+            <button className={actionClass} onClick={onOpenDecisions}>
+              {decisions.label}
+            </button>
+          )}
         </div>
         <div className="text-2xs text-text-muted">
           Claude {counts.claude} · Codex {counts.codex} · {capacity.title}
@@ -132,7 +139,6 @@ export function CompanyHud({
   const done = by.DONE ?? 0;
   const pct = total ? Math.round((done / total) * 100) : 0;
   const ap = board.autopilot;
-  const openDecisions = (board.decisions ?? []).filter((d) => d.status === 'open').length;
   const showNotice = notice && now - notice.at < 8000;
   const active = board.items.filter((i) => i.owner?.state === 'active');
   const working = active.filter((i) =>
@@ -202,9 +208,9 @@ export function CompanyHud({
           <button className={actionClass} onClick={onOpenBacklog} title="Ver todas las tareas">
             Tareas
           </button>
-          {(board.decisions?.length ?? 0) > 0 && (
+          {decisions.visible && (
             <button className={actionClass} onClick={onOpenDecisions}>
-              Decisiones{openDecisions ? ` ${openDecisions}` : ''}
+              {decisions.label}
             </button>
           )}
           {ap && (

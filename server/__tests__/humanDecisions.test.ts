@@ -111,11 +111,19 @@ describe('structured human decisions', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    expect(audit[0]).toMatchObject({
+    expect(audit.map((entry) => entry.outcome.status)).toEqual(['pending', 'answered']);
+    expect(audit[1]).toMatchObject({
       actorId: 'fede',
       policyDecision: { outcome: 'allow' },
-      outcome: { status: 'answered', detail: JSON.stringify({ answeredBy: 'fede' }) },
+      outcome: { status: 'answered' },
     });
+    expect(JSON.parse(audit[1].outcome.detail)).toMatchObject({
+      answeredBy: 'fede',
+      reconcile: false,
+    });
+    expect(JSON.parse(audit[0].outcome.detail).attemptId).toBe(
+      JSON.parse(audit[1].outcome.detail).attemptId,
+    );
     expect(await store.claim('task', 'next-worker')).toMatchObject({
       status: 'LEASED',
       lease_owner: 'next-worker',
@@ -133,6 +141,9 @@ describe('structured human decisions', () => {
     );
     expect(store.getTask('task')?.status).toBe('WAITING_HUMAN');
     expect(store.listDecisions()[0].status).toBe('open');
+    await expect(service.reconcile('decision', 'review', true, 'fede', 'A0')).rejects.toThrow(
+      'closed',
+    );
   });
   it('rolls back all task changes when one block is missing or duplicate decision is opened', async () => {
     const original = store.getTask('task');
@@ -147,17 +158,25 @@ describe('structured human decisions', () => {
     await expect(store.openDecision({ ...input, blocks: [] })).rejects.toThrow();
     expect(store.listDecisions()).toHaveLength(1);
   });
-  it('rolls back the answer and restoration when audit persistence fails', async () => {
-    await store.openDecision(input);
-    vi.spyOn(AuditLog.prototype, 'append').mockImplementation(() => {
-      throw new Error('audit unavailable');
-    });
-    await expect(service.answer('decision', 'review', true, 'fede', 'A2')).rejects.toThrow(
-      'audit unavailable',
-    );
-    expect(store.listDecisions()[0].status).toBe('open');
-    expect(store.getTask('task')?.status).toBe('WAITING_HUMAN');
-  });
+  it.each([false, true])(
+    'rolls back the answer/restoration when audit persistence fails (reconcile=%s)',
+    async (reconcile) => {
+      await store.openDecision(input);
+      if (reconcile) await store.resolveDecision('decision', null, 'runtime', () => {});
+      const tasks = store.listTasks();
+      const events = store.listDomainEvents();
+      vi.spyOn(AuditLog.prototype, 'append').mockImplementation(() => {
+        throw new Error('audit unavailable');
+      });
+      const response = reconcile ? service.reconcile.bind(service) : service.answer.bind(service);
+      await expect(response('decision', 'review', true, 'fede', 'A2')).rejects.toThrow(
+        'audit unavailable',
+      );
+      expect(store.listDecisions()[0].status).toBe(reconcile ? 'expired' : 'open');
+      expect(store.listTasks()).toEqual(tasks);
+      expect(store.listDomainEvents()).toEqual(events);
+    },
+  );
   it('rejects duplicate option IDs and invalid escalation packages', async () => {
     await expect(
       store.openDecision({ ...input, options: [input.options[0], input.options[0]] }),
@@ -215,6 +234,32 @@ describe('structured human decisions', () => {
       answeredAt: null,
     });
     expect(store.getTask('task')?.status).toBe('WAITING_HUMAN');
+    const task = store.getTask('task')!;
+    await expect(
+      store.transition('task', task.version, 'READY', 'bypass', 'agent'),
+    ).rejects.toThrow('INVALID_TRANSITION');
+    await expect(store.claim('task', 'agent')).rejects.toThrow('INVALID_TRANSITION');
+    await expect(service.answer('decision', 'review', true, 'fede', 'A4')).rejects.toThrow(
+      'closed',
+    );
+    await expect(service.reconcile('decision', 'review', false, 'agent', 'A4')).rejects.toThrow(
+      'token',
+    );
+    await expect(service.reconcile('decision', 'invented', true, 'fede', 'A4')).rejects.toThrow(
+      'listed option',
+    );
+    expect(store.getTask('task')).toEqual(task);
+    await service.reconcile('decision', 'review', true, 'fede', 'A0');
+    expect(store.getTask('task')).toMatchObject({ status: 'READY', attempt: 0, lease_owner: null });
+    expect(store.listDomainEvents().at(-1)).toMatchObject({
+      actor: 'fede',
+      reason: 'Reconcile expired decision: decision',
+    });
+    expect(
+      new AuditLog()
+        .read('test')
+        .filter((entry) => !entry.corrupt && entry.entry.outcome.status === 'answered'),
+    ).toHaveLength(1);
   });
   it('rejects overlapping gates and repeated answers', async () => {
     await store.openDecision(input);
@@ -395,4 +440,199 @@ describe('structured human decisions', () => {
     expect(store.listDomainEvents()).toEqual(events);
     expect(store.listDecisions()[0].status).toBe('open');
   });
+
+  it('never audits success when COMMIT fails after the intent append', async () => {
+    await store.openDecision(input);
+    const tasks = store.listTasks();
+    const events = store.listDomainEvents();
+    const { DatabaseSync } = await import('node:sqlite');
+    const exec = DatabaseSync.prototype.exec;
+    vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (
+      this: import('node:sqlite').DatabaseSync,
+      sql,
+    ) {
+      if (sql === 'COMMIT') {
+        expect(new AuditLog().read('test')).toMatchObject([
+          { entry: { outcome: { status: 'pending' } } },
+        ]);
+        throw new Error('commit failed');
+      }
+      return exec.call(this, sql);
+    });
+    await expect(service.answer('decision', 'review', true, 'fede', 'A0')).rejects.toThrow(
+      'commit failed',
+    );
+    expect(store.listDecisions()[0].status).toBe('open');
+    expect(store.listTasks()).toEqual(tasks);
+    expect(store.listDomainEvents()).toEqual(events);
+    expect(
+      new AuditLog().read('test').map((row) => !row.corrupt && row.entry.outcome.status),
+    ).toEqual(['pending', 'rejected']);
+  });
+
+  it('reports committed state with pending audit if confirmation fails after COMMIT', async () => {
+    await store.openDecision(input);
+    const append = AuditLog.prototype.append;
+    vi.spyOn(AuditLog.prototype, 'append').mockImplementation(function (this: AuditLog, entry) {
+      if (entry.outcome.status === 'answered') throw new Error('confirmation unavailable');
+      return append.call(this, entry);
+    });
+    await expect(service.answer('decision', 'review', true, 'fede', 'A0')).rejects.toThrow(
+      'Decision committed; audit confirmation pending',
+    );
+    expect(store.listDecisions()[0]).toMatchObject({ status: 'answered', answeredBy: 'fede' });
+    expect(store.getTask('task')?.status).toBe('READY');
+    expect(new AuditLog().read('test')).toMatchObject([
+      { entry: { outcome: { status: 'pending' } } },
+    ]);
+  });
+
+  it.each(['WAITING_HUMAN', 'READY', 'REVIEW'] as const)(
+    'rejects operational PID without a lease in %s',
+    async (status) => {
+      await execution();
+      if (status === 'WAITING_HUMAN') await store.openDecision(input);
+      else if (status === 'REVIEW')
+        await store.transition('task', 3, 'REVIEW', 'complete', 'worker');
+      else {
+        await store.openDecision(input);
+        await service.answer('decision', 'review', true, 'fede', 'A0');
+      }
+      await expect(
+        store.createExecution({
+          ...store.getExecution('run')!,
+          key: 'illegal',
+          task_version: store.getTask('task')!.version,
+        }),
+      ).rejects.toThrow('lease');
+      expect(store.getExecution('illegal')).toBeUndefined();
+      // Metadata with no operational PID remains supported, even during a human gate.
+      await store.createExecution({
+        ...store.getExecution('run')!,
+        key: 'metadata',
+        pid: null,
+        task_version: store.getTask('task')!.version,
+      });
+    },
+  );
+
+  it('fences registration in the transaction when a decision opens during PID identity lookup', async () => {
+    await execution();
+    const peer = await openWorkStore({ repositoryPath: root, projectId: 'test' });
+    vi.mocked(processStartIdentity).mockImplementationOnce(async () => {
+      await peer.openDecision(input);
+      return 'identity';
+    });
+    try {
+      await expect(
+        store.createExecution({ ...store.getExecution('run')!, key: 'late' }),
+      ).rejects.toThrow('Task changed or lease expired');
+      expect(store.getExecution('late')).toBeUndefined();
+      expect(peer.getTask('task')?.status).toBe('WAITING_HUMAN');
+    } finally {
+      peer.close();
+    }
+  });
+
+  it('fences registration when the lease expires during PID identity lookup', async () => {
+    await execution();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.mocked(processStartIdentity).mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.parse(store.getTask('task')!.lease_expires_at!));
+      return 'identity';
+    });
+    await expect(
+      store.createExecution({ ...store.getExecution('run')!, key: 'late' }),
+    ).rejects.toThrow('Task changed or lease expired');
+    expect(store.getExecution('late')).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    'does not restore any block with an inherited Execution pending closure (reconcile=%s)',
+    async (reconcile) => {
+      await execution();
+      store.createTask({ key: 'other', type: 'implementation', status: 'REVIEW' });
+      await store.openDecision({ ...input, blocks: ['other', 'task'] });
+      if (reconcile) await store.resolveDecision('decision', null, 'runtime', () => {});
+      const { DatabaseSync } = await import('node:sqlite');
+      const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
+      try {
+        // Simulate a record accepted by the old implementation, now lacking closure proof.
+        db.prepare('UPDATE executions SET tree_closed_at = NULL WHERE key = ?').run('run');
+      } finally {
+        db.close();
+      }
+      const tasks = store.listTasks();
+      const events = store.listDomainEvents();
+      const response = reconcile ? service.reconcile.bind(service) : service.answer.bind(service);
+      await expect(response('decision', 'review', true, 'fede', 'A0')).rejects.toThrow(
+        'pending closure',
+      );
+      expect(store.listTasks()).toEqual(tasks);
+      expect(store.listDomainEvents()).toEqual(events);
+      expect(store.listDecisions()[0].status).toBe(reconcile ? 'expired' : 'open');
+    },
+  );
+
+  it('commits exactly one of two concurrent responses across connections', async () => {
+    await store.openDecision(input);
+    const peer = await openWorkStore({ repositoryPath: root, projectId: 'test' });
+    try {
+      const results = await Promise.allSettled([
+        service.answer('decision', 'review', true, 'first', 'A0'),
+        new HumanDecisions(peer).answer('decision', 'review', true, 'second', 'A0'),
+      ]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+      expect(store.listDecisions()[0]).toMatchObject({ status: 'answered', answeredBy: 'first' });
+      expect(
+        store.listDomainEvents().filter((event) => event.from_status === 'WAITING_HUMAN'),
+      ).toHaveLength(1);
+      expect(
+        new AuditLog()
+          .read('test')
+          .filter((row) => !row.corrupt && row.entry.outcome.status === 'answered'),
+      ).toHaveLength(1);
+    } finally {
+      peer.close();
+    }
+  });
+
+  it.each([false, true])(
+    'a concurrent delayed sweeper cannot undo the answer (sweep first=%s)',
+    async (sweepFirst) => {
+      await execution();
+      const peer = await openWorkStore({ repositoryPath: root, projectId: 'test' });
+      await store.openDecision(input);
+      const { StatementSync } = await import('node:sqlite');
+      const all = StatementSync.prototype.all;
+      vi.spyOn(StatementSync.prototype, 'all').mockImplementation(function (
+        this: import('node:sqlite').StatementSync,
+        ...args
+      ) {
+        // Simulate the candidate snapshot captured before the human pause was committed.
+        if (this.sourceSQL.startsWith('SELECT key FROM tasks')) return [{ key: 'task' }];
+        return all.apply(this, args);
+      });
+      try {
+        const sweep = () => peer.recoverExpiredLeases();
+        const answer = () => service.answer('decision', 'review', true, 'fede', 'A0');
+        await Promise.all(sweepFirst ? [sweep(), answer()] : [answer(), sweep()]);
+        expect(store.getTask('task')).toMatchObject({ status: 'READY', attempt: 0 });
+        expect(store.listLeaseRecoveries()).toEqual([]);
+        await store.claim('task', 'next');
+        expect(store.getTask('task')).toMatchObject({
+          status: 'LEASED',
+          lease_owner: 'next',
+          attempt: 0,
+        });
+        expect(store.listDomainEvents().filter((event) => event.actor === 'lease-sweeper')).toEqual(
+          [],
+        );
+        expect(terminateExecutionTree).toHaveBeenCalledTimes(1);
+      } finally {
+        peer.close();
+      }
+    },
+  );
 });

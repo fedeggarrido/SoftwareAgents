@@ -37,13 +37,14 @@ Este archivo fija el flujo de colaboración del Development Project.
 
 ## QA y fixes tras cada feature
 
-- Después de integrar cada feature o tanda, y antes de empezar la siguiente:
+- Después de integrar **cada feature** (cada tarea SA-###, no cada tanda) y antes de
+  pasar a la siguiente:
   1. **QA de Codex** (solo lectura): comprueba cada criterio de aceptación de las
      tareas en ClickUp, casos límite y exploración del código; entrega un TestReport
      con severidad por hallazgo.
   2. **QA de Claude** (real): oficina en el navegador, ejecuciones reales de
      executors y worker, audit log y CLI.
-  3. Los hallazgos van a una tarea `SA-QA-n · Fixes tras <tanda>` que se implementa,
+  3. Los hallazgos van a una tarea `SA-QA-n · Fixes tras SA-###` que se implementa,
      revisa e integra **antes** de la siguiente feature. Si no hay hallazgos, se
      cierra vacía indicándolo.
 - Solo un hallazgo bloqueante detiene la integración; el resto va a la tarea de fixes.

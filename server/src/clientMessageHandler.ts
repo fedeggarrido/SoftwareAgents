@@ -15,6 +15,7 @@ import {
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -218,6 +219,32 @@ export function handleClientMessage(
       }
       const decision = allowCompanyAction('answer_decision', send);
       if (!decision) break;
+      const root = companyWorkspaceRoot();
+      const project = root ? loadProjectConfig(root) : undefined;
+      if (root && project) {
+        void answerProjectDecision(
+          root,
+          project.project.id,
+          project.operator.autonomyLevel,
+          String(msg.id ?? ''),
+          String(msg.answer ?? ''),
+          ctx.privileged === true,
+        )
+          .then((text) =>
+            send({
+              type: 'companyNotice',
+              text:
+                text || answerDecision(String(msg.id ?? ''), String(msg.answer ?? ''), decision),
+            }),
+          )
+          .catch((error) =>
+            send({
+              type: 'companyNotice',
+              text: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        break;
+      }
       send({
         type: 'companyNotice',
         text: answerDecision(String(msg.id ?? ''), String(msg.answer ?? ''), decision),
@@ -355,7 +382,7 @@ function allowCompanyAction(action: PolicyAction, send: WsSend): PolicyDecision 
     const decision = evaluatePolicy(action, 'human', level);
     if (decision.outcome === 'allow') return decision;
     recordAudit(action, 'policy', null, { status: 'rejected' }, { policyDecision: decision });
-    // SA-028 is not available: no queued approval and no side effect.
+    // Operator requests normally allow; invalid policy still fails closed.
     send({
       type: 'companyNotice',
       text: `Acción rechazada: ${decision.reason}`,

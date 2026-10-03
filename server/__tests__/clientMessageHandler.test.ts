@@ -12,6 +12,7 @@ import {
 import * as companyControl from '../src/companyControl.js';
 import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
+import * as decisions from '../src/humanDecisions.js';
 import * as policy from '../src/policy.js';
 import * as projectConfig from '../src/projectConfig.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
@@ -104,7 +105,7 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   it.each([
     ['companyAutopilot', 'autopilot_toggle', 'setAutopilot'],
     ['companyDecision', 'answer_decision', 'answerDecision'],
-  ] as const)('applies operator policy before %s effects', (type, action, effect) => {
+  ] as const)('applies operator policy before %s effects', async (type, action, effect) => {
     const root = vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(tempHome);
     const load = vi.spyOn(projectConfig, 'loadProjectConfig').mockReturnValue({
       project: {
@@ -120,7 +121,10 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
       operator: { autonomyLevel: 'A3', allowedExecutors: [] },
     });
     const evaluate = vi.spyOn(policy, 'evaluatePolicy');
-    const perform = vi.spyOn(companyControl, effect).mockReturnValue('ok');
+    const perform =
+      effect === 'answerDecision'
+        ? vi.spyOn(decisions, 'answerProjectDecision').mockResolvedValue('ok')
+        : vi.spyOn(companyControl, effect).mockReturnValue('ok');
     try {
       ctx.privileged = true;
       const message = {
@@ -132,6 +136,7 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
         actor: 'agent',
       };
       handleClientMessage(message, (m) => sent.push(m), ctx);
+      await settle();
       expect(load).toHaveBeenCalledWith(tempHome);
       expect(evaluate).toHaveBeenCalledWith(action, 'human', 'A3');
       expect(perform).toHaveBeenCalledTimes(1);

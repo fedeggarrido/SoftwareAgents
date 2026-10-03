@@ -4,12 +4,15 @@ import * as fs from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 
+import * as decisionSchema from '../../../core/schemas/human-decision.schema.json';
+import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
 import {
   WORKSTORE_BUSY_TIMEOUT_MS,
   WORKSTORE_DEFAULT_MAX_ATTEMPTS,
   WORKSTORE_INITIAL_TASK_STATUS,
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
+import { compileSchema, validateSchema } from '../schemaValidation.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
 import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
@@ -542,6 +545,12 @@ class SqliteWorkStore implements WorkStore {
       throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
     if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
       throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+    // SA-028: a task blocked by an open Human Decision only leaves WAITING_HUMAN when it is answered.
+    if (
+      task.status === 'WAITING_HUMAN' &&
+      this.listDecisions().some((d) => d.status === 'open' && d.blocks.includes(taskId))
+    )
+      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
     if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
       throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
     if (
@@ -672,7 +681,9 @@ class SqliteWorkStore implements WorkStore {
   }
   recordHumanDecision(decision: Omit<HumanDecisionRecord, 'project_id'>): void {
     this.db
-      .prepare('INSERT INTO human_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO human_decisions (project_id,key,task_key,execution_key,question,answer,actor,decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
       .run(
         this.projectId,
         decision.key,
@@ -693,6 +704,169 @@ class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM human_decisions WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as HumanDecisionRecord[];
+  }
+
+  listDecisions(): HumanDecision[] {
+    return this.db
+      .prepare(
+        'SELECT escalation FROM human_decisions WHERE project_id = ? AND escalation IS NOT NULL ORDER BY key',
+      )
+      .all(this.projectId)
+      .map((row) => JSON.parse(row.escalation as string) as HumanDecision);
+  }
+  /** Decision suspension/restoration preserves attempts and blocked_reason, but never a lease. */
+  private decisionTask(
+    task: TaskRecord,
+    status: TaskStatus,
+    actor: string,
+    reason: string,
+    token?: string,
+  ): void {
+    this.assertNotRecovering(task.key, token);
+    if (['LEASED', 'RUNNING'].includes(status))
+      throw new Error('Active Task requires a lease; use claim or claimRework');
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        'UPDATE tasks SET status = ?, version = version + 1, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL WHERE project_id = ? AND key = ? AND version = ?',
+      )
+      .run(status, now, this.projectId, task.key, task.version);
+    if (result.changes !== 1)
+      throw new TaskVersionConflictError(task.key, task.version, this.getTask(task.key)!.version);
+    this.db
+      .prepare(
+        "INSERT INTO domain_events (project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at) VALUES (?,?,'TASK_TRANSITIONED',?,?,?,?,?,?,?)",
+      )
+      .run(
+        this.projectId,
+        task.key,
+        task.status,
+        status,
+        task.version + 1,
+        task.attempt,
+        reason,
+        actor,
+        now,
+      );
+  }
+  async openDecision(input: NewHumanDecision): Promise<HumanDecision> {
+    const decision = validateSchema(compileSchema<HumanDecision>(decisionSchema), {
+      // Snapshot nested input before asynchronous process cleanup.
+      ...structuredClone(input),
+      status: 'open',
+      answeredBy: null,
+      answeredAt: null,
+    });
+    if (
+      new Set(decision.options.map((o) => o.id)).size !== decision.options.length ||
+      decision.options.some((o) => !o.id.trim())
+    )
+      throw new Error('Option IDs must be nonempty and unique');
+    // Reserve every block atomically before touching the OS. No partial decision or suspension
+    // is visible, and neither a sweeper nor a worker may change these Task generations.
+    const reservations = await this.write(() => {
+      if (this.getHumanDecision(decision.id)) throw new Error('Decision already exists');
+      const tasks = decision.blocks.map((key) => {
+        this.assertNotRecovering(key);
+        const task = this.getTask(key);
+        if (!task || ['DONE', 'FAILED_FINAL', 'CANCELLED', 'WAITING_HUMAN'].includes(task.status))
+          throw new Error('Task cannot wait for a human: ' + key);
+        // Expired/incomplete active leases must follow normal recovery, including attempts.
+        if (['LEASED', 'RUNNING'].includes(task.status)) this.owned(key, task.lease_owner ?? '');
+        return task;
+      });
+      return tasks.map((task) => ({
+        task,
+        token: this.reserve(task, decision.id, decision.requestedBy),
+      }));
+    });
+    try {
+      for (const { task, token } of reservations) await this.terminate(task, token);
+      return await this.write(() => {
+        const states: Record<string, TaskStatus> = Object.create(null) as Record<
+          string,
+          TaskStatus
+        >;
+        for (const { task: candidate, token } of reservations) {
+          const task = this.reservedTask(candidate.key, token);
+          states[task.key] = task.status;
+          this.decisionTask(task, 'WAITING_HUMAN', decision.requestedBy, decision.id, token);
+          this.clearReservation(task.key, token);
+        }
+        this.db
+          .prepare(
+            'INSERT INTO human_decisions (project_id,key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?)',
+          )
+          .run(
+            this.projectId,
+            decision.id,
+            decision.context,
+            '',
+            decision.requestedBy,
+            '',
+            JSON.stringify(decision),
+            JSON.stringify(states),
+          );
+        return decision;
+      });
+    } catch (error) {
+      // OS effects cannot roll back. Retain all tokens until the operator reconciles them.
+      for (const { task, token } of reservations)
+        await this.recoveryFailure(task.key, token, error);
+      throw error;
+    }
+  }
+  async resolveDecision(
+    id: string,
+    answer: string | null,
+    actor: string,
+    beforeCommit: () => void,
+  ): Promise<HumanDecision> {
+    return this.write(() => {
+      const row = this.db
+        .prepare(
+          'SELECT escalation,previous_states FROM human_decisions WHERE project_id = ? AND key = ?',
+        )
+        .get(this.projectId, id);
+      if (!row?.escalation) throw new Error('Unknown structured decision');
+      const decision = JSON.parse(row.escalation as string) as HumanDecision;
+      if (decision.status !== 'open') throw new Error('Decision is closed');
+      if (answer !== null && !decision.options.some((o) => o.id === answer))
+        throw new Error('Answer must be a listed option');
+      const states = JSON.parse(row.previous_states as string) as Record<string, TaskStatus>;
+      for (const [key, status] of Object.entries(states)) {
+        this.assertNotRecovering(key);
+        const task = this.getTask(key);
+        if (!task || task.status !== 'WAITING_HUMAN') throw new Error('Blocked task state changed');
+        // Expiry is not a human answer: retain the gate until explicit recovery.
+        // A human answer is no lease owner and starts no Execution. Active work must re-claim.
+        if (answer !== null)
+          this.decisionTask(
+            task,
+            ['LEASED', 'RUNNING'].includes(status) ? 'READY' : status,
+            actor,
+            id,
+          );
+      }
+      decision.status = answer === null ? 'expired' : 'answered';
+      decision.answer = answer;
+      decision.answeredBy = answer === null ? null : actor;
+      decision.answeredAt = answer === null ? null : new Date().toISOString();
+      this.db
+        .prepare(
+          'UPDATE human_decisions SET escalation = ?, answer = ?, actor = ?, decided_at = ? WHERE project_id = ? AND key = ?',
+        )
+        .run(
+          JSON.stringify(decision),
+          answer ?? '',
+          actor,
+          decision.answeredAt ?? '',
+          this.projectId,
+          id,
+        );
+      beforeCommit();
+      return decision;
+    });
   }
   close(): void {
     clearInterval(this.sweeper);

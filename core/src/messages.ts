@@ -438,6 +438,13 @@ export interface EpicSummary {
 
 export interface BoardDecision {
   id: string;
+  structuredOptions?: HumanDecisionOption[];
+  impact?: string;
+  urgency?: DecisionUrgency;
+  requestedBy?: string;
+  answeredBy?: string | null;
+  answeredAt?: string | null;
+  disagreement?: DecisionDisagreement[];
   question: string;
   context?: string;
   options: string[];
@@ -446,6 +453,21 @@ export interface BoardDecision {
   status: string;
   answer?: string | null;
   additionalProperties?: Record<string, any>;
+}
+
+export interface HumanDecisionOption {
+  id: string;
+  label: string;
+  benefit: string;
+  cost: string;
+  risk: string;
+}
+
+export type DecisionUrgency = 'low' | 'medium' | 'high' | 'critical';
+
+export interface DecisionDisagreement {
+  role: string;
+  position: string;
 }
 
 export interface MeetingState {

@@ -99,6 +99,62 @@ describe('BoardWatcher characterization', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it.skipIf(!DatabaseSync)(
+    'projects structured escalation packages without changing legacy choices',
+    () => {
+      fs.mkdirSync(path.join(commonDir, 'softwareagents'));
+      const db = new DatabaseSync!(path.join(commonDir, 'softwareagents/work.sqlite3'));
+      const option = {
+        id: 'review',
+        label: 'Review',
+        benefit: 'Confidence',
+        cost: 'Time',
+        risk: 'Delay',
+      };
+      try {
+        db.exec('CREATE TABLE human_decisions (project_id TEXT, escalation TEXT, key TEXT)');
+        db.prepare('INSERT INTO human_decisions (project_id, escalation) VALUES (?, ?)').run(
+          'sample',
+          JSON.stringify({
+            id: 'structured',
+            context: 'Protected change',
+            options: [option],
+            status: 'open',
+            blocks: ['SA-004'],
+            urgency: 'high',
+            requestedBy: 'system',
+          }),
+        );
+        db.prepare('INSERT INTO human_decisions (project_id, escalation) VALUES (?, ?)').run(
+          'other',
+          JSON.stringify({ id: 'hidden', context: 'Other project', options: [option] }),
+        );
+      } finally {
+        db.close();
+      }
+      const bound = new BoardWatcher(store, workspace, () => nowS * 1000, {
+        kind: 'project',
+        project: {
+          project: {
+            apiVersion: 'softwareagents.io/v1alpha1',
+            kind: 'Project',
+            id: 'sample',
+            name: 'Sample',
+            repo: { remote: 'https://example.invalid/sample.git', defaultBranch: 'main' },
+            brain: { path: '.softwareagents/brain' },
+          },
+          repoRoot: workspace,
+          paths: { brain: path.join(workspace, '.softwareagents/brain') },
+          operator: { autonomyLevel: 'A0', allowedExecutors: [] },
+        },
+      });
+      bound.start();
+      bound.dispose();
+      expect(bound.build()?.decisions).toMatchObject([
+        { id: 'structured', options: ['review'], structuredOptions: [option], urgency: 'high' },
+      ]);
+    },
+  );
   it.each([
     ['broken YAML', 'brain: [', '/project.yaml'],
     ['invalid schema', '{}', '/apiVersion'],

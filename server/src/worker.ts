@@ -13,6 +13,7 @@ import { ExecutionRegistry } from './executors/executionRegistry.js';
 import type { ExecutionHandle } from './executors/executor.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
+import { HumanDecisions } from './humanDecisions.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -202,6 +203,30 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       executionId,
     });
     if (gate.decision.outcome !== 'allow') {
+      if (gate.decision.outcome === 'require_human') {
+        const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
+        const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+        try {
+          if (!store.getTask(args.task))
+            store.createTask({
+              key: args.task,
+              type: 'implementation',
+              // This legacy worker has finished its CLI and has no WorkStore lease.
+              status: 'REVIEW',
+              branch: tree.branch,
+              worktree_ref: tree.path,
+            });
+          await new HumanDecisions(store).requireHuman(
+            'touch_protected_path',
+            'system',
+            config.operator.autonomyLevel,
+            'Rama: ' + tree.branch + '\nRutas protegidas: ' + gate.paths.join(', '),
+            [args.task],
+          );
+        } finally {
+          store.close();
+        }
+      }
       log('require_human: rutas protegidas: ' + gate.paths.join(', ') + '\nRama: ' + tree.branch);
       return { branch: tree.branch, commit: null, stat: '', policyDecision: gate.decision };
     }

@@ -1646,6 +1646,33 @@ components:
           const: companyNotice
         text:
           type: string
+    DecisionUrgency:
+      type: string
+      enum: [low, medium, high, critical]
+    HumanDecisionOption:
+      type: object
+      additionalProperties: false
+      required: [id, label, benefit, cost, risk]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        benefit:
+          type: string
+        cost:
+          type: string
+        risk:
+          type: string
+    DecisionDisagreement:
+      type: object
+      additionalProperties: false
+      required: [role, position]
+      properties:
+        role:
+          type: string
+        position:
+          type: string
     BoardDecision:
       type: object
       additionalProperties: true
@@ -1657,6 +1684,24 @@ components:
       properties:
         id:
           type: string
+        structuredOptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/HumanDecisionOption'
+        impact:
+          type: string
+        urgency:
+          $ref: '#/components/schemas/DecisionUrgency'
+        requestedBy:
+          type: string
+        answeredBy:
+          type: [string, 'null']
+        answeredAt:
+          type: [string, 'null']
+        disagreement:
+          type: array
+          items:
+            $ref: '#/components/schemas/DecisionDisagreement'
         question:
           type: string
         context:

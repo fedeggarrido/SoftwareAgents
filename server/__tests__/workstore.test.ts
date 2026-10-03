@@ -47,7 +47,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 4 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 5 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
         10,
@@ -238,7 +238,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
+        'ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
       );
       db.prepare(
         `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
@@ -255,7 +255,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
+        'ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
       );
       db.exec(
         "INSERT INTO tasks VALUES ('a', NULL, 'old-running', 'dev', 'RUNNING', 0, NULL, 7, NULL, NULL, 1, 3, NULL, NULL, NULL, NULL, 'then', 'then')",
@@ -401,7 +401,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 4 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 5 }]);
     } finally {
       db.close();
     }

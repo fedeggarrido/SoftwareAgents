@@ -93,6 +93,8 @@ const migrations = [
     WHEN NEW.status IN ('LEASED','RUNNING') AND
       (NEW.lease_owner IS NULL OR length(trim(NEW.lease_owner)) = 0 OR NEW.lease_expires_at IS NULL OR julianday(NEW.lease_expires_at) IS NULL)
     BEGIN SELECT RAISE(ABORT, 'Active Task requires a lease'); END;`,
+  `ALTER TABLE human_decisions ADD COLUMN escalation TEXT;
+  ALTER TABLE human_decisions ADD COLUMN previous_states TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

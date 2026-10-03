@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { HumanDecision } from '../../core/src/humanDecision.js';
 import type {
   AutopilotState,
   BoardDecision,
@@ -338,6 +339,18 @@ export class BoardWatcher {
       byEpic[epic].total += 1;
       if (it.phase === 'DONE') byEpic[epic].done += 1;
     }
+    const decisionDb = project
+      ? this.sources.source(dir, 'softwareagents/work.sqlite3')
+      : undefined;
+    const structured = decisionDb
+      ? (
+          readRows<{ escalation: string }>(
+            decisionDb,
+            'SELECT escalation FROM human_decisions WHERE project_id = ? AND escalation IS NOT NULL ORDER BY key',
+            project?.id,
+          ) ?? []
+        ).map((row) => JSON.parse(row.escalation) as HumanDecision)
+      : [];
     const decisionsFile = this.sources.source(this.workspaceDir, board.decisionsFile);
     return {
       type: 'boardState',
@@ -362,7 +375,17 @@ export class BoardWatcher {
         .map(eventView),
       summary: { total: view.length, byPhase, byEpic },
       waiting,
-      decisions: decisionsFile ? openDecisions(decisionsFile) : [],
+      decisions: [
+        ...structured.map((d) => ({
+          ...d,
+          question: d.context,
+          options: d.options.map((o) => o.id),
+          structuredOptions: d.options,
+        })),
+        ...(decisionsFile
+          ? openDecisions(decisionsFile).filter((d) => !structured.some((s) => s.id === d.id))
+          : []),
+      ],
       meeting: latestMeeting(this.sources.source(dir, board.meetingsDir), nowS),
       autopilot: hasBoard ? (readAutopilot() as AutopilotState | undefined) : undefined,
       generatedAt: this.now(),

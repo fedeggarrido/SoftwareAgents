@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "context",
+    "options",
+    "recommendation",
+    "disagreement",
+    "impact",
+    "urgency",
+    "requestedBy",
+    "blocks",
+    "status",
+    "answeredBy",
+    "answeredAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommendation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "impact": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "urgency": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "status": {
+      "enum": [
+        "open",
+        "answered",
+        "expired"
+      ]
+    },
+    "answeredBy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "answeredAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "answer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "blocks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "benefit",
+          "cost",
+          "risk"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "benefit": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "disagreement": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "position"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,8 +9,10 @@ import { dispatchCli } from '../src/cli.js';
 import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
+import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
+import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
@@ -157,6 +159,14 @@ describe('supervised worker', () => {
       },
     );
     expect(result).toMatchObject({ commit: null, policyDecision: { outcome: 'require_human' } });
+    const work = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(work.getTask('SA-999')?.status).toBe('WAITING_HUMAN');
+      expect(work.listDecisions()[0]).toMatchObject({ status: 'open', blocks: ['SA-999'] });
+      expect(work.listDecisions()[0].context).toContain('.github/workflows/ci.yml');
+    } finally {
+      work.close();
+    }
     expect(git(repo, 'rev-parse', result.branch)).toBe(base);
     expect(new AuditLog().read('test')).toMatchObject([
       {
@@ -169,6 +179,29 @@ describe('supervised worker', () => {
         },
       },
     ]);
+    const answered = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      await new HumanDecisions(answered).answer(
+        answered.listDecisions()[0].id,
+        'review',
+        true,
+        'fede',
+        'A1',
+      );
+      expect(answered.getTask('SA-999')).toMatchObject({
+        status: 'REVIEW',
+        lease_owner: null,
+        lease_expires_at: null,
+        attempt: 0,
+      });
+      expect(answered.listExecutions()).toEqual([]);
+      expect(git(repo, 'rev-parse', result.branch)).toBe(base);
+      expect(
+        git(path.join(repo, '.worktrees/SA-999'), 'diff', '--cached', '--name-only'),
+      ).toContain('.github/workflows/ci.yml');
+    } finally {
+      answered.close();
+    }
   });
   it('checks committed and staged changes, scripts and additive operator paths', () => {
     const base = git(repo, 'rev-parse', 'HEAD');

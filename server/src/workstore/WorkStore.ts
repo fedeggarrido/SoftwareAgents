@@ -1,3 +1,4 @@
+import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
@@ -141,5 +142,13 @@ export interface WorkStore {
   recordHumanDecision(decision: Omit<HumanDecisionRecord, 'project_id'>): void;
   getHumanDecision(key: string): HumanDecisionRecord | undefined;
   listHumanDecisions(): HumanDecisionRecord[];
+  openDecision(decision: NewHumanDecision): Promise<HumanDecision>;
+  resolveDecision(
+    id: string,
+    answer: string | null,
+    actor: string,
+    beforeCommit: () => void,
+  ): Promise<HumanDecision>;
+  listDecisions(): HumanDecision[];
   close(): void;
 }

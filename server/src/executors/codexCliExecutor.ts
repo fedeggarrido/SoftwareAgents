@@ -4,7 +4,13 @@ import * as path from 'path';
 import { createInterface } from 'readline';
 
 import type { ProjectOperatorConfig } from '../../../core/src/project.js';
-import { codexCompilerFlags, compileAgent, validateAgentOutput } from '../agentCompiler.js';
+import {
+  CODEX_WEB_EVENT_TYPES,
+  CODEX_WEB_ITEM_TYPE,
+  codexCompilerFlags,
+  compileAgent,
+  validateAgentOutput,
+} from '../agentCompiler.js';
 import { CODEX_WINDOWS_SANDBOX } from '../constants.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
@@ -89,6 +95,7 @@ export class CodexCliExecutor implements Executor {
     let cancelled = false,
       done = false;
     let cancelFailure: Error | undefined;
+    let violation: string | undefined;
     const cancel = () => {
       if (done || cancelled) return;
       cancelled = true;
@@ -221,11 +228,34 @@ export class CodexCliExecutor implements Executor {
                 }
                 if (
                   record.type === 'item.started' &&
-                  ['command_execution', 'mcp_tool_call', 'web_search', 'file_change'].includes(
-                    item?.type,
-                  )
+                  [
+                    'command_execution',
+                    'mcp_tool_call',
+                    CODEX_WEB_ITEM_TYPE,
+                    'file_change',
+                  ].includes(item?.type)
                 )
                   push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
+              }
+              // web_search="disabled" should make this unreachable, in the exec item stream or
+              // the rollout envelope; seeing it means the flag did not apply (SA-074), so the
+              // run is stopped and never trusted.
+              const webEvent = [
+                record.type === 'item.started' || record.type === 'item.completed'
+                  ? record.item?.type
+                  : undefined,
+                record.type === 'event_msg' || record.type === 'response_item'
+                  ? record.payload?.type
+                  : undefined,
+              ].find((type) => CODEX_WEB_EVENT_TYPES.includes(type));
+              if (webEvent && !violation) {
+                violation = `Policy violation: Codex used ${webEvent} despite web_search="${compiled.codex.webSearch}"; slice profiles have no web access`;
+                push({ type: 'output', text: violation, stream });
+                try {
+                  cancel();
+                } catch {
+                  /* reported below */
+                }
               }
               const payload = record?.type === 'event_msg' ? record.payload : record;
               if (payload?.type === 'token_count') {
@@ -315,9 +345,18 @@ export class CodexCliExecutor implements Executor {
           done = true;
           yield {
             type: 'finished',
-            exitCode: cancelFailure ? 1 : cancelled ? 130 : failure || resultError ? 1 : exitCode,
+            exitCode:
+              cancelFailure || violation
+                ? 1
+                : cancelled
+                  ? 130
+                  : failure || resultError
+                    ? 1
+                    : exitCode,
             resultSummary:
-              cancelFailure?.message ?? (cancelled ? 'Cancelled' : (failure?.message ?? summary)),
+              cancelFailure?.message ??
+              violation ??
+              (cancelled ? 'Cancelled' : (failure?.message ?? summary)),
           };
         } finally {
           if (timer) clearTimeout(timer);

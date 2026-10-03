@@ -42,6 +42,7 @@ UNTRUSTED_CONTEXT_JSON
 {"brain":[{"content":null,"path":"features"},{"content":null,"path":"technical-designs"},{"content":null,"path":"VISION.md"},{"content":null,"path":"CONSTRAINTS.md"},{"content":null,"path":"RULES.md"}],"kind":"untrusted-context-data","repository":null,"task":{"key":"SA-020"}}",
     "outputSchema": undefined,
     "sandbox": "read-only",
+    "webSearch": "disabled",
   },
   "flags": [
     "--sandbox",
@@ -50,9 +51,11 @@ UNTRUSTED_CONTEXT_JSON
     "--ignore-rules",
     "-c",
     "shell_environment_policy.inherit="none"",
+    "-c",
+    "web_search="disabled"",
   ],
   "hash": "78b18995d56b4cf27a3381bb1757d6849a405f3d1d284607bbbe46351e9d4d13",
-  "version": "sa-020/v2",
+  "version": "sa-074/v3",
 }
 `;
 
@@ -98,6 +101,7 @@ UNTRUSTED_CONTEXT_JSON
 {"brain":[{"content":null,"path":"features"},{"content":null,"path":"technical-designs"},{"content":null,"path":"VISION.md"},{"content":null,"path":"CONSTRAINTS.md"},{"content":null,"path":"RULES.md"}],"kind":"untrusted-context-data","repository":null,"task":{"key":"SA-020"}}",
     "outputSchema": undefined,
     "sandbox": "workspace-write",
+    "webSearch": "disabled",
   },
   "flags": [
     "--sandbox",
@@ -106,9 +110,11 @@ UNTRUSTED_CONTEXT_JSON
     "--ignore-rules",
     "-c",
     "shell_environment_policy.inherit="none"",
+    "-c",
+    "web_search="disabled"",
   ],
   "hash": "6c2e68e01de6ff852907ed6c976771c835dd32c5a2d9b88dc54ac31fe8675f0f",
-  "version": "sa-020/v2",
+  "version": "sa-074/v3",
 }
 `;
 
@@ -154,6 +160,7 @@ UNTRUSTED_CONTEXT_JSON
 {"brain":[{"content":null,"path":"features"},{"content":null,"path":"technical-designs"},{"content":null,"path":"VISION.md"},{"content":null,"path":"CONSTRAINTS.md"},{"content":null,"path":"RULES.md"}],"kind":"untrusted-context-data","repository":null,"task":{"key":"SA-020"}}",
     "outputSchema": undefined,
     "sandbox": "read-only",
+    "webSearch": "disabled",
   },
   "flags": [
     "--sandbox",
@@ -162,9 +169,11 @@ UNTRUSTED_CONTEXT_JSON
     "--ignore-rules",
     "-c",
     "shell_environment_policy.inherit="none"",
+    "-c",
+    "web_search="disabled"",
   ],
   "hash": "a776120b646c54f06c8ffae219eba11632a19874f63ea804410ec7681dba1a70",
-  "version": "sa-020/v2",
+  "version": "sa-074/v3",
 }
 `;
 
@@ -210,6 +219,7 @@ UNTRUSTED_CONTEXT_JSON
 {"brain":[{"content":null,"path":"features"},{"content":null,"path":"technical-designs"},{"content":null,"path":"VISION.md"},{"content":null,"path":"CONSTRAINTS.md"},{"content":null,"path":"RULES.md"}],"kind":"untrusted-context-data","repository":null,"task":{"key":"SA-020"}}",
     "outputSchema": undefined,
     "sandbox": "read-only",
+    "webSearch": "disabled",
   },
   "flags": [
     "--sandbox",
@@ -218,9 +228,11 @@ UNTRUSTED_CONTEXT_JSON
     "--ignore-rules",
     "-c",
     "shell_environment_policy.inherit="none"",
+    "-c",
+    "web_search="disabled"",
   ],
   "hash": "32c86a829ca8dbecee6181a7d6b59b705963659b26483d8cf9e0ad14af3d752d",
-  "version": "sa-020/v2",
+  "version": "sa-074/v3",
 }
 `;
 
@@ -266,6 +278,7 @@ UNTRUSTED_CONTEXT_JSON
 {"brain":[{"content":null,"path":"features"},{"content":null,"path":"technical-designs"},{"content":null,"path":"VISION.md"},{"content":null,"path":"CONSTRAINTS.md"},{"content":null,"path":"RULES.md"}],"kind":"untrusted-context-data","repository":null,"task":{"key":"SA-020"}}",
     "outputSchema": undefined,
     "sandbox": "read-only",
+    "webSearch": "disabled",
   },
   "flags": [
     "--sandbox",
@@ -274,8 +287,10 @@ UNTRUSTED_CONTEXT_JSON
     "--ignore-rules",
     "-c",
     "shell_environment_policy.inherit="none"",
+    "-c",
+    "web_search="disabled"",
   ],
   "hash": "ee0c187cbe10795e9920845f78de7f8f7714c09b3494bff5cbe419d93e98eb3f",
-  "version": "sa-020/v2",
+  "version": "sa-074/v3",
 }
 `;

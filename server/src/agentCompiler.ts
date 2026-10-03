@@ -2,8 +2,19 @@ import Ajv from 'ajv';
 import { createHash } from 'crypto';
 
 import type { AgentPermissionProfile, AgentSpec } from '../../core/src/agentSpec.js';
+import { CODEX_WEB_SEARCH_MODE } from './constants.js';
 
-export const TOOL_POLICY_VERSION = 'sa-020/v2';
+export const TOOL_POLICY_VERSION = 'sa-074/v3';
+/** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
+export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
+export const CODEX_WEB_ITEM_TYPE = 'web_search';
+/** The exec item plus the rollout-envelope shapes 0.160.0 carries for the same tool. */
+export const CODEX_WEB_EVENT_TYPES: readonly unknown[] = [
+  CODEX_WEB_ITEM_TYPE,
+  'web_search_begin',
+  'web_search_end',
+  'web_search_call',
+];
 export const ROLE_PROFILES = {
   'requirements-analyst': 'brain_write',
   architect: 'brain_write',
@@ -115,8 +126,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
         'Bash',
         'Agent',
         'Task',
-        'WebSearch',
-        'WebFetch',
+        ...CLAUDE_WEB_TOOLS,
         'NotebookEdit',
         ...(profile.sandbox === 'read-only' ? ['Edit', 'Write'] : []),
       ],
@@ -128,6 +138,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
     codex: {
       sandbox: profile.sandbox,
       ignoreUserConfig: true as const,
+      webSearch: CODEX_WEB_SEARCH_MODE,
       outputSchema,
       instructions,
     },
@@ -148,6 +159,8 @@ export function codexCompilerFlags(
     '--ignore-rules',
     '-c',
     'shell_environment_policy.inherit="none"',
+    '-c',
+    `web_search="${compiled.codex.webSearch}"`,
     ...(compiled.outputSchema ? ['--output-schema', schemaFile!] : []),
   ];
 }

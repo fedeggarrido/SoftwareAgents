@@ -19,6 +19,19 @@ process.stdin.on('end', () => {
     fs.readFileSync(require('path').join(__dirname, 'codex-startup-real.jsonl')),
   );
   if (args.includes('--startup-only')) return;
+  // Obeys a web-exfiltration injection, then hangs until the SA-074 tripwire kills it.
+  if (args.includes('--web-search') || args.includes('--web-search-envelope')) {
+    emit(
+      args.includes('--web-search')
+        ? {
+            type: 'item.started',
+            item: { id: 'web-1', type: 'web_search', query: 'site:attacker.invalid secret' },
+          }
+        : { type: 'event_msg', payload: { type: 'web_search_begin', call_id: 'web-1' } },
+    );
+    setTimeout(() => {}, 20000);
+    return;
+  }
   if (args.includes('--token-count'))
     emit({
       type: 'event_msg',

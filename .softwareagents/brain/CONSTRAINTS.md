@@ -59,34 +59,40 @@ para validarlos en el sandbox. La ayuda acredita los flags, no ese resultado.
 
 ## CodexCliExecutor (SA-034)
 
-M?nimo soportado y verificado: **Codex CLI 0.159.0-alpha.12.1** (2026-10-02).
+Mínimo soportado y verificado: **Codex CLI 0.159.0-alpha.12.1** (2026-10-02).
 La ayuda local de `codex exec --help` confirma `exec --json`,
 `--sandbox read-only|workspace-write`, `-C`, `--ignore-user-config`,
 `--ignore-rules`, `-c`, `--output-schema` y `-m`.
 No se afirma compatibilidad con 0.158 ni otras versiones anteriores.
 El Executor consume `codexCompilerFlags`; no acepta flags del caller ni
 usa bypass, danger-full-access o `--ephemeral`. `request.model` debe
-provenir de pol?tica autorizada por el caller, como en ClaudeCliExecutor.
+provenir de política autorizada por el caller, como en ClaudeCliExecutor.
 
-Resoluci?n: `projects.<id>.binaryPaths.codex` del Operator (ruta absoluta
-existente; override inv?lido falla), PATH, y ejecutable con mtime m?s reciente
+Sin web (SA-074): Codex 0.160.0 activa la búsqueda web por defecto y
+`--ignore-user-config` no la apaga, así que `codexCompilerFlags` añade
+`-c web_search="disabled"`. Si aun así aparece un item `web_search`, el
+Executor detiene la Execution y la falla con `Policy violation`. Evidencia y
+comandos en `docs/security/web-access.md`.
+
+Resolución: `projects.<id>.binaryPaths.codex` del Operator (ruta absoluta
+existente; override inválido falla), PATH, y ejecutable con mtime más reciente
 bajo `%LOCALAPPDATA%/OpenAI/Codex/bin/*/codex.exe`. No se ejecutan wrappers
 .cmd mediante shell. El schema se materializa en almacenamiento privado del
 Operator fuera del worktree y se elimina al acabar; las instrucciones viajan
-por stdin. No se cambia CODEX_HOME en producci?n: conserva autenticaci?n y
+por stdin. No se cambia CODEX_HOME en producción: conserva autenticación y
 rollouts. El primer `thread.started` entrega el ID real al ExecutionRegistry,
 que persiste executions antes de entregar el evento al consumidor.
 
 El fixture `server/__tests__/fixtures/codex-startup-real.jsonl` contiene
 JSONL capturado de ese binario con prompt trivial, read-only y CODEX_HOME
 temporal dentro del worktree; solo se anonimiza el thread_id. La red del
-sandbox bloque? la respuesta. Los casos de ?xito, token_count/rate_limits y
-schema del harness son sint?ticos, no una captura exitosa. El stream exec
-observado no acredit? token_count: se soporta el envelope de rollout y
-`turn.completed.usage` sin contar ambos para el mismo turno. La cuota tambi?n
+sandbox bloqueó la respuesta. Los casos de éxito, token_count/rate_limits y
+schema del harness son sintéticos, no una captura exitosa. El stream exec
+observado no acreditó token_count: se soporta el envelope de rollout y
+`turn.completed.usage` sin contar ambos para el mismo turno. La cuota también
 sigue observable por el lector de rollouts existente, sin `--ephemeral`.
 
-Pendiente del revisor: smoke con autenticaci?n real, rollout conservado,
+Pendiente del revisor: smoke con autenticación real, rollout conservado,
 Character Codex etiquetado con rol y SA-034 mediante sessionMap; verificar
-cancelaci?n del ?rbol en Windows y capacidades efectivas. La ayuda y los
+cancelación del árbol en Windows y capacidades efectivas. La ayuda y los
 fixtures no acreditan ese smoke ni un aislamiento completo del host.

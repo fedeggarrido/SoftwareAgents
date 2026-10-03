@@ -1,4 +1,4 @@
-﻿import { execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -169,7 +169,20 @@ it('uses the Reviewer compiler tools and sends task content as data', async () =
   );
   expect(report.args[report.args.indexOf('--tools') + 1]).toBe('Read,Glob,Grep');
   expect(report.args[report.args.indexOf('--disallowedTools') + 1]).toContain('Edit,Write');
+  expect(report.args[report.args.indexOf('--disallowedTools') + 1].split(',')).toEqual(
+    expect.arrayContaining(['WebSearch', 'WebFetch']),
+  );
   expect(report.args[report.args.indexOf('--append-system-prompt') + 1]).not.toContain(req.prompt);
+});
+it.each([
+  ['--web-init', 'Claude exposed WebSearch'],
+  ['--web-tool', 'Claude used WebFetch'],
+])('stops and fails the run when a web tool appears (%s)', async (mode, detail) => {
+  const events: ExecutionEvent[] = [];
+  for await (const event of executor(mode).start(req).events) events.push(event);
+  const summary = `Policy violation: ${detail}; slice profiles have no web access`;
+  expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
+  expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
 });
 it('fails the execution when Claude returns output that does not match the schema', async () => {
   req.taskData = {

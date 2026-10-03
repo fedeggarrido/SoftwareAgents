@@ -100,6 +100,8 @@ it('uses compiler sandbox/config/schema and optional policy model without bypass
       '--output-schema',
     ]),
   );
+  expect(report.args[report.args.indexOf('web_search="disabled"') - 1]).toBe('-c');
+  expect(report.args).not.toContain('--search');
   if (process.platform === 'win32')
     expect(report.args).toEqual(expect.arrayContaining(['-c', 'windows.sandbox="elevated"']));
   else expect(report.args).not.toContain('windows.sandbox="elevated"');
@@ -153,6 +155,22 @@ it('normalizes token_count and quotas without counting turn usage twice', async 
     }),
   );
 });
+it.each([
+  ['--web-search', 'web_search'],
+  ['--web-search-envelope', 'web_search_begin'],
+])(
+  'stops and fails the run when Codex searches the web despite the policy (%s)',
+  async (mode, seen) => {
+    const events = await collect(mode);
+    const summary = `Policy violation: Codex used ${seen} despite web_search="disabled"; slice profiles have no web access`;
+    if (seen === 'web_search')
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'toolUse', toolName: 'web_search' }),
+      );
+    expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
+    expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
+  },
+);
 it('fails closed on truncated real startup without a completed turn', async () => {
   expect((await collect('--startup-only')).at(-1)).toMatchObject({ exitCode: 1 });
 });

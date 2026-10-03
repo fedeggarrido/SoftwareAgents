@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import {
+  CLAUDE_WEB_TOOLS,
   codexCompilerFlags,
   compileAgent,
   ROLE_PROFILES,
@@ -39,6 +40,16 @@ for (const role of Object.keys(ROLE_PROFILES)) {
     }
   });
 }
+it.each(Object.keys(ROLE_PROFILES))('closes web access for %s in both CLIs', (role) => {
+  const compiled = compileAgent(template(role), role, { task: { key: 'SA-074' } });
+  expect(compiled.claude.disallowedTools).toEqual(expect.arrayContaining([...CLAUDE_WEB_TOOLS]));
+  for (const tool of CLAUDE_WEB_TOOLS) expect(compiled.claude.allowedTools).not.toContain(tool);
+  const flags = codexCompilerFlags(compiled);
+  expect(compiled.codex.webSearch).toBe('disabled');
+  expect(flags[flags.indexOf('web_search="disabled"') - 1]).toBe('-c');
+  expect(flags).not.toContain('--search');
+  expect(flags.filter((flag) => flag.startsWith('web_search='))).toEqual(['web_search="disabled"']);
+});
 it.each(['reviewer', 'qa', 'requirements-analyst', 'architect'])(
   'permits Codex shell reads for %s while keeping writes and unsafe actions forbidden',
   (role) => {

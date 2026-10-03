@@ -120,6 +120,10 @@ export const MACHINE_CAPACITY_PUBLISH_MS = 15_000;
 /** --ignore-user-config also drops the operator's Windows sandbox mode. Without the
  *  elevated sandbox, codex exec rejects every shell command (even reads) on Windows. */
 export const CODEX_WINDOWS_SANDBOX = 'elevated';
+/** Codex enables web search by default (0.160.0 says so in its own `[features].web_search`
+ *  deprecation notice) and --ignore-user-config keeps that default, so agents turn it off
+ *  explicitly. Modes accepted by 0.160.0: disabled, cached, indexed, live (SA-074). */
+export const CODEX_WEB_SEARCH_MODE = 'disabled';
 export const WORKSTORE_INITIAL_TASK_STATUS = 'DRAFT';
 export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
 /** Async OS helper deadline, including native-helper compilation and descendant discovery. */

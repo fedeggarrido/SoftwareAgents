@@ -1,10 +1,10 @@
-﻿import { type ChildProcess, execFileSync, spawn } from 'child_process';
+import { type ChildProcess, execFileSync, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
 
-import { compileAgent, validateAgentOutput } from '../agentCompiler.js';
+import { CLAUDE_WEB_TOOLS, compileAgent, validateAgentOutput } from '../agentCompiler.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
@@ -63,6 +63,7 @@ export class ClaudeCliExecutor implements Executor {
     let child: ChildProcess | undefined;
     let cancelled = false;
     let cancellationFailure: Error | undefined;
+    let violation: string | undefined;
     let done = false;
     const cancel = () => {
       if (done || cancelled) return;
@@ -189,6 +190,17 @@ export class ClaudeCliExecutor implements Executor {
             queue.push(event);
             wake?.();
           };
+          // Flags already withhold web tools; seeing one means they did not apply (SA-074).
+          const violate = (detail: string) => {
+            if (violation) return;
+            violation = `Policy violation: ${detail}; slice profiles have no web access`;
+            push({ type: 'output', stream: 'stdout', text: violation });
+            try {
+              cancel();
+            } catch {
+              /* surfaced after the process closes */
+            }
+          };
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: processChild[stream]! })) {
               if (stream === 'stderr') {
@@ -202,6 +214,10 @@ export class ClaudeCliExecutor implements Executor {
                   continue;
                 }
                 if (record.type === 'system' && record.subtype === 'init') {
+                  const exposed = (Array.isArray(record.tools) ? record.tools : []).filter(
+                    (tool: unknown) => typeof tool === 'string' && CLAUDE_WEB_TOOLS.includes(tool),
+                  );
+                  if (exposed.length) violate(`Claude exposed ${exposed.join(', ')}`);
                   push({
                     type: 'output',
                     stream,
@@ -216,13 +232,16 @@ export class ClaudeCliExecutor implements Executor {
                 }
                 if (record.type === 'assistant') {
                   for (const content of record.message?.content ?? []) {
-                    if (content.type === 'tool_use')
+                    if (content.type === 'tool_use') {
                       push({
                         type: 'toolUse',
                         toolId: content.id,
                         toolName: content.name,
                         input: content.input,
                       });
+                      if (CLAUDE_WEB_TOOLS.includes(content.name))
+                        violate(`Claude used ${content.name}`);
+                    }
                     if (content.type === 'text')
                       push({ type: 'output', text: content.text, stream });
                   }
@@ -306,15 +325,17 @@ export class ClaudeCliExecutor implements Executor {
           done = true;
           yield {
             type: 'finished',
-            exitCode: cancellationFailure
-              ? 1
-              : cancelled
-                ? 130
-                : resultError || failure
-                  ? 1
-                  : exitCode,
+            exitCode:
+              cancellationFailure || violation
+                ? 1
+                : cancelled
+                  ? 130
+                  : resultError || failure
+                    ? 1
+                    : exitCode,
             resultSummary:
               cancellationFailure?.message ??
+              violation ??
               (cancelled ? 'Cancelled' : (failure?.message ?? summary)),
           };
         } finally {

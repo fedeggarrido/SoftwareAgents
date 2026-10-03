@@ -44,7 +44,9 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
   comandos, endpoints ni credenciales.
 - **Mitigación (SA-020, SA-033, SA-034, SA-062, SA-074):** compilar AgentSpec a flags
   con aislamiento de la configuración del usuario, Executors aislados, contención
-  del agente y cierre de WebSearch/WebFetch en los perfiles del slice.
+  del agente y cierre de WebSearch/WebFetch en los perfiles del slice. SA-074 lo
+  aplica en ambos CLIs, incluido `web_search="disabled"` en Codex (activo por
+  defecto), con tripwire en los Executors: [web-access.md](web-access.md).
   **Aceptación temporal (SA-067):** se acepta temporalmente la herencia para
   trabajo local supervisado; inventariar capacidades efectivas antes de lanzar
   una Execution. El aislamiento de configuración exigido por ADR-0002 sigue

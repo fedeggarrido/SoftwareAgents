@@ -31,7 +31,7 @@ outputs:
 permissions:
   profile: branch_write
 modelPolicy:
-  capabilityClass: coding
+  capabilityClass: standard_coding
   fallbackAllowed: true
 context:
   brainPaths:

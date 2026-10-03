@@ -63,6 +63,67 @@ afterEach(() => {
 });
 
 describe('supervised worker', () => {
+  it.each(['claude', 'codex'])(
+    'optional selection launches %s as a single probe',
+    async (selected) => {
+      fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
+      fs.writeFileSync(
+        path.join(repo, '.softwareagents/agents/model-policy.yaml'),
+        `standard_coding:\n  - executor: ${selected === 'claude' ? 'codex' : 'claude'}\n  - executor: ${selected}\n    model: test-model\n`,
+      );
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-m', 'preferences');
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            test: {
+              autonomyLevel: 'A1',
+              allowedExecutors: [selected],
+              binaryPaths: { [selected]: process.execPath },
+              quotaThresholds: { [selected]: 5 },
+              concurrency: { maxExecutions: 2, perExecutor: { [selected]: 2 } },
+            },
+          },
+        }),
+      );
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/machine-capacity.json'),
+        JSON.stringify({ observedAt: Date.now() / 1000, active: { [selected]: 0 } }),
+      );
+      const log = vi.fn();
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
+        { cwd: repo, binaryArgs: [fake, selected], log },
+      );
+      expect(result.branch).toContain('SA-999');
+      expect(result.commit).toBeNull();
+      expect(log.mock.calls[0][0]).toContain('probe');
+      const records = fs.readFileSync(
+        path.join(repo, '.git/softwareagents/executions.jsonl'),
+        'utf8',
+      );
+      expect(JSON.parse(records.trim().split('\n')[0])).toMatchObject({
+        executor: selected,
+        model: 'test-model',
+      });
+    },
+  );
+  it('optional selection waits before creating a worktree when machine count is absent', async () => {
+    fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
+    fs.writeFileSync(
+      path.join(repo, '.softwareagents/agents/model-policy.yaml'),
+      'standard_coding:\n  - executor: claude\n',
+    );
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
+      { cwd: repo, log: () => {} },
+    );
+    expect(result).toMatchObject({ commit: null, quotaDecision: { status: 'wait' } });
+    expect(fs.existsSync(path.join(repo, '.worktrees/SA-999'))).toBe(false);
+    expect(process.exitCode).toBe(3);
+    process.exitCode = 0;
+  });
   it.each([
     ['\n# SA-999 · HUD: mostrar Capacidad\nDetails', 'HUD: mostrar Capacidad'],
     ['# sa-999: HUD', 'HUD'],

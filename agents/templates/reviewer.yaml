@@ -30,7 +30,7 @@ outputs:
 permissions:
   profile: read_only
 modelPolicy:
-  capabilityClass: high_reasoning
+  capabilityClass: review
   fallbackAllowed: true
 context:
   brainPaths:

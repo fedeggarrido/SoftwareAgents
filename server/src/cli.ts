@@ -35,6 +35,7 @@ import { MAX_PORT, MIN_PORT } from './constants.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
+import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
 import { parseWorkerArgs, runWorker } from './worker.js';
 
@@ -143,7 +144,9 @@ export async function dispatchCli(
   argv: string[],
   handlers = { server: startServer, worker: runWorker },
 ): Promise<void> {
-  if (argv[0] === 'worker') {
+  if (argv[0] === 'quota') {
+    process.exitCode = runQuotaCheck(parseQuotaArgs(argv.slice(1)));
+  } else if (argv[0] === 'worker') {
     await handlers.worker(parseWorkerArgs(argv.slice(1)));
   } else {
     await handlers.server(argv);

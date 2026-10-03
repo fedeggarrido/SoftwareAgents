@@ -1,0 +1,14 @@
+# Preferencias declarativas de executor por capabilityClass (orden). Sin nombres de modelo:
+# el modelo y el esfuerzo por tarea los decide la config del operador (SA-084).
+high_reasoning:
+  - executor: claude
+  - executor: codex
+standard_coding:
+  - executor: codex
+  - executor: claude
+fast_cheap:
+  - executor: claude
+  - executor: codex
+review:
+  - executor: claude
+  - executor: codex

@@ -9,19 +9,24 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import { compileAgent } from './agentCompiler.js';
 import { recordAudit } from './auditLog.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
+import { CodexCliExecutor } from './executors/codexCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import type { ExecutionHandle } from './executors/executor.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
+import { selectExecutor } from './executorSelection.js';
 import { HumanDecisions } from './humanDecisions.js';
+import { loadModelPolicy } from './modelPolicy.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { readSelectionSnapshot } from './quotaCommand.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
 export interface WorkerArgs {
   task: string;
   brief: string;
+  selectExecutor?: boolean;
 }
 
 /** Use the brief heading as written, with the task key only in the commit scope. */
@@ -41,8 +46,14 @@ export function parseWorkerArgs(argv: string[]): WorkerArgs {
   if (argv[0] !== 'run')
     throw new Error('Usage: pixel-agents worker run --task SA-### --brief <file>');
   const values: Record<string, string> = {};
+  let selection = false;
   for (let i = 1; i < argv.length; i += 2) {
     const key = argv[i];
+    if (key === '--select-executor' && !selection) {
+      selection = true;
+      i--;
+      continue;
+    }
     const value = argv[i + 1];
     if (!['--task', '--brief'].includes(key) || !value || value.startsWith('--') || values[key])
       throw new Error('Expected unique --task and --brief values');
@@ -50,7 +61,11 @@ export function parseWorkerArgs(argv: string[]): WorkerArgs {
   }
   if (!/^SA-\d{3,}$/.test(values['--task'] ?? '') || !values['--brief'])
     throw new Error('Expected --task SA-### and --brief <file>');
-  return { task: values['--task'], brief: values['--brief'] };
+  return {
+    task: values['--task'],
+    brief: values['--brief'],
+    ...(selection ? { selectExecutor: true } : {}),
+  };
 }
 
 function git(cwd: string, args: string[]): string {
@@ -112,7 +127,10 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
         input: args,
       },
     );
-  if (decision.outcome !== 'allow' || !config.operator.allowedExecutors.includes('claude')) {
+  if (
+    decision.outcome !== 'allow' ||
+    (!args.selectExecutor && !config.operator.allowedExecutors.includes('claude'))
+  ) {
     audit('denied');
     throw new Error('Operator config must allow the claude executor for this Project');
   }
@@ -129,6 +147,17 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     repository: { projectId: config.project.id },
   };
   const compiled = compileAgent(spec, 'developer', taskData);
+  const selection = args.selectExecutor
+    ? selectExecutor(spec, loadModelPolicy(cwd), readSelectionSnapshot(config.operator))
+    : undefined;
+  if (selection) {
+    log(selection.reason);
+    if (!selection.choice || selection.gate.status === 'wait') {
+      audit('quota_wait');
+      process.exitCode = 3;
+      return { branch: '', commit: null, stat: '', quotaDecision: selection.gate };
+    }
+  }
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
   const release = acquireTaskLock(common, args.task);
   let handle: ExecutionHandle | undefined;
@@ -155,11 +184,17 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     const base = git(tree.path, ['rev-parse', 'HEAD']);
     if (interrupted) throw new Error('Worker interrupted');
     const executor = new ExecutionRegistry(tree.path).executor(
-      new ClaudeCliExecutor({
-        binary: config.operator.binaryPaths?.claude ?? 'claude',
-        binaryArgs: options.binaryArgs,
-        runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
-      }),
+      selection?.choice?.executor === 'codex'
+        ? new CodexCliExecutor({
+            operator: config.operator,
+            binaryArgs: options.binaryArgs,
+            runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
+          })
+        : new ClaudeCliExecutor({
+            binary: config.operator.binaryPaths?.claude ?? 'claude',
+            binaryArgs: options.binaryArgs,
+            runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
+          }),
     );
     handle = executor.start({
       executionId,
@@ -170,6 +205,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       taskData,
       agentSpec: spec,
       flags: [],
+      ...(selection?.choice?.model ? { model: selection.choice.model } : {}),
       worktreePath: tree.path,
       timeoutMin: 30,
     });

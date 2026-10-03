@@ -1,12 +1,11 @@
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { readConfig } from './configPersistence.js';
 import type { ExecutorId } from './executors/executor.js';
 import type { SelectionSnapshot } from './executorSelection.js';
+import { machineCapacityFile } from './machineCapacity.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
@@ -82,9 +81,7 @@ export function readSelectionSnapshot(
   try {
     observation = validateSchema(
       validateObservation,
-      JSON.parse(
-        fs.readFileSync(path.join(os.homedir(), '.pixel-agents', 'machine-capacity.json'), 'utf8'),
-      ),
+      JSON.parse(fs.readFileSync(machineCapacityFile(), 'utf8')),
     );
     if (observation.observedAt > nowS || nowS - observation.observedAt > MAX_OBSERVATION_AGE_S)
       observation = undefined;

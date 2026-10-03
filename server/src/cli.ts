@@ -21,7 +21,7 @@ import {
   loadAllPets,
 } from './assetReload.js';
 import { loadBoardSelection } from './boardSources.js';
-import { BoardWatcher } from './boardWatcher.js';
+import { BoardWatcher, latestBoardMessage } from './boardWatcher.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
 import { CodexWatcher } from './codexWatcher.js';
 import { configureCompanyControl } from './companyControl.js';
@@ -34,6 +34,7 @@ import {
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { MachineCapacityPublisher } from './machineCapacity.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
@@ -371,6 +372,14 @@ async function startServer(argv: string[]): Promise<void> {
     const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
 
+    // The machine-wide observation the quota gate needs (SA-QA-3). Without it,
+    // `quota check` and `worker run --select-executor` always wait.
+    const machineCapacity = new MachineCapacityPublisher(store, () => {
+      const quota = latestBoardMessage()?.quota;
+      return { claude: quota?.claude.capacity, codex: quota?.codex.capacity };
+    });
+    machineCapacity.start();
+
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
     // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,
@@ -390,6 +399,7 @@ async function startServer(argv: string[]): Promise<void> {
       codexWatcher.dispose();
       roleResolver.dispose();
       boardWatcher.dispose();
+      machineCapacity.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

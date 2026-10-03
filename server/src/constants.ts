@@ -114,6 +114,9 @@ export const HUE_SHIFT_MAX_DEG = 360;
 
 // Operational WorkStore defaults; transition policy lives in workstore/taskStateMachine.
 export const WORKSTORE_BUSY_TIMEOUT_MS = 5000;
+/** Machine-wide observation the quota gate reads (SA-036/SA-QA-3); it goes stale after 60 s. */
+export const MACHINE_CAPACITY_FILE_NAME = 'machine-capacity.json';
+export const MACHINE_CAPACITY_PUBLISH_MS = 15_000;
 /** --ignore-user-config also drops the operator's Windows sandbox mode. Without the
  *  elevated sandbox, codex exec rejects every shell command (even reads) on Windows. */
 export const CODEX_WINDOWS_SANDBOX = 'elevated';

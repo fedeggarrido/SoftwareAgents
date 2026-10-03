@@ -35,7 +35,32 @@ opcionalmente CapacitySnapshots de SA-035 por executor. Sin cuota conocida y con
 recuento válido, se permite una única sonda. Ventanas ya reseteadas se descartan;
 las demás ventanas siguen bloqueando si su cuota está bajo el umbral.
 
-SA-036 no publica esta observación ni inspecciona procesos o datos de Fundtrinsic.
-El operador debe suministrarla mediante su fuente global. Es un gate observacional,
+**Publicación (SA-QA-3).** El servidor standalone de la oficina (`pixel-agents`) publica esta
+observación cada 15 s de forma atómica mientras está en marcha (`MachineCapacityPublisher`):
+`active` cuenta **todas** las sesiones que la oficina sigue por executor, activas o en espera
+(contar de más solo hace esperar; contar de menos permitiría superar el tope), y `capacities`
+copia los CapacitySnapshots de SA-035. Alcance: solo lo que ve esa oficina; las sesiones de
+otros workspaces cuentan únicamente con Watch All Sessions activado. Si la oficina se para, la
+observación caduca a los 60 s y el gate vuelve a esperar. No inspecciona procesos ni datos de
+Fundtrinsic.
+
+**Configuración del operador necesaria** (en `~/.pixel-agents/config.json → projects.<id>`;
+la escribe el operador, nunca el repo). Sin `concurrency.perExecutor` el gate espera siempre:
+
+```json
+{
+  "projects": {
+    "softwareagents": {
+      "autonomyLevel": "A1",
+      "allowedExecutors": ["claude", "codex"],
+      "concurrency": { "maxExecutions": 1, "perExecutor": { "claude": 1, "codex": 1 } },
+      "quotaThresholds": { "claude": 10, "codex": 10 }
+    }
+  }
+}
+```
+
+`quotaThresholds` es el porcentaje mínimo restante por executor; un valor conservador evita
+agotar la cuota compartida con otros proyectos. Es un gate observacional,
 no una reserva atómica: dos consumidores pueden leer el mismo recuento antes de
 lanzar. No habilitar paralelismo desatendido hasta el ledger/reservas de SA-037.

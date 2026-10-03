@@ -76,6 +76,23 @@ const migrations = [
   ) STRICT;
   CREATE INDEX tasks_lease_expiry ON tasks(project_id, lease_expires_at)
     WHERE status IN ('LEASED', 'RUNNING');`,
+  `CREATE TABLE lease_recoveries (
+    project_id TEXT NOT NULL, task_key TEXT NOT NULL, token TEXT NOT NULL,
+    task_version INTEGER NOT NULL, reason TEXT NOT NULL, actor TEXT NOT NULL,
+    started_at TEXT NOT NULL, error TEXT,
+    PRIMARY KEY(project_id, task_key),
+    FOREIGN KEY(project_id, task_key) REFERENCES tasks(project_id, key)
+  ) STRICT;
+  ALTER TABLE executions ADD COLUMN tree_closed_at TEXT;
+  CREATE INDEX executions_task_version ON executions(project_id, task_key, task_version);
+  CREATE TRIGGER tasks_active_lease_insert BEFORE INSERT ON tasks
+    WHEN NEW.status IN ('LEASED','RUNNING') AND
+      (NEW.lease_owner IS NULL OR length(trim(NEW.lease_owner)) = 0 OR NEW.lease_expires_at IS NULL OR julianday(NEW.lease_expires_at) IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'Active Task requires a lease'); END;
+  CREATE TRIGGER tasks_active_lease_update BEFORE UPDATE ON tasks
+    WHEN NEW.status IN ('LEASED','RUNNING') AND
+      (NEW.lease_owner IS NULL OR length(trim(NEW.lease_owner)) = 0 OR NEW.lease_expires_at IS NULL OR julianday(NEW.lease_expires_at) IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'Active Task requires a lease'); END;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

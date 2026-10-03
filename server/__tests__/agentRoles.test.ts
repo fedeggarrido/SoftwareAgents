@@ -49,6 +49,18 @@ describe('specialistRole', () => {
 });
 
 describe('roleFromBrief', () => {
+  it('labels QA/Reviewer only when the brief or top-level metadata assigns that role', () => {
+    expect(roleFromBrief('Rol: QA\nComprueba SA-026', 'codex')).toMatchObject({
+      label: 'QA',
+      department: 'Calidad',
+    });
+    expect(roleFromBrief('Actúa como Reviewer de SA-026', 'codex').label).toBe('Reviewer');
+    expect(codexRole({ agent_role: 'reviewer' }, 'Revisa la tarea').label).toBe('Reviewer');
+    expect(
+      roleFromBrief('Implementa los fixes tras la QA; Claude hace de Reviewer', 'codex').label,
+    ).toBe('Dueño');
+    expect(roleFromBrief('¿Cómo funciona QA?', 'codex').label).toBe('Dueño');
+  });
   it.each(['.', ',', ';', ':', ')', ']', '\u00bb', '"', "'"])(
     'trims closing punctuation %s from opaque task identifiers',
     (closing) => {
@@ -164,6 +176,20 @@ describe('transcript and rollout readers', () => {
     fs.writeFileSync(file, line({ type: 'session_meta', payload: { thread_source: 'user' } }));
     expect(codexRoleFromRollout(file)).toBeUndefined();
   });
+  it.each(['QA', 'Reviewer'])(
+    'reads an explicit main-session %s role before a brief arrives',
+    (role) => {
+      const file = path.join(dir, 'main-role.jsonl');
+      fs.writeFileSync(
+        file,
+        line({
+          type: 'session_meta',
+          payload: { thread_source: 'user', cwd: 'D:/repo', agent_role: role },
+        }),
+      );
+      expect(codexRoleFromRollout(file)).toMatchObject({ label: role, department: 'Calidad' });
+    },
+  );
 
   it('reads a Claude brief, ignoring meta and command records', () => {
     const file = path.join(dir, 't.jsonl');

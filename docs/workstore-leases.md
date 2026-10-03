@@ -1,81 +1,132 @@
 # Leases y efectos idempotentes de WorkStore
 
 SA-026 amplía el WorkStore de [ADR-0003](adr/0003-workstore-sqlite-local.md).
-Se activa al abrir explícitamente un WorkStore del Managed Project desde el
-servidor standalone. No migra claims legacy ni conecta el ledger JSONL de los
-Executors con SQLite; los consumidores del nuevo WorkStore deben registrar sus
-Executions aquí. La oficina legacy sigue usando sus fuentes actuales.
+SA-QA-1 añade fencing de recuperación y la migración v4. Se activa al abrir
+explícitamente un WorkStore del Managed Project desde el servidor standalone.
+No migra claims legacy ni conecta el ledger JSONL de los Executors con SQLite;
+los consumidores deben registrar aquí sus Executions. La oficina legacy sigue
+usando sus fuentes actuales.
 
 ## Reserva y renovación
 
-`claim(taskId, owner, ttl)` recibe milisegundos; el TTL por defecto es **60 segundos**.
-El worker debe usar un owner único por instancia (por ejemplo, un UUID), renovar
-con `heartbeat` cada **20 segundos** y dejar de trabajar si pierde la lease.
-Cada heartbeat recibe su TTL; si se omite, vuelve a usar 60 segundos.
-Se usan timestamps UTC y el reloj del mismo Host: un salto de reloj puede adelantar
-o retrasar la recuperación. No se admite coordinación entre Hosts.
+`claim(taskId, owner, ttl)` recibe milisegundos; el TTL predeterminado es **60 segundos**.
+El worker debe usar un owner único por instancia, renovar con `heartbeat` cada
+**20 segundos** y dejar de trabajar si pierde la lease. Cada heartbeat recibe su
+TTL; si se omite, vuelve a usar 60 segundos. Se usan timestamps UTC del mismo
+Host. Un salto del reloj hacia delante puede adelantar la caducidad; uno hacia
+atrás puede retrasarla o acortar una renovación. No hay reloj monotónico
+persistente ni coordinación entre Hosts. Los tests cubren ambos saltos y el token
+impide renovar durante una recuperación incluso con un reloj atrasado en otro proceso.
+Antes de reservar un token, un salto hacia atrás puede hacer que una lease parezca
+vigente otra vez: no se garantiza caducidad monotónica.
 
 Un claim acepta QUEUED, READY o FAILED_RETRYABLE. Recorre las transiciones legales
-de SA-025 hasta LEASED en una sola transacción, comprobando dependencias y versión.
-Solo gana un claimant; el perdedor recibe un error, sin eventos parciales.
-El consumidor pasa a RUNNING con `transition` y la versión retornada. El heartbeat
-no cambia esa versión, para no invalidar el fencing de la Execution. La renovación
-y release comprueban owner, estado activo y caducidad bajo el lock de escritura.
-`transition` y `createExecution` rechazan una lease vencida; registrar una Execution
-activa exige la versión actual de la Task.
+hasta LEASED bajo una adquisición excluyente, comprobando dependencias y versión.
+La lease y sus DomainEvents se confirman juntos. Solo gana un claimant.
+El consumidor pasa de LEASED a RUNNING con `transition` y la versión retornada.
+Para rework se usa **`claimRework(taskId, expectedVersion, owner, ttl)`**: adquiere
+atómicamente una lease nueva al pasar de REVIEW/QA a RUNNING e incrementa attempt.
+`transition` rechaza esos reworks y la entrada directa a LEASED. `createTask`
+rechaza estados activos o leases importadas. Los triggers SQLite v4 también
+impiden nuevos registros LEASED/RUNNING con lease incompleta o fecha inválida.
+Los registros históricos activos sin lease no se reescriben durante la migración:
+se consideran candidatos de recuperación; con Executions inseguras quedan bloqueados.
 
-`release` aborta el intento: termina el executor registrado y pasa a FAILED_RETRYABLE,
-o FAILED_FINAL al agotar intentos. Una finalización normal se registra con
-RUNNING → REVIEW; salir de LEASED/RUNNING elimina los campos de lease.
+El heartbeat no cambia la versión de la Task, para conservar el fencing de la
+Execution. Renovación y release comprueban owner, estado y caducidad bajo el lock.
+`transition` y `createExecution` rechazan leases vencidas y reservas de recuperación.
+**`createExecution` ahora devuelve Promise<void> y debe esperarse con await**:
+la consulta de identidad al SO es asíncrona y la inserción SQL vuelve a comprobar
+versión, owner, vencimiento y ausencia de token en una sola sentencia bajo el lock.
+Si falla el registro después de lanzar el CLI, el consumidor debe detenerlo;
+SQLite no contiene procesos lanzados sin registrarlos. Para cerrar también esa
+ventana se necesita coordinar la reserva con el Executor antes de que pueda escribir.
 
-Cada handle del WorkStore tiene un sweeper de **5 segundos**, con timer `unref` que
-se cancela en `close`. También se barre al inicio de cada claim. Servidor y workers
-pueden barrer concurrentemente: la versión se vuelve a comprobar bajo `BEGIN IMMEDIATE`
-y `retryBusy`; la recuperación efectiva y su DomainEvent se confirman juntos una
-sola vez. El servidor debe mantener abierto el handle mientras coordine el Project.
+`release` reserva la recuperación y termina las Executions antes de pasar a
+FAILED_RETRYABLE o FAILED_FINAL. Una salida normal RUNNING → REVIEW elimina la
+lease, pero por sí sola **no acredita** que el árbol del CLI terminó.
 
-Una lease vencida incrementa `attempt` en uno. Cuando el nuevo contador alcanza
-`max_attempts`, pasa a FAILED_FINAL; antes pasa a FAILED_RETRYABLE. Por ejemplo,
-con `attempt=0` y `max_attempts=3`, la tercera recuperación es definitiva.
+## Recuperación excluyente por tarea
+
+Cada handle abierto tiene un sweeper cada **5 segundos**, con timer unref que se
+cancela en close. Cada claim recupera solo la Task solicitada; no espera el barrido
+ni la terminación de Tasks independientes. El sweeper consulta candidatos activos
+vencidos/incompletos y procesa cada Task por separado, con sus errores aislados.
+`recoverExpiredLeases` devuelve las Tasks recuperadas; los fallos se registran en
+consola y persisten en **`listLeaseRecoveries()`**, delimitados por Project.
+
+Antes de tocar el SO, una transacción corta BEGIN IMMEDIATE relee el estado y
+vencimiento actuales y reserva un **token UUID persistente**, único por Task.
+Esto protege también contra un candidato antiguo cuya misma lease fue renovada.
+El token excluye heartbeat, transición, otro claim/rework/release y registro de
+Executions. El cierre comprueba **el mismo token y versión**. La terminación y la
+consulta de identidad ocurren fuera del lock y de forma asíncrona; otras Tasks
+pueden seguir renovando y reclamándose durante un helper lento. Solo se consultan
+Executions de la Task y de generaciones anteriores, mediante un índice específico.
+
+La transición final, incremento de attempt, DomainEvent y eliminación del token
+se confirman juntos. Si attempt + 1 alcanza max_attempts, termina en FAILED_FINAL;
+antes pasa a FAILED_RETRYABLE. Las referencias Git y los cambios se conservan.
+
+Si falla el helper o el cierre SQL, **se conserva el token y su error**. Si muere el
+proceso recuperador, el token sin error sigue visible tras reabrir. No tiene TTL
+ni se roba automáticamente: el recuperador antiguo podría seguir usando handles.
+La Task insegura queda reservada; Tasks independientes siguen funcionando.
+Cerrar un handle del store durante una recuperación tampoco libera su token.
+Un fallo anterior a obtener el token se registra en consola; no se puede garantizar
+persistir su diagnóstico si SQLite no permite escribir.
+
+La reconciliación requiere detener y comprobar el recuperador anterior y todos
+los posibles escritores, inspeccionar el trabajo parcial y reparar explícitamente
+el registro con evidencia del Operator. Eliminar solo el token no basta si una
+Execution sigue sin prueba de cierre. No hay API/UI de reconciliación ni prueba
+de cierre aportada automáticamente por el Executor legacy en este slice; se
+propone conectarlo a contención de procesos y Human Decisions en un cambio posterior.
+Un registro de Human Decision por sí solo no concede autoridad de ejecución.
 
 ## Executor y worktree huérfanos
 
-Caducar no prueba que el Developer ni su CLI hayan muerto. Antes de recuperar o
-reasignar se comprueban las Executions registradas de esa Task, incluidas las
-anteriores. `pid` debe identificar la **raíz del CLI executor**, no el worker que
-lo lanzó: si muere el worker, el CLI sigue siendo localizable.
+`pid` debe identificar la **raíz del CLI**, no el worker que lo lanzó.
+`pid_started_at` conserva los ticks UTC exactos de creación del proceso Windows,
+separados del timestamp lógico `started_at`. El registro de una Execution activa
+captura su identidad con Get-Process.StartTime. Nunca se compara una hora aproximada
+con una tolerancia capaz de confundir un PID reciclado.
 
-`started_at` conserva el timestamp lógico de la Execution. La migración v3 añade
-`pid_started_at`: identidad exacta de creación del proceso del SO, expresada como
-ticks UTC de `Get-Process.StartTime`. `createExecution` la captura automáticamente
-para una Task con lease activa. No se compara una hora aproximada del evento CLI
-con una tolerancia que pudiera confundir un PID reutilizado.
+Para recuperar en Windows, un helper C# embebido y compilado con Add-Type abre
+un handle nativo con OpenProcess. GetProcessTimes verifica la identidad y
+TerminateProcess/WaitForSingleObject operan sobre **ese mismo handle retenido**;
+no se vuelve a abrir por PID para matar y no se usa taskkill. Este helper evita
+depender de que Process.Kill reutilice el handle consultado en una versión concreta
+de .NET. Cada descendiente capturado también conserva su handle. Las consultas CIM
+se limitan a ParentProcessId de procesos ya fijados y validan CreationDate
+(microsegundos) contra la creación del handle. No se terminan procesos ajenos
+al árbol registrado; Fundtrinsic queda fuera del alcance.
 
-En Windows se consulta únicamente el PID registrado. Si ya murió, no se mata nada;
-si su identidad cambió, se deja vivo el proceso que reutilizó ese PID. Si coincide,
-se ejecuta `taskkill.exe /PID <pid> /T /F` y se verifica que la raíz original haya
-desaparecido. Errores de permisos, timeout, identidad ilegible o una Execution
-legacy viva sin identidad bloquean la recuperación y el claim. Se mantiene el
-estado anterior y el sweeper informa del error. Se intentan recuperar las otras
-Tasks del Project, pero el claim recibe el fallo del barrido para que sea visible.
+Raíz ausente, ya terminada o con PID reutilizado **sin prueba persistida de cierre**,
+identidad ilegible, descendiente desaparecido/reciclado durante la captura,
+permiso denegado y timeout bloquean la reutilización. El error y token quedan
+visibles. Al terminar y esperar la raíz y los descendientes capturados se guarda
+`tree_closed_at` por Execution bajo el mismo token. El siguiente claim omite esas
+Executions ya cerradas y nunca vuelve a matar sus PIDs, aunque se hayan reutilizado.
+Los consumidores no pueden importar ese campo mediante createExecution.
 
-Las consultas y terminación del SO ocurren **fuera de la transacción SQLite**;
-después se comprueban otra vez versión y caducidad. Actualmente son síncronas,
-con timeout de 10 segundos por comando; pueden bloquear el hilo del llamador.
-No se recorren procesos del Host ni se interviene en Fundtrinsic. La recuperación
-de executors vivos en otros sistemas operativos falla explícitamente hasta contar
-con un mecanismo equivalente.
+**Límite residual:** tree_closed_at acredita el cierre del **árbol capturado**, no
+contención del SO. CIM no puede probar que un descendiente no escapó o nació después
+de capturar su padre y antes de terminarlo. La identidad segura del handle resuelve
+la carrera de PID reciclado; no resuelve esa carrera de creación/escape. Para
+excluir cualquier escritor adversarial hace falta lanzar el Executor dentro de un
+**Windows Job Object** (sin breakaway y con asignación antes de permitir ejecución),
+o un mecanismo equivalente. Esto exige coordinar el lanzamiento con Executors y
+se propone como rediseño posterior. Un CLI ya terminado sin tree_closed_at, incluso
+tras una finalización normal, requiere reconciliación antes del siguiente intento.
+Los helpers tienen deadline asíncrono de 60 segundos y espera por handle de 10;
+SQLite conserva operaciones síncronas cortas y su propio busy_timeout: contención
+SQL prolongada aún puede retrasar el event loop. La recuperación de Executions con
+PID en otros SO falla explícitamente hasta contar con un mecanismo equivalente.
 
-El worktree, la rama y los cambios sin commit **se conservan**. No se ejecuta reset,
-clean ni eliminación automática; el siguiente intento recibe las referencias
-existentes y debe inspeccionar el trabajo parcial antes de continuar.
-
-Límites del MVP: la comprobación de identidad y `taskkill` son dos operaciones del
-SO; queda una ventana pequeña de reutilización entre ambas. `/T` cubre el árbol
-que Windows identifica bajo la raíz viva; no acredita recuperar descendientes
-que escaparon de ese árbol o cuya raíz CLI ya desapareció. Un Job Object o un
-registro completo de descendientes requiere coordinación con los Executors y
-queda fuera de SA-026. El caso cubierto es worker muerto con raíz CLI viva.
+El worktree, la rama y los cambios parciales **se conservan**. No se ejecutan reset,
+clean ni eliminación automática. Los tests usan un worktree Git real, un archivo
+modificado, uno sin seguimiento y una junction sintética, y comprueban su conservación.
 
 ## Idempotencia de efectos externos
 
@@ -99,18 +150,39 @@ reinvocar automáticamente un efecto incierto. SA-026 no añade una UI de reconc
 
 ## Verificación real pendiente de Claude
 
-Ejecutar desde `server`, sin `SA_SKIP_TASKKILL_TEST`:
+Ejecutar desde el worktree, sin SA_SKIP_TASKKILL_TEST:
 
 ```powershell
-$env:TEMP="$PWD\..\.vitest-tmp"; $env:TMP=$env:TEMP
-npx vitest run __tests__/leaseOrphan.test.ts
+$env:TEMP="$PWD\.vitest-tmp"; $env:TMP=$env:TEMP
+Remove-Item Env:SA_SKIP_TASKKILL_TEST -ErrorAction SilentlyContinue
+npm exec --workspace server -- vitest run __tests__/leases.test.ts __tests__/leaseProcesses.test.ts __tests__/leaseOrphan.test.ts __tests__/processRecovery.test.ts __tests__/windowsProcessRecovery.test.ts __tests__/workstore.test.ts __tests__/agentRoles.test.ts
 ```
 
-La prueba lanza un worker y un CLI fixture con descendiente, registra la identidad
-del CLI, mata únicamente el worker y comprueba que el CLI sigue vivo. El claim tras
-el TTL debe matar CLI y descendiente antes de reservar al siguiente owner, incrementar
-el intento y conservar el worktree. En un sandbox que deniegue `taskkill`, usar
-`SA_SKIP_TASKKILL_TEST=1` y registrar que este criterio sigue pendiente fuera del sandbox.
-La prueba utiliza repos y procesos temporales propios, sin CLIs autenticados ni perfil
-real. En la oficina real, confirmar además que los Characters y paneles legacy siguen
-mostrando actividad normal; esta tarea no añade indicadores visuales de leases.
+La prueba de worker muerto mantiene raíz CLI y descendiente vivos. Tras el TTL,
+el siguiente claim debe terminar ambos, guardar tree_closed_at, incrementar el
+intento y conservar rama, worktree, cambios y junction. También se prueba una raíz
+CLI que desapareció con un descendiente escribiendo: debe bloquear el claim y
+mantener el error, owner y attempt anteriores. Son procesos/repos temporales
+propios, sin CLIs autenticados ni escrituras al perfil real.
+
+El sandbox de Codex denegó Get-CimInstance (Access denied) al probar el árbol vivo.
+Se utiliza SA_SKIP_TASKKILL_TEST=1 únicamente para esa prueba; su nombre se conserva
+por compatibilidad aunque ya no se use taskkill. Claude debe repetirla fuera del
+sandbox sin esa variable. La prueba de raíz desaparecida y la prueba determinista
+del helper C# sobre sustitución de PID sí pueden ejecutarse en el sandbox.
+
+Los tests de procesos reales controlan dos peers Node por IPC y aíslan solo la
+frontera del SO: claims concurrentes, snapshot antiguo tras heartbeat, exclusión
+por token, registro asíncrono intercalado y recuperador muerto. La prueba C# ejecuta
+el algoritmo de producción con una API kernel controlada que sustituye el mapa PID
+entre consulta de identidad y terminación y verifica que solo se usa el handle antiguo.
+Otra prueba ejecuta GetProcessTimes, TerminateProcess y WaitForSingleObject sobre
+un proceso Windows fixture real, usando un único handle retenido, sin depender de CIM.
+
+En la oficina real, confirmar que Characters y paneles legacy siguen mostrando
+actividad normal. Las leases SQLite no se conectan todavía al worker legacy ni
+se muestran en un panel nuevo. Para el ajuste visual LOW, un brief explícito
+**Rol: QA / Role: Reviewer / Actúa como QA / Actúa como Reviewer**, metadata
+`agent_role` reconocida o un rol equivalente en registry debe etiquetar Calidad,
+incluso desde el checkout principal. Mencionar QA/Reviewer como parte del trabajo
+sin asignar ese rol conserva la etiqueta anterior: no se infiere por actividad.

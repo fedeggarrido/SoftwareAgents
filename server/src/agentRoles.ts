@@ -36,6 +36,8 @@ export type Department =
   'Dirección' | 'Ingeniería' | 'Diseño' | 'Calidad' | 'Análisis' | 'Sesiones';
 
 const SPECIALISTS: Record<string, [string, Department]> = {
+  qa: ['QA', 'Calidad'],
+  reviewer: ['Reviewer', 'Calidad'],
   developer: ['DEV', 'Ingeniería'],
   'company-manager': ['Manager', 'Dirección'],
   'delivery-lead': ['Delivery', 'Dirección'],
@@ -95,6 +97,10 @@ export function specialistRole(name: string | undefined, detail?: string): Agent
 /** Role from the first thing the session was asked to do. */
 export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'codex'): AgentRole {
   const text = brief ?? '';
+  const explicit =
+    /^(?:Rol|Role):\s*(qa|reviewer)\b/im.exec(text)?.[1]?.toLowerCase() ??
+    /(?:Actúa como|Tu rol es)\s+(qa|reviewer)\b/i.exec(text)?.[1]?.toLowerCase();
+  if (explicit) return specialistRole(explicit)!;
   const manager =
     /\$[a-z0-9]+-company-manager\b/.test(text) || /Actúa como manager de /i.test(text);
   if (manager) {
@@ -130,6 +136,9 @@ export function codexRole(meta: Record<string, unknown>, brief: string | undefin
     const builtin = roleName ? CODEX_BUILTINS[roleName] : undefined;
     return { label: builtin ?? 'Ayudante', department: 'Sesiones', detail: nickname };
   }
+  const explicit =
+    typeof meta.agent_role === 'string' ? specialistRole(meta.agent_role.toLowerCase()) : undefined;
+  if (explicit) return explicit;
   return roleFromBrief(brief, 'codex');
 }
 
@@ -225,6 +234,8 @@ export function codexRoleFromRollout(file: string): AgentRole | undefined {
     if (rec.type === 'session_meta') {
       meta = p;
       if (meta.thread_source === 'subagent') return codexRole(meta, undefined);
+      if (typeof meta.agent_role === 'string' && specialistRole(meta.agent_role.toLowerCase()))
+        return codexRole(meta, undefined);
       continue;
     }
     if (rec.type === 'response_item' && p.type === 'message' && p.role === 'user') {

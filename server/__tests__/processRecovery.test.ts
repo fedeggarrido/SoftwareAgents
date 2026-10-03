@@ -1,85 +1,68 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { processStartIdentity, terminateExecutionTree } from '../src/workstore/processRecovery.js';
 
-vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
+vi.mock('node:child_process', () => {
+  const execFile = Object.assign(vi.fn(), {
+    [Symbol.for('nodejs.util.promisify.custom')]: vi.fn(),
+  });
+  return { execFile };
+});
+const execute = vi.mocked(promisify(execFile));
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.mocked(execFileSync).mockReset();
+  execute.mockReset();
 });
 
-describe('executor process identity recovery', () => {
-  it('rejects unsafe PIDs without querying or terminating processes', () => {
+describe('async executor identity recovery', () => {
+  it('rejects unsafe PIDs before any OS action', async () => {
     const kill = vi.spyOn(process, 'kill');
     for (const pid of [-1, 0, 1.5, NaN, process.pid])
-      expect(() => terminateExecutionTree(pid, 'identity')).toThrow('Invalid executor PID');
+      await expect(terminateExecutionTree(pid, '123')).rejects.toThrow('Invalid executor PID');
     expect(kill).not.toHaveBeenCalled();
-    expect(execFileSync).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
-  it('does nothing for dead processes and fails closed on access errors', () => {
+  it('returns null for a dead identity query and preserves access errors', async () => {
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('gone'), { code: 'ESRCH' });
     });
-    expect(processStartIdentity(123)).toBeNull();
-    expect(() => terminateExecutionTree(123, null)).not.toThrow();
+    expect(await processStartIdentity(123)).toBeNull();
     kill.mockImplementation(() => {
       throw Object.assign(new Error('denied'), { code: 'EPERM' });
     });
-    expect(() => terminateExecutionTree(123, 'identity')).toThrow('denied');
-    expect(execFileSync).not.toHaveBeenCalled();
+    await expect(processStartIdentity(123)).rejects.toThrow('denied');
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('refuses absent or injectable identities even when the root is gone', async () => {
+    for (const identity of [null, '', "123'; Stop-Process", 'approximate'])
+      await expect(terminateExecutionTree(123, identity)).rejects.toThrow('tree closure unproven');
+    expect(execute).not.toHaveBeenCalled();
   });
   it.skipIf(process.platform !== 'win32')(
-    'never kills a reused PID or one lacking an identity',
-    () => {
-      vi.spyOn(process, 'kill').mockReturnValue(true);
-      vi.mocked(execFileSync).mockReturnValue('123456');
-      terminateExecutionTree(123, 'different');
-      expect(execFileSync).toHaveBeenCalledTimes(1);
-      expect(() => terminateExecutionTree(123, null)).toThrow('lacks a recorded');
-      expect(vi.mocked(execFileSync).mock.calls.every(([cmd]) => cmd === 'powershell.exe')).toBe(
-        true,
-      );
-    },
-  );
-  it.skipIf(process.platform !== 'win32')(
-    'uses taskkill /T /F only after verifying identity and checks termination',
-    () => {
-      vi.spyOn(process, 'kill').mockReturnValue(true);
-      vi.mocked(execFileSync)
-        .mockReturnValueOnce('123456')
-        .mockReturnValueOnce('')
-        .mockReturnValueOnce('');
-      terminateExecutionTree(123, '123456');
-      expect(execFileSync).toHaveBeenNthCalledWith(
-        2,
-        'taskkill.exe',
-        ['/PID', '123', '/T', '/F'],
+    'requires explicit tree closure and propagates helper failures',
+    async () => {
+      execute.mockResolvedValue({ stdout: 'TREE_CLOSED\r\n', stderr: '' });
+      await terminateExecutionTree(123, '123456');
+      expect(execute).toHaveBeenCalledWith(
+        'powershell.exe',
+        expect.any(Array),
         expect.objectContaining({ windowsHide: true }),
       );
+      execute.mockResolvedValue({ stdout: '', stderr: '' });
+      await expect(terminateExecutionTree(123, '123456')).rejects.toThrow('tree closure unproven');
+      for (const failure of ['root disappeared', 'PID reused', 'access denied', 'timeout']) {
+        execute.mockRejectedValue(new Error(failure));
+        await expect(terminateExecutionTree(123, '123456')).rejects.toThrow(failure);
+      }
     },
   );
-  it.skipIf(process.platform !== 'win32')(
-    'blocks when taskkill fails or the executor remains live',
-    () => {
-      vi.spyOn(process, 'kill').mockReturnValue(true);
-      vi.mocked(execFileSync).mockImplementation((cmd) => {
-        if (cmd === 'taskkill.exe') throw new Error('taskkill denied');
-        return '123456';
-      });
-      expect(() => terminateExecutionTree(123, '123456')).toThrow('taskkill denied');
-      vi.mocked(execFileSync).mockReturnValue('123456');
-      expect(() => terminateExecutionTree(123, '123456')).toThrow('still alive');
-    },
-  );
-  it.skipIf(process.platform !== 'win32')(
-    'blocks when the OS creation identity cannot be read',
-    () => {
-      vi.spyOn(process, 'kill').mockReturnValue(true);
-      vi.mocked(execFileSync).mockReturnValue('unreadable');
-      expect(() => terminateExecutionTree(123, '123456')).toThrow('Cannot verify');
-    },
-  );
+  it.skipIf(process.platform !== 'win32')('rejects unreadable OS creation timestamps', async () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    execute.mockResolvedValue({ stdout: 'unreadable', stderr: '' });
+    await expect(processStartIdentity(123)).rejects.toThrow('Cannot verify');
+  });
 });

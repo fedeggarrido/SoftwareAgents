@@ -119,3 +119,6 @@ export const WORKSTORE_BUSY_TIMEOUT_MS = 5000;
 export const CODEX_WINDOWS_SANDBOX = 'elevated';
 export const WORKSTORE_INITIAL_TASK_STATUS = 'DRAFT';
 export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
+/** Async OS helper deadline, including native-helper compilation and descendant discovery. */
+export const WORKSTORE_PROCESS_TIMEOUT_MS = 60_000;
+export const WORKSTORE_PROCESS_WAIT_MS = 10_000;

@@ -52,6 +52,8 @@ export interface ExecutionRecord {
   pid: number | null;
   /** OS process creation identity, not the approximate Execution timestamp. */
   pid_started_at?: string | null;
+  /** Recovery verified termination of the captured tree; not process containment. */
+  tree_closed_at?: string | null;
   started_at: string;
   system_prompt_hash: string;
   project_brain_sha: string;
@@ -68,6 +70,17 @@ export interface HumanDecisionRecord {
   answer: string;
   actor: string;
   decided_at: string;
+}
+
+export interface LeaseRecoveryRecord {
+  project_id: string;
+  task_key: string;
+  token: string;
+  task_version: number;
+  reason: string;
+  actor: string;
+  started_at: string;
+  error: string | null;
 }
 
 export type NewTask = Pick<TaskRecord, 'key' | 'type'> &
@@ -99,9 +112,17 @@ export interface WorkStore {
   canStart(taskId: string): boolean;
   /** TTL in milliseconds. Owner must be unique to this worker incarnation. */
   claim(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
+  /** REVIEW/QA rework atomically acquires a new lease and enters RUNNING. */
+  claimRework(
+    taskId: string,
+    expectedVersion: number,
+    owner: string,
+    ttl?: number,
+  ): Promise<TaskRecord>;
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   release(taskId: string, owner: string): Promise<TaskRecord>;
   recoverExpiredLeases(): Promise<TaskRecord[]>;
+  listLeaseRecoveries(): LeaseRecoveryRecord[];
   /** Durable at-most-once invocation; uncertain effects require human reconciliation. */
   withIdempotency<T>(key: string, fn: () => Promise<T> | T): Promise<T>;
   transition(
@@ -114,7 +135,7 @@ export interface WorkStore {
   listDomainEvents(taskId?: string): DomainEventRecord[];
   addTaskDependency(taskKey: string, dependsOnKey: string): void;
   listTaskDependencies(taskKey: string): TaskDependencyRecord[];
-  createExecution(execution: Omit<ExecutionRecord, 'project_id'>): void;
+  createExecution(execution: Omit<ExecutionRecord, 'project_id' | 'tree_closed_at'>): Promise<void>;
   getExecution(key: string): ExecutionRecord | undefined;
   listExecutions(): ExecutionRecord[];
   recordHumanDecision(decision: Omit<HumanDecisionRecord, 'project_id'>): void;

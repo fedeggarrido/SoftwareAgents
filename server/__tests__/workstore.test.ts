@@ -47,10 +47,10 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 3 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 4 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
-        9,
+        10,
       );
     } finally {
       db.close();
@@ -70,7 +70,7 @@ describe('WorkStore (real SQLite)', () => {
       store.createTask({ key: 'task', type: store.projectId, feature_key: 'feature' });
       store.createTask({ key: 'dependency', type: store.projectId });
       store.addTaskDependency('task', 'dependency');
-      store.createExecution({
+      await store.createExecution({
         key: 'execution',
         task_key: 'task',
         agent_template_version: 'developer@v1',
@@ -96,7 +96,7 @@ describe('WorkStore (real SQLite)', () => {
     }
     a.createFeature({ key: 'only-a', doc_path: 'a', git_sha: 'sha', status: 'draft' });
     a.createTask({ key: 'only-a', type: 'implementation' });
-    a.createExecution({ ...a.getExecution('execution')!, key: 'only-a' });
+    await a.createExecution({ ...a.getExecution('execution')!, key: 'only-a' });
     a.recordHumanDecision({ ...a.getHumanDecision('decision')!, key: 'only-a' });
     for (const store of [a, b]) {
       expect(store.getProject().project_id).toBe(store.projectId);
@@ -130,9 +130,9 @@ describe('WorkStore (real SQLite)', () => {
     ).toThrow(/FOREIGN KEY/);
     expect(() => b.addTaskDependency('task', 'only-a')).toThrow(/FOREIGN KEY/);
     const execution = a.getExecution('execution')!;
-    expect(() => b.createExecution({ ...execution, key: 'bad', task_key: 'only-a' })).toThrow(
-      /FOREIGN KEY/,
-    );
+    await expect(
+      b.createExecution({ ...execution, key: 'bad', task_key: 'only-a' }),
+    ).rejects.toThrow(/FOREIGN KEY/);
     expect(() =>
       b.recordHumanDecision({
         key: 'bad',
@@ -162,10 +162,10 @@ describe('WorkStore (real SQLite)', () => {
     );
     expect(a.getTask('B')).toMatchObject({ version: 1, status: 'READY' });
     expect(a.listDomainEvents()).toEqual([]);
-    await a.transition('A', 1, 'RUNNING', 'rework', 'reviewer');
+    await a.claimRework('A', 1, 'reviewer');
     expect(a.getTask('A')).toMatchObject({ version: 2, attempt: 1 });
     await a.transition('A', 2, 'REVIEW', 'ready', 'developer');
-    await a.transition('A', 3, 'RUNNING', 'rework', 'reviewer');
+    await a.claimRework('A', 3, 'reviewer');
     expect(a.getTask('A')?.attempt).toBe(2);
     await a.transition('A', 4, 'REVIEW', 'ready', 'developer');
     await a.transition('A', 5, 'QA', 'reviewed', 'reviewer');
@@ -238,7 +238,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
+        'DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
       );
       db.prepare(
         `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
@@ -249,6 +249,111 @@ describe('WorkStore (real SQLite)', () => {
     const store = await open();
     expect(store.getTask('old')).toMatchObject({ status: 'DRAFT', version: 4, attempt: 2 });
     expect(store.listDomainEvents()).toEqual([]);
+  });
+  it('recognizes historical RUNNING-without-lease rows and recovers them conservatively after v3 migration', async () => {
+    await open();
+    const db = await inspect();
+    try {
+      db.exec(
+        'DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
+      );
+      db.exec(
+        "INSERT INTO tasks VALUES ('a', NULL, 'old-running', 'dev', 'RUNNING', 0, NULL, 7, NULL, NULL, 1, 3, NULL, NULL, NULL, NULL, 'then', 'then')",
+      );
+    } finally {
+      db.close();
+    }
+    const migrated = await open();
+    expect(await migrated.recoverExpiredLeases()).toMatchObject([
+      { key: 'old-running', status: 'FAILED_RETRYABLE', attempt: 2, version: 8 },
+    ]);
+    expect(migrated.listDomainEvents('old-running')).toMatchObject([
+      { from_status: 'RUNNING', to_status: 'FAILED_RETRYABLE' },
+    ]);
+  });
+  it('enforces complete active leases in SQLite even when callers bypass the WorkStore API', async () => {
+    const store = await open();
+    store.createTask({ key: 'task', type: 'dev', status: 'QUEUED' });
+    const db = await inspect();
+    try {
+      for (const [owner, expires] of [
+        [null, null],
+        ['', '2026-10-03T10:00:00Z'],
+        ['worker', 'invalid'],
+      ]) {
+        expect(() =>
+          db
+            .prepare(
+              "UPDATE tasks SET status = 'RUNNING', lease_owner = ?, lease_expires_at = ? WHERE key = 'task'",
+            )
+            .run(owner, expires),
+        ).toThrow('Active Task requires a lease');
+      }
+      expect(() =>
+        db.exec(
+          "INSERT INTO tasks SELECT project_id, feature_key, 'invalid', type, 'LEASED', priority, agent_role, version, NULL, NULL, attempt, max_attempts, branch, worktree_ref, pr_ref, blocked_reason, created_at, updated_at FROM tasks WHERE key = 'task'",
+        ),
+      ).toThrow('Active Task requires a lease');
+      expect(store.getTask('task')).toMatchObject({ status: 'QUEUED', version: 1 });
+      expect(store.getTask('invalid')).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+  it('preserves a real Git worktree, partial changes, branch and junction during recovery', async () => {
+    const git = (args: string[]) =>
+      execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: 'pipe', windowsHide: true });
+    fs.writeFileSync(path.join(root, 'partial.txt'), 'base\n');
+    git(['add', 'partial.txt']);
+    git([
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'core.hooksPath=NUL',
+      'commit',
+      '-m',
+      'fixture',
+    ]);
+    const worktree = path.join(root, 'worktree');
+    git(['worktree', 'add', '-b', 'fixture-task', worktree]);
+    const target = path.join(root, 'fixture-dependencies');
+    const junction = path.join(worktree, 'node_modules');
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, 'keep.txt'), 'dependencies');
+    fs.symlinkSync(target, junction, 'junction');
+    try {
+      fs.writeFileSync(path.join(worktree, 'partial.txt'), 'partial work\n');
+      fs.writeFileSync(path.join(worktree, 'new.txt'), 'unfinished\n');
+      const before = git(['-C', worktree, 'status', '--porcelain']);
+      const taskStore = await openWorkStore({ repositoryPath: worktree, projectId: 'a' });
+      stores.push(taskStore);
+      taskStore.createTask({
+        key: 'task',
+        type: 'dev',
+        status: 'QUEUED',
+        branch: 'fixture-task',
+        worktree_ref: worktree,
+      });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const start = Date.now();
+      await taskStore.claim('task', 'first', 1000);
+      vi.setSystemTime(start + 1000);
+      const claimed = await taskStore.claim('task', 'next');
+      expect(claimed).toMatchObject({ attempt: 1, branch: 'fixture-task', worktree_ref: worktree });
+      expect(git(['-C', worktree, 'status', '--porcelain'])).toBe(before);
+      expect(fs.readFileSync(path.join(worktree, 'partial.txt'), 'utf8')).toBe('partial work\n');
+      expect(fs.readFileSync(path.join(worktree, 'new.txt'), 'utf8')).toBe('unfinished\n');
+      expect(fs.readFileSync(path.join(junction, 'keep.txt'), 'utf8')).toBe('dependencies');
+      expect(fs.realpathSync(junction)).toBe(fs.realpathSync(target));
+      expect(git(['-C', worktree, 'branch', '--show-current']).trim()).toBe('fixture-task');
+    } finally {
+      vi.useRealTimers();
+      fs.unlinkSync(junction); // Unlink only the fixture junction; retain its target.
+    }
   });
   it('rejects a schema newer than this implementation', async () => {
     await open();
@@ -296,7 +401,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 3 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 4 }]);
     } finally {
       db.close();
     }

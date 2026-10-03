@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,8 +11,8 @@ import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
 vi.mock('../src/workstore/processRecovery.js', () => ({
-  processStartIdentity: vi.fn(() => 'identity'),
-  terminateExecutionTree: vi.fn(),
+  processStartIdentity: vi.fn(async () => 'identity'),
+  terminateExecutionTree: vi.fn(async () => {}),
 }));
 
 describe('WorkStore leases and durable idempotency', () => {
@@ -21,7 +22,7 @@ describe('WorkStore leases and durable idempotency', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-leases-'));
     execFileSync('git', ['init', root], { stdio: 'pipe', windowsHide: true });
     vi.mocked(terminateExecutionTree).mockReset();
-    vi.mocked(processStartIdentity).mockReturnValue('identity');
+    vi.mocked(processStartIdentity).mockResolvedValue('identity');
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -44,8 +45,8 @@ describe('WorkStore leases and durable idempotency', () => {
   function advance(ms: number) {
     vi.setSystemTime(Date.now() + ms);
   }
-  function execution(store: WorkStore) {
-    store.createExecution({
+  async function execution(store: WorkStore) {
+    await store.createExecution({
       key: 'run',
       task_key: 'task',
       agent_template_version: 'developer@v1',
@@ -124,33 +125,32 @@ describe('WorkStore leases and durable idempotency', () => {
     expect(store.getTask('task')).toMatchObject({ status: 'FAILED_FINAL', attempt: 2 });
     await expect(store.claim('task', 'third')).rejects.toThrow('INVALID_TRANSITION');
   });
-  it('kills before recovery, blocks reassignment on termination failure, then retries safely', async () => {
+  it('kills under a token and persistently blocks reassignment on termination failure', async () => {
     const store = await open();
     queued(store);
     clock();
     await store.claim('task', 'first', 100);
-    execution(store);
+    await execution(store);
     expect(store.getExecution('run')?.pid_started_at).toBe('identity');
     advance(100);
-    vi.mocked(terminateExecutionTree).mockImplementation(() => {
+    vi.mocked(terminateExecutionTree).mockImplementation(async () => {
       expect(store.getTask('task')?.status).toBe('LEASED');
       throw new Error('termination failed');
     });
     await expect(store.claim('task', 'second')).rejects.toThrow('termination failed');
     expect(store.getTask('task')).toMatchObject({ lease_owner: 'first', attempt: 0 });
-    vi.mocked(terminateExecutionTree).mockImplementation(() => {});
-    expect(await store.claim('task', 'second')).toMatchObject({
-      status: 'LEASED',
-      lease_owner: 'second',
-      attempt: 1,
-    });
+    vi.mocked(terminateExecutionTree).mockImplementation(async () => {});
+    await expect(store.claim('task', 'second')).rejects.toThrow('termination failed');
+    expect(store.listLeaseRecoveries()).toMatchObject([
+      { task_key: 'task', error: 'termination failed' },
+    ]);
     expect(terminateExecutionTree).toHaveBeenCalledWith(12345, 'identity');
   });
   it('release terminates the executor and clears the lease; normal completion also clears it', async () => {
     const store = await open();
     queued(store);
     await store.claim('task', 'worker');
-    execution(store);
+    await execution(store);
     expect(await store.release('task', 'worker')).toMatchObject({
       status: 'FAILED_RETRYABLE',
       lease_owner: null,
@@ -158,6 +158,7 @@ describe('WorkStore leases and durable idempotency', () => {
     });
     expect(terminateExecutionTree).toHaveBeenCalled();
     const lease = await store.claim('task', 'next');
+    expect(terminateExecutionTree).toHaveBeenCalledTimes(1); // Durable closure proof skips the old PID.
     const running = await store.transition('task', lease.version, 'RUNNING', 'start', 'next');
     expect(await store.transition('task', running.version, 'REVIEW', 'done', 'next')).toMatchObject(
       { lease_owner: null, lease_expires_at: null },
@@ -170,23 +171,262 @@ describe('WorkStore leases and durable idempotency', () => {
     const old = await store.claim('task', 'old', 100);
     advance(100);
     await store.claim('task', 'new');
-    execution(store);
-    vi.spyOn(store, 'listTasks').mockReturnValue([old]);
+    await execution(store);
+    const { DatabaseSync } = await import('node:sqlite');
+    const prepare = DatabaseSync.prototype.prepare;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (
+      this: import('node:sqlite').DatabaseSync,
+      sql,
+    ) {
+      if (sql.startsWith('SELECT key FROM tasks'))
+        return { all: () => [{ key: old.key }] } as unknown as ReturnType<typeof prepare>;
+      return prepare.call(this, sql);
+    });
     vi.mocked(terminateExecutionTree).mockClear();
     expect(await store.recoverExpiredLeases()).toEqual([]);
     expect(terminateExecutionTree).not.toHaveBeenCalled();
     expect(store.getTask('task')?.lease_owner).toBe('new');
+  });
+  it('rejects every public entry to active states without atomic lease acquisition', async () => {
+    const store = await open();
+    expect(() => store.createTask({ key: 'invalid', type: 'dev', status: 'LEASED' })).toThrow(
+      'claim',
+    );
+    expect(() =>
+      store.createTask({
+        key: 'invalid',
+        type: 'dev',
+        status: 'RUNNING',
+        lease_owner: 'imported',
+        lease_expires_at: new Date(Date.now() + 1000).toISOString(),
+      }),
+    ).toThrow('claim');
+    queued(store);
+    await expect(store.transition('task', 1, 'LEASED', 'bypass', 'worker')).rejects.toThrow(
+      'lease',
+    );
+    const leased = await store.claim('task', 'worker');
+    const running = await store.transition('task', leased.version, 'RUNNING', 'start', 'worker');
+    const review = await store.transition('task', running.version, 'REVIEW', 'done', 'worker');
+    await expect(
+      store.transition('task', review.version, 'RUNNING', 'rework', 'worker'),
+    ).rejects.toThrow('claimRework');
+    const rework = await store.claimRework('task', review.version, 'new', 1000);
+    expect(rework).toMatchObject({ status: 'RUNNING', attempt: 1, lease_owner: 'new' });
+    expect(rework.lease_expires_at).not.toBeNull();
+    const again = await store.transition('task', rework.version, 'REVIEW', 'done', 'new');
+    const qa = await store.transition('task', again.version, 'QA', 'reviewed', 'reviewer');
+    const other = await open();
+    const results = await Promise.allSettled([
+      store.claimRework('task', qa.version, 'a'),
+      other.claimRework('task', qa.version, 'b'),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(store.getTask('task')).toMatchObject({ status: 'RUNNING', attempt: 2 });
+  });
+  it('keeps heartbeats and independent claims moving while one OS recovery is slow', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'old', 1000);
+    await execution(store);
+    store.createTask({ key: 'healthy', type: 'dev', status: 'QUEUED' });
+    store.createTask({ key: 'independent', type: 'dev', status: 'QUEUED' });
+    await store.claim('healthy', 'alive', 10000);
+    advance(1000);
+    let finish!: () => void;
+    vi.mocked(terminateExecutionTree).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.spyOn(store, 'listExecutions').mockImplementation(() => {
+      throw new Error('must query relevant executions only');
+    });
+    const sweep = store.recoverExpiredLeases();
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    for (let i = 0; i < 4; i++) {
+      advance(2000);
+      expect(await store.heartbeat('healthy', 'alive', 10000)).toMatchObject({
+        lease_owner: 'alive',
+      });
+    }
+    expect(await store.claim('independent', 'next')).toMatchObject({ status: 'LEASED' });
+    await expect(store.heartbeat('task', 'old')).rejects.toThrow('recovery reserved');
+    await expect(execution(store)).rejects.toThrow('recovery reserved');
+    finish();
+    expect(await sweep).toMatchObject([{ key: 'task', status: 'FAILED_RETRYABLE' }]);
+  });
+  it('persists errors per task across reopen without blocking other recoveries or claims', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'old', 100);
+    await execution(store);
+    store.createTask({ key: 'other', type: 'dev', status: 'QUEUED' });
+    await store.claim('other', 'other-old', 100);
+    advance(100);
+    vi.mocked(terminateExecutionTree).mockRejectedValueOnce(
+      new Error('root disappeared; tree closure unproven'),
+    );
+    expect(await store.recoverExpiredLeases()).toMatchObject([{ key: 'other' }]);
+    const reopened = await open();
+    expect(reopened.listLeaseRecoveries()).toMatchObject([
+      { task_key: 'task', error: 'root disappeared; tree closure unproven' },
+    ]);
+    await expect(reopened.claim('task', 'next')).rejects.toThrow('tree closure unproven');
+    expect(await reopened.claim('other', 'next')).toMatchObject({ lease_owner: 'next' });
+    expect(store.getTask('task')).toMatchObject({ status: 'LEASED', attempt: 0 });
+    const anotherProject = await open('b');
+    queued(anotherProject);
+    expect(anotherProject.listLeaseRecoveries()).toEqual([]);
+    expect(await anotherProject.claim('task', 'isolated')).toMatchObject({
+      lease_owner: 'isolated',
+    });
+  });
+  it('scheduled heartbeats keep a healthy lease alive while a real async child delays recovery beyond its TTL', async () => {
+    const store = await open();
+    queued(store);
+    const realNow = Date.now();
+    clock();
+    vi.setSystemTime(realNow - 2000);
+    await store.claim('task', 'old', 1000);
+    await execution(store);
+    advance(1000);
+    // The orphan is expired, but heartbeat and the OS delay now use real timers.
+    vi.useRealTimers();
+    store.createTask({ key: 'healthy', type: 'dev', status: 'QUEUED' });
+    await store.claim('healthy', 'alive', 2000);
+    let started = false;
+    vi.mocked(terminateExecutionTree).mockImplementationOnce(async () => {
+      started = true;
+      await promisify(execFile)(process.execPath, ['-e', 'setTimeout(()=>{},2500)'], {
+        windowsHide: true,
+        timeout: 8000,
+      });
+    });
+    let renewals = 0;
+    const errors: unknown[] = [];
+    const pending: Promise<void>[] = [];
+    const timer = setInterval(() => {
+      pending.push(
+        store.heartbeat('healthy', 'alive', 2000).then(
+          () => {
+            renewals++;
+          },
+          (error: unknown) => {
+            errors.push(error);
+          },
+        ),
+      );
+    }, 100);
+    try {
+      const sweep = store.recoverExpiredLeases();
+      await vi.waitFor(() => expect(started).toBe(true));
+      await sweep;
+      expect(renewals).toBeGreaterThanOrEqual(5);
+      expect(errors).toEqual([]);
+      expect(await store.heartbeat('healthy', 'alive', 2000)).toMatchObject({
+        lease_owner: 'alive',
+      });
+      expect(store.getTask('task')?.status).toBe('FAILED_RETRYABLE');
+    } finally {
+      clearInterval(timer);
+      await Promise.all(pending);
+    }
+  });
+  it('never finalizes against a replaced recovery token', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'old', 100);
+    await execution(store);
+    advance(100);
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
+    try {
+      vi.mocked(terminateExecutionTree).mockImplementationOnce(async () => {
+        db.prepare('UPDATE lease_recoveries SET token = ? WHERE task_key = ?').run(
+          'replacement',
+          'task',
+        );
+      });
+      expect(await store.recoverExpiredLeases()).toEqual([]);
+      expect(store.listLeaseRecoveries()).toMatchObject([{ token: 'replacement', error: null }]);
+      expect(store.getTask('task')).toMatchObject({ lease_owner: 'old', version: 2, attempt: 0 });
+      expect(store.getExecution('run')?.tree_closed_at).toBeNull();
+      expect(store.listDomainEvents('task')).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+  it('retains the token and tree proof when the final recovery transaction rolls back', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'old', 100);
+    await execution(store);
+    advance(100);
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
+    try {
+      db.exec(
+        "CREATE TRIGGER fail_recovery_event AFTER INSERT ON domain_events BEGIN SELECT RAISE(ABORT, 'event failed'); END;",
+      );
+      expect(await store.recoverExpiredLeases()).toEqual([]);
+      expect(store.listLeaseRecoveries()).toMatchObject([{ error: 'event failed' }]);
+      expect(store.getTask('task')).toMatchObject({ lease_owner: 'old', version: 2, attempt: 0 });
+      expect(store.getExecution('run')?.tree_closed_at).toBeTruthy();
+      expect(store.listDomainEvents('task')).toHaveLength(1);
+      await expect(store.claim('task', 'next')).rejects.toThrow('event failed');
+    } finally {
+      db.close();
+    }
+  });
+  it('fences an identity lookup started before recovery reserved its token', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'worker', 100);
+    let identified!: (value: string) => void;
+    vi.mocked(processStartIdentity).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          identified = resolve;
+        }),
+    );
+    const registration = execution(store);
+    advance(100);
+    await store.recoverExpiredLeases();
+    identified('identity');
+    await expect(registration).rejects.toThrow('Task changed');
+    expect(store.listExecutions()).toEqual([]);
+  });
+  it('handles forward/backward wall-clock jumps conservatively without reviving expired leases', async () => {
+    const store = await open();
+    queued(store);
+    clock();
+    await store.claim('task', 'worker', 1000);
+    advance(-5000);
+    expect(await store.recoverExpiredLeases()).toEqual([]);
+    await store.heartbeat('task', 'worker', 1000);
+    advance(6000);
+    await expect(store.heartbeat('task', 'worker')).rejects.toThrow('expired');
+    expect(await store.recoverExpiredLeases()).toMatchObject([{ attempt: 1 }]);
+    advance(-10000);
+    await expect(store.heartbeat('task', 'worker')).rejects.toThrow('not owned');
   });
   it('fences Execution registration if the lease expires while reading the OS identity', async () => {
     const store = await open();
     queued(store);
     clock();
     await store.claim('task', 'worker', 100);
-    vi.mocked(processStartIdentity).mockImplementationOnce(() => {
+    vi.mocked(processStartIdentity).mockImplementationOnce(async () => {
       advance(100);
       return 'identity';
     });
-    expect(() => execution(store)).toThrow('lease expired before Execution registration');
+    await expect(execution(store)).rejects.toThrow('lease expired before Execution registration');
     expect(store.listExecutions()).toEqual([]);
   });
   it('fails closed on dependencies and invalid owner/TTL without recording transitions', async () => {

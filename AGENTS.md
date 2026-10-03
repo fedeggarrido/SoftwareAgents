@@ -10,6 +10,8 @@ Este archivo fija el flujo de colaboración del Development Project.
   Trabaja solo dentro de su worktree; nunca hagas commits directos a `main`.
 - Nunca tocar Fundtrinsic: sus archivos, datos y procesos quedan fuera del alcance.
 - Codex implementa por defecto: Fede lo prioriza porque le sale gratis.
+  Si Codex no está disponible (límite de uso o capacidad), Claude implementa en su
+  lugar sin esperar; la revisión cruzada y la QA de Codex se hacen cuando vuelva.
   Claude revisa, hace commit en la rama de la tarea e integra. Cuando implementa
   Claude, Codex realiza la revisión cruzada; Claude hace commit e integra.
 - Quien trabaja la tarea actualiza su estado en ClickUp al empezar, al pasar a

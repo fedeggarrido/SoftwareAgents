@@ -9,7 +9,9 @@ import {
   WORKSTORE_INITIAL_TASK_STATUS,
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
+import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
+import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
 import { retryBusy } from './retryBusy.js';
 import type { TaskStatus } from './taskStateMachine.js';
 import {
@@ -105,7 +107,183 @@ class SqliteWorkStore implements WorkStore {
   constructor(
     private readonly db: DatabaseSync,
     readonly projectId: string,
-  ) {}
+  ) {
+    this.sweeper = setInterval(() => {
+      void this.recoverExpiredLeases().catch((error: unknown) => {
+        console.error('[WorkStore] Lease recovery failed; work remains reserved', error);
+      });
+    }, LEASE_SWEEP_INTERVAL_MS);
+    this.sweeper.unref();
+  }
+  private readonly sweeper: ReturnType<typeof setInterval>;
+
+  private write<T>(operation: () => T): Promise<T> {
+    return retryBusy(this.db, performance.now() + WORKSTORE_BUSY_TIMEOUT_MS, () => {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = operation();
+        this.db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
+  private owned(taskId: string, owner: string): TaskRecord {
+    const task = this.getTask(taskId);
+    if (
+      !task ||
+      !owner.trim() ||
+      task.lease_owner !== owner ||
+      !['LEASED', 'RUNNING'].includes(task.status) ||
+      !task.lease_expires_at ||
+      task.lease_expires_at <= new Date().toISOString()
+    )
+      throw new Error(`Task ${taskId}: lease is expired or not owned by this worker`);
+    return task;
+  }
+
+  private terminate(task: TaskRecord): void {
+    // A delayed sweeper may run after another process reclaimed the Task.
+    // Never terminate Executions registered under that newer incarnation.
+    for (const execution of this.listExecutions().filter(
+      (e) => e.task_key === task.key && e.task_version <= task.version,
+    )) {
+      if (execution.pid !== null) terminateExecutionTree(execution.pid, execution.pid_started_at);
+    }
+  }
+
+  private failLease(task: TaskRecord, reason: string, actor: string): TaskRecord {
+    return this.change(
+      task.key,
+      task.version,
+      task.attempt + 1 >= task.max_attempts ? 'FAILED_FINAL' : 'FAILED_RETRYABLE',
+      reason,
+      actor,
+      task.attempt + 1,
+    );
+  }
+
+  async recoverExpiredLeases(): Promise<TaskRecord[]> {
+    const recovered: TaskRecord[] = [];
+    let failure: unknown;
+    for (const candidate of this.listTasks().filter(
+      (task) =>
+        ['LEASED', 'RUNNING'].includes(task.status) &&
+        task.lease_expires_at !== null &&
+        task.lease_expires_at <= new Date().toISOString(),
+    )) {
+      try {
+        // Never hold the SQLite writer lock while querying/killing OS processes.
+        this.terminate(candidate);
+        const task = await this.write(() => {
+          const current = this.getTask(candidate.key)!;
+          if (
+            current.version !== candidate.version ||
+            !current.lease_expires_at ||
+            current.lease_expires_at > new Date().toISOString()
+          )
+            return undefined;
+          return this.failLease(current, 'Lease expired', 'lease-sweeper');
+        });
+        if (task) recovered.push(task);
+      } catch (error) {
+        failure = error;
+      }
+    }
+    if (failure) throw failure;
+    return recovered;
+  }
+
+  async claim(taskId: string, owner: string, ttl = DEFAULT_LEASE_TTL_MS): Promise<TaskRecord> {
+    leaseDeadline(owner, ttl);
+    await this.recoverExpiredLeases();
+    const candidate = this.getTask(taskId);
+    if (!candidate) throw new TaskTransitionError(taskId, 'NOT_FOUND');
+    if (!['QUEUED', 'READY', 'FAILED_RETRYABLE'].includes(candidate.status))
+      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+    this.terminate(candidate);
+    return this.write(() => {
+      let task = this.getTask(taskId);
+      if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
+      if (task.version !== candidate.version)
+        throw new TaskVersionConflictError(taskId, candidate.version, task.version);
+      if (!['QUEUED', 'READY', 'FAILED_RETRYABLE'].includes(task.status))
+        throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+      if (task.status === 'FAILED_RETRYABLE')
+        task = this.change(taskId, task.version, 'READY', 'Retry lease', owner);
+      if (task.status === 'READY')
+        task = this.change(taskId, task.version, 'QUEUED', 'Queue lease', owner);
+      task = this.change(taskId, task.version, 'LEASED', 'Claim lease', owner);
+      this.db
+        .prepare(
+          'UPDATE tasks SET lease_owner = ?, lease_expires_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+        )
+        .run(owner, leaseDeadline(owner, ttl), this.projectId, taskId, task.version);
+      return this.getTask(taskId)!;
+    });
+  }
+
+  heartbeat(taskId: string, owner: string, ttl = DEFAULT_LEASE_TTL_MS): Promise<TaskRecord> {
+    leaseDeadline(owner, ttl);
+    return this.write(() => {
+      const task = this.owned(taskId, owner);
+      this.db
+        .prepare(
+          'UPDATE tasks SET lease_expires_at = ?, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+        )
+        .run(
+          leaseDeadline(owner, ttl),
+          new Date().toISOString(),
+          this.projectId,
+          taskId,
+          task.version,
+        );
+      return this.getTask(taskId)!;
+    });
+  }
+
+  async release(taskId: string, owner: string): Promise<TaskRecord> {
+    const candidate = this.owned(taskId, owner);
+    this.terminate(candidate);
+    return this.write(() => {
+      const current = this.owned(taskId, owner);
+      if (current.version !== candidate.version)
+        throw new TaskVersionConflictError(taskId, candidate.version, current.version);
+      return this.failLease(current, 'Lease released', owner);
+    });
+  }
+
+  async withIdempotency<T>(key: string, fn: () => Promise<T> | T): Promise<T> {
+    if (!key.trim()) throw new Error('Idempotency key must be nonempty');
+    const reservation = await this.write(() => {
+      const existing = this.db
+        .prepare('SELECT state, result FROM idempotency_keys WHERE project_id = ? AND key = ?')
+        .get(this.projectId, key);
+      if (existing) {
+        if (existing.state !== 'COMPLETED')
+          throw new Error('Idempotency effect is pending or uncertain; reconcile before retrying');
+        return { cached: true, result: existing.result as string };
+      }
+      this.db
+        .prepare("INSERT INTO idempotency_keys VALUES (?, ?, 'PENDING', NULL, ?)")
+        .run(this.projectId, key, new Date().toISOString());
+      return { cached: false, result: '' };
+    });
+    if (reservation.cached) return (JSON.parse(reservation.result) as { value?: T }).value as T;
+    const result = await fn();
+    const serialized = JSON.stringify({ value: result });
+    await this.write(() =>
+      this.db
+        .prepare(
+          "UPDATE idempotency_keys SET state = 'COMPLETED', result = ? WHERE project_id = ? AND key = ?",
+        )
+        .run(serialized, this.projectId, key),
+    );
+    return result;
+  }
 
   getProject(): ProjectRecord {
     return this.db
@@ -177,55 +355,56 @@ class SqliteWorkStore implements WorkStore {
     reason: string,
     actor: string,
   ): Promise<TaskRecord> {
-    return retryBusy(this.db, performance.now() + WORKSTORE_BUSY_TIMEOUT_MS, () => {
-      this.db.exec('BEGIN IMMEDIATE');
-      try {
-        const task = this.getTask(taskId);
-        if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
-        if (task.version !== expectedVersion)
-          throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
-        if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
-          throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
-        if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
-          throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
-        const now = new Date().toISOString();
-        const attempt = task.attempt + attemptIncrement(task.status, to);
-        this.db
-          .prepare(
-            `UPDATE tasks SET status = ?, version = version + 1, attempt = ?, blocked_reason = ?, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?`,
-          )
-          .run(
-            to,
-            attempt,
-            to === 'BLOCKED' ? reason : null,
-            now,
-            this.projectId,
-            taskId,
-            expectedVersion,
-          );
-        this.db
-          .prepare(
-            `INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            this.projectId,
-            taskId,
-            task.status,
-            to,
-            task.version + 1,
-            attempt,
-            reason,
-            actor,
-            now,
-          );
-        const updated = this.getTask(taskId)!;
-        this.db.exec('COMMIT');
-        return updated;
-      } catch (error) {
-        this.db.exec('ROLLBACK');
-        throw error;
-      }
-    });
+    return this.write(() => this.change(taskId, expectedVersion, to, reason, actor));
+  }
+
+  private change(
+    taskId: string,
+    expectedVersion: number,
+    to: TaskStatus,
+    reason: string,
+    actor: string,
+    failureAttempt?: number,
+  ): TaskRecord {
+    const task = this.getTask(taskId);
+    if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
+    if (task.version !== expectedVersion)
+      throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
+    if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
+      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+    if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
+      throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
+    if (
+      task.lease_owner &&
+      ['LEASED', 'RUNNING'].includes(task.status) &&
+      (!task.lease_expires_at || task.lease_expires_at <= new Date().toISOString()) &&
+      failureAttempt === undefined
+    )
+      throw new Error('Expired lease must be recovered before transitioning');
+    const now = new Date().toISOString();
+    const attempt = failureAttempt ?? task.attempt + attemptIncrement(task.status, to);
+    const active = ['LEASED', 'RUNNING'].includes(to);
+    this.db
+      .prepare(
+        'UPDATE tasks SET status = ?, version = version + 1, attempt = ?, blocked_reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+      )
+      .run(
+        to,
+        attempt,
+        to === 'BLOCKED' ? reason : null,
+        now,
+        active ? task.lease_owner : null,
+        active ? task.lease_expires_at : null,
+        this.projectId,
+        taskId,
+        expectedVersion,
+      );
+    this.db
+      .prepare(
+        "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(this.projectId, taskId, task.status, to, task.version + 1, attempt, reason, actor, now);
+    return this.getTask(taskId)!;
   }
   listDomainEvents(taskId?: string): DomainEventRecord[] {
     return (taskId === undefined
@@ -250,8 +429,24 @@ class SqliteWorkStore implements WorkStore {
       .all(this.projectId, taskKey) as unknown as TaskDependencyRecord[];
   }
   createExecution(execution: Omit<ExecutionRecord, 'project_id'>): void {
-    this.db
-      .prepare(`INSERT INTO executions VALUES (${Array(13).fill('?').join(',')})`)
+    const task = this.getTask(execution.task_key);
+    let identity = execution.pid_started_at ?? null;
+    if (task?.lease_owner) {
+      this.owned(task.key, task.lease_owner);
+      if (execution.task_version !== task.version)
+        throw new TaskVersionConflictError(task.key, execution.task_version, task.version);
+      if (execution.pid !== null) {
+        identity = processStartIdentity(execution.pid);
+        if (!identity) throw new Error('Executor died before its identity was recorded');
+      }
+    }
+    // Capture OS identity outside a transaction, then fence the insertion atomically.
+    // Recovery on another connection may have advanced the Task during that query.
+    const guard = task
+      ? " WHERE EXISTS (SELECT 1 FROM tasks WHERE project_id = ? AND key = ? AND version = ? AND lease_owner IS ? AND (lease_owner IS NULL OR (status IN ('LEASED', 'RUNNING') AND lease_expires_at > ?)))"
+      : '';
+    const result = this.db
+      .prepare(`INSERT INTO executions SELECT ${Array(14).fill('?').join(',')}${guard}`)
       .run(
         this.projectId,
         execution.key,
@@ -266,7 +461,19 @@ class SqliteWorkStore implements WorkStore {
         execution.project_brain_sha,
         execution.task_version,
         execution.tool_policy_version,
+        identity,
+        ...(task
+          ? [
+              this.projectId,
+              task.key,
+              execution.task_version,
+              task.lease_owner,
+              new Date().toISOString(),
+            ]
+          : []),
       );
+    if (result.changes !== 1)
+      throw new Error('Task changed or lease expired before Execution registration');
   }
   getExecution(key: string): ExecutionRecord | undefined {
     return this.db
@@ -303,6 +510,7 @@ class SqliteWorkStore implements WorkStore {
       .all(this.projectId) as unknown as HumanDecisionRecord[];
   }
   close(): void {
+    clearInterval(this.sweeper);
     this.db.close();
   }
 }

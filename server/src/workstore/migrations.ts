@@ -67,6 +67,15 @@ const migrations = [
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;
   CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;`,
+  `ALTER TABLE executions ADD COLUMN pid_started_at TEXT;
+  CREATE TABLE idempotency_keys (
+    project_id TEXT NOT NULL REFERENCES projects(project_id), key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('PENDING', 'COMPLETED')),
+    result TEXT, created_at TEXT NOT NULL,
+    PRIMARY KEY(project_id, key)
+  ) STRICT;
+  CREATE INDEX tasks_lease_expiry ON tasks(project_id, lease_expires_at)
+    WHERE status IN ('LEASED', 'RUNNING');`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

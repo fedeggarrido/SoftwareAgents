@@ -50,6 +50,8 @@ export interface ExecutionRecord {
   model_id: string;
   session_id: string | null;
   pid: number | null;
+  /** OS process creation identity, not the approximate Execution timestamp. */
+  pid_started_at?: string | null;
   started_at: string;
   system_prompt_hash: string;
   project_brain_sha: string;
@@ -95,6 +97,13 @@ export interface WorkStore {
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
   canStart(taskId: string): boolean;
+  /** TTL in milliseconds. Owner must be unique to this worker incarnation. */
+  claim(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
+  heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
+  release(taskId: string, owner: string): Promise<TaskRecord>;
+  recoverExpiredLeases(): Promise<TaskRecord[]>;
+  /** Durable at-most-once invocation; uncertain effects require human reconciliation. */
+  withIdempotency<T>(key: string, fn: () => Promise<T> | T): Promise<T>;
   transition(
     taskId: string,
     expectedVersion: number,

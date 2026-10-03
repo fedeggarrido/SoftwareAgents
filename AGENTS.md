@@ -32,10 +32,21 @@ Este archivo fija el flujo de colaboración del Development Project.
 - Tras revisión cruzada y tests verdes, Claude hace rebase de la rama sobre
   `main` local, vuelve a validar el resultado y la integra por fast-forward
   (`git merge --ff-only`).
-- Push y PR solo cuando Fede lo pida. El título de PR sigue la misma convención:
-  `feat(SA-012): crear project brain`; cumple `.github/workflows/pr-title.yml`.
-  El cuerpo usa la [plantilla existente](.github/pull_request_template.md) e incluye
-  el enlace manual a la tarea de ClickUp mientras no exista SA-053.
+- Sin PRs ni `gh` (decisión de Fede): tras integrar, Claude hace `git push origin main`
+  después de pasar gitleaks. El enlace a ClickUp va en los comentarios de la tarea.
+
+## QA y fixes tras cada feature
+
+- Después de integrar cada feature o tanda, y antes de empezar la siguiente:
+  1. **QA de Codex** (solo lectura): comprueba cada criterio de aceptación de las
+     tareas en ClickUp, casos límite y exploración del código; entrega un TestReport
+     con severidad por hallazgo.
+  2. **QA de Claude** (real): oficina en el navegador, ejecuciones reales de
+     executors y worker, audit log y CLI.
+  3. Los hallazgos van a una tarea `SA-QA-n · Fixes tras <tanda>` que se implementa,
+     revisa e integra **antes** de la siguiente feature. Si no hay hallazgos, se
+     cierra vacía indicándolo.
+- Solo un hallazgo bloqueante detiene la integración; el resto va a la tarea de fixes.
 
 ## Worktrees y validación segura
 

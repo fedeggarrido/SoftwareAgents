@@ -1,4 +1,6 @@
 import * as fs from 'fs';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +26,7 @@ vi.mock('os', async () => {
 });
 
 // Must import AFTER mock setup
-const { PixelAgentsServer } = await import('../src/server.js');
+const { PixelAgentsServer, probeServer } = await import('../src/server.js');
 
 async function postHook(
   port: number,
@@ -278,6 +280,117 @@ describe('PixelAgentsServer', () => {
     expect(config.port).not.toBe(70_000);
     expect(fs.existsSync(malformedFile)).toBe(false);
     expect(registryFiles()).toHaveLength(1);
+  });
+
+  // SA-076: Windows recycles PIDs, so a crashed server's entry can name a live
+  // but unrelated process. Only an entry that answers /api/health is reused.
+  describe('stale registrations with a live PID (SA-076)', () => {
+    const listeners: http.Server[] = [];
+    afterEach(async () => {
+      for (const listener of listeners.splice(0)) {
+        listener.closeAllConnections();
+        await new Promise((resolve) => listener.close(resolve));
+      }
+    });
+    async function listen(handler?: http.RequestListener): Promise<number> {
+      const listener = http.createServer(handler);
+      await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+      listeners.push(listener);
+      return (listener.address() as AddressInfo).port;
+    }
+    async function closedPort(): Promise<number> {
+      const port = await listen();
+      const listener = listeners.pop()!;
+      await new Promise((resolve) => listener.close(resolve));
+      return port;
+    }
+    function register(port: number, extra: object = {}): string {
+      fs.mkdirSync(registryDir, { recursive: true });
+      const file = path.join(registryDir, `${process.pid}-${port}.json`);
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          port,
+          pid: process.pid, // alive: this very test process
+          token: 'stale',
+          startedAt: 0,
+          servesSpa: false,
+          protocol: 1,
+          ...extra,
+        }),
+      );
+      return file;
+    }
+
+    it('does not reuse a live-pid entry with nothing listening; prunes it and server.json', async () => {
+      const port = await closedPort();
+      const file = register(port);
+      fs.writeFileSync(serverJsonPath, fs.readFileSync(file));
+
+      const config = await server.start({ embedded: true });
+
+      expect(config.port).not.toBe(port);
+      expect(config.token).not.toBe('stale');
+      expect(fs.existsSync(file)).toBe(false);
+      expect(registryFiles()).toEqual([`${process.pid}-${config.port}.json`]);
+      expect(JSON.parse(fs.readFileSync(serverJsonPath, 'utf-8')).port).toBe(config.port);
+    });
+
+    it('does not reuse a port answered by another process', async () => {
+      const port = await listen((_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ status: 'ok', pid: process.pid + 1 }));
+      });
+      const file = register(port);
+
+      const config = await server.start({ embedded: true });
+
+      expect(config.port).not.toBe(port);
+      expect(fs.existsSync(file)).toBe(false);
+    });
+
+    it('neither reuses nor prunes a server too busy to answer', async () => {
+      const port = await listen(() => {
+        /* never answers */
+      });
+      const file = register(port);
+
+      const config = await server.start({ embedded: true });
+
+      expect(config.port).not.toBe(port);
+      expect(fs.existsSync(file)).toBe(true);
+    });
+
+    it('reuses a healthy server and drops a stale legacy pointer', async () => {
+      const first = await server.start({ embedded: true });
+      const port = await closedPort();
+      fs.writeFileSync(
+        serverJsonPath,
+        JSON.stringify({ port, pid: process.pid, token: 'stale-pointer' }),
+      );
+      const second = new PixelAgentsServer();
+
+      const reused = await second.start({ embedded: true });
+
+      expect(reused.port).toBe(first.port);
+      expect(reused.token).toBe(first.token);
+      expect(fs.existsSync(serverJsonPath)).toBe(false);
+      expect(registryFiles()).toHaveLength(1);
+      second.stop();
+    });
+
+    it('probeServer tells healthy, stale and unknown apart', async () => {
+      const healthy = await listen((_req, res) => res.end(JSON.stringify({ pid: 4242 })));
+      const html = await listen((_req, res) => res.end('<html>not ours</html>'));
+      const hanging = await listen(() => {
+        /* never answers */
+      });
+      expect(await probeServer({ port: healthy, pid: 4242 })).toBe('healthy');
+      expect(await probeServer({ port: healthy, pid: 4243 })).toBe('stale');
+      expect(await probeServer({ port: html, pid: 4242 })).toBe('stale');
+      expect(await probeServer({ port: await closedPort(), pid: 4242 })).toBe('stale');
+      expect(await probeServer({ port: hanging, pid: 4242 }, 200)).toBe('unknown');
+    });
   });
 
   // 18. server.json cleaned up on stop

@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -12,13 +13,15 @@ import type {
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
 import {
+  SERVER_HEALTH_MAX_BODY_CHARS,
+  SERVER_HEALTH_PROBE_TIMEOUT_MS,
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
   SERVER_REGISTRY_PROTOCOL_VERSION,
   SERVERS_DIR,
 } from './constants.js';
 import { createHttpServer } from './httpServer.js';
-import type { ServerConfig } from './serverConfig.js';
+import type { ServerConfig, ServerTarget } from './serverConfig.js';
 import { isServerConfig, isServerTarget } from './serverConfig.js';
 
 export type { ServerConfig } from './serverConfig.js';
@@ -78,9 +81,9 @@ export class PixelAgentsServer {
     // reuses another standalone -- never across the boundary, which is what
     // used to leave a standalone attached to VS Code's SPA-less embedded
     // server (blank page). Prune dead entries first so a crashed server's
-    // stale file never blocks discovery of a live one.
-    const registry = this.readAndPruneRegistry();
-    const candidate = registry.find((e) => e.servesSpa === wantsSpa);
+    // stale file never blocks discovery of a live one; a live PID alone is not
+    // a live server (SA-076), so only an entry that answers /api/health is reused.
+    const candidate = await this.findReusableServer(wantsSpa);
     if (candidate) {
       this.config = candidate;
       this.ownsServer = false;
@@ -217,7 +220,7 @@ export class PixelAgentsServer {
    * or gets fanned out to by the hook script. Malformed/mid-write files are
    * treated the same as dead entries and removed. Returns only live entries.
    */
-  private readAndPruneRegistry(): ServerConfig[] {
+  private readAndPruneRegistry(): Array<{ config: ServerConfig; file: string }> {
     const dir = this.getRegistryDir();
     let files: string[];
     try {
@@ -226,7 +229,7 @@ export class PixelAgentsServer {
       return []; // Directory doesn't exist yet -- no live servers registered.
     }
 
-    const live: ServerConfig[] = [];
+    const live: Array<{ config: ServerConfig; file: string }> = [];
     for (const file of files) {
       const filePath = path.join(dir, file);
       try {
@@ -236,7 +239,7 @@ export class PixelAgentsServer {
           continue;
         }
         if (isProcessRunning(entry.pid)) {
-          live.push(entry);
+          live.push({ config: entry, file: filePath });
         } else {
           fs.unlinkSync(filePath);
         }
@@ -249,6 +252,65 @@ export class PixelAgentsServer {
       }
     }
     return live;
+  }
+
+  /**
+   * Probe every PID-live registry entry, plus the legacy server.json pointer,
+   * and return the first healthy entry offering the wanted capability. An
+   * entry that is refused or answered by another PID is stale -- typically a
+   * crashed server whose PID Windows handed to an unrelated process -- and is
+   * pruned like a dead PID, together with a server.json pointing at it. A
+   * timeout is a busy server: it is neither reused nor pruned.
+   */
+  private async findReusableServer(wantsSpa: boolean): Promise<ServerConfig | undefined> {
+    const registry = this.readAndPruneRegistry();
+    const probes = await Promise.all(registry.map(({ config }) => probeServer(config)));
+    const ignore = (target: ServerTarget) =>
+      console.log(
+        `[Pixel Agents] Ignoring stale server registration on port ${target.port} (PID ${target.pid}): it does not answer as that server`,
+      );
+    for (const [i, { config, file }] of registry.entries()) {
+      if (probes[i] !== 'stale') continue;
+      ignore(config);
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* already gone */
+      }
+    }
+    let legacy: ServerTarget | undefined;
+    try {
+      const pointer = JSON.parse(fs.readFileSync(this.getServerJsonPath(), 'utf-8')) as unknown;
+      if (isServerTarget(pointer)) legacy = pointer;
+    } catch {
+      // No legacy pointer, or unreadable: nothing to verify.
+    }
+    if (legacy) {
+      // A pointer naming a registered server shares that entry's verdict.
+      const index = registry.findIndex(
+        ({ config }) => config.pid === legacy.pid && config.port === legacy.port,
+      );
+      const verdict = index >= 0 ? probes[index] : await probeServer(legacy);
+      if (verdict === 'stale') {
+        if (index < 0) ignore(legacy);
+        this.deleteLegacyPointer(legacy);
+      }
+    }
+    return registry.find(
+      ({ config }, i) => probes[i] === 'healthy' && config.servesSpa === wantsSpa,
+    )?.config;
+  }
+
+  /** Delete server.json only while it still holds exactly this stale target. */
+  private deleteLegacyPointer(target: ServerTarget): void {
+    try {
+      const filePath = this.getServerJsonPath();
+      const current = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+      if (isServerTarget(current) && current.pid === target.pid && current.port === target.port)
+        fs.unlinkSync(filePath);
+    } catch {
+      // Already gone or rewritten by a starting server.
+    }
   }
 
   /** Write this server's registry entry atomically (tmp + rename) with mode 0o600. */
@@ -277,6 +339,49 @@ export class PixelAgentsServer {
       // File may already be gone
     }
   }
+}
+
+/** What a registered server answered when asked whether it is still there. */
+export type ServerProbe = 'healthy' | 'stale' | 'unknown';
+
+/**
+ * Ask the server registered at `target` whether it is really there (SA-076):
+ * GET /api/health on its port must answer 200 with the same PID. A refused
+ * connection or an answer from anything else is `stale`; a timeout or any other
+ * network error is `unknown` -- maybe a busy server, so never treat it as dead.
+ */
+export function probeServer(
+  target: Pick<ServerTarget, 'port' | 'pid'>,
+  timeoutMs = SERVER_HEALTH_PROBE_TIMEOUT_MS,
+): Promise<ServerProbe> {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { hostname: '127.0.0.1', port: target.port, path: '/api/health', timeout: timeoutMs },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          if (body.length < SERVER_HEALTH_MAX_BODY_CHARS) body += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const health = JSON.parse(body) as { pid?: unknown };
+            resolve(res.statusCode === 200 && health.pid === target.pid ? 'healthy' : 'stale');
+          } catch {
+            resolve('stale');
+          }
+        });
+        res.on('error', () => resolve('unknown'));
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve('unknown');
+    });
+    req.on('error', (error: NodeJS.ErrnoException) =>
+      resolve(error.code === 'ECONNREFUSED' ? 'stale' : 'unknown'),
+    );
+  });
 }
 
 /** Check if a process is alive by sending signal 0 (no-op, just checks existence). */

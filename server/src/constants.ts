@@ -76,6 +76,13 @@ export const MAX_PORT = 65_535;
  *  fields (servesSpa, protocol itself) don't require a bump -- readers already
  *  tolerate unknown/missing fields (see ServerConfig.debugLog precedent). */
 export const SERVER_REGISTRY_PROTOCOL_VERSION = 1;
+/** A live PID is not a live server (Windows recycles PIDs, SA-076): before reuse,
+ *  /api/health must answer on the entry's port with the same PID. A refused
+ *  connection arrives in milliseconds; past this deadline the server is busy,
+ *  so it is neither reused nor pruned. */
+export const SERVER_HEALTH_PROBE_TIMEOUT_MS = 1500;
+/** Our /api/health body is tiny; anything longer is not ours and is not buffered. */
+export const SERVER_HEALTH_MAX_BODY_CHARS = 4096;
 
 // ── WebSocket close codes (application range 4000-4999) ────
 /** Embedded mode: Bearer token missing or wrong. */

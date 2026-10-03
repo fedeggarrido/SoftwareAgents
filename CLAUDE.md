@@ -362,7 +362,7 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 | Method | Path                     | Purpose                                 |
 | ------ | ------------------------ | --------------------------------------- |
 | POST   | `/api/hooks/:providerId` | Bearer-authenticated hook event ingress |
-| GET    | `/api/health`            | Liveness: `{ ok, version, port, pid }`  |
+| GET    | `/api/health`            | Liveness: `{ status, uptime, pid }`     |
 | GET    | `/ws`                    | Bidirectional protocol channel          |
 | GET    | `/*` (standalone only)   | Webview SPA via `@fastify/static`       |
 
@@ -373,7 +373,7 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 
 The **hooks preference is persisted only after the install/uninstall settled and the on-disk result agrees** — writing it first strands the user when an uninstall fails: entries still firing, but a persisted hooks-off makes the next startup skip the consent/install path entirely.
 
-Server discovery written to `~/.pixel-agents/server.json` with `{ port, pid, authToken }`. Multi-window safe: a second server detects an existing `server.json` and reuses or replaces it based on PID liveness.
+Server discovery written to `~/.pixel-agents/server.json` (legacy pointer) and `~/.pixel-agents/servers/<pid>-<port>.json` (registry) with `{ port, pid, token, servesSpa, ... }`. Multi-window safe: a starting server reuses a registered one only if its PID is alive AND `/api/health` on its port answers with that same PID — Windows recycles PIDs, so a crashed server's entry can name an unrelated live process (SA-076). Refused or answered by someone else = stale: the entry and a `server.json` naming it are pruned. A probe timeout (busy server) is neither reused nor pruned.
 
 ### ClientMessageHandler
 

@@ -58,10 +58,14 @@ Este archivo fija el flujo de colaboración del Development Project.
 
 - Los `node_modules` de los worktrees son junctions al repo principal: no escribas
   en ellos, no los borres recursivamente ni instales dependencias desde el worktree.
-- Antes de `git worktree remove`, verifica las rutas absolutas y que cada
-  `node_modules` sea una junction del worktree que vas a retirar. Retira cada enlace
-  con `cmd /c rmdir "<ruta-absoluta-del-worktree>\node_modules"` **sin `/s`**
-  (también los de los workspaces, si existen). Así conservas el `node_modules` real.
+- Retira worktrees **solo** con
+  `powershell -NoProfile -File scripts/remove-worktree.ps1 -Path .worktrees/<id>`:
+  quita cada enlace sin tocar su destino, comprueba que no queda ninguno y solo
+  entonces llama a git. Nunca uses `git worktree remove` directamente ni lo
+  encadenes tras otro comando. En Windows, git sigue una junction que quede y, a
+  través de los enlaces de workspaces de npm (`node_modules/pixel-agents -> server`),
+  vacía el `node_modules` real y borra `server/` y `webview-ui/` del checkout
+  principal (incidente del 2026-10-03).
 - Guarda archivos sin BOM; ejecuta Prettier sobre lo tocado, ESLint cuando aplique,
   `npm run check-types` y las pruebas pertinentes antes de entregar a revisión.
 - No modifiques `tsconfig*.json`, `vitest.config.ts` ni otra configuración del repo para

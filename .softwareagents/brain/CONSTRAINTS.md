@@ -78,7 +78,11 @@ Sin conectores (SA-QA-4): `--ignore-user-config` tampoco quita los conectores
 de la cuenta ChatGPT, que llegan como el servidor MCP `codex_apps` (Gmail,
 ClickUp, Sites, llamadas, acceso a internet). Los flags apagan
 `CODEX_DISABLED_FEATURES` (`apps` y afines), y cualquier `mcp_tool_call` falla
-la Execution. Tras actualizar Codex, `npx tsx scripts/verify-codex-tools.ts`.
+la Execution. Lo mismo hacen un `collab_tool_call` o un rollout de sub-agente
+hijo del hilo: la delegación no se puede apagar en 0.160.0. `project_doc_max_bytes=0`
+evita que Codex inyecte el AGENTS.md del worktree, y el Executor no arranca si el
+worktree trae `.codex/` o `.agents/`. Tras actualizar Codex,
+`npx tsx scripts/verify-codex-tools.ts`.
 
 Resolución: `projects.<id>.binaryPaths.codex` del Operator (ruta absoluta
 existente; override inválido falla), PATH, y ejecutable con mtime más reciente

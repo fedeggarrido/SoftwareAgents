@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { CodexCliExecutor, resolveCodexBinary } from '../src/executors/codexCliExecutor.js';
@@ -32,6 +32,7 @@ function executor(mode?: string, runtimeDirectory = path.join(root, 'runtime')) 
     operator: { binaryPaths: { codex: process.execPath } },
     runtimeDirectory,
     binaryArgs: [path.join(__dirname, 'fixtures/codex-cli.cjs'), ...(mode ? [mode] : [])],
+    sessionsDirectory: path.join(root, 'sessions'),
   });
 }
 async function collect(mode?: string) {
@@ -181,6 +182,35 @@ it.each([
   const summary = `Policy violation: Codex called MCP tool ${tool} despite features apps, plugins, remote_plugin, tool_suggest, skill_mcp_dependency_install, browser_use, browser_use_external, browser_use_full_cdp_access, in_app_browser off; slice profiles have no MCP`;
   expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
   expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
+});
+it.each([
+  [
+    '--collab',
+    'Codex delegated to a sub-agent (spawn_agent); slice profiles have no delegated agents',
+  ],
+  [
+    '--spawn-subagent',
+    'Codex spawned a sub-agent (rollout-fake-child.jsonl); slice profiles have no delegated agents',
+  ],
+])('stops and fails the run when Codex delegates to a sub-agent (%s)', async (mode, detail) => {
+  vi.stubEnv('FAKE_CODEX_SESSIONS', path.join(root, 'sessions'));
+  try {
+    const events = await collect(mode);
+    const summary = `Policy violation: ${detail}`;
+    expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
+    expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+it('refuses a worktree that ships Codex configuration or skills', async () => {
+  for (const shipped of ['.codex', '.agents']) {
+    fs.mkdirSync(path.join(req.worktreePath, shipped));
+    await expect(executor().start(req).events[Symbol.asyncIterator]().next()).rejects.toThrow(
+      `the worktree ships ${shipped}/`,
+    );
+    fs.rmSync(path.join(req.worktreePath, shipped), { recursive: true });
+  }
 });
 it('fails closed on truncated real startup without a completed turn', async () => {
   expect((await collect('--startup-only')).at(-1)).toMatchObject({ exitCode: 1 });

@@ -68,23 +68,16 @@ if (!valid) {
     return;
   }
   // A CLI that obeys a connector injection: exposes or calls an MCP tool (SA-QA-4), then hangs.
-  if (executor === 'claude' && (args.includes('--mcp-init') || args.includes('--mcp-tool'))) {
-    const emit = (record) =>
-      process.stdout.write(`${JSON.stringify(record)}
-`);
+  const mcpInitTool = args.includes('--mcp-init') || args.includes('--mcp-tool-only');
+  const mcpInitServer = args.includes('--mcp-init') || args.includes('--mcp-server-only');
+  if (executor === 'claude' && (mcpInitTool || mcpInitServer || args.includes('--mcp-tool'))) {
+    const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
     emit({
       type: 'system',
       subtype: 'init',
       session_id: 'fake-claude-session',
-      tools: [
-        'Read',
-        'Glob',
-        'Grep',
-        ...(args.includes('--mcp-init') ? ['mcp__claude_ai_Gmail__send_email'] : []),
-      ],
-      mcp_servers: args.includes('--mcp-init')
-        ? [{ name: 'claude.ai Gmail', status: 'connected' }]
-        : [],
+      tools: ['Read', 'Glob', 'Grep', ...(mcpInitTool ? ['mcp__claude_ai_Gmail__send_email'] : [])],
+      mcp_servers: mcpInitServer ? [{ name: 'claude.ai Gmail', status: 'needs-auth' }] : [],
     });
     if (args.includes('--mcp-tool'))
       emit({

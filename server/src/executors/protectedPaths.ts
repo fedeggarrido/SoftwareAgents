@@ -7,6 +7,15 @@ import { evaluatePolicy, type PolicyActor, type PolicyDecision } from '../policy
 export const DEFAULT_PROTECTED_PATHS = Object.freeze([
   '.github/**',
   '.claude/**',
+  // Files the CLIs load by themselves as configuration or instructions, outside the
+  // untrusted-data boundary (SA-QA-4): a Developer must not be able to plant them.
+  '.codex/**',
+  '.agents/**',
+  '.mcp.json',
+  'AGENTS.md',
+  '**/AGENTS.md',
+  'CLAUDE.md',
+  '**/CLAUDE.md',
   '.softwareagents/project.yaml',
   '.softwareagents/agents/**',
   'agents/templates/**',

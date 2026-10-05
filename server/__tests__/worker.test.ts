@@ -309,6 +309,13 @@ describe('supervised worker', () => {
     const files = [
       '.github/workflows/ci.yml',
       '.claude/settings.json',
+      '.codex/config.toml',
+      '.agents/skills/x/SKILL.md',
+      '.mcp.json',
+      'AGENTS.md',
+      'server/AGENTS.md',
+      'CLAUDE.md',
+      'webview-ui/CLAUDE.md',
       '.softwareagents/agents/developer.yaml',
       'agents/templates/developer.yaml',
       'CODEOWNERS',

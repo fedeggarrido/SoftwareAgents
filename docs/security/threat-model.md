@@ -50,7 +50,11 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
   **SA-QA-4:** `--ignore-user-config` no quitaba los conectores de la cuenta
   ChatGPT (`codex_apps`: Gmail, ClickUp, Sites, llamadas, acceso a internet).
   Ahora se apagan con `features.apps=false` y afines, y cualquier llamada MCP
-  hace fallar la Execution.
+  hace fallar la Execution. Codex 0.160.0 también ofrece delegar en
+  sub-agentes, y ningún flag lo impide: el Executor falla la ejecución si ve
+  un `collab_tool_call` o un rollout hijo. Además, `project_doc_max_bytes=0`
+  deja de inyectar el AGENTS.md del repo, y `AGENTS.md`, `CLAUDE.md`,
+  `.codex/`, `.agents/` y `.mcp.json` son rutas protegidas.
   **Aceptación temporal (SA-067):** se acepta temporalmente la herencia para
   trabajo local supervisado; inventariar capacidades efectivas antes de lanzar
   una Execution. El aislamiento de configuración exigido por ADR-0002 sigue

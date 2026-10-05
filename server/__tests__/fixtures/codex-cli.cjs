@@ -58,6 +58,45 @@ process.stdin.on('end', () => {
     setTimeout(() => {}, 20000);
     return;
   }
+  // Delegation (SA-QA-4): a visible collab_tool_call item, or a silent spawn that only shows as a
+  // sub-agent rollout naming the parent thread in $FAKE_CODEX_SESSIONS/YYYY/MM/DD.
+  if (args.includes('--collab')) {
+    emit({
+      type: 'item.started',
+      item: {
+        id: 'collab-1',
+        type: 'collab_tool_call',
+        tool: 'spawn_agent',
+        status: 'in_progress',
+      },
+    });
+    setTimeout(() => {}, 20000);
+    return;
+  }
+  if (args.includes('--spawn-subagent')) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const day = require('path').join(
+      process.env.FAKE_CODEX_SESSIONS,
+      String(now.getFullYear()),
+      pad(now.getMonth() + 1),
+      pad(now.getDate()),
+    );
+    fs.mkdirSync(day, { recursive: true });
+    fs.writeFileSync(
+      require('path').join(day, 'rollout-fake-child.jsonl'),
+      JSON.stringify({
+        type: 'session_meta',
+        payload: {
+          id: 'child-thread',
+          parent_thread_id: '00000000-0000-7000-a000-000000000034',
+          thread_source: 'subagent',
+        },
+      }) + '\n',
+    );
+    setTimeout(() => {}, 20000);
+    return;
+  }
   if (args.includes('--token-count'))
     emit({
       type: 'event_msg',

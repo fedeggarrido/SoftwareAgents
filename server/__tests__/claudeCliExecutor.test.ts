@@ -181,6 +181,11 @@ it.each([
     '--mcp-init',
     'Claude exposed MCP (mcp__claude_ai_Gmail__send_email, claude.ai Gmail); slice profiles have no MCP',
   ],
+  ['--mcp-server-only', 'Claude exposed MCP (claude.ai Gmail); slice profiles have no MCP'],
+  [
+    '--mcp-tool-only',
+    'Claude exposed MCP (mcp__claude_ai_Gmail__send_email); slice profiles have no MCP',
+  ],
   [
     '--mcp-tool',
     'Claude called MCP tool mcp__claude_ai_Gmail__send_email; slice profiles have no MCP',

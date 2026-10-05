@@ -2,7 +2,11 @@ import Ajv from 'ajv';
 import { createHash } from 'crypto';
 
 import type { AgentPermissionProfile, AgentSpec } from '../../core/src/agentSpec.js';
-import { CODEX_DISABLED_FEATURES, CODEX_WEB_SEARCH_MODE } from './constants.js';
+import {
+  CODEX_DISABLED_FEATURES,
+  CODEX_PROJECT_DOC_MAX_BYTES,
+  CODEX_WEB_SEARCH_MODE,
+} from './constants.js';
 
 export const TOOL_POLICY_VERSION = 'sa-qa-4/v4';
 /** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
@@ -18,6 +22,8 @@ export const CODEX_WEB_EVENT_TYPES: readonly unknown[] = [
   'web_search_call',
 ];
 /** Any MCP call, in the exec item stream or the event envelope: slice profiles get no MCP. */
+/** Sub-agent delegation (spawn/wait/send...) as it shows in the exec item stream. */
+export const CODEX_DELEGATION_ITEM_TYPES: readonly unknown[] = ['collab_tool_call'];
 export const CODEX_MCP_EVENT_TYPES: readonly unknown[] = [
   'mcp_tool_call',
   'mcp_tool_call_begin',
@@ -148,6 +154,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       ignoreUserConfig: true as const,
       webSearch: CODEX_WEB_SEARCH_MODE,
       disabledFeatures: [...CODEX_DISABLED_FEATURES],
+      projectDocMaxBytes: CODEX_PROJECT_DOC_MAX_BYTES,
       outputSchema,
       instructions,
     },
@@ -171,6 +178,8 @@ export function codexCompilerFlags(
     '-c',
     `web_search="${compiled.codex.webSearch}"`,
     ...compiled.codex.disabledFeatures.flatMap((feature) => ['-c', `features.${feature}=false`]),
+    '-c',
+    `project_doc_max_bytes=${compiled.codex.projectDocMaxBytes}`,
     ...(compiled.outputSchema ? ['--output-schema', schemaFile!] : []),
   ];
 }

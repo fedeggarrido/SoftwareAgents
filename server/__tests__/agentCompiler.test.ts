@@ -59,6 +59,7 @@ it.each(Object.keys(ROLE_PROFILES))(
     for (const feature of CODEX_DISABLED_FEATURES)
       expect(flags[flags.indexOf(`features.${feature}=false`) - 1]).toBe('-c');
     expect(flags.filter((flag) => /^features\.[a-z_]+=true$/.test(flag))).toEqual([]);
+    expect(flags[flags.indexOf('project_doc_max_bytes=0') - 1]).toBe('-c');
   },
 );
 it.each(['reviewer', 'qa', 'requirements-analyst', 'architect'])(

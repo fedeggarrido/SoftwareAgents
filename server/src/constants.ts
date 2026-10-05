@@ -147,6 +147,19 @@ export const CODEX_DISABLED_FEATURES: readonly string[] = [
   'browser_use_full_cdp_access',
   'in_app_browser',
 ];
+/** Codex injects the worktree's AGENTS.md as user-role instructions, outside the untrusted-data
+ *  boundary; 0 bytes turns that off (measured on 0.160.0). Slice agents get context from the
+ *  declared Brain paths instead. */
+export const CODEX_PROJECT_DOC_MAX_BYTES = 0;
+/** Codex 0.160.0 lets any run spawn sub-agents (spawn_agent/wait_agent...) and no flag stops it:
+ *  `features.multi_agent=false` and `agents.max_depth=0` both still spawned (SA-QA-4). The Executor
+ *  fails the run on a `collab_tool_call` item and on any rollout whose `parent_thread_id` is its
+ *  thread, polled at this interval. */
+export const CODEX_SUBAGENT_POLL_MS = 1000;
+/** session_meta carries base instructions (~20 KB); the parent id sits before them. */
+export const CODEX_SUBAGENT_HEADER_BYTES = 256 * 1024;
+/** Repository-provided Codex configuration or skills: the Codex Executor refuses such a worktree. */
+export const CODEX_REPO_CONFIG_DIRS: readonly string[] = ['.codex', '.agents'];
 export const WORKSTORE_INITIAL_TASK_STATUS = 'DRAFT';
 export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
 /** Async OS helper deadline, including native-helper compilation and descendant discovery. */

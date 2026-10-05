@@ -5,6 +5,7 @@ import { createInterface } from 'readline';
 
 import type { ProjectOperatorConfig } from '../../../core/src/project.js';
 import {
+  CODEX_DELEGATION_ITEM_TYPES,
   CODEX_MCP_EVENT_TYPES,
   CODEX_WEB_EVENT_TYPES,
   CODEX_WEB_ITEM_TYPE,
@@ -12,8 +13,13 @@ import {
   compileAgent,
   validateAgentOutput,
 } from '../agentCompiler.js';
-import { CODEX_WINDOWS_SANDBOX } from '../constants.js';
+import {
+  CODEX_REPO_CONFIG_DIRS,
+  CODEX_SUBAGENT_POLL_MS,
+  CODEX_WINDOWS_SANDBOX,
+} from '../constants.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
+import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 
 /** `server.tool` of an MCP call record (exec item or envelope), for the violation message. */
@@ -87,6 +93,8 @@ export interface CodexCliExecutorOptions {
   runtimeDirectory: string;
   /** Trusted prefix for test harnesses; never supplied by repository content. */
   binaryArgs?: readonly string[];
+  /** Codex rollout root watched for sub-agents; defaults to $CODEX_HOME/sessions. */
+  sessionsDirectory?: string;
 }
 
 export class CodexCliExecutor implements Executor {
@@ -146,6 +154,13 @@ export class CodexCliExecutor implements Executor {
               !relative.startsWith(`..${path.sep}`))
           )
             throw new Error('Runtime settings must be outside the worktree');
+          // A repository-shipped .codex/ or .agents/ is configuration or skills Codex may load by
+          // itself; never run a slice agent over it (SA-QA-4).
+          for (const shipped of CODEX_REPO_CONFIG_DIRS)
+            if (fs.existsSync(path.join(req.worktreePath, shipped)))
+              throw new Error(
+                `Refusing to run Codex: the worktree ships ${shipped}/ (repository-provided Codex configuration or skills)`,
+              );
           directory = fs.mkdtempSync(path.join(options.runtimeDirectory, 'codex-'));
           const schemaFile = path.join(directory, 'output-schema.json');
           if (compiled.outputSchema)
@@ -197,6 +212,30 @@ export class CodexCliExecutor implements Executor {
             resultError = false,
             sawTurn = false;
           let tokenCountSeen = false;
+          let watcher: ReturnType<typeof setInterval> | undefined;
+          const violate = (detail: string) => {
+            if (violation) return;
+            violation = `Policy violation: ${detail}`;
+            push({ type: 'output', text: violation, stream: 'stdout' });
+            try {
+              cancel();
+            } catch {
+              /* reported below */
+            }
+          };
+          // No 0.160.0 flag stops delegation, and a spawn without a wait never reaches the exec
+          // stream: the sub-agent's own rollout (parent_thread_id = our thread) is the signal.
+          const sessionsRoot = options.sessionsDirectory ?? codexSessionsDirectory();
+          const launchedMs = Date.now();
+          const seenRollouts = new Set<string>();
+          const checkSubagents = () => {
+            if (!sessionId || violation) return;
+            const rollout = findSubagentRollout(sessionsRoot, sessionId, launchedMs, seenRollouts);
+            if (rollout)
+              violate(
+                `Codex spawned a sub-agent (${path.basename(rollout)}); slice profiles have no delegated agents`,
+              );
+          };
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: proc[stream]! })) {
               if (stream === 'stderr') {
@@ -221,6 +260,7 @@ export class CodexCliExecutor implements Executor {
                 !sessionId
               ) {
                 sessionId = record.thread_id;
+                watcher ??= setInterval(checkSubagents, CODEX_SUBAGENT_POLL_MS);
                 push({
                   type: 'started',
                   sessionId,
@@ -245,6 +285,7 @@ export class CodexCliExecutor implements Executor {
                     'mcp_tool_call',
                     CODEX_WEB_ITEM_TYPE,
                     'file_change',
+                    ...CODEX_DELEGATION_ITEM_TYPES,
                   ].includes(item?.type)
                 )
                   push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
@@ -262,20 +303,21 @@ export class CodexCliExecutor implements Executor {
               ];
               const web = shapes.find((shape) => CODEX_WEB_EVENT_TYPES.includes(shape?.type));
               const mcp = shapes.find((shape) => CODEX_MCP_EVENT_TYPES.includes(shape?.type));
-              const detail = web
-                ? `Codex used ${web.type} despite web_search="${compiled.codex.webSearch}"; slice profiles have no web access`
-                : mcp
-                  ? `Codex called MCP tool ${codexMcpToolName(mcp)} despite features ${compiled.codex.disabledFeatures.join(', ')} off; slice profiles have no MCP`
-                  : undefined;
-              if (detail && !violation) {
-                violation = `Policy violation: ${detail}`;
-                push({ type: 'output', text: violation, stream });
-                try {
-                  cancel();
-                } catch {
-                  /* reported below */
-                }
-              }
+              const delegation = shapes.find((shape) =>
+                CODEX_DELEGATION_ITEM_TYPES.includes(shape?.type),
+              );
+              if (web)
+                violate(
+                  `Codex used ${web.type} despite web_search="${compiled.codex.webSearch}"; slice profiles have no web access`,
+                );
+              else if (mcp)
+                violate(
+                  `Codex called MCP tool ${codexMcpToolName(mcp)} despite features ${compiled.codex.disabledFeatures.join(', ')} off; slice profiles have no MCP`,
+                );
+              else if (delegation)
+                violate(
+                  `Codex delegated to a sub-agent (${typeof delegation.tool === 'string' ? delegation.tool : delegation.type}); slice profiles have no delegated agents`,
+                );
               const payload = record?.type === 'event_msg' ? record.payload : record;
               if (payload?.type === 'token_count') {
                 const usage = payload.info?.last_token_usage;
@@ -338,6 +380,8 @@ export class CodexCliExecutor implements Executor {
             const result = results[0];
             exitCode = result.status === 'fulfilled' ? (result.value as number) : 1;
             for (const r of results) if (r.status === 'rejected') failure = r.reason;
+            if (watcher) clearInterval(watcher);
+            checkSubagents(); // a spawn right before exit still fails the run
             closed = true;
             wake?.();
           });

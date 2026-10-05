@@ -62,10 +62,17 @@ export function inspectInventory(records: VerificationRecords) {
     )
       continue;
     const chunks = Array.isArray(payload.output) ? payload.output : [];
-    const text = chunks
+    const texts = chunks
       .map((chunk) => object(chunk).text)
-      .filter((v): v is string => typeof v === 'string')
-      .join('\n');
+      .filter((v): v is string => typeof v === 'string');
+    // Code mode prefixes its status ("Script completed\nWall time 0.0 seconds\nOutput:\n",
+    // measured on 0.160.0): metadata, not inventory. A script that did not complete is no evidence.
+    const status = /^Script (\w+(?: \w+)?)\b[\s\S]*\nOutput:\s*$/.exec(texts[0] ?? '');
+    if (status) {
+      if (status[1] !== 'completed') malformed = true;
+      texts.shift();
+    }
+    const text = texts.join('\n');
     const names = text
       .split(/\r?\n/)
       .map((line) => line.trim())

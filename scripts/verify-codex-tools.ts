@@ -2,7 +2,7 @@
  * Re-verify the Codex tool surface of the slice profiles against the installed binary
  * (SA-074, SA-QA-4). Run it whenever Codex updates:
  *
- *   npx tsx scripts/verify-codex-tools.ts [--binary <codex.exe>]
+ *   npx tsx scripts/verify-codex-tools.ts [--binary <codex.exe>] [--role developer]
  *
  * The binary is the one the Executor would run: --binary, else the Operator's
  * `projects.<id>.binaryPaths.codex` when all projects agree, else the usual resolution.
@@ -61,8 +61,11 @@ function operatorBinary(): string | undefined {
 }
 
 const root = path.resolve(__dirname, '..');
-const spec = parse(fs.readFileSync(path.join(root, 'agents/templates/reviewer.yaml'), 'utf8'));
-const flags = codexCompilerFlags(compileAgent(spec, 'reviewer', { task: 'verify-codex-tools' }));
+// --role developer verifies the workspace-write sandbox; the default Reviewer, read-only.
+const roleFlag = process.argv.indexOf('--role');
+const role = roleFlag > 0 ? process.argv[roleFlag + 1] : 'reviewer';
+const spec = parse(fs.readFileSync(path.join(root, 'agents/templates', `${role}.yaml`), 'utf8'));
+const flags = codexCompilerFlags(compileAgent(spec, role, { task: 'verify-codex-tools' }));
 const configured = operatorBinary();
 const codex = resolveCodexBinary(configured ? { binaryPaths: { codex: configured } } : {});
 const sessions = codexSessionsDirectory();

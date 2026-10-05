@@ -32,6 +32,27 @@ const control = () => run([record({ type: 'web_search_call' })]);
 it('accepts a complete inventory correlated with its exact ALL_TOOLS call', () => {
   expect(judgeCodexTools(run(inventory()), run(), control()).exitCode).toBe(0);
 });
+// Shape captured from a real 0.160.0 rollout: code mode sends its status as the first chunk.
+const realShape = (status: string) => [
+  record({
+    type: 'custom_tool_call',
+    name: 'exec',
+    call_id: 'call_real',
+    input: `${INVENTORY_CODE}\n`,
+  }),
+  record({
+    type: 'custom_tool_call_output',
+    call_id: 'call_real',
+    output: [
+      { type: 'input_text', text: `Script ${status}\nWall time 0.0 seconds\nOutput:\n` },
+      { type: 'input_text', text: [...EXPECTED_TOOLS].join('\n') },
+    ],
+  }),
+];
+it('reads the real code-mode output: status header skipped, failed scripts are no evidence', () => {
+  expect(judgeCodexTools(run(realShape('completed')), run(), control()).exitCode).toBe(0);
+  expect(judgeCodexTools(run(realShape('failed')), run(), control()).exitCode).toBe(2);
+});
 it.each(
   [
     inventory(['exec_command']),

@@ -131,6 +131,22 @@ export const CODEX_WINDOWS_SANDBOX = 'elevated';
  *  deprecation notice) and --ignore-user-config keeps that default, so agents turn it off
  *  explicitly. Modes accepted by 0.160.0: disabled, cached, indexed, live (SA-074). */
 export const CODEX_WEB_SEARCH_MODE = 'disabled';
+/** Account-level Codex features that add tools beyond the sandbox, disabled for every slice
+ *  profile (SA-QA-4). `apps` injects the ChatGPT connectors as the `codex_apps` MCP server even
+ *  under --ignore-user-config: measured on 0.160.0, 243 tools (Gmail send/delete, ClickUp writes,
+ *  Sites deploys, phone calls, an internet tool) that `-c features.apps=false` removes. The rest
+ *  add browser, plugin and plugin-install tools; 0.160.0 accepts every one of these keys. */
+export const CODEX_DISABLED_FEATURES: readonly string[] = [
+  'apps',
+  'plugins',
+  'remote_plugin',
+  'tool_suggest',
+  'skill_mcp_dependency_install',
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'in_app_browser',
+];
 export const WORKSTORE_INITIAL_TASK_STATUS = 'DRAFT';
 export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
 /** Async OS helper deadline, including native-helper compilation and descendant discovery. */

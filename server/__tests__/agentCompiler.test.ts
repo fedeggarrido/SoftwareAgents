@@ -11,6 +11,7 @@ import {
   ROLE_PROFILES,
   validateAgentOutput,
 } from '../src/agentCompiler.js';
+import { CODEX_DISABLED_FEATURES } from '../src/constants.js';
 
 function template(role: string): AgentSpec {
   return parse(
@@ -50,6 +51,16 @@ it.each(Object.keys(ROLE_PROFILES))('closes web access for %s in both CLIs', (ro
   expect(flags).not.toContain('--search');
   expect(flags.filter((flag) => flag.startsWith('web_search='))).toEqual(['web_search="disabled"']);
 });
+it.each(Object.keys(ROLE_PROFILES))(
+  'turns off the account connectors, plugins and browser for %s in Codex',
+  (role) => {
+    const flags = codexCompilerFlags(compileAgent(template(role), role, { task: 'SA-QA-4' }));
+    expect(CODEX_DISABLED_FEATURES).toContain('apps');
+    for (const feature of CODEX_DISABLED_FEATURES)
+      expect(flags[flags.indexOf(`features.${feature}=false`) - 1]).toBe('-c');
+    expect(flags.filter((flag) => /^features\.[a-z_]+=true$/.test(flag))).toEqual([]);
+  },
+);
 it.each(['reviewer', 'qa', 'requirements-analyst', 'architect'])(
   'permits Codex shell reads for %s while keeping writes and unsafe actions forbidden',
   (role) => {

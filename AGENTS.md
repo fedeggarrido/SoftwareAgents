@@ -50,6 +50,10 @@ Este archivo fija el flujo de colaboración del Development Project.
      revisa e integra **antes** de la siguiente feature. Si no hay hallazgos, se
      cierra vacía indicándolo.
 - Solo un hallazgo bloqueante detiene la integración; el resto va a la tarea de fixes.
+- Las ejecuciones manuales de Codex (QA, revisiones, implementación) se lanzan con
+  `-c features.apps=false`. Sin ese flag, Codex recibe los conectores de la cuenta
+  ChatGPT (Gmail, ClickUp, Sites, llamadas) aunque nadie los pida
+  (`docs/security/web-access.md`).
 
 ## Worktrees y validación segura
 

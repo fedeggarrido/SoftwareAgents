@@ -2,11 +2,13 @@ import Ajv from 'ajv';
 import { createHash } from 'crypto';
 
 import type { AgentPermissionProfile, AgentSpec } from '../../core/src/agentSpec.js';
-import { CODEX_WEB_SEARCH_MODE } from './constants.js';
+import { CODEX_DISABLED_FEATURES, CODEX_WEB_SEARCH_MODE } from './constants.js';
 
-export const TOOL_POLICY_VERSION = 'sa-074/v3';
+export const TOOL_POLICY_VERSION = 'sa-qa-4/v4';
 /** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
+/** Claude names every MCP tool `mcp__<server>__<tool>`; slice profiles get no MCP at all. */
+export const CLAUDE_MCP_TOOL_PREFIX = 'mcp__';
 export const CODEX_WEB_ITEM_TYPE = 'web_search';
 /** The exec item plus the rollout-envelope shapes 0.160.0 carries for the same tool. */
 export const CODEX_WEB_EVENT_TYPES: readonly unknown[] = [
@@ -14,6 +16,12 @@ export const CODEX_WEB_EVENT_TYPES: readonly unknown[] = [
   'web_search_begin',
   'web_search_end',
   'web_search_call',
+];
+/** Any MCP call, in the exec item stream or the event envelope: slice profiles get no MCP. */
+export const CODEX_MCP_EVENT_TYPES: readonly unknown[] = [
+  'mcp_tool_call',
+  'mcp_tool_call_begin',
+  'mcp_tool_call_end',
 ];
 export const ROLE_PROFILES = {
   'requirements-analyst': 'brain_write',
@@ -139,6 +147,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       sandbox: profile.sandbox,
       ignoreUserConfig: true as const,
       webSearch: CODEX_WEB_SEARCH_MODE,
+      disabledFeatures: [...CODEX_DISABLED_FEATURES],
       outputSchema,
       instructions,
     },
@@ -161,6 +170,7 @@ export function codexCompilerFlags(
     'shell_environment_policy.inherit="none"',
     '-c',
     `web_search="${compiled.codex.webSearch}"`,
+    ...compiled.codex.disabledFeatures.flatMap((feature) => ['-c', `features.${feature}=false`]),
     ...(compiled.outputSchema ? ['--output-schema', schemaFile!] : []),
   ];
 }

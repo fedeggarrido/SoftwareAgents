@@ -5,6 +5,7 @@ import { createInterface } from 'readline';
 
 import type { ProjectOperatorConfig } from '../../../core/src/project.js';
 import {
+  CODEX_MCP_EVENT_TYPES,
   CODEX_WEB_EVENT_TYPES,
   CODEX_WEB_ITEM_TYPE,
   codexCompilerFlags,
@@ -14,6 +15,17 @@ import {
 import { CODEX_WINDOWS_SANDBOX } from '../constants.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
+
+/** `server.tool` of an MCP call record (exec item or envelope), for the violation message. */
+function codexMcpToolName(shape: {
+  server?: unknown;
+  tool?: unknown;
+  invocation?: { server?: unknown; tool?: unknown };
+}): string {
+  const server = shape.server ?? shape.invocation?.server;
+  const tool = shape.tool ?? shape.invocation?.tool;
+  return typeof server === 'string' && typeof tool === 'string' ? `${server}.${tool}` : 'unknown';
+}
 
 /** Only trusted Operator config can select an executable. An invalid override fails closed. */
 export function resolveCodexBinary(
@@ -237,19 +249,26 @@ export class CodexCliExecutor implements Executor {
                 )
                   push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
               }
-              // web_search="disabled" should make this unreachable, in the exec item stream or
-              // the rollout envelope; seeing it means the flag did not apply (SA-074), so the
-              // run is stopped and never trusted.
-              const webEvent = [
+              // The compiled flags should make web and MCP tools unreachable, in the exec item
+              // stream or the rollout envelope; seeing one means a flag did not apply (SA-074,
+              // SA-QA-4), so the run is stopped and never trusted.
+              const shapes = [
                 record.type === 'item.started' || record.type === 'item.completed'
-                  ? record.item?.type
+                  ? record.item
                   : undefined,
                 record.type === 'event_msg' || record.type === 'response_item'
-                  ? record.payload?.type
+                  ? record.payload
                   : undefined,
-              ].find((type) => CODEX_WEB_EVENT_TYPES.includes(type));
-              if (webEvent && !violation) {
-                violation = `Policy violation: Codex used ${webEvent} despite web_search="${compiled.codex.webSearch}"; slice profiles have no web access`;
+              ];
+              const web = shapes.find((shape) => CODEX_WEB_EVENT_TYPES.includes(shape?.type));
+              const mcp = shapes.find((shape) => CODEX_MCP_EVENT_TYPES.includes(shape?.type));
+              const detail = web
+                ? `Codex used ${web.type} despite web_search="${compiled.codex.webSearch}"; slice profiles have no web access`
+                : mcp
+                  ? `Codex called MCP tool ${codexMcpToolName(mcp)} despite features ${compiled.codex.disabledFeatures.join(', ')} off; slice profiles have no MCP`
+                  : undefined;
+              if (detail && !violation) {
+                violation = `Policy violation: ${detail}`;
                 push({ type: 'output', text: violation, stream });
                 try {
                   cancel();

@@ -73,7 +73,7 @@ it('loads at least the web-exfiltration case', () => {
 });
 for (const attack of cases) {
   it.each(Object.keys(ROLE_PROFILES))(
-    `${attack.id}: keeps the payload as data and grants %s no web tool`,
+    `${attack.id}: keeps the payload as data and grants %s no web tool or connector`,
     (role) => {
       const spec = template(role);
       const compiled = compileAgent(spec, role, {
@@ -89,7 +89,9 @@ for (const attack of cases) {
       expect(compiled.claude.disallowedTools).toEqual(
         expect.arrayContaining([...CLAUDE_WEB_TOOLS]),
       );
-      expect(codexCompilerFlags(compiled)).toContain('web_search="disabled"');
+      expect(codexCompilerFlags(compiled)).toEqual(
+        expect.arrayContaining(['web_search="disabled"', 'features.apps=false']),
+      );
     },
   );
   if (attack.obeyingCli?.claude)

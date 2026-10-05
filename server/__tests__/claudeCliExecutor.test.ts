@@ -175,12 +175,20 @@ it('uses the Reviewer compiler tools and sends task content as data', async () =
   expect(report.args[report.args.indexOf('--append-system-prompt') + 1]).not.toContain(req.prompt);
 });
 it.each([
-  ['--web-init', 'Claude exposed WebSearch'],
-  ['--web-tool', 'Claude used WebFetch'],
-])('stops and fails the run when a web tool appears (%s)', async (mode, detail) => {
+  ['--web-init', 'Claude exposed WebSearch; slice profiles have no web access'],
+  ['--web-tool', 'Claude used WebFetch; slice profiles have no web access'],
+  [
+    '--mcp-init',
+    'Claude exposed MCP (mcp__claude_ai_Gmail__send_email, claude.ai Gmail); slice profiles have no MCP',
+  ],
+  [
+    '--mcp-tool',
+    'Claude called MCP tool mcp__claude_ai_Gmail__send_email; slice profiles have no MCP',
+  ],
+])('stops and fails the run when a web or MCP tool appears (%s)', async (mode, detail) => {
   const events: ExecutionEvent[] = [];
   for await (const event of executor(mode).start(req).events) events.push(event);
-  const summary = `Policy violation: ${detail}; slice profiles have no web access`;
+  const summary = `Policy violation: ${detail}`;
   expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
   expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
 });

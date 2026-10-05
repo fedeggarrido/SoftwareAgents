@@ -101,6 +101,8 @@ it('uses compiler sandbox/config/schema and optional policy model without bypass
     ]),
   );
   expect(report.args[report.args.indexOf('web_search="disabled"') - 1]).toBe('-c');
+  for (const feature of ['apps', 'plugins', 'tool_suggest', 'browser_use'])
+    expect(report.args[report.args.indexOf(`features.${feature}=false`) - 1]).toBe('-c');
   expect(report.args).not.toContain('--search');
   if (process.platform === 'win32')
     expect(report.args).toEqual(expect.arrayContaining(['-c', 'windows.sandbox="elevated"']));
@@ -171,6 +173,15 @@ it.each([
     expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
   },
 );
+it.each([
+  ['--mcp-call', 'codex_apps.gmail_send_email'],
+  ['--mcp-envelope', 'codex_apps.search_service.web_run'],
+])('stops and fails the run when Codex calls an MCP tool (%s)', async (mode, tool) => {
+  const events = await collect(mode);
+  const summary = `Policy violation: Codex called MCP tool ${tool} despite features apps, plugins, remote_plugin, tool_suggest, skill_mcp_dependency_install, browser_use, browser_use_external, browser_use_full_cdp_access, in_app_browser off; slice profiles have no MCP`;
+  expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
+  expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
+});
 it('fails closed on truncated real startup without a completed turn', async () => {
   expect((await collect('--startup-only')).at(-1)).toMatchObject({ exitCode: 1 });
 });

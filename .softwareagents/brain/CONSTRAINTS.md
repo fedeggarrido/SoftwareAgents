@@ -74,6 +74,12 @@ Sin web (SA-074): Codex 0.160.0 activa la búsqueda web por defecto y
 Executor detiene la Execution y la falla con `Policy violation`. Evidencia y
 comandos en `docs/security/web-access.md`.
 
+Sin conectores (SA-QA-4): `--ignore-user-config` tampoco quita los conectores
+de la cuenta ChatGPT, que llegan como el servidor MCP `codex_apps` (Gmail,
+ClickUp, Sites, llamadas, acceso a internet). Los flags apagan
+`CODEX_DISABLED_FEATURES` (`apps` y afines), y cualquier `mcp_tool_call` falla
+la Execution. Tras actualizar Codex, `npx tsx scripts/verify-codex-tools.ts`.
+
 Resolución: `projects.<id>.binaryPaths.codex` del Operator (ruta absoluta
 existente; override inválido falla), PATH, y ejecutable con mtime más reciente
 bajo `%LOCALAPPDATA%/OpenAI/Codex/bin/*/codex.exe`. No se ejecutan wrappers

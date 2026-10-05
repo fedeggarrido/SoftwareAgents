@@ -1,6 +1,8 @@
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import type { ExecutorId } from './executors/executor.js';
 
+export const MAX_QUOTA_OBSERVATION_AGE_S = 60;
+
 /** Trusted machine policy: thresholds are minimum remaining percentages. */
 export interface MachineQuotaPolicy {
   quotaThresholds: Partial<Record<ExecutorId, number>>;
@@ -10,7 +12,7 @@ export type QuotaDecision =
   | { status: 'go' | 'probe'; concurrencyLimit: number; reason: string }
   | { status: 'wait'; resetsAt: number | null; reason: string };
 
-/** Pure admission decision; counts must cover the machine, not a project or role. */
+/** Pure admission decision; active = runtime slots + observed non-runtime sessions. */
 export function quotaGate(
   executor: ExecutorId,
   policy: MachineQuotaPolicy | undefined,
@@ -41,6 +43,9 @@ export function quotaGate(
   if (snapshot && snapshot.provider !== executor) return wait('Capacity provider mismatch');
   if (
     !Number.isFinite(nowS) ||
+    (snapshot?.observedAt !== undefined &&
+      snapshot.observedAt !== null &&
+      !Number.isFinite(snapshot.observedAt)) ||
     snapshot?.windows.some(
       (w) =>
         (w.usedRatio !== null &&
@@ -58,17 +63,34 @@ export function quotaGate(
         ? null
         : Math.max(...blocked.map((w) => w.resetsAt!)),
     );
-  if (snapshot?.status === 'rejected' && (!snapshot.windows.length || windows.length))
+  const rejectedWindows =
+    snapshot?.status === 'rejected'
+      ? windows.filter((w) => w.usedRatio === null || w.usedRatio >= 1)
+      : [];
+  const unlocatedRejection =
+    snapshot?.status === 'rejected' &&
+    !snapshot.windows.some((w) => w.usedRatio === null || (w.usedRatio ?? 0) >= 1);
+  if (
+    snapshot?.status === 'rejected' &&
+    (!snapshot.windows.length || rejectedWindows.length || (unlocatedRejection && windows.length))
+  )
     return wait(
       `${executor}: capacity rejected`,
-      !windows.length || windows.some((w) => w.resetsAt === null)
+      !windows.length ||
+        (rejectedWindows.length ? rejectedWindows : windows).some((w) => w.resetsAt === null)
         ? null
-        : Math.max(...windows.map((w) => w.resetsAt!), nowS),
+        : Math.max(...(rejectedWindows.length ? rejectedWindows : windows).map((w) => w.resetsAt!)),
     );
   const unknown =
     !snapshot ||
     snapshot.status === 'unknown' ||
+    snapshot.status === 'reset' ||
+    snapshot.confidence === 'low' ||
     snapshot.confidence === 'unknown' ||
+    snapshot.observedAt === null ||
+    snapshot.observedAt > nowS ||
+    nowS - snapshot.observedAt > MAX_QUOTA_OBSERVATION_AGE_S ||
+    windows.length !== snapshot.windows.length ||
     !windows.length ||
     windows.some((w) => w.usedRatio === null);
   if (unknown)
@@ -77,11 +99,11 @@ export function quotaGate(
       : {
           status: 'probe',
           concurrencyLimit: 1,
-          reason: `${executor}: unknown capacity; go with one machine-wide probe`,
+          reason: `${executor}: unknown capacity; one runtime probe (unobserved interactive sessions excluded)`,
         };
   return {
     status: 'go',
     concurrencyLimit: limit,
-    reason: `${executor}: quota and machine concurrency allow execution`,
+    reason: `${executor}: quota and runtime concurrency allow execution (unobserved interactive sessions excluded)`,
   };
 }

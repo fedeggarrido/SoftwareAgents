@@ -14,6 +14,11 @@ export interface SelectionSnapshot {
   capacities: Partial<Record<ExecutorId, CapacitySnapshot>>;
   active: Partial<Record<ExecutorId, number>>;
   nowS: number;
+  coverage?: {
+    scope: 'runtime_slots_and_observed_sessions';
+    offices: { scope: 'office'; workspaces: string[]; source: 'office_store' }[];
+    unobservedInteractiveSessions: 'not_counted';
+  };
 }
 
 /** Order is a preference, never permission. Waiting does not trigger fallback (SA-038). */

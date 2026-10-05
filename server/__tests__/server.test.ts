@@ -6,6 +6,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AgentStateStore } from '../src/agentStateStore.js';
+import { MachineCapacityPublisher } from '../src/machineCapacity.js';
 import { canBind } from './helpers/bindable.js';
 
 // Use isolated temp HOME to avoid touching real ~/.pixel-agents/
@@ -201,6 +203,22 @@ describe('PixelAgentsServer', () => {
     const config2 = await server2.start({ embedded: false });
     expect(config2.port).toBe(config1.port);
     expect(registryFiles()).toHaveLength(1);
+    expect(server.isServerOwner()).toBe(true);
+    expect(server2.isServerOwner()).toBe(false);
+    const publisher = new MachineCapacityPublisher(
+      new AgentStateStore(),
+      () => ({}),
+      Date.now,
+      undefined,
+      ['test-workspace'],
+      () => server2.isServerOwner(),
+    );
+    publisher.start();
+    expect(fs.existsSync(publisher.file)).toBe(false);
+    server.stop();
+    publisher.publish();
+    expect(fs.existsSync(publisher.file)).toBe(false);
+    publisher.dispose();
     server2.stop();
   });
 

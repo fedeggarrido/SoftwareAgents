@@ -15,12 +15,14 @@ import type { ExecutionHandle } from './executors/executor.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
 import { selectExecutor } from './executorSelection.js';
+import { acquireExecutorSlot, withExecutorAdmission } from './executorSlots.js';
 import { HumanDecisions } from './humanDecisions.js';
 import { loadModelPolicy } from './modelPolicy.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
+import { type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
 export interface WorkerArgs {
@@ -147,22 +149,22 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     repository: { projectId: config.project.id },
   };
   const compiled = compileAgent(spec, 'developer', taskData);
-  const selection = args.selectExecutor
-    ? selectExecutor(spec, loadModelPolicy(cwd), readSelectionSnapshot(config.operator))
+  const modelPolicy = args.selectExecutor ? loadModelPolicy(cwd) : undefined;
+  let selection = modelPolicy
+    ? selectExecutor(spec, modelPolicy, readSelectionSnapshot(config.operator))
     : undefined;
-  if (selection) {
+  if (selection && !selection.choice) {
     log(selection.reason);
-    if (!selection.choice || selection.gate.status === 'wait') {
-      audit('quota_wait');
-      process.exitCode = 3;
-      return { branch: '', commit: null, stat: '', quotaDecision: selection.gate };
-    }
+    audit('quota_wait');
+    process.exitCode = 3;
+    return { branch: '', commit: null, stat: '', quotaDecision: selection.gate };
   }
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
   const release = acquireTaskLock(common, args.task);
   let handle: ExecutionHandle | undefined;
   let interrupted = false;
   let executionFinished = false;
+  let slot: ReturnType<typeof acquireExecutorSlot>;
   const cancel = () => {
     interrupted = true;
     try {
@@ -174,6 +176,49 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   process.on('SIGINT', cancel);
   process.on('SIGTERM', cancel);
   try {
+    const selectedExecutor = selection?.choice?.executor ?? 'claude';
+    // Both locks are held during the fresh gate decision and exclusive slot creation.
+    // The admission lock spans projects/tasks; the slot spans the entire Execution.
+    const admission = withExecutorAdmission(selectedExecutor, executionId, (owner) => {
+      const snapshot = readSelectionSnapshot(config.operator);
+      if (modelPolicy) selection = selectExecutor(spec, modelPolicy, snapshot);
+      const gate =
+        selection?.gate ??
+        quotaGate(
+          selectedExecutor,
+          snapshot.machinePolicy,
+          snapshot.capacities[selectedExecutor],
+          snapshot.active[selectedExecutor] ?? NaN,
+          snapshot.nowS,
+        );
+      if (gate.status === 'wait') return { gate, slot: undefined };
+      const reserved = acquireExecutorSlot(selectedExecutor, gate.concurrencyLimit, owner);
+      return {
+        gate: reserved
+          ? gate
+          : ({
+              status: 'wait',
+              resetsAt: null,
+              reason: `${selectedExecutor}: no free runtime executor slot`,
+            } as QuotaDecision),
+        slot: reserved,
+      };
+    });
+    const admissionGate =
+      admission?.gate ??
+      ({
+        status: 'wait',
+        resetsAt: null,
+        reason: `${selectedExecutor}: runtime admission is busy`,
+      } as QuotaDecision);
+    slot = admission?.slot;
+    if (selection) log(selection.reason);
+    if (admissionGate.status === 'wait' || !slot) {
+      log(admissionGate.reason);
+      audit('quota_wait');
+      process.exitCode = 3;
+      return { branch: '', commit: null, stat: '', quotaDecision: admissionGate };
+    }
     const tree = await new WorktreeManager({
       repositoryPath: cwd,
       defaultBranch: config.project.repo.defaultBranch,
@@ -196,6 +241,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
             runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
           }),
     );
+    slot.markLaunching();
     handle = executor.start({
       executionId,
       projectId: config.project.id,
@@ -209,8 +255,13 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       worktreePath: tree.path,
       timeoutMin: 30,
     });
+    if (handle.sessionId) slot.setSession(handle.sessionId);
     let exitCode: number | undefined;
     for await (const event of handle.events) {
+      if (event.type === 'started') {
+        slot.setSession(event.sessionId);
+        slot.setExecutionProcess(event.pid);
+      }
       if (event.type === 'finished') {
         exitCode = event.exitCode;
         executionFinished = true;
@@ -284,7 +335,9 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   } finally {
     process.removeListener('SIGINT', cancel);
     process.removeListener('SIGTERM', cancel);
-    if (!handle || executionFinished) release();
-    else log('Task lock retained: executor termination was not confirmed.');
+    if (!handle || executionFinished) {
+      slot?.release();
+      release();
+    } else log('Task lock and executor slot retained: executor termination was not confirmed.');
   }
 }

@@ -214,6 +214,11 @@ export class PixelAgentsServer {
     return this.config;
   }
 
+  /** Reusing another process's server never grants publication ownership. */
+  isServerOwner(): boolean {
+    return this.ownsServer;
+  }
+
   /** Returns the absolute path to ~/.pixel-agents/server.json. */
   private getServerJsonPath(): string {
     return discoveryPath(SERVER_JSON_NAME);

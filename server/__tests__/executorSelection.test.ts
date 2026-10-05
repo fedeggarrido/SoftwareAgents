@@ -8,6 +8,10 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import { dispatchCli } from '../src/cli.js';
 import { selectExecutor } from '../src/executorSelection.js';
+import {
+  machineCapacityDirectory,
+  writeMachineCapacityObservation,
+} from '../src/machineCapacity.js';
 import { loadModelPolicy } from '../src/modelPolicy.js';
 import { parseQuotaArgs, readSelectionSnapshot, runQuotaCheck } from '../src/quotaCommand.js';
 import { quotaGate } from '../src/quotaGate.js';
@@ -40,9 +44,28 @@ it.each([
   ['unknown in use', undefined, 1, 'wait'],
   ['unknown ratio', capacity(null), 0, 'probe'],
   ['reset', capacity(1, 100), 0, 'probe'],
+  ['old rejected', { ...capacity(1, 5000), status: 'rejected', observedAt: 0 }, 0, 'wait'],
+  ['old threshold', { ...capacity(0.99, 5000), observedAt: 0 }, 0, 'wait'],
+  ['old favorable', { ...capacity(0.1), observedAt: 0 }, 0, 'probe'],
+  ['low confidence', { ...capacity(0.1), confidence: 'low' }, 0, 'probe'],
+  ['unknown confidence', { ...capacity(0.1), confidence: 'unknown' }, 0, 'probe'],
+  ['low confidence in use', { ...capacity(0.1), confidence: 'low' }, 1, 'wait'],
   ['unknown count', undefined, NaN, 'wait'],
 ] as const)('%s', (_name, observation, active, status) => {
   expect(quotaGate('codex', policy, observation, active, 100).status).toBe(status);
+});
+it('reevaluates rejected against every live window instead of waiting for a healthy weekly reset', () => {
+  const s = { ...capacity(1, 100), status: 'rejected' as const };
+  s.windows.push({ kind: 'weekly', usedRatio: 0.1, resetsAt: 300 });
+  expect(quotaGate('codex', policy, s, 0, 100).status).toBe('probe');
+  s.windows[1].usedRatio = 1;
+  expect(quotaGate('codex', policy, s, 0, 100)).toMatchObject({ status: 'wait', resetsAt: 300 });
+});
+it('keeps model identifiers out of selection and policy modules; Provider knowledge is allowed', () => {
+  for (const name of ['executorSelection', 'quotaGate', 'modelPolicy', 'worker']) {
+    const text = fs.readFileSync(path.resolve(__dirname, `../src/${name}.ts`), 'utf8');
+    expect(text).not.toMatch(/\b(?:opus|sonnet|haiku|gpt-\d|o[134](?:-|\b)|claude-[123])/i);
+  }
 });
 it('waits until all blocked windows reset', () => {
   const snapshot = capacity(0.99);
@@ -124,15 +147,29 @@ function writeOperator() {
     }),
   );
 }
+let sequence = 0;
+function observation(
+  cap?: CapacitySnapshot,
+  sessions: string[] = [],
+  observedAt = Date.now() / 1000,
+) {
+  writeMachineCapacityObservation(
+    {
+      observedAt,
+      publisher: { id: 'test', bootId: 'test', pid: process.pid, sequence: ++sequence },
+      coverage: { scope: 'office', workspaces: [root], source: 'office_store' },
+      sessions: { claude: [], codex: sessions },
+      capacities: cap ? { codex: cap } : {},
+    },
+    path.join(machineCapacityDirectory(), 'test.json'),
+  );
+}
 it('CLI returns 0 for probe and 3 for wait with a JSON reason; role grants nothing', () => {
   writeOperator();
   const args = parseQuotaArgs(['check', '--executor', 'codex', '--role', 'architect', '--json']);
   const log = vi.fn();
-  expect(runQuotaCheck(args, root, log)).toBe(3);
-  fs.writeFileSync(
-    path.join(root, '.pixel-agents/machine-capacity.json'),
-    JSON.stringify({ observedAt: Date.now() / 1000, active: { codex: 0 } }),
-  );
+  expect(runQuotaCheck(args, root, log)).toBe(0);
+  observation();
   expect(runQuotaCheck(args, root, log)).toBe(0);
   expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
     status: 'probe',
@@ -140,11 +177,10 @@ it('CLI returns 0 for probe and 3 for wait with a JSON reason; role grants nothi
     reason: expect.any(String),
   });
   expect(runQuotaCheck({ ...args, executor: 'claude' }, root, log)).toBe(3);
-  fs.writeFileSync(
-    path.join(root, '.pixel-agents/machine-capacity.json'),
-    JSON.stringify({ observedAt: 0, active: { codex: 0 } }),
-  );
+  observation(undefined, ['observed']);
   expect(runQuotaCheck(args, root, log)).toBe(3);
+  observation(undefined, ['observed'], 0);
+  expect(runQuotaCheck(args, root, log)).toBe(0);
 });
 it('uses the strictest machine executor cap across projects', () => {
   writeOperator();
@@ -161,27 +197,33 @@ it('dispatches quota to CLI exit codes and returns known quota go/wait', async (
   try {
     const args = ['quota', 'check', '--executor', 'codex', '--role', 'developer', '--json'];
     const now = Date.now() / 1000;
-    const snapshot = {
-      observedAt: now,
-      active: { codex: 0 },
-      capacities: { codex: { ...capacity(0.5, now + 300), observedAt: now } },
-    };
-    const file = path.join(root, '.pixel-agents/machine-capacity.json');
-    fs.writeFileSync(file, JSON.stringify(snapshot));
+    const snapshot = { ...capacity(0.5, now + 300), observedAt: now };
+    observation(snapshot);
     await dispatchCli(args);
     expect(process.exitCode).toBe(0);
     expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
       status: 'go',
       reason: expect.any(String),
     });
-    snapshot.capacities.codex.windows[0].usedRatio = 0.99;
-    fs.writeFileSync(file, JSON.stringify(snapshot));
+    snapshot.windows[0].usedRatio = 0.99;
+    observation(snapshot);
     await dispatchCli(args);
     expect(process.exitCode).toBe(3);
     expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
       status: 'wait',
       resetsAt: now + 300,
     });
+    observation({ ...snapshot, status: 'rejected', observedAt: now - 61 });
+    await dispatchCli(args);
+    expect(process.exitCode).toBe(3);
+    observation({ ...capacity(0.1, now + 300), observedAt: now - 61 });
+    await dispatchCli(args);
+    expect(process.exitCode).toBe(0);
+    expect(JSON.parse(log.mock.calls.at(-1)![0]).status).toBe('probe');
+    observation({ ...capacity(0.1, now + 300), observedAt: now, confidence: 'low' });
+    await dispatchCli(args);
+    expect(process.exitCode).toBe(0);
+    expect(JSON.parse(log.mock.calls.at(-1)![0]).status).toBe('probe');
   } finally {
     process.exitCode = previousExitCode;
     cwd.mockRestore();

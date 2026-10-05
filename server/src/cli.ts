@@ -372,12 +372,18 @@ async function startServer(argv: string[]): Promise<void> {
     const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
 
-    // The machine-wide observation the quota gate needs (SA-QA-3). Without it,
-    // `quota check` and `worker run --select-executor` always wait.
-    const machineCapacity = new MachineCapacityPublisher(store, () => {
-      const quota = latestBoardMessage()?.quota;
-      return { claude: quota?.claude.capacity, codex: quota?.codex.capacity };
-    });
+    // Office-scoped evidence; only the process owning HTTP may publish.
+    const machineCapacity = new MachineCapacityPublisher(
+      store,
+      () => {
+        const quota = latestBoardMessage()?.quota;
+        return { claude: quota?.claude.capacity, codex: quota?.codex.capacity };
+      },
+      Date.now,
+      undefined,
+      [process.cwd()],
+      () => server.isServerOwner(),
+    );
     machineCapacity.start();
 
     // The URL the operator opens has to be REACHABLE (a wildcard bind address

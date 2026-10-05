@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { quotaGate } from '../src/quotaGate.js';
 import { claudeQuota, codexQuota } from '../src/quotaReader.js';
 
 const NOW = 1_790_600_000;
@@ -27,6 +28,99 @@ describe('quotaReader', () => {
   });
   afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each(['claude', 'codex'] as const)(
+    'uses the %s quota event timestamp, never mtime or unrelated appends',
+    (provider) => {
+      const file = path.join(dir, 'event.jsonl');
+      const timestamp = new Date((NOW - 61) * 1000).toISOString();
+      const record =
+        provider === 'claude'
+          ? {
+              type: 'rate_limit_event',
+              timestamp,
+              rate_limit_info: {
+                status: 'allowed_warning',
+                utilization: 0.91,
+                resetsAt: NOW + 600,
+              },
+            }
+          : {
+              type: 'event_msg',
+              timestamp,
+              payload: {
+                type: 'token_count',
+                rate_limits: { primary: { used_percent: 91, resets_at: NOW + 600 } },
+              },
+            };
+      fs.writeFileSync(
+        file,
+        JSON.stringify(record) +
+          '\n' +
+          JSON.stringify({ type: 'unrelated', timestamp: new Date(NOW * 1000).toISOString() }),
+      );
+      fs.utimesSync(file, NOW, NOW);
+      const snapshot =
+        provider === 'claude' ? claudeQuota(dir, NOW).capacity : codexQuota(NOW, dir).capacity;
+      expect(snapshot?.observedAt).toBe(NOW - 61);
+      expect(
+        quotaGate(
+          provider,
+          { quotaThresholds: { [provider]: 5 }, maxConcurrent: { [provider]: 2 } },
+          snapshot,
+          0,
+          NOW,
+        ).status,
+      ).toBe('probe');
+    },
+  );
+  it('missing quota event time remains unknown despite a recent file mtime', () => {
+    fs.writeFileSync(
+      path.join(dir, 'run.jsonl'),
+      tokenCount({ used_percent: 20, resets_at: NOW + 600 }),
+    );
+    const snapshot = codexQuota(NOW, dir).capacity;
+    expect(snapshot?.observedAt).toBeNull();
+    expect(
+      quotaGate(
+        'codex',
+        { quotaThresholds: { codex: 10 }, maxConcurrent: { codex: 2 } },
+        snapshot,
+        0,
+        NOW,
+      ).status,
+    ).toBe('probe');
+  });
+  it('keeps all normalized Claude windows so a reset cannot hide a live weekly rejection', () => {
+    fs.writeFileSync(
+      path.join(dir, 'run.jsonl'),
+      JSON.stringify({
+        type: 'rateLimit',
+        capacity: {
+          provider: 'claude',
+          status: 'rejected',
+          source: 'claude_stream_json',
+          confidence: 'high',
+          observedAt: NOW - 61,
+          windows: [
+            { kind: 'five_hour', usedRatio: 1, resetsAt: NOW },
+            { kind: 'weekly', usedRatio: 1, resetsAt: NOW + 600 },
+          ],
+        },
+      }),
+    );
+    const snapshot = claudeQuota(dir, NOW).capacity;
+    expect(snapshot?.windows).toHaveLength(2);
+    expect(
+      quotaGate(
+        'claude',
+        { quotaThresholds: { claude: 10 }, maxConcurrent: { claude: 2 } },
+        snapshot,
+        0,
+        NOW,
+      ),
+    ).toMatchObject({ status: 'wait', resetsAt: NOW + 600 });
   });
 
   it('is unknown, never available, when nothing was observed', () => {

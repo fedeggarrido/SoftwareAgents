@@ -1,14 +1,15 @@
-# Selección y quota gate (SA-036)
+# Selección y quota gate (SA-036, SA-QA-5)
 
 `pixel-agents quota check --executor claude|codex --role <rol> [--json]`
 devuelve 0 para `go` o `probe`, y 3 para `wait`. JSON incluye `reason` y,
 en espera por cuota, `resetsAt` (epoch seconds; null si no se conoce).
 El rol es informativo: no reserva porcentajes ni concede permisos.
+`quota check` observa; el lanzamiento del worker vuelve a decidir y reserva un slot.
 
 `worker run --task SA-### --brief <archivo> --select-executor` activa la selección
-por capabilityClass del Developer. Sin ese flag se conserva el worker Claude.
-La primera preferencia permitida se mantiene incluso si debe esperar; no hay
-fallback. El modelo opcional se pasa al Executor, nunca se fija en el servidor.
+por capabilityClass del Developer. Sin ese flag se conserva la preferencia Claude,
+pero se aplica igualmente el gate y la reserva. La primera preferencia permitida
+se mantiene incluso si debe esperar; no hay fallback.
 
 `.softwareagents/agents/model-policy.yaml` es un catálogo ordenado de preferencias
 declarativas. Su parser rechaza campos de autoridad. La ruta permanece protegida
@@ -17,35 +18,106 @@ por SA-063. Solo `~/.pixel-agents/config.json → projects.<id>` autoriza execut
 El tope efectivo es el mínimo entre todos los proyectos que permiten ese executor;
 si alguno carece de tope explícito, el gate espera. No se modifica esa config.
 
-El consumidor necesita una observación global del operador en
-`~/.pixel-agents/machine-capacity.json`, con esta forma:
+La regla «sin nombres de modelo» se aplica a selección y política:
+`executorSelection.ts`, `quotaGate.ts`, `modelPolicy.ts` y `worker.ts`.
+Una regresión realiza el grep acotado a esos módulos. El Provider puede conocer
+identificadores de modelo para interpretar su contexto; la tabla de ventanas de
+`providers/hook/claude/constants.ts` permanece en el Provider. Los modelos opcionales
+de Operator preferences se pasan al Executor sin fijarlos en esos módulos.
+
+**Concurrencia y alcance.** Los slots exclusivos de
+`~/.pixel-agents/executor-slots/<executor>/<n>.lock` son la autoridad para
+lanzamientos del worker en esta máquina, entre repositorios y tareas distintas.
+`concurrencyLimit` determina el número admisible de slots. La admisión serializa
+la decisión actual del gate y el exclusive-create del slot por executor; un slot
+se mantiene durante toda la Execution y se libera tras confirmar su fin.
+Sin slot libre o con otra admisión en curso se devuelve `wait` con razón.
+La sonda tiene límite 1, incluso si Operator config permite más concurrencia.
+
+Cada lock registra PID, identidad de creación del proceso, executionId y token de
+propiedad. La recuperación consulta únicamente esos PIDs registrados, nunca
+explora procesos ajenos. Un propietario muerto o un PID reutilizado se recupera
+bajo exclusión de admisión. Si se registró el hijo del Executor, también se exige
+que haya desaparecido o cambiado de identidad; un hijo con identidad no verificable
+se conserva mientras siga vivo. Locks corruptos, incompletos o una recuperación
+interrumpida requieren comprobación manual y fallan cerrados.
+Si el worker muere entre spawn y registro del PID hijo, una marca previa de
+lanzamiento conserva el slot para recuperación manual: no se supone que el hijo
+haya terminado. La identidad OS está
+implementada para Windows (StartTime ticks) y Linux (boot ID + start ticks); otros
+sistemas fallan cerrados. El lock de tarea conserva su recuperación manual previa.
+
+El gate suma slots y sesiones observadas por oficinas, deduplicando sessionId
+entre publicadores y contra los slots del runtime. Cuenta todas las sesiones
+observadas, incluidas las que esperan, de forma conservadora. **No establece un
+total de sesiones interactivas de máquina:** si falta observación o la cobertura
+es parcial, su número total es desconocido; las sesiones interactivas no observadas
+no se cuentan. Por tanto, el límite garantiza admisión del runtime, con una
+reducción adicional por las sesiones observadas. No garantiza la concurrencia ni
+la cuota de otros programas. No inspecciona archivos, datos ni procesos de Fundtrinsic.
+
+**Publicación.** Solo el proceso que posee HTTP publica; reutilizar otro servidor
+no concede propiedad. Cada arranque tiene un fichero distinto en
+`~/.pixel-agents/machine-capacity.json.d/<pid>-<bootId>.json`. El antiguo fichero
+único `machine-capacity.json` deja de ser fuente autoritativa. Cada contribución
+declara identidad, contador de publicación y:
 
 ```json
 {
-  "observedAt": 1791000000,
-  "active": { "claude": 0, "codex": 1 },
-  "capacities": {}
+  "coverage": {
+    "scope": "office",
+    "workspaces": ["D:/Source/project-a"],
+    "source": "office_store"
+  },
+  "sessions": { "claude": [], "codex": ["session-id"] }
 }
 ```
 
-`active` debe incluir toda la máquina, también otros proyectos y lanzamientos
-externos. Nunca se supone cero si falta. La observación caduca a los 60 segundos;
-ausencia, datos inválidos o fecha futura producen espera. `capacities` contiene
-opcionalmente CapacitySnapshots de SA-035 por executor. Sin cuota conocida y con
-recuento válido, se permite una única sonda. Ventanas ya reseteadas se descartan;
-las demás ventanas siguen bloqueando si su cuota está bajo el umbral.
+Cada propietario publica cada 15 s. Las contribuciones se agregan al leer y
+caducan a los 60 s. Watch All Sessions puede ampliar la observación de Claude;
+**no amplía Codex**: su watcher sigue filtrando por workspace. Providers distintos
+de `undefined`/`claude` y `codex` no se atribuyen a ninguno de esos executors.
+La cobertura publicada es siempre de oficina, nunca global.
 
-**Publicación (SA-QA-3).** El servidor standalone de la oficina (`pixel-agents`) publica esta
-observación cada 15 s de forma atómica mientras está en marcha (`MachineCapacityPublisher`):
-`active` cuenta **todas** las sesiones que la oficina sigue por executor, activas o en espera
-(contar de más solo hace esperar; contar de menos permitiría superar el tope), y `capacities`
-copia los CapacitySnapshots de SA-035. Alcance: solo lo que ve esa oficina; las sesiones de
-otros workspaces cuentan únicamente con Watch All Sessions activado. Si la oficina se para, la
-observación caduca a los 60 s y el gate vuelve a esperar. No inspecciona procesos ni datos de
-Fundtrinsic.
+El publicador no emite timestamps anteriores al último publicado en su arranque.
+El lector rechaza retrocesos de timestamp o contador y limita la vida de una misma
+generación con tiempo monotónico. Una generación caducada/futura/retrocedida se
+marca en un directorio `.invalid` junto a su contribución; esa marca impide
+revivirla tras un cambio de reloj, incluso al reiniciar el lector. Un nuevo
+heartbeat válido o un nuevo arranque puede aportar nueva evidencia. No borrar
+marcas mientras siga existiendo su contribución: la retención y limpieza de
+publicadores históricos se deja al operador. Un salto adelante puede provocar
+caducidad conservadora; se necesita un nuevo heartbeat válido para recuperar.
 
-**Configuración del operador necesaria** (en `~/.pixel-agents/config.json → projects.<id>`;
-la escribe el operador, nunca el repo). Sin `concurrency.perExecutor` el gate espera siempre:
+**Evidencia de cuota.** El heartbeat de sesiones y el evento de cuota son tiempos
+distintos. `observedAt` de CapacitySnapshot procede del evento o su timestamp,
+nunca del mtime; si no se conoce, queda null. Los ficheros contienen también
+`evidence` compactada por ventana, conservando el tiempo de cada evento.
+
+Un rechazo o porcentaje por encima del umbral se conserva hasta su `resetsAt`,
+o hasta una observación posterior fiable de la misma ventana. Una observación
+nueva con confianza baja/desconocida puede añadir restricciones, pero no borrar
+las anteriores. Los lectores también conservan restricciones de publicadores
+caducados. Un rechazo sin reset conocido requiere evidencia fiable posterior;
+no se recupera por esperar 60 segundos. La ausencia de reset puede bloquear
+indefinidamente y requiere revisar la fuente de cuota.
+
+El rechazo se reevalúa por ventanas vigentes: si la única agotada reseteó,
+`probe`; si otra sigue agotada, `wait`. Evidencia favorable con más de 60 s,
+fecha futura/desconocida, publicador caducado, una ventana renovada o confianza
+`low`/`unknown` permite como máximo `probe`, nunca `go`. No se añade autorización
+para baja confianza a Operator config. Un reset no demuestra cuota disponible.
+
+**Escritura y permisos.** Temporal único creado con `wx`, fsync y rename en el
+mismo directorio; los fallos de escritura/rename limpian el temporal. En POSIX
+se comprueba modo 0600 del temporal y del destino. En Windows, `mode: 0o600`
+no establece una DACL privada: la protección depende de las ACL del perfil,
+`~/.pixel-agents` y los archivos heredados. El operador debe restringirlas a su
+cuenta y cuentas administrativas necesarias, como describe
+[company-autopilot.md](company-autopilot.md). La QA real de Windows debe verificar
+las ACL y el reemplazo; las pruebas sintéticas no acreditan la DACL del perfil.
+
+**Configuración necesaria** (la escribe el operador fuera del repo):
 
 ```json
 {
@@ -60,7 +132,6 @@ la escribe el operador, nunca el repo). Sin `concurrency.perExecutor` el gate es
 }
 ```
 
-`quotaThresholds` es el porcentaje mínimo restante por executor; un valor conservador evita
-agotar la cuota compartida con otros proyectos. Es un gate observacional,
-no una reserva atómica: dos consumidores pueden leer el mismo recuento antes de
-lanzar. No habilitar paralelismo desatendido hasta el ledger/reservas de SA-037.
+`quotaThresholds` es el porcentaje mínimo restante por executor. Los slots
+reservan admisión del runtime, no cuota de cuenta: no son el ledger de SA-037.
+Ledger, fallback de SA-038 y scoring ponderado quedan fuera de este cambio.

@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'child_process';
+import { buildSync } from 'esbuild';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,6 +10,7 @@ import { dispatchCli } from '../src/cli.js';
 import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
+import { readExecutorSlots } from '../src/executorSlots.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
@@ -57,6 +59,8 @@ beforeEach(() => {
           autonomyLevel: 'A1',
           allowedExecutors: ['claude'],
           binaryPaths: { claude: process.execPath },
+          quotaThresholds: { claude: 5 },
+          concurrency: { maxExecutions: 2, perExecutor: { claude: 2 } },
         },
       },
     }),
@@ -69,6 +73,98 @@ afterEach(() => {
 });
 
 describe('supervised worker', () => {
+  it('two real worker processes with different tasks launch only one synthetic executor at limit 1', async () => {
+    fs.writeFileSync(
+      path.join(root, '.pixel-agents/config.json'),
+      JSON.stringify({
+        projects: {
+          test: {
+            autonomyLevel: 'A1',
+            allowedExecutors: ['claude'],
+            binaryPaths: { claude: process.execPath },
+            quotaThresholds: { claude: 5 },
+            concurrency: { maxExecutions: 1, perExecutor: { claude: 1 } },
+          },
+        },
+      }),
+    );
+    const bundle = path.join(root, 'worker.cjs');
+    buildSync({
+      entryPoints: [path.resolve(__dirname, '../src/worker.ts')],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      logLevel: 'silent',
+    });
+    fs.mkdirSync(path.join(root, 'agents/templates'), { recursive: true });
+    fs.copyFileSync(
+      path.resolve(__dirname, '../../agents/templates/developer.yaml'),
+      path.join(root, 'agents/templates/developer.yaml'),
+    );
+    const launches = path.join(root, 'launches');
+    const release = path.join(root, 'release');
+    const children = [0, 1].map(() =>
+      spawn(process.execPath, [path.join(__dirname, 'fixtures/worker-slot-process.cjs'), bundle], {
+        env: {
+          ...process.env,
+          HOME: root,
+          SA_SLOT_TEST_LAUNCHES: launches,
+          SA_SLOT_TEST_RELEASE: release,
+        },
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        windowsHide: true,
+      }),
+    );
+    const ready = children.map(
+      (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
+    );
+    const done = children.map(
+      (child) =>
+        new Promise<{
+          result?: { quotaDecision?: { status: string } };
+          exitCode?: number;
+          error?: string;
+        }>((resolve, reject) => {
+          child.on(
+            'message',
+            (message: {
+              ready?: boolean;
+              result?: { quotaDecision?: { status: string } };
+              exitCode?: number;
+              error?: string;
+            }) => {
+              if (!message.ready) resolve(message);
+            },
+          );
+          child.on('error', reject);
+        }),
+    );
+    const exited = children.map(
+      (child) => new Promise<number | null>((resolve) => child.once('exit', resolve)),
+    );
+    try {
+      await Promise.all(ready);
+      children.forEach((child, i) => child.send({ task: `SA-${998 + i}`, repo, fake }));
+      const loser = await Promise.race(done);
+      expect(loser.error).toBeUndefined();
+      expect(loser).toMatchObject({ exitCode: 3, result: { quotaDecision: { status: 'wait' } } });
+      await vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 });
+      expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+      expect(readExecutorSlots('claude').count).toBe(1);
+      fs.writeFileSync(release, 'release');
+      const results = await Promise.all(done);
+      expect(results.filter((r) => r.exitCode === 0)).toHaveLength(1);
+      expect((await Promise.all(exited)).sort()).toEqual([0, 3]);
+      expect(readExecutorSlots('claude').count).toBe(0);
+    } finally {
+      fs.writeFileSync(release, 'release');
+      children.forEach((child) => {
+        if (child.exitCode === null) child.kill();
+      });
+      await Promise.all(exited);
+    }
+  }, 30000);
   it.each(['claude', 'codex'])(
     'releases the task lock after synchronous %s spawn EINVAL',
     async (selected) => {
@@ -207,7 +303,15 @@ describe('supervised worker', () => {
       });
     },
   );
-  it('optional selection waits before creating a worktree when machine count is absent', async () => {
+  it('optional selection waits before creating a worktree when policy is incomplete', async () => {
+    fs.writeFileSync(
+      path.join(root, '.pixel-agents/config.json'),
+      JSON.stringify({
+        projects: {
+          test: { autonomyLevel: 'A1', allowedExecutors: ['claude'] },
+        },
+      }),
+    );
     fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
     fs.writeFileSync(
       path.join(repo, '.softwareagents/agents/model-policy.yaml'),

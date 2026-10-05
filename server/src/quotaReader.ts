@@ -126,6 +126,13 @@ const unknown = (provider: 'claude' | 'codex'): ProviderQuota =>
     observedAt: null,
   });
 
+/** Event time only: unrelated appends/mtime changes never refresh quota evidence. */
+function eventObservedAt(record: { timestamp?: unknown }): number | null {
+  if (typeof record.timestamp !== 'string') return null;
+  const ms = Date.parse(record.timestamp);
+  return Number.isFinite(ms) ? ms / 1000 : null;
+}
+
 export function claudeQuota(runsDir: string | undefined, nowS: number): ProviderQuota {
   if (!runsDir) return unknown('claude');
   for (const file of newestFiles(runsDir, 30)) {
@@ -140,7 +147,7 @@ export function claudeQuota(runsDir: string | undefined, nowS: number): Provider
           const observed =
             typeof c?.observedAt === 'number' && Number.isFinite(c.observedAt)
               ? c.observedAt
-              : Math.round(fs.statSync(file).mtimeMs / 1000);
+              : eventObservedAt(record);
           const status = c?.status ?? record.message;
           if (!['allowed', 'warning', 'rejected', 'reset'].includes(status)) continue;
           info = {
@@ -149,10 +156,37 @@ export function claudeQuota(runsDir: string | undefined, nowS: number): Provider
             rateLimitType: c?.windows?.[0]?.kind === 'weekly' ? 'seven_day' : c?.windows?.[0]?.kind,
             resetsAt:
               c?.windows?.[0]?.resetsAt ??
-              (record.retryAfterSec > 0 ? observed + record.retryAfterSec : null),
+              (observed !== null && record.retryAfterSec > 0
+                ? observed + record.retryAfterSec
+                : null),
           };
           const q = parseClaudeRateLimit(info, nowS, observed);
           if (!c) q.capacity!.confidence = q.status === 'reset' ? 'unknown' : 'low';
+          else if (Array.isArray(c.windows) && c.windows.length > 0) {
+            const windows = c.windows.filter(
+              (w: CapacitySnapshot['windows'][number]) =>
+                ['five_hour', 'weekly', 'other'].includes(w.kind) &&
+                (w.usedRatio === null ||
+                  (Number.isFinite(w.usedRatio) && w.usedRatio >= 0 && w.usedRatio <= 1)) &&
+                (w.resetsAt === null || Number.isFinite(w.resetsAt)),
+            );
+            if (windows.length !== c.windows.length) continue;
+            const live = windows.filter(
+              (w: CapacitySnapshot['windows'][number]) => w.resetsAt === null || w.resetsAt > nowS,
+            );
+            q.capacity = {
+              ...q.capacity!,
+              windows: windows.map((w: CapacitySnapshot['windows'][number]) =>
+                w.resetsAt !== null && w.resetsAt <= nowS ? { ...w, usedRatio: null } : w,
+              ),
+              status: live.length ? status : 'reset',
+              confidence:
+                live.length && ['unknown', 'low', 'high', 'exact'].includes(c.confidence)
+                  ? c.confidence
+                  : 'unknown',
+            };
+            q.status = q.capacity.status;
+          }
           return q;
         }
         if (record.type !== 'rate_limit_event') continue;
@@ -160,7 +194,7 @@ export function claudeQuota(runsDir: string | undefined, nowS: number): Provider
       } catch {
         continue;
       }
-      return parseClaudeRateLimit(info, nowS, Math.round(fs.statSync(file).mtimeMs / 1000));
+      return parseClaudeRateLimit(info, nowS, eventObservedAt(JSON.parse(lines[i])));
     }
   }
   return unknown('claude');
@@ -183,7 +217,7 @@ export function codexQuota(
         continue;
       }
       if (!limits.primary) continue;
-      return parseCodexRateLimits(limits, nowS, Math.round(fs.statSync(file).mtimeMs / 1000));
+      return parseCodexRateLimits(limits, nowS, eventObservedAt(JSON.parse(lines[i])));
     }
   }
   return unknown('codex');
@@ -193,7 +227,7 @@ export function codexQuota(
 export function parseClaudeRateLimit(
   info: Record<string, unknown>,
   nowS: number,
-  observedAt: number,
+  observedAt: number | null,
 ): ProviderQuota {
   const resetsAt =
     typeof info.resetsAt === 'number' && Number.isFinite(info.resetsAt) ? info.resetsAt : null;
@@ -240,7 +274,7 @@ export function parseClaudeRateLimit(
 export function parseCodexRateLimits(
   limits: Record<string, Record<string, number> | undefined>,
   nowS: number,
-  observedAt = nowS,
+  observedAt: number | null = nowS,
 ): ProviderQuota {
   const p = limits.primary;
   if (!p) return unknown('codex');

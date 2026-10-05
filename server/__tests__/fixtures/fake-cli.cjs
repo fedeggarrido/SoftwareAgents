@@ -192,4 +192,11 @@ if (!valid) {
   for (const record of records) {
     process.stdout.write(`${JSON.stringify(record)}\n`);
   }
+  if (args.includes('--slot-hold')) {
+    const fs = require('fs');
+    fs.appendFileSync(process.env.SA_SLOT_TEST_LAUNCHES, `${process.cwd()}\n`);
+    const timer = setInterval(() => {
+      if (fs.existsSync(process.env.SA_SLOT_TEST_RELEASE)) clearInterval(timer);
+    }, 25);
+  }
 }

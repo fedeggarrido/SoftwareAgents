@@ -1,9 +1,6 @@
 import * as crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
-import * as http from 'http';
-import * as os from 'os';
-import * as path from 'path';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
@@ -12,14 +9,17 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
+import { SERVER_JSON_NAME, SERVER_REGISTRY_PROTOCOL_VERSION, SERVERS_DIR } from './constants.js';
 import {
-  SERVER_HEALTH_MAX_BODY_CHARS,
-  SERVER_HEALTH_PROBE_TIMEOUT_MS,
-  SERVER_JSON_DIR,
-  SERVER_JSON_NAME,
-  SERVER_REGISTRY_PROTOCOL_VERSION,
-  SERVERS_DIR,
-} from './constants.js';
+  discoveryPath,
+  isProcessRunning,
+  sameServerGeneration,
+  withDiscoveryLock,
+  writeDiscoveryRecord,
+} from './discoveryRecords.js';
+import { probeServer } from './serverProbe.js';
+export type { ServerProbe } from './serverProbe.js';
+export { probeServer } from './serverProbe.js';
 import { createHttpServer } from './httpServer.js';
 import type { ServerConfig, ServerTarget } from './serverConfig.js';
 import { isServerConfig, isServerTarget } from './serverConfig.js';
@@ -97,7 +97,7 @@ export class PixelAgentsServer {
     const token = crypto.randomUUID();
     const store = options?.store;
 
-    const { app, port } = await createHttpServer({
+    const { app, port, host } = await createHttpServer({
       embedded,
       host: options?.host,
       port: options?.port,
@@ -114,6 +114,7 @@ export class PixelAgentsServer {
     this.app = app;
     this.config = {
       port,
+      ...(host !== '127.0.0.1' ? { host } : {}),
       pid: process.pid,
       token,
       startedAt: Date.now(),
@@ -128,9 +129,15 @@ export class PixelAgentsServer {
     this.ownsServer = true;
     // Dual-write: legacy single-target pointer (old hook scripts) + registry
     // entry (new hook scripts fan out to every entry here).
-    this.writeServerJson(this.config);
-    this.writeRegistryEntry(this.config);
-    console.log(`[Pixel Agents] Server: listening on 127.0.0.1:${port}`);
+    try {
+      withDiscoveryLock(() => {
+        this.writeServerJson(this.config!);
+        this.writeRegistryEntry(this.config!);
+      });
+    } catch (error) {
+      console.error(`[Pixel Agents] Failed to publish discovery records: ${error}`);
+    }
+    console.log(`[Pixel Agents] Server: listening on ${host}:${port}`);
 
     return this.config;
   }
@@ -142,8 +149,14 @@ export class PixelAgentsServer {
       this.app = null;
     }
     if (this.ownsServer) {
-      this.deleteServerJson();
-      this.deleteRegistryEntry();
+      try {
+        withDiscoveryLock(() => {
+          this.deleteServerJson();
+          this.deleteRegistryEntry();
+        });
+      } catch (error) {
+        console.error(`[Pixel Agents] Failed to clean discovery records: ${error}`);
+      }
     }
     this.config = null;
     this.ownsServer = false;
@@ -156,62 +169,22 @@ export class PixelAgentsServer {
 
   /** Returns the absolute path to ~/.pixel-agents/server.json. */
   private getServerJsonPath(): string {
-    return path.join(os.homedir(), SERVER_JSON_DIR, SERVER_JSON_NAME);
+    return discoveryPath(SERVER_JSON_NAME);
   }
 
-  /** Write server.json atomically (tmp + rename) with mode 0o600. */
+  /** Called under the discovery lock, after listen has completed. */
   private writeServerJson(config: ServerConfig): void {
-    const filePath = this.getServerJsonPath();
-    const dir = path.dirname(filePath);
-    try {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      }
-      const tmpPath = filePath + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-      fs.renameSync(tmpPath, filePath);
-    } catch (e) {
-      console.error(`[Pixel Agents] Failed to write server.json: ${e}`);
-    }
+    writeDiscoveryRecord(SERVER_JSON_NAME, config);
   }
 
-  /**
-   * Delete the legacy server.json only if the PID inside matches our process
-   * (safe for multi-window / multi-server: never removes another server's
-   * pointer). Known gap during mixed-version skew (A2): because this file is
-   * a single pointer, whichever server most recently (re)claimed it "owns"
-   * it -- if that server later stops while a DIFFERENT, still-live server
-   * coexists, this deletes the only pointer an old (pre-registry) hook
-   * script can find, even though a compatible server is still running. The
-   * registry (servers/) doesn't have this problem -- each entry is deleted
-   * strictly self-only (D6) and a new hook script always prefers it over
-   * this legacy file. Accepted: A2 already treats "an old script reaches at
-   * most one server" as the baseline degradation for this skew window.
-   */
+  /** Cleanup only our exact generation; old scripts still see a single pointer. */
   private deleteServerJson(): void {
-    try {
-      const filePath = this.getServerJsonPath();
-      if (!fs.existsSync(filePath)) return;
-      const existing = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
-      if (isServerTarget(existing) && existing.pid === process.pid) {
-        fs.unlinkSync(filePath);
-      }
-    } catch {
-      // File may already be gone
-    }
+    if (this.config) this.deleteLegacyPointer(this.config);
   }
 
   /** Returns the absolute path to ~/.pixel-agents/servers/. */
   private getRegistryDir(): string {
-    return path.join(os.homedir(), SERVER_JSON_DIR, SERVERS_DIR);
-  }
-
-  /** Returns the absolute path to this config's registry entry file. Keyed on
-   *  pid+port (not pid alone) so two servers started in the same process --
-   *  which happens in tests, never in production where pids are unique per
-   *  process -- still get distinct, non-colliding registry files. */
-  private getRegistryFilePath(config: Pick<ServerConfig, 'pid' | 'port'>): string {
-    return path.join(this.getRegistryDir(), `${config.pid}-${config.port}.json`);
+    return discoveryPath(SERVERS_DIR);
   }
 
   /**
@@ -221,37 +194,34 @@ export class PixelAgentsServer {
    * treated the same as dead entries and removed. Returns only live entries.
    */
   private readAndPruneRegistry(): Array<{ config: ServerConfig; file: string }> {
-    const dir = this.getRegistryDir();
-    let files: string[];
     try {
-      files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+      return withDiscoveryLock(() => {
+        const dir = this.getRegistryDir();
+        const live: Array<{ config: ServerConfig; file: string }> = [];
+        for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+          const relative = `${SERVERS_DIR}/${file}`;
+          // Read and prune under the publication lock. Escaping or broken links
+          // fail closed, including when the final record itself is a symlink.
+          try {
+            const entry = JSON.parse(fs.readFileSync(discoveryPath(relative), 'utf8')) as unknown;
+            if (isServerConfig(entry) && isProcessRunning(entry.pid)) {
+              live.push({ config: entry, file: relative });
+            } else {
+              fs.unlinkSync(discoveryPath(relative));
+            }
+          } catch {
+            try {
+              fs.unlinkSync(discoveryPath(relative));
+            } catch {
+              /* fail closed */
+            }
+          }
+        }
+        return live;
+      });
     } catch {
-      return []; // Directory doesn't exist yet -- no live servers registered.
+      return [];
     }
-
-    const live: Array<{ config: ServerConfig; file: string }> = [];
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      try {
-        const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
-        if (!isServerConfig(entry)) {
-          fs.unlinkSync(filePath);
-          continue;
-        }
-        if (isProcessRunning(entry.pid)) {
-          live.push({ config: entry, file: filePath });
-        } else {
-          fs.unlinkSync(filePath);
-        }
-      } catch {
-        try {
-          fs.unlinkSync(filePath);
-        } catch {
-          /* already gone */
-        }
-      }
-    }
-    return live;
   }
 
   /**
@@ -273,7 +243,7 @@ export class PixelAgentsServer {
       if (probes[i] !== 'stale') continue;
       ignore(config);
       try {
-        fs.unlinkSync(file);
+        withDiscoveryLock(() => this.deleteMatchingRecord(file, config));
       } catch {
         /* already gone */
       }
@@ -287,13 +257,15 @@ export class PixelAgentsServer {
     }
     if (legacy) {
       // A pointer naming a registered server shares that entry's verdict.
-      const index = registry.findIndex(
-        ({ config }) => config.pid === legacy.pid && config.port === legacy.port,
-      );
+      const index = registry.findIndex(({ config }) => sameServerGeneration(config, legacy!));
       const verdict = index >= 0 ? probes[index] : await probeServer(legacy);
       if (verdict === 'stale') {
         if (index < 0) ignore(legacy);
-        this.deleteLegacyPointer(legacy);
+        try {
+          withDiscoveryLock(() => this.deleteLegacyPointer(legacy!));
+        } catch {
+          /* fail closed */
+        }
       }
     }
     return registry.find(
@@ -303,93 +275,33 @@ export class PixelAgentsServer {
 
   /** Delete server.json only while it still holds exactly this stale target. */
   private deleteLegacyPointer(target: ServerTarget): void {
-    try {
-      const filePath = this.getServerJsonPath();
-      const current = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
-      if (isServerTarget(current) && current.pid === target.pid && current.port === target.port)
-        fs.unlinkSync(filePath);
-    } catch {
-      // Already gone or rewritten by a starting server.
-    }
+    this.deleteMatchingRecord(SERVER_JSON_NAME, target);
   }
 
-  /** Write this server's registry entry atomically (tmp + rename) with mode 0o600. */
-  private writeRegistryEntry(config: ServerConfig): void {
-    const dir = this.getRegistryDir();
+  /** Under the publication lock: re-read and delete only this generation. */
+  private deleteMatchingRecord(relative: string, target: ServerTarget): void {
     try {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const current = JSON.parse(fs.readFileSync(discoveryPath(relative), 'utf8')) as unknown;
+      if (isServerTarget(current) && sameServerGeneration(current, target)) {
+        fs.unlinkSync(discoveryPath(relative));
       }
-      const filePath = this.getRegistryFilePath(config);
-      const tmpPath = `${filePath}.tmp`;
-      fs.writeFileSync(tmpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-      fs.renameSync(tmpPath, filePath);
-    } catch (e) {
-      console.error(`[Pixel Agents] Failed to write registry entry: ${e}`);
-    }
-  }
-
-  /** Delete this server's own registry entry (self-only cleanup, mirrors deleteServerJson). */
-  private deleteRegistryEntry(): void {
-    if (!this.config) return;
-    try {
-      const filePath = this.getRegistryFilePath(this.config);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch {
-      // File may already be gone
+      // Already gone, physically outside the root, or unreadable: leave alone.
     }
   }
-}
 
-/** What a registered server answered when asked whether it is still there. */
-export type ServerProbe = 'healthy' | 'stale' | 'unknown';
+  /** Called under the discovery lock. */
+  private writeRegistryEntry(config: ServerConfig): void {
+    writeDiscoveryRecord(`${SERVERS_DIR}/${config.pid}-${config.port}.json`, config);
+  }
 
-/**
- * Ask the server registered at `target` whether it is really there (SA-076):
- * GET /api/health on its port must answer 200 with the same PID. A refused
- * connection or an answer from anything else is `stale`; a timeout or any other
- * network error is `unknown` -- maybe a busy server, so never treat it as dead.
- */
-export function probeServer(
-  target: Pick<ServerTarget, 'port' | 'pid'>,
-  timeoutMs = SERVER_HEALTH_PROBE_TIMEOUT_MS,
-): Promise<ServerProbe> {
-  return new Promise((resolve) => {
-    const req = http.get(
-      { hostname: '127.0.0.1', port: target.port, path: '/api/health', timeout: timeoutMs },
-      (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => {
-          if (body.length < SERVER_HEALTH_MAX_BODY_CHARS) body += chunk;
-        });
-        res.on('end', () => {
-          try {
-            const health = JSON.parse(body) as { pid?: unknown };
-            resolve(res.statusCode === 200 && health.pid === target.pid ? 'healthy' : 'stale');
-          } catch {
-            resolve('stale');
-          }
-        });
-        res.on('error', () => resolve('unknown'));
-      },
-    );
-    req.on('timeout', () => {
-      req.destroy();
-      resolve('unknown');
-    });
-    req.on('error', (error: NodeJS.ErrnoException) =>
-      resolve(error.code === 'ECONNREFUSED' ? 'stale' : 'unknown'),
-    );
-  });
-}
-
-/** Check if a process is alive by sending signal 0 (no-op, just checks existence). */
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+  /** Stop cleanup uses the same generation check as stale probe cleanup. */
+  private deleteRegistryEntry(): void {
+    if (this.config) {
+      this.deleteMatchingRecord(
+        `${SERVERS_DIR}/${this.config.pid}-${this.config.port}.json`,
+        this.config,
+      );
+    }
   }
 }

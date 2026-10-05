@@ -81,6 +81,10 @@ export const SERVER_REGISTRY_PROTOCOL_VERSION = 1;
  *  connection arrives in milliseconds; past this deadline the server is busy,
  *  so it is neither reused nor pruned. */
 export const SERVER_HEALTH_PROBE_TIMEOUT_MS = 1500;
+/** Legacy hook validation stays cheap; registry fan-out does not add probes. */
+export const HOOK_LEGACY_PROBE_TIMEOUT_MS = 300;
+/** Publication/cleanup lock is never held over network work. */
+export const SERVER_DISCOVERY_LOCK_TIMEOUT_MS = 300;
 /** Our /api/health body is tiny; anything longer is not ours and is not buffered. */
 export const SERVER_HEALTH_MAX_BODY_CHARS = 4096;
 

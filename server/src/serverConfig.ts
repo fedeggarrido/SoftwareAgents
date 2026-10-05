@@ -1,3 +1,6 @@
+import { isIP } from 'net';
+import * as os from 'os';
+
 import { MAX_PORT, MIN_PORT, SERVER_REGISTRY_PROTOCOL_VERSION } from './constants.js';
 
 /** Minimum fields the hook producer needs to contact a server. Kept separate
@@ -7,6 +10,9 @@ export interface ServerTarget {
   port: number;
   pid: number;
   token: string;
+  /** Literal IP on this machine; absent in old records means 127.0.0.1. */
+  host?: string;
+  startedAt?: number;
   debugLog?: string;
 }
 
@@ -24,6 +30,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** No DNS names, remote addresses, or wildcard addresses as contact targets. */
+export function isLocalContactHost(host: unknown): host is string {
+  if (typeof host !== 'string' || !isIP(host)) return false;
+  if (host === '0.0.0.0' || host === '::') return false;
+  if (host === '::1' || (isIP(host) === 4 && host.startsWith('127.'))) return true;
+  return Object.values(os.networkInterfaces()).some((entries) =>
+    entries?.some((entry) => entry.address === host),
+  );
+}
+
 /** Validate the contact fields shared by current and legacy discovery records. */
 export function isServerTarget(value: unknown): value is ServerTarget {
   if (!isRecord(value)) return false;
@@ -35,6 +51,9 @@ export function isServerTarget(value: unknown): value is ServerTarget {
     (value.pid as number) > 0 &&
     typeof value.token === 'string' &&
     value.token.length > 0 &&
+    (value.host === undefined || isLocalContactHost(value.host)) &&
+    (value.startedAt === undefined ||
+      (Number.isSafeInteger(value.startedAt) && (value.startedAt as number) >= 0)) &&
     (value.debugLog === undefined || typeof value.debugLog === 'string')
   );
 }

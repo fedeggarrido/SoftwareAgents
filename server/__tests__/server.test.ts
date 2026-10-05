@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
@@ -27,6 +28,11 @@ vi.mock('os', async () => {
 
 // Must import AFTER mock setup
 const { PixelAgentsServer, probeServer } = await import('../src/server.js');
+const probes = await import('../src/serverProbe.js');
+const { withDiscoveryLock, writeDiscoveryRecord } = await import('../src/discoveryRecords.js');
+const { isServerTarget } = await import('../src/serverConfig.js');
+const { SERVER_HEALTH_MAX_BODY_CHARS, SERVER_HEALTH_PROBE_TIMEOUT_MS } =
+  await import('../src/constants.js');
 
 async function postHook(
   port: number,
@@ -57,6 +63,7 @@ describe('PixelAgentsServer', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     server?.stop();
     try {
       fs.rmSync(tmpBase, { recursive: true, force: true });
@@ -379,6 +386,105 @@ describe('PixelAgentsServer', () => {
       second.stop();
     });
 
+    it('bounds continuous streaming and still reuses another healthy candidate', async () => {
+      const healthy = await server.start();
+      const streaming = await listen((_req, res) => {
+        res.writeHead(200);
+        res.write(' ');
+        const interval = setInterval(() => res.write(' '), 20);
+        res.on('close', () => clearInterval(interval));
+      });
+      const file = register(streaming);
+      const beganProbe = Date.now();
+      expect(await probeServer({ port: streaming, pid: process.pid }, 100)).toBe('unknown');
+      expect(Date.now() - beganProbe).toBeLessThan(700);
+      const second = new PixelAgentsServer();
+      const beganReuse = Date.now();
+      const reused = await second.start();
+      expect(reused.token).toBe(healthy.token);
+      expect(Date.now() - beganReuse).toBeLessThan(SERVER_HEALTH_PROBE_TIMEOUT_MS + 1000);
+      expect(fs.existsSync(file)).toBe(true);
+      second.stop();
+    });
+
+    it.each(['one chunk', 'several chunks'])(
+      'rejects an oversized health body in %s',
+      async (kind) => {
+        const json = JSON.stringify({ pid: process.pid });
+        const prefix = json + ' '.repeat(SERVER_HEALTH_MAX_BODY_CHARS - json.length);
+        const port = await listen((_req, res) => {
+          if (kind === 'one chunk') res.end(prefix + ' '.repeat(2000));
+          else {
+            res.write(prefix);
+            setTimeout(() => res.end('THIS IS NOT JSON'), 20);
+          }
+        });
+        expect(await probeServer({ port, pid: process.pid })).toBe('stale');
+      },
+    );
+
+    it('preserves a new generation published after the old probe verdict', async () => {
+      const healthy = await server.start();
+      let requests = 0;
+      const replacedPort = await listen((_req, res) =>
+        res.end(JSON.stringify({ pid: ++requests === 1 ? process.pid + 1 : process.pid })),
+      );
+      const file = register(replacedPort);
+      const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+      fs.writeFileSync(serverJsonPath, JSON.stringify(old));
+      const replacement = { ...old, token: 'new-generation', startedAt: 12345 };
+      let oldVerdict!: () => void;
+      const oldFinished = new Promise<void>((resolve) => {
+        oldVerdict = resolve;
+      });
+      const original = probes.probeServer;
+      vi.spyOn(probes, 'probeServer').mockImplementation(async (target, timeout) => {
+        const verdict = await original(target, timeout);
+        if (target.port === replacedPort && requests === 1) oldVerdict();
+        if (target.port === healthy.port) {
+          await oldFinished;
+          withDiscoveryLock(() => {
+            writeDiscoveryRecord('servers/' + path.basename(file), replacement);
+            writeDiscoveryRecord('server.json', replacement);
+          });
+        }
+        return verdict;
+      });
+      const second = new PixelAgentsServer();
+      const reused = await second.start();
+      expect(reused.token).toBe(healthy.token);
+      expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(replacement);
+      expect(JSON.parse(fs.readFileSync(serverJsonPath, 'utf8'))).toEqual(replacement);
+      expect(requests).toBe(2); // The new legacy generation got its own verdict.
+      second.stop();
+    });
+
+    it.each(['127.0.0.2', '::1'])('discovers and reuses the specific bind %s', async (host) => {
+      const first = await server.start({ host });
+      expect(first.host).toBe(host);
+      expect(await probeServer(first)).toBe('healthy');
+      const second = new PixelAgentsServer();
+      expect((await second.start()).token).toBe(first.token);
+      expect(registryFiles()).toHaveLength(1);
+      second.stop();
+    });
+
+    it('accepts local interface IPs but rejects remote IPs, wildcards and DNS names', () => {
+      for (const host of ['127.0.0.2', '::1']) {
+        expect(isServerTarget({ port: 1234, pid: process.pid, token: 'x', host })).toBe(true);
+      }
+      for (const host of ['example.com', 'localhost', '192.0.2.1', '0.0.0.0', '::']) {
+        expect(isServerTarget({ port: 1234, pid: process.pid, token: 'x', host })).toBe(false);
+      }
+      for (const entries of Object.values(os.networkInterfaces())) {
+        for (const entry of entries ?? []) {
+          expect(
+            isServerTarget({ port: 1234, pid: process.pid, token: 'x', host: entry.address }),
+          ).toBe(true);
+        }
+      }
+    });
+
     it('probeServer tells healthy, stale and unknown apart', async () => {
       const healthy = await listen((_req, res) => res.end(JSON.stringify({ pid: 4242 })));
       const html = await listen((_req, res) => res.end('<html>not ours</html>'));
@@ -391,6 +497,143 @@ describe('PixelAgentsServer', () => {
       expect(await probeServer({ port: await closedPort(), pid: 4242 })).toBe('stale');
       expect(await probeServer({ port: hanging, pid: 4242 }, 200)).toBe('unknown');
     });
+  });
+
+  it('stop preserves another generation on the same PID and port', async () => {
+    const config = await server.start();
+    const replacement = { ...config, token: 'replacement', startedAt: config.startedAt + 1 };
+    withDiscoveryLock(() => {
+      writeDiscoveryRecord('server.json', replacement);
+      writeDiscoveryRecord('servers/' + process.pid + '-' + config.port + '.json', replacement);
+    });
+    server.stop();
+    expect(JSON.parse(fs.readFileSync(serverJsonPath, 'utf8'))).toEqual(replacement);
+    expect(registryFiles()).toHaveLength(1);
+  });
+
+  it('recovers a dead lock owner and bounds contention with a live owner', () => {
+    fs.mkdirSync(registryDir, { recursive: true });
+    const lock = path.join(registryDir, '.discovery.lock');
+    fs.writeFileSync(
+      lock,
+      JSON.stringify({ pid: 999999, nonce: '12345678-1234-1234-1234-123456789abc' }),
+    );
+    let called = false;
+    withDiscoveryLock(() => {
+      called = true;
+    });
+    expect(called).toBe(true);
+    expect(fs.existsSync(lock)).toBe(false);
+    const live = JSON.stringify({
+      pid: process.pid,
+      nonce: '12345678-1234-1234-1234-123456789def',
+    });
+    fs.writeFileSync(lock, live);
+    const began = Date.now();
+    expect(() =>
+      withDiscoveryLock(() => {
+        throw new Error('must not run');
+      }),
+    ).toThrow('Discovery lock timed out');
+    expect(Date.now() - began).toBeLessThan(1000);
+    expect(fs.readFileSync(lock, 'utf8')).toBe(live);
+  });
+
+  it('cleans a unique temporary when publication fails and preserves a shared legacy tmp', () => {
+    const oldTmp = serverJsonPath + '.tmp';
+    fs.writeFileSync(oldTmp, 'other writer');
+    fs.mkdirSync(serverJsonPath); // A directory is an actual failed rename destination.
+    withDiscoveryLock(() => {
+      expect(() =>
+        writeDiscoveryRecord('server.json', { pid: process.pid, port: 1234, token: 'x' }),
+      ).toThrow();
+    });
+    expect(fs.readFileSync(oldTmp, 'utf8')).toBe('other writer');
+    expect(fs.readdirSync(serverJsonDir).filter((file) => file.endsWith('.tmp'))).toEqual([
+      'server.json.tmp',
+    ]);
+  });
+
+  it('refuses registry writes and pruning through an escaping directory link', async () => {
+    const outside = path.join(tmpBase, 'outside');
+    fs.mkdirSync(outside);
+    const external = path.join(outside, 'dead.json');
+    fs.writeFileSync(external, 'external data');
+    fs.symlinkSync(outside, registryDir, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      await server.start();
+      server.stop();
+      expect(fs.readFileSync(external, 'utf8')).toBe('external data');
+      expect(fs.readdirSync(outside)).toEqual(['dead.json']);
+      expect(fs.existsSync(serverJsonPath)).toBe(false);
+    } finally {
+      fs.unlinkSync(registryDir);
+    }
+  });
+
+  it('refuses publication and cleanup through an escaping server.json link', async () => {
+    const outside = path.join(tmpBase, 'pointer-target');
+    fs.mkdirSync(outside);
+    const external = path.join(outside, 'data.json');
+    fs.writeFileSync(external, 'external data');
+    // A junction needs no file-symlink privilege on Windows and exercises the
+    // final server.json path's realpath containment, even for a malformed pointer.
+    fs.symlinkSync(outside, serverJsonPath, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      await server.start();
+      server.stop();
+      expect(fs.readFileSync(external, 'utf8')).toBe('external data');
+      expect(fs.readdirSync(outside)).toEqual(['data.json']);
+      expect(fs.lstatSync(serverJsonPath).isSymbolicLink()).toBe(true);
+    } finally {
+      fs.unlinkSync(serverJsonPath);
+    }
+  });
+
+  it('waits for an independent process to finish its locked publication', async () => {
+    fs.mkdirSync(registryDir, { recursive: true });
+    const code = [
+      "const fs = require('fs'); const path = require('path');",
+      "const dir = process.argv[1]; const lock = path.join(dir, '.discovery.lock');",
+      "fs.writeFileSync(lock, JSON.stringify({pid: process.pid, nonce: '12345678-1234-1234-1234-123456789abc'}), {flag: 'wx'});",
+      "process.stdout.write('locked');",
+      "setTimeout(() => {fs.writeFileSync(path.join(dir, 'published.txt'), 'published'); fs.unlinkSync(lock);}, 100);",
+    ].join(' ');
+    const child = spawn(process.execPath, ['-e', code, registryDir], {
+      env: { ...process.env, HOME: tmpBase, USERPROFILE: tmpBase },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.stdout.once('data', () => resolve());
+        child.once('error', reject);
+        child.once('exit', (code) => {
+          if (code !== 0) reject(new Error('Lock holder failed'));
+        });
+      });
+      withDiscoveryLock(() => {
+        expect(fs.readFileSync(path.join(registryDir, 'published.txt'), 'utf8')).toBe('published');
+      });
+    } finally {
+      child.kill();
+      if (child.exitCode === null) await new Promise((resolve) => child.once('exit', resolve));
+    }
+  });
+
+  it('simultaneous starts publish distinct entries and complete legacy pointers', async () => {
+    const second = new PixelAgentsServer();
+    try {
+      const configs = await Promise.all([server.start(), second.start()]);
+      expect(new Set(configs.map((config) => config.port)).size).toBe(2);
+      expect(registryFiles()).toHaveLength(2);
+      const pointer = JSON.parse(fs.readFileSync(serverJsonPath, 'utf8'));
+      expect(configs).toContainEqual(pointer);
+      expect(await probeServer(pointer)).toBe('healthy');
+      expect(fs.readdirSync(serverJsonDir).some((file) => file.endsWith('.tmp'))).toBe(false);
+      expect(fs.readdirSync(registryDir).some((file) => file.endsWith('.tmp'))).toBe(false);
+    } finally {
+      second.stop();
+    }
   });
 
   // 18. server.json cleaned up on stop

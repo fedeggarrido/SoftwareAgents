@@ -10,17 +10,23 @@ const HOOK_SCRIPT = path.join(__dirname, '../../dist/hooks/claude-hook.js');
 // Isolated temp HOME
 let tmpBase: string;
 
-function writeServerJson(port: number, token: string): void {
+function writeServerJson(port: number, token: string, host?: string): void {
   const dir = path.join(tmpBase, '.pixel-agents');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'server.json'),
-    JSON.stringify({ port, pid: process.pid, token, startedAt: Date.now() }),
+    JSON.stringify({
+      port,
+      pid: process.pid,
+      token,
+      startedAt: Date.now(),
+      ...(host ? { host } : {}),
+    }),
   );
 }
 
 /** Write one multi-server registry entry (~/.pixel-agents/servers/<pid>-<port>.json). */
-function writeRegistryEntry(pid: number, port: number, token: string): void {
+function writeRegistryEntry(pid: number, port: number, token: string, host?: string): void {
   const dir = path.join(tmpBase, '.pixel-agents', 'servers');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
@@ -32,14 +38,29 @@ function writeRegistryEntry(pid: number, port: number, token: string): void {
       startedAt: Date.now(),
       servesSpa: false,
       protocol: 1,
+      ...(host ? { host } : {}),
     }),
   );
 }
 
 /** Start a bare HTTP server that records every request body it receives. */
-function startRecordingServer(): Promise<{ port: number; received: string[]; close: () => void }> {
+function startRecordingServer(
+  host = '127.0.0.1',
+  healthPid = process.pid,
+): Promise<{
+  port: number;
+  received: string[];
+  requests: Array<{ method?: string; authorization?: string }>;
+  close: () => void;
+}> {
   const received: string[] = [];
+  const requests: Array<{ method?: string; authorization?: string }> = [];
   const server = http.createServer((req, res) => {
+    requests.push({ method: req.method, authorization: req.headers.authorization });
+    if (req.method === 'GET' && req.url === '/api/health') {
+      res.end(JSON.stringify({ pid: healthPid }));
+      return;
+    }
     let body = '';
     req.on('data', (c: Buffer) => (body += c.toString()));
     req.on('end', () => {
@@ -49,9 +70,17 @@ function startRecordingServer(): Promise<{ port: number; received: string[]; clo
     });
   });
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(0, host, () => {
       const port = (server.address() as { port: number }).port;
-      resolve({ port, received, close: () => server.close() });
+      resolve({
+        port,
+        received,
+        requests,
+        close: () => {
+          server.closeAllConnections();
+          server.close();
+        },
+      });
     });
   });
 }
@@ -101,6 +130,10 @@ describe('claude-hook.js integration', () => {
   itBuilt('reads stdin and POSTs to server', async () => {
     const received: string[] = [];
     const server = http.createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/api/health') {
+        res.end(JSON.stringify({ pid: process.pid }));
+        return;
+      }
       let body = '';
       req.on('data', (c: Buffer) => (body += c.toString()));
       req.on('end', () => {
@@ -246,6 +279,121 @@ describe('claude-hook.js integration', () => {
     legacy.close();
     expect(code).toBe(0);
     expect(legacy.received).toHaveLength(1);
+  });
+
+  itBuilt(
+    'probes legacy health without sending credentials, and leaves healthy files intact',
+    async () => {
+      const legacy = await startRecordingServer();
+      try {
+        writeServerJson(legacy.port, 'legacy-token');
+        const registry = path.join(tmpBase, '.pixel-agents', 'servers');
+        fs.mkdirSync(registry, { recursive: true });
+        const malformed = path.join(registry, 'malformed.json');
+        fs.writeFileSync(malformed, 'unparseable');
+        const pointer = path.join(tmpBase, '.pixel-agents', 'server.json');
+        const before = fs.readFileSync(pointer, 'utf8');
+        expect(
+          (await runHookScript(JSON.stringify({ session_id: 'healthy', hook_event_name: 'Stop' })))
+            .code,
+        ).toBe(0);
+        expect(legacy.received).toHaveLength(1);
+        expect(legacy.requests).toEqual([
+          { method: 'GET', authorization: undefined },
+          { method: 'POST', authorization: 'Bearer legacy-token' },
+        ]);
+        expect(fs.readFileSync(pointer, 'utf8')).toBe(before);
+        expect(fs.readFileSync(malformed, 'utf8')).toBe('unparseable');
+      } finally {
+        legacy.close();
+      }
+    },
+  );
+
+  itBuilt(
+    'does not POST to a stale legacy listener and preserves all discovery files',
+    async () => {
+      const stale = await startRecordingServer('127.0.0.1', process.pid + 1);
+      try {
+        writeServerJson(stale.port, 'secret-legacy-token');
+        const pointer = path.join(tmpBase, '.pixel-agents', 'server.json');
+        const before = fs.readFileSync(pointer, 'utf8');
+        writeRegistryEntry(999999, stale.port, 'dead-token');
+        const dead = path.join(
+          tmpBase,
+          '.pixel-agents',
+          'servers',
+          '999999-' + stale.port + '.json',
+        );
+        const deadBefore = fs.readFileSync(dead, 'utf8');
+        expect(
+          (await runHookScript(JSON.stringify({ session_id: 'stale', hook_event_name: 'Stop' })))
+            .code,
+        ).toBe(0);
+        expect(stale.received).toHaveLength(0);
+        expect(stale.requests).toEqual([{ method: 'GET', authorization: undefined }]);
+        expect(fs.readFileSync(pointer, 'utf8')).toBe(before);
+        expect(fs.readFileSync(dead, 'utf8')).toBe(deadBefore);
+      } finally {
+        stale.close();
+      }
+    },
+  );
+
+  itBuilt('does not attempt a POST for a live-pid legacy pointer with a closed port', async () => {
+    const closed = await startRecordingServer();
+    closed.close();
+    writeServerJson(closed.port, 'stale-token');
+    const pointer = path.join(tmpBase, '.pixel-agents', 'server.json');
+    const before = fs.readFileSync(pointer, 'utf8');
+    const log = path.join(tmpBase, 'debug.log');
+    expect(
+      (
+        await runHookScript(JSON.stringify({ session_id: 'closed', hook_event_name: 'Stop' }), {
+          PIXEL_AGENTS_DEBUG_LOG: log,
+        })
+      ).code,
+    ).toBe(0);
+    expect(fs.readFileSync(log, 'utf8')).toContain('legacy-not-healthy');
+    expect(fs.readFileSync(log, 'utf8')).not.toContain('POST event=');
+    expect(fs.readFileSync(pointer, 'utf8')).toBe(before);
+  });
+
+  for (const host of ['127.0.0.2', '::1']) {
+    for (const source of ['registry', 'legacy']) {
+      itBuilt('delivers using ' + source + ' specific bind ' + host, async () => {
+        const target = await startRecordingServer(host);
+        try {
+          if (source === 'registry')
+            writeRegistryEntry(process.pid, target.port, 'host-token', host);
+          else writeServerJson(target.port, 'host-token', host);
+          expect(
+            (await runHookScript(JSON.stringify({ session_id: 'bind', hook_event_name: 'Stop' })))
+              .code,
+          ).toBe(0);
+          expect(target.received).toHaveLength(1);
+          expect(target.requests.map((request) => request.method)).toEqual(
+            source === 'registry' ? ['POST'] : ['GET', 'POST'],
+          );
+        } finally {
+          target.close();
+        }
+      });
+    }
+  }
+
+  itBuilt('skips a DNS destination in both the registry and legacy pointer', async () => {
+    const target = await startRecordingServer();
+    try {
+      writeServerJson(target.port, 'host-token', 'localhost');
+      writeRegistryEntry(process.pid, target.port, 'host-token', 'localhost');
+      expect(
+        (await runHookScript(JSON.stringify({ session_id: 'dns', hook_event_name: 'Stop' }))).code,
+      ).toBe(0);
+      expect(target.requests).toHaveLength(0);
+    } finally {
+      target.close();
+    }
   });
 
   // 11. Fan-out delivers in parallel, not sequentially: two unresponsive

@@ -5,12 +5,14 @@ import * as path from 'path';
 
 import {
   HOOK_API_PREFIX,
+  HOOK_LEGACY_PROBE_TIMEOUT_MS,
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
   SERVERS_DIR,
 } from '../../../../constants.js';
 import type { ServerConfig, ServerTarget } from '../../../../serverConfig.js';
 import { isServerConfig, isServerTarget } from '../../../../serverConfig.js';
+import { probeServer } from '../../../../serverProbe.js';
 
 const SERVER_JSON = path.join(os.homedir(), SERVER_JSON_DIR, SERVER_JSON_NAME);
 const SERVERS_REGISTRY_DIR = path.join(os.homedir(), SERVER_JSON_DIR, SERVERS_DIR);
@@ -108,7 +110,7 @@ function postToServer(
     try {
       const req = http.request(
         {
-          hostname: '127.0.0.1',
+          hostname: server.host ?? '127.0.0.1',
           port: server.port,
           path: `${HOOK_API_PREFIX}/claude`,
           method: 'POST',
@@ -172,6 +174,10 @@ async function main(): Promise<void> {
       const legacy = JSON.parse(fs.readFileSync(SERVER_JSON, 'utf-8')) as unknown;
       if (!isServerTarget(legacy)) {
         throw new Error('invalid legacy server config');
+      }
+      if ((await probeServer(legacy, HOOK_LEGACY_PROBE_TIMEOUT_MS)) !== 'healthy') {
+        hookDebug(`exit reason=legacy-not-healthy event=${eventName} sid=${sid}`);
+        return;
       }
       servers = [legacy];
     } catch (e) {

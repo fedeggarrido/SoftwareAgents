@@ -375,6 +375,30 @@ The **hooks preference is persisted only after the install/uninstall settled and
 
 Server discovery written to `~/.pixel-agents/server.json` (legacy pointer) and `~/.pixel-agents/servers/<pid>-<port>.json` (registry) with `{ port, pid, token, servesSpa, ... }`. Multi-window safe: a starting server reuses a registered one only if its PID is alive AND `/api/health` on its port answers with that same PID — Windows recycles PIDs, so a crashed server's entry can name an unrelated live process (SA-076). Refused or answered by someone else = stale: the entry and a `server.json` naming it are pruned. A probe timeout (busy server) is neither reused nor pruned.
 
+Discovery (SA-QA-6): the shared probe enforces a total deadline (1500 ms for reuse;
+300 ms for the hook's legacy fallback) and rejects bodies exceeding 4096 characters.
+Registry hook fan-out does not add a probe per event. Records may carry a validated
+local literal contact IP (`host`); missing `host` retains 127.0.0.1 compatibility.
+The contact IP comes from the actual bind; wildcard IPv4/IPv6 use 127.0.0.1/::1.
+Publication and generation-specific cleanup (token + startedAt + PID + port, also
+host) share an exclusive-create lock in servers/, with a 300 ms contention bound.
+HTTP probes never hold this lock. Dead-owner recovery elects one reaper per lock
+generation; tiny .reaped-<nonce>.lock tombstones remain to prevent a delayed second
+reaper from unlinking a new lock. Unreadable/incomplete locks fail closed.
+Mutations use `pathGuard.resolveInside` relative to ~/.pixel-agents, including
+realpath containment, and unique exclusive-create temporaries with failure cleanup.
+The directory is operator-owned: 0700 on creation and discovery/lock files 0600 on
+POSIX; on Windows, inherited profile ACLs provide ownership isolation. This does
+not repair permissive existing ACLs, and the cooperative lock cannot constrain old
+versions or an adversary replacing filesystem links between validation and use.
+
+Residual discovery risk: PID health is liveness, **not server authentication**. A
+local process can imitate /api/health and receive the token and events in the
+subsequent POST. Nonce/HMAC authentication without disclosing the token during the
+probe is explicitly deferred. Concurrent starts may still create separate servers;
+each publishes only after listen completes, with its own PID/port entry. The legacy
+single pointer still reaches at most one server during mixed-version operation.
+
 ### ClientMessageHandler
 
 Single dispatch point for `ClientMessage`. Each variant calls into `AgentRuntime`, `AgentStateStore`, `LayoutPersistence`, or `FileStateAdapter`, or delegates to host-specific callbacks (`onLaunchAgent`, `onOpenSessionsFolder`, `onExportLayout`, `onImportLayout`, `onSetHooksEnabled`). Both surfaces wire the same handler.

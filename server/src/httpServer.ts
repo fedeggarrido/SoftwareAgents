@@ -51,6 +51,8 @@ export interface HttpServerOptions {
 export interface HttpServerHandle {
   app: FastifyInstance;
   port: number;
+  /** Reachable literal contact IP, derived from the actual listening address. */
+  host: string;
 }
 
 const startTime = Date.now();
@@ -94,7 +96,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   const address = app.server.address();
   const port = typeof address === 'object' ? (address?.port ?? 0) : 0;
 
-  return { app, port };
+  const bindHost = typeof address === 'object' && address ? address.address : '127.0.0.1';
+  const host = bindHost === '0.0.0.0' ? '127.0.0.1' : bindHost === '::' ? '::1' : bindHost;
+  return { app, port, host };
 }
 
 // ── Health ──────────────────────────────────────────────────────

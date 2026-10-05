@@ -1,6 +1,6 @@
 # SA-085: LLM local para tareas pequeñas
 
-Fecha de investigación: **2026-10-03**. Estado: propuesta, pendiente de revisión de Claude y benchmark real. No se ha instalado software, descargado pesos ni ejecutado inferencia. Fuentes web oficiales consultadas en esa fecha; la fecha de consulta no equivale a fecha de publicación. No se afirma que los modelos seleccionados sean los más recientes ni los mejores en octubre de 2026.
+Fecha de investigación: **2026-10-03**. **Benchmark real ejecutado el 2026-10-05: ningún modelo local cumple los criterios; no se adopta** (ver «Resultado del benchmark»). El resto del documento es la investigación original y su protocolo.
 
 ## Recomendación ejecutiva
 
@@ -9,6 +9,35 @@ Probar **Ollama + Qwen3-8B Q4_K_M** primero, y **Qwen2.5-Coder-7B-Instruct Q4_K_
 La ventaja buscada es reducir consumo de cuota remota en transformaciones rutinarias. «Gratuito» significa sin tarifa de inferencia local: consume electricidad, disco, memoria y tiempo de revisión. Codex ya se prioriza por el coste de la suscripción existente; no hay ahorro monetario demostrado ni rendimiento local medido.
 
 Fede debe aprobar por separado instalación/descargas, consumo de cuota del baseline y eventual adopción del ADR. La autorización de investigación no concede ninguna de ellas.
+
+## Resultado del benchmark (2026-10-05)
+
+**Veredicto: no adoptar.** Ninguna combinación local cumple los umbrales del protocolo: cero fallos críticos, ≥7/8 por caso y ≥90 % de la calidad media del baseline. La velocidad y la memoria sí cumplen; la calidad no. Incluso en transformaciones pequeñas de datos suministrados, los modelos locales inventaron o contradijeron hechos en 2–5 de los 8 casos.
+
+**Entorno.** RTX 4060 8 GB, 32 GB RAM, Windows 11, Codex CLI 0.160.0 y Ollama 0.35.1. Ollama se usó en su release oficial, con SHA-256 verificado, binario y pesos en `D:AI`, bind solo a `127.0.0.1:11434`, `OLLAMA_NO_CLOUD=1`, sin instalación ni variables persistentes. Corpus: los 8 casos del protocolo, fijados a la revisión `917368b`. Se hicieron 1 pasada en frío y 3 en caliente por caso, con un timeout de 120 s. El baseline es Codex con `gpt-6.1-sol` y reasoning `low`. Calidad: un juez ciego de Claude por caso puntuó fidelidad, cobertura, formato e instrucciones (0–2 cada una) sobre la primera repetición en caliente, con las respuestas barajadas. La validez JSON se comprobó por código. Los resultados privados están en `D:AIsa085-benchcombined`.
+
+| Sistema                            | Calidad media /8 | % baseline | Críticos | Casos ≥7 | Mediana caliente | p95 caliente | Pico GPU |
+| ---------------------------------- | ---------------- | ---------- | -------- | -------- | ---------------- | ------------ | -------- |
+| Baseline `gpt-6.1-sol` low (Codex) | **7,88**         | 100 %      | **0/8**  | **8/8**  | 8,8 s            | 15,5 s       | —        |
+| qwen3.5:9b directo, `think:false`  | 6,00             | 76 %       | 3/8      | 1/8      | 6,7 s            | 9,8 s        | 7,1 GiB  |
+| qwen3:8b directo                   | 5,88             | 75 %       | 2/8      | 3/8      | 12,6 s           | 21,0 s       | 7,1 GiB  |
+| qwen3:8b vía `codex --oss`         | 5,44             | 69 %       | 2/8      | 2/8      | 39,6 s           | 73,3 s       | 7,2 GiB  |
+| qwen3.5:9b vía `codex --oss`       | 5,00             | 63 %       | 4/8      | 1/8      | 14,5 s           | 22,1 s       | 7,4 GiB  |
+| qwen2.5-coder:7b directo           | 4,63             | 59 %       | 5/8      | 1/8      | 4,4 s            | 10,3 s       | 6,1 GiB  |
+| qwen2.5-coder:7b vía `codex --oss` | 4,06             | 52 %       | 4/8      | 1/8      | 5,3 s            | 10,5 s       | 6,8 GiB  |
+
+El JSON fue válido en todas las respuestas completadas de B02 y B06. qwen3:8b vía Codex tuvo un timeout.
+
+**Hallazgos que cambian supuestos del informe:**
+
+- **8k de contexto no sirven para `codex --oss`.** El harness de Codex ocupa unos 7,5k tokens. Con 8k, Ollama truncó el prompt en silencio y lo dejó en 4.098 tokens (`truncating input prompt` en su log), de modo que el modelo respondió casi sin instrucciones. Codex no pasa `num_ctx`, así que la ventana es `OLLAMA_CONTEXT_LENGTH` del servidor: hace falta 16k, y el harness consume casi la mitad.
+- **qwen3.5:9b ignora `/no_think`.** Por la API directa razona siempre: 49 s y 6.376 caracteres de razonamiento para responder «OK», y los 4 intentos de B01 superaron 120 s. Solo es viable con `think:false`, una desviación registrada que no aplica a la vía Codex.
+- **El harness empeora o no mejora la calidad.** Para los tres modelos, la vía directa sin harness puntuó igual o mejor que `codex --oss` y fue más rápida. Para transformaciones sin herramientas, el harness de Codex añade tokens y latencia, no calidad.
+- **Los errores críticos son del tipo que más daña en una fábrica de agentes.** Hubo políticas inventadas, por ejemplo una «sincronización periódica con upstream», recuentos contradichos («20 commits» frente a «base + 19») y mitigaciones de un riesgo atribuidas a otro. Un resumen que inventa no se detecta sin leer la fuente, que es justo el trabajo que se quería ahorrar.
+
+**Limitaciones del resultado.** Un juez por caso y una repetición juzgada por sistema. La distancia con el baseline (≥1,9 puntos de media y 0 críticos frente a ≥2) es grande, pero el tamaño de la muestra no permite ordenar con confianza a los modelos locales entre sí. Los 8 casos son el corpus del protocolo, no una muestra del trabajo real.
+
+**Qué queda.** Ollama y los tres modelos siguen en `D:AI` (18,5 GB), parados y sin arranque automático, para repetir el benchmark con `bench.mjs` cuando aparezca un candidato mejor. Para borrarlos basta con eliminar `D:AI`, porque no hay nada instalado en el sistema. Las condiciones para repetirlo están en [ADR-0004](../adr/0004-llm-local-para-tareas-pequenas.md).
 
 ## Evidencia local y límites
 

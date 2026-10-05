@@ -1,6 +1,6 @@
 ---
-Status: Proposed
-Date: 2026-10-03
+Status: Rejected
+Date: 2026-10-05
 Owner: Fede
 Related Feature: []
 Supersedes: []
@@ -45,6 +45,12 @@ Sin instalación ni almacenamiento adicional y con el flujo de suscripción actu
 
 Qwen2.5-Coder-14B-Instruct Apache-2.0 ocupa unos 9.0 GB de pesos cuantizados publicados, antes de buffers/KV: necesita offload en esta GPU. Podría mejorar calidad; latencia/RAM no verificadas. Solo experimento opcional aprobado, sin ser default de `economy`.
 
+## Outcome (2026-10-05)
+
+**No se adopta.** El piloto se ejecutó con aprobación de Fede, que pidió descargas en el disco D. Ninguna combinación local cumplió los umbrales de la decisión 5. Las mejores obtuvieron el 75–76 % de la calidad media del baseline, con 2–3 fallos críticos en 8 casos. El baseline sacó 7,88/8 sin fallos críticos. La latencia y la memoria sí cumplieron. Resultados, hallazgos (8k trunca el harness de Codex, `/no_think` ignorado por qwen3.5) y limitaciones en [el informe](../research/local-llm.md#resultado-del-benchmark-2026-10-05). El routing vigente no cambia, `economy` sigue sin backend local y la excepción de suscripción no se activa.
+
+La sección Decision de abajo se conserva como la propuesta que se evaluó.
+
 ## Decision
 
 **Proponer un piloto supervisado de Ollama + Qwen3-8B Q4_K_M**, seguido de Coder-7B si el primero no cubre texto técnico. Mantener LM Studio como alternativa y 14B como experimento separado. Adoptar por clase de tarea solo tras benchmark aprobado; hasta entonces mantener el routing vigente.
@@ -71,6 +77,8 @@ Las recomendaciones de contexto para Codex son mayores que el piloto: 64k en Oll
 - **Revisión de Claude pendiente; benchmark no ejecutado.** SA-085 no puede declararse completada con todos sus criterios hasta la revisión requerida. No se cambia el estado de ClickUp desde esta investigación.
 
 ## Revisit when
+
+- **Repetir el benchmark del informe, sin cambiar el corpus ni los umbrales**, cuando aparezca un modelo con licencia apta que quepa en el hardware (o cambie el hardware) y sus resultados públicos sugieran una mejora clara sobre qwen3.5:9b / qwen3:8b en fidelidad. El harness `bench.mjs` y los pesos actuales están en `D:AI`.
 
 - Antes de aprobar este ADR, si el texto aprobado de SA-084 contradice elegibilidad, límites o escalado propuestos: armonizar explícitamente con Fede.
 - Cambia CLI, backend/runtime, plantilla, digest, cuantización, licencia o driver: repetir contrato y casos representativos antes de utilizar la combinación nueva.

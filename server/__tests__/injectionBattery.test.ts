@@ -41,9 +41,23 @@ function template(role: string): AgentSpec {
     fs.readFileSync(path.join(__dirname, '../../agents/templates', role + '.yaml'), 'utf8'),
   );
 }
+// Native taskkill is unavailable in restricted sandboxes. Fixtures self-close in this mode;
+// executorTermination.test.ts verifies failed kills and retries with simulated processes.
+vi.mock('child_process', async (original) => {
+  const actual = await original<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: (file: string, ...args: unknown[]) => {
+      if (file === 'taskkill' && process.env.SA_SKIP_TASKKILL_TEST === '1') return Buffer.alloc(0);
+      return Reflect.apply(actual.execFileSync, actual, [file, ...args]);
+    },
+  };
+});
+
 let root: string;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'injection-battery-'));
+  vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
   vi.stubEnv('HOME', root);
   fs.mkdirSync(path.join(root, 'worktree'));
 });

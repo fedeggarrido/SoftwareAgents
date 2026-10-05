@@ -1,10 +1,11 @@
-import { type ChildProcess, execFileSync, spawn } from 'child_process';
+import { type ChildProcess, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
 
 import {
+  CLAUDE_DELEGATION_TOOLS,
   CLAUDE_MCP_TOOL_PREFIX,
   CLAUDE_WEB_TOOLS,
   compileAgent,
@@ -14,6 +15,7 @@ import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claud
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
+import { processCancellation } from './processCancellation.js';
 
 export interface ClaudeCliExecutorOptions {
   /** Trusted operator executable, not project content. Native executable on Windows. */
@@ -66,28 +68,11 @@ export class ClaudeCliExecutor implements Executor {
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
     const sessionId = randomUUID();
     let child: ChildProcess | undefined;
-    let cancelled = false;
-    let cancellationFailure: Error | undefined;
-    let violation: string | undefined;
     let done = false;
+    let violation: string | undefined;
+    const cancellation = processCancellation(() => child);
     const cancel = () => {
-      if (done || cancelled) return;
-      cancelled = true;
-      if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
-      if (process.platform === 'win32') {
-        try {
-          execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-        } catch (error) {
-          cancellationFailure = error as Error;
-          throw error;
-        }
-      } else {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-        }
-      }
+      if (!done) cancellation.cancel();
     };
     const options = this.options;
     return {
@@ -97,7 +82,7 @@ export class ClaudeCliExecutor implements Executor {
         let directory: string | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          if (cancelled) {
+          if (cancellation.requested) {
             yield { type: 'finished', exitCode: 130, resultSummary: 'Cancelled' };
             return;
           }
@@ -176,7 +161,10 @@ export class ClaudeCliExecutor implements Executor {
             processChild.on('error', (error) => {
               failure = error;
             });
-            processChild.on('close', (code) => resolve(code ?? 1));
+            processChild.on('close', (code) => {
+              cancellation.confirmClose();
+              resolve(code ?? 1);
+            });
           });
           processChild.stdin!.on('error', () => {
             /* premature process exit */
@@ -226,6 +214,9 @@ export class ClaudeCliExecutor implements Executor {
                   const mcp = tools.filter(
                     (tool) => typeof tool === 'string' && tool.startsWith(CLAUDE_MCP_TOOL_PREFIX),
                   );
+                  const delegation = tools.filter(
+                    (tool) => typeof tool === 'string' && CLAUDE_DELEGATION_TOOLS.includes(tool),
+                  );
                   const servers: unknown[] = Array.isArray(record.mcp_servers)
                     ? record.mcp_servers
                     : [];
@@ -234,6 +225,10 @@ export class ClaudeCliExecutor implements Executor {
                   else if (mcp.length || servers.length)
                     violate(
                       `Claude exposed MCP (${[...mcp, ...servers.map((server) => (server as { name?: unknown })?.name ?? 'server')].join(', ')}); slice profiles have no MCP`,
+                    );
+                  else if (delegation.length)
+                    violate(
+                      `Claude exposed ${delegation.join(', ')}; slice profiles have no delegated agents`,
                     );
                   push({
                     type: 'output',
@@ -250,12 +245,6 @@ export class ClaudeCliExecutor implements Executor {
                 if (record.type === 'assistant') {
                   for (const content of record.message?.content ?? []) {
                     if (content.type === 'tool_use') {
-                      push({
-                        type: 'toolUse',
-                        toolId: content.id,
-                        toolName: content.name,
-                        input: content.input,
-                      });
                       if (CLAUDE_WEB_TOOLS.includes(content.name))
                         violate(`Claude used ${content.name}; slice profiles have no web access`);
                       else if (
@@ -265,6 +254,17 @@ export class ClaudeCliExecutor implements Executor {
                         violate(
                           `Claude called MCP tool ${content.name}; slice profiles have no MCP`,
                         );
+                      else if (CLAUDE_DELEGATION_TOOLS.includes(content.name))
+                        violate(
+                          `Claude used ${content.name}; slice profiles have no delegated agents`,
+                        );
+                      else
+                        push({
+                          type: 'toolUse',
+                          toolId: content.id,
+                          toolName: content.name,
+                          input: content.input,
+                        });
                     }
                     if (content.type === 'text')
                       push({ type: 'output', text: content.text, stream });
@@ -350,17 +350,16 @@ export class ClaudeCliExecutor implements Executor {
           yield {
             type: 'finished',
             exitCode:
-              cancellationFailure || violation
+              cancellation.failure || violation
                 ? 1
-                : cancelled
+                : cancellation.requested
                   ? 130
                   : resultError || failure
                     ? 1
                     : exitCode,
             resultSummary:
-              cancellationFailure?.message ??
-              violation ??
-              (cancelled ? 'Cancelled' : (failure?.message ?? summary)),
+              [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
+              (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
           };
         } finally {
           if (timer) clearTimeout(timer);

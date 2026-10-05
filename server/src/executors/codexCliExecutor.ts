@@ -1,4 +1,4 @@
-import { type ChildProcess, execFileSync, spawn } from 'child_process';
+import { type ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
@@ -8,7 +8,6 @@ import {
   CODEX_DELEGATION_ITEM_TYPES,
   CODEX_MCP_EVENT_TYPES,
   CODEX_WEB_EVENT_TYPES,
-  CODEX_WEB_ITEM_TYPE,
   codexCompilerFlags,
   compileAgent,
   validateAgentOutput,
@@ -21,6 +20,7 @@ import {
 import { parseCodexRateLimits } from '../quotaReader.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
+import { processCancellation } from './processCancellation.js';
 
 /** `server.tool` of an MCP call record (exec item or envelope), for the violation message. */
 function codexMcpToolName(shape: {
@@ -104,6 +104,12 @@ export class CodexCliExecutor implements Executor {
     if (req.flags.length) throw new Error('Caller flags are forbidden');
     if (!req.agentSpec) throw new Error('Codex requires an AgentSpec');
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
+    // Synchronous preflight: no handle/process exists, so the worker can release its task lock.
+    for (const shipped of CODEX_REPO_CONFIG_DIRS)
+      if (fs.existsSync(path.join(req.worktreePath, shipped)))
+        throw new Error(
+          `Refusing to run Codex: the worktree ships ${shipped}/ (repository-provided Codex configuration or skills)`,
+        );
     const compiled = compileAgent(
       req.agentSpec,
       req.role,
@@ -112,24 +118,11 @@ export class CodexCliExecutor implements Executor {
     const binary = resolveCodexBinary(this.options.operator);
     const options = this.options;
     let child: ChildProcess | undefined;
-    let cancelled = false,
-      done = false;
-    let cancelFailure: Error | undefined;
+    let done = false;
     let violation: string | undefined;
+    const cancellation = processCancellation(() => child);
     const cancel = () => {
-      if (done || cancelled) return;
-      cancelled = true;
-      if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
-      try {
-        if (process.platform === 'win32')
-          execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-        else process.kill(-child.pid, 'SIGKILL');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
-          cancelFailure = error as Error;
-          throw error;
-        }
-      }
+      if (!done) cancellation.cancel();
     };
     return {
       cancel,
@@ -137,7 +130,7 @@ export class CodexCliExecutor implements Executor {
         let directory: string | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          if (cancelled) {
+          if (cancellation.requested) {
             done = true;
             yield { type: 'finished', exitCode: 130, resultSummary: 'Cancelled' };
             return;
@@ -154,13 +147,6 @@ export class CodexCliExecutor implements Executor {
               !relative.startsWith(`..${path.sep}`))
           )
             throw new Error('Runtime settings must be outside the worktree');
-          // A repository-shipped .codex/ or .agents/ is configuration or skills Codex may load by
-          // itself; never run a slice agent over it (SA-QA-4).
-          for (const shipped of CODEX_REPO_CONFIG_DIRS)
-            if (fs.existsSync(path.join(req.worktreePath, shipped)))
-              throw new Error(
-                `Refusing to run Codex: the worktree ships ${shipped}/ (repository-provided Codex configuration or skills)`,
-              );
           directory = fs.mkdtempSync(path.join(options.runtimeDirectory, 'codex-'));
           const schemaFile = path.join(directory, 'output-schema.json');
           if (compiled.outputSchema)
@@ -190,7 +176,10 @@ export class CodexCliExecutor implements Executor {
             proc.on('error', (error) => {
               failure = error;
             });
-            proc.on('close', (code) => resolve(code ?? 1));
+            proc.on('close', (code) => {
+              cancellation.confirmClose();
+              resolve(code ?? 1);
+            });
           });
           proc.stdin!.on('error', () => {});
           proc.stdin!.end(compiled.codex.instructions);
@@ -225,16 +214,19 @@ export class CodexCliExecutor implements Executor {
           };
           // No 0.160.0 flag stops delegation, and a spawn without a wait never reaches the exec
           // stream: the sub-agent's own rollout (parent_thread_id = our thread) is the signal.
-          const sessionsRoot = options.sessionsDirectory ?? codexSessionsDirectory();
+          const sessionsRoot =
+            options.sessionsDirectory ?? codexSessionsDirectory(process.env, req.worktreePath);
           const launchedMs = Date.now();
           const seenRollouts = new Set<string>();
-          const checkSubagents = () => {
+          const checkSubagents = (final = false) => {
             if (!sessionId || violation) return;
             const rollout = findSubagentRollout(sessionsRoot, sessionId, launchedMs, seenRollouts);
-            if (rollout)
+            if (rollout.status === 'found')
               violate(
-                `Codex spawned a sub-agent (${path.basename(rollout)}); slice profiles have no delegated agents`,
+                `Codex spawned a sub-agent (${path.basename(rollout.file)}); slice profiles have no delegated agents`,
               );
+            else if (final && rollout.status === 'inconclusive')
+              violate(`could not verify that no sub-agent was spawned: ${rollout.reason}`);
           };
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: proc[stream]! })) {
@@ -260,7 +252,7 @@ export class CodexCliExecutor implements Executor {
                 !sessionId
               ) {
                 sessionId = record.thread_id;
-                watcher ??= setInterval(checkSubagents, CODEX_SUBAGENT_POLL_MS);
+                watcher ??= setInterval(() => checkSubagents(), CODEX_SUBAGENT_POLL_MS);
                 push({
                   type: 'started',
                   sessionId,
@@ -278,17 +270,6 @@ export class CodexCliExecutor implements Executor {
                   summary = item.text;
                   push({ type: 'output', text: summary, stream });
                 }
-                if (
-                  record.type === 'item.started' &&
-                  [
-                    'command_execution',
-                    'mcp_tool_call',
-                    CODEX_WEB_ITEM_TYPE,
-                    'file_change',
-                    ...CODEX_DELEGATION_ITEM_TYPES,
-                  ].includes(item?.type)
-                )
-                  push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
               }
               // The compiled flags should make web and MCP tools unreachable, in the exec item
               // stream or the rollout envelope; seeing one means a flag did not apply (SA-074,
@@ -318,6 +299,11 @@ export class CodexCliExecutor implements Executor {
                 violate(
                   `Codex delegated to a sub-agent (${typeof delegation.tool === 'string' ? delegation.tool : delegation.type}); slice profiles have no delegated agents`,
                 );
+              if (!web && !mcp && !delegation && record.type === 'item.started') {
+                const item = record.item;
+                if (['command_execution', 'file_change'].includes(item?.type))
+                  push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
+              }
               const payload = record?.type === 'event_msg' ? record.payload : record;
               if (payload?.type === 'token_count') {
                 const usage = payload.info?.last_token_usage;
@@ -381,7 +367,7 @@ export class CodexCliExecutor implements Executor {
             exitCode = result.status === 'fulfilled' ? (result.value as number) : 1;
             for (const r of results) if (r.status === 'rejected') failure = r.reason;
             if (watcher) clearInterval(watcher);
-            checkSubagents(); // a spawn right before exit still fails the run
+            checkSubagents(true); // an unreadable final check cannot accept the result
             closed = true;
             wake?.();
           });
@@ -396,7 +382,7 @@ export class CodexCliExecutor implements Executor {
             resultError = true;
             summary ||= 'Codex exited without a session or completed turn';
           }
-          if (compiled.outputSchema && !cancelled && !failure && !resultError) {
+          if (compiled.outputSchema && !cancellation.requested && !failure && !resultError) {
             try {
               if (!validateAgentOutput(compiled.outputSchema, JSON.parse(summary)))
                 throw new Error();
@@ -409,17 +395,16 @@ export class CodexCliExecutor implements Executor {
           yield {
             type: 'finished',
             exitCode:
-              cancelFailure || violation
+              cancellation.failure || violation
                 ? 1
-                : cancelled
+                : cancellation.requested
                   ? 130
                   : failure || resultError
                     ? 1
                     : exitCode,
             resultSummary:
-              cancelFailure?.message ??
-              violation ??
-              (cancelled ? 'Cancelled' : (failure?.message ?? summary)),
+              [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
+              (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
           };
         } finally {
           if (timer) clearTimeout(timer);

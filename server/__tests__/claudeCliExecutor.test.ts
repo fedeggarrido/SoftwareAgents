@@ -15,6 +15,19 @@ vi.mock('os', async (importOriginal) => {
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
 });
 
+// Native taskkill is unavailable in restricted sandboxes. Fixtures self-close in this mode;
+// executorTermination.test.ts verifies failed kills and retries with simulated processes.
+vi.mock('child_process', async (original) => {
+  const actual = await original<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: (file: string, ...args: unknown[]) => {
+      if (file === 'taskkill' && process.env.SA_SKIP_TASKKILL_TEST === '1') return Buffer.alloc(0);
+      return Reflect.apply(actual.execFileSync, actual, [file, ...args]);
+    },
+  };
+});
+
 let root: string;
 let req: ExecutionRequest;
 beforeEach(() => {
@@ -175,6 +188,10 @@ it('uses the Reviewer compiler tools and sends task content as data', async () =
   expect(report.args[report.args.indexOf('--append-system-prompt') + 1]).not.toContain(req.prompt);
 });
 it.each([
+  ['--agent-init', 'Claude exposed Agent; slice profiles have no delegated agents'],
+  ['--task-init', 'Claude exposed Task; slice profiles have no delegated agents'],
+  ['--agent-tool', 'Claude used Agent; slice profiles have no delegated agents'],
+  ['--task-tool', 'Claude used Task; slice profiles have no delegated agents'],
   ['--web-init', 'Claude exposed WebSearch; slice profiles have no web access'],
   ['--web-tool', 'Claude used WebFetch; slice profiles have no web access'],
   [
@@ -197,6 +214,21 @@ it.each([
   expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
   expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
 });
+it.each(['--web-tool', '--mcp-tool', '--agent-tool', '--task-tool'])(
+  'never persists forbidden arguments in the ExecutionRegistry (%s)',
+  async (mode) => {
+    const events: ExecutionEvent[] = [];
+    for await (const event of new ExecutionRegistry(root).executor(executor(mode)).start(req)
+      .events)
+      events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 1 });
+    expect(events.some((event) => event.type === 'toolUse')).toBe(false);
+    expect(JSON.stringify(events)).not.toContain('TEST_SECRET');
+    expect(
+      fs.readFileSync(path.join(root, '.git/softwareagents/runs/run.jsonl'), 'utf8'),
+    ).not.toContain('TEST_SECRET');
+  },
+);
 it('fails the execution when Claude returns output that does not match the schema', async () => {
   req.taskData = {
     task: 'typed output',

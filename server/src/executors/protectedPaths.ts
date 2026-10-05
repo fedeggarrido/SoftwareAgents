@@ -10,8 +10,11 @@ export const DEFAULT_PROTECTED_PATHS = Object.freeze([
   // Files the CLIs load by themselves as configuration or instructions, outside the
   // untrusted-data boundary (SA-QA-4): a Developer must not be able to plant them.
   '.codex/**',
+  '**/.codex/**',
   '.agents/**',
+  '**/.agents/**',
   '.mcp.json',
+  '**/.mcp.json',
   'AGENTS.md',
   '**/AGENTS.md',
   'CLAUDE.md',
@@ -26,9 +29,9 @@ export const DEFAULT_PROTECTED_PATHS = Object.freeze([
 ]);
 
 function matches(file: string, pattern: string): boolean {
-  // Protect directory entries too (e.g. replacing .github with a symlink).
-  if (pattern.endsWith('/**') && file.toLowerCase() === pattern.slice(0, -3).toLowerCase())
-    return true;
+  // **/ includes the root, and directory entries themselves may be replaced with symlinks.
+  if (pattern.startsWith('**/') && matches(file, pattern.slice(3))) return true;
+  if (pattern.endsWith('/**') && matches(file, pattern.slice(0, -3))) return true;
   const expression = pattern
     .split(/(\*\*|\*)/)
     .map((part) =>

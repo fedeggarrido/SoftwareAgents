@@ -175,3 +175,6 @@ export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
 /** Async OS helper deadline, including native-helper compilation and descendant discovery. */
 export const WORKSTORE_PROCESS_TIMEOUT_MS = 60_000;
 export const WORKSTORE_PROCESS_WAIT_MS = 10_000;
+/** Retry failed process-tree termination for this long; an unconfirmed close never finishes. */
+export const EXECUTOR_TERMINATION_TIMEOUT_MS = 5_000;
+export const EXECUTOR_TERMINATION_RETRY_MS = 250;

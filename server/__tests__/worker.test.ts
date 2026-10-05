@@ -30,6 +30,7 @@ beforeEach(() => {
   repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);
+  vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
   vi.stubEnv('GIT_AUTHOR_NAME', 'Test');
   vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.invalid');
   vi.stubEnv('GIT_COMMITTER_NAME', 'Test');
@@ -63,6 +64,44 @@ afterEach(() => {
 });
 
 describe('supervised worker', () => {
+  it.each(['.codex', '.agents'])(
+    'releases the task lock after Codex preflight rejects %s',
+    async (shipped) => {
+      fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
+      fs.writeFileSync(
+        path.join(repo, '.softwareagents/agents/model-policy.yaml'),
+        'standard_coding:\n  - executor: codex\n',
+      );
+      fs.mkdirSync(path.join(repo, shipped));
+      fs.writeFileSync(path.join(repo, shipped, 'config'), 'untrusted');
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-m', 'preflight fixture');
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            test: {
+              autonomyLevel: 'A1',
+              allowedExecutors: ['codex'],
+              binaryPaths: { codex: process.execPath },
+              quotaThresholds: { codex: 5 },
+              concurrency: { maxExecutions: 2, perExecutor: { codex: 2 } },
+            },
+          },
+        }),
+      );
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/machine-capacity.json'),
+        JSON.stringify({ observedAt: Date.now() / 1000, active: { codex: 0 } }),
+      );
+      const args = { task: 'SA-999', brief: 'brief.md', selectExecutor: true };
+      const options = { cwd: repo, binaryArgs: [fake, 'codex'], log: vi.fn() };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(runWorker(args, options)).rejects.toThrow(`the worktree ships ${shipped}/`);
+        expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+      }
+    },
+  );
   it.each(['claude', 'codex'])(
     'optional selection launches %s as a single probe',
     async (selected) => {
@@ -312,6 +351,10 @@ describe('supervised worker', () => {
       '.codex/config.toml',
       '.agents/skills/x/SKILL.md',
       '.mcp.json',
+      'server/.mcp.json',
+      'server/.codex/config.toml',
+      'server/.agents/skills/x/SKILL.md',
+      'nested/deep/.codex/config.toml',
       'AGENTS.md',
       'server/AGENTS.md',
       'CLAUDE.md',

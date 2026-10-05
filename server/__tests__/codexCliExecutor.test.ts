@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -5,7 +6,21 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { CodexCliExecutor, resolveCodexBinary } from '../src/executors/codexCliExecutor.js';
+import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
+
+// Native taskkill is unavailable in restricted sandboxes. Fixtures self-close in this mode;
+// executorTermination.test.ts verifies failed kills and retries with simulated processes.
+vi.mock('child_process', async (original) => {
+  const actual = await original<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: (file: string, ...args: unknown[]) => {
+      if (file === 'taskkill' && process.env.SA_SKIP_TASKKILL_TEST === '1') return Buffer.alloc(0);
+      return Reflect.apply(actual.execFileSync, actual, [file, ...args]);
+    },
+  };
+});
 
 let root: string;
 let req: ExecutionRequest;
@@ -166,10 +181,6 @@ it.each([
   async (mode, seen) => {
     const events = await collect(mode);
     const summary = `Policy violation: Codex used ${seen} despite web_search="disabled"; slice profiles have no web access`;
-    if (seen === 'web_search')
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: 'toolUse', toolName: 'web_search' }),
-      );
     expect(events).toContainEqual({ type: 'output', stream: 'stdout', text: summary });
     expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 1, resultSummary: summary });
   },
@@ -203,14 +214,63 @@ it.each([
     vi.unstubAllEnvs();
   }
 });
-it('refuses a worktree that ships Codex configuration or skills', async () => {
+it('refuses a worktree that ships Codex configuration or skills before returning a handle', () => {
   for (const shipped of ['.codex', '.agents']) {
     fs.mkdirSync(path.join(req.worktreePath, shipped));
-    await expect(executor().start(req).events[Symbol.asyncIterator]().next()).rejects.toThrow(
-      `the worktree ships ${shipped}/`,
-    );
+    expect(() => executor().start(req)).toThrow(`the worktree ships ${shipped}/`);
     fs.rmSync(path.join(req.worktreePath, shipped), { recursive: true });
   }
+});
+it.each(['--web-search', '--mcp-call', '--collab'])(
+  'never persists forbidden arguments in the ExecutionRegistry (%s)',
+  async (mode) => {
+    execFileSync('git', ['init'], { cwd: req.worktreePath });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'base',
+      ],
+      { cwd: req.worktreePath },
+    );
+    const events: ExecutionEvent[] = [];
+    for await (const event of new ExecutionRegistry(req.worktreePath)
+      .executor(executor(mode))
+      .start(req).events)
+      events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 1 });
+    expect(events.some((event) => event.type === 'toolUse')).toBe(false);
+    expect(JSON.stringify(events)).not.toContain('TEST_SECRET');
+    expect(
+      fs.readFileSync(path.join(req.worktreePath, '.git/softwareagents/runs/run.jsonl'), 'utf8'),
+    ).not.toContain('TEST_SECRET');
+  },
+);
+
+it('fails when the final rollout inspection is inconclusive', async () => {
+  const day = new Date();
+  const folder = path.join(
+    root,
+    'sessions',
+    String(day.getFullYear()),
+    String(day.getMonth() + 1).padStart(2, '0'),
+    String(day.getDate()).padStart(2, '0'),
+  );
+  fs.mkdirSync(folder, { recursive: true });
+  // It is created before launch; a future mtime ensures it is within the watched interval.
+  const file = path.join(folder, 'rollout-incomplete.jsonl');
+  fs.writeFileSync(file, '{"type":"session_meta"');
+  fs.utimesSync(file, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+  expect((await collect()).at(-1)).toMatchObject({
+    exitCode: 1,
+    resultSummary: expect.stringContaining('could not verify that no sub-agent was spawned'),
+  });
 });
 it('fails closed on truncated real startup without a completed turn', async () => {
   expect((await collect('--startup-only')).at(-1)).toMatchObject({ exitCode: 1 });

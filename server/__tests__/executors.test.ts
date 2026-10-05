@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
@@ -18,6 +18,7 @@ function git(...args: string[]): string {
 }
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'execution-'));
+  vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
   git('init');
   // Per-command identity, never change Git configuration.
   git(
@@ -42,7 +43,10 @@ beforeEach(() => {
     timeoutMin: 1,
   };
 });
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  fs.rmSync(root, { recursive: true, force: true });
+});
 
 describe('Execution contract and transitional registry', () => {
   it.each(['claude', 'codex'] as const)(

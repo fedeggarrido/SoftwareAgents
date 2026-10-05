@@ -12,15 +12,15 @@ por su cuenta en ejecuciones posteriores.
 
 ## Qué se aplica
 
-| Capa                 | Claude Code                                                                                                              | Codex CLI                                                                                                                                                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Compilador           | `--tools` sin web, `--disallowedTools` con `WebSearch,WebFetch,Agent,Task`, MCP estricto y vacío (SA-033)                | `-c web_search="disabled"`, `-c features.<f>=false` para `CODEX_DISABLED_FEATURES` (`apps`, `plugins`, `remote_plugin`, `tool_suggest`, `skill_mcp_dependency_install` y las de navegador) y `-c project_doc_max_bytes=0` |
-| Executor (preflight) | —                                                                                                                        | se niega a lanzar si el worktree trae `.codex/` o `.agents/`                                                                                                                                                              |
-| Executor (tripwire)  | init que exponga `WebSearch`/`WebFetch`, una herramienta `mcp__*` o un servidor MCP; o un `tool_use` que llame a alguno  | items `web_search`, `mcp_tool_call` o `collab_tool_call` en el stream `--json`; y cualquier rollout de sub-agente cuyo `parent_thread_id` sea el hilo de la Execution                                                     |
-| Resultado del trip   | se cancela el árbol y la Execution termina con `exitCode: 1` y `Policy violation: …`; el resultado nunca se da por bueno | igual                                                                                                                                                                                                                     |
+| Capa                 | Claude Code                                                                                                                             | Codex CLI                                                                                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compilador           | `--tools` sin web, `--disallowedTools` con `WebSearch,WebFetch,Agent,Task`, MCP estricto y vacío (SA-033)                               | `-c web_search="disabled"`, `-c features.<f>=false` para `CODEX_DISABLED_FEATURES` (`apps`, `plugins`, `remote_plugin`, `tool_suggest`, `skill_mcp_dependency_install` y las de navegador) y `-c project_doc_max_bytes=0` |
+| Executor (preflight) | —                                                                                                                                       | se niega a lanzar si la raiz del worktree trae `.codex/` o `.agents/`                                                                                                                                                     |
+| Executor (tripwire)  | init que exponga `Agent`/`Task`, `WebSearch`/`WebFetch`, una herramienta `mcp__*` o un servidor MCP; o un `tool_use` que llame a alguno | items `web_search`, `mcp_tool_call` o `collab_tool_call` en el stream `--json`; y cualquier rollout de sub-agente cuyo `parent_thread_id` sea el hilo de la Execution                                                     |
+| Resultado del trip   | se cancela el árbol y la Execution termina con `exitCode: 1` y `Policy violation: …`; el resultado nunca se da por bueno                | igual                                                                                                                                                                                                                     |
 
 `TOOL_POLICY_VERSION` es `sa-qa-4/v4`. Las constantes viven en
-[agentCompiler.ts](../../server/src/agentCompiler.ts) (`CLAUDE_WEB_TOOLS`,
+[agentCompiler.ts](../../server/src/agentCompiler.ts) (`CLAUDE_WEB_TOOLS`, `CLAUDE_DELEGATION_TOOLS`,
 `CLAUDE_MCP_TOOL_PREFIX`, `CODEX_WEB_EVENT_TYPES`, `CODEX_MCP_EVENT_TYPES`,
 `CODEX_DELEGATION_ITEM_TYPES`) y [constants.ts](../../server/src/constants.ts)
 (`CODEX_WEB_SEARCH_MODE`, `CODEX_DISABLED_FEATURES`, `CODEX_PROJECT_DOC_MAX_BYTES`,
@@ -33,7 +33,7 @@ comprueba son defensa por si llegaran a ese stream; no lee el rollout del propio
 hilo.
 
 Los ficheros que los CLIs cargan por su cuenta son rutas protegidas del commit
-del runtime (`protectedPaths.ts`): `.codex/**`, `.agents/**`, `.mcp.json`,
+del runtime (`protectedPaths.ts`): `.codex/**`, `.agents/**`, `.mcp.json` en cualquier nivel,
 `AGENTS.md` y `CLAUDE.md` en cualquier nivel. Un Developer que los toque pasa a
 `require_human`.
 
@@ -54,10 +54,13 @@ propio** rollout (por `thread_id`), nunca sobre la respuesta del modelo:
 2. petición de búsqueda web con los flags compilados;
 3. control con `web_search="live"`, que debe producir eventos.
 
-Falla (exit 1) si aparece una herramienta fuera de la lista esperada, si se
-inyecta el AGENTS.md o si hay eventos web con los flags compilados. Devuelve
+Solo da OK con un inventario completo correlacionado con la llamada exacta a
+`ALL_TOOLS`. Falla (exit 1) si aparece una herramienta fuera de la lista esperada,
+si se inyecta el AGENTS.md (incluido su marcador `CANARY_AGENTS_MD`), si hay
+eventos MCP en el stdout o rollout de cualquiera de las tres ejecuciones,
+o si hay eventos web con los flags compilados. Devuelve
 inconcluso (exit 2) si alguna ejecución no termina, si no encuentra su rollout o
-si el control no produce eventos web, porque entonces el resto no prueba nada.
+si el inventario es parcial o si el control no produce eventos web, porque entonces el resto no prueba nada.
 Avisa, sin fallar, de que la delegación sigue ofrecida. Gasta un poco de cuota
 de Codex.
 
@@ -114,7 +117,8 @@ de Codex.
 8. **Skills del host.** Codex sigue listando las skills del Operator (`~/.agents`,
    `~/.codex`) aunque se ignore la configuración de usuario; ninguna clave
    probada lo quita. Son del Operator, no del repo. Las del repo (`.agents/`)
-   las bloquea el preflight.
+   las bloquea el preflight. El preflight comprueba `.codex/` y `.agents/` solo
+   en la raíz del worktree y rechaza el lanzamiento antes de devolver el handle.
 
 ### Claude Code 2.1.161 (2026-10-03)
 
@@ -131,8 +135,8 @@ de Codex.
 Cada caso es un JSON en
 [server/\_\_tests\_\_/fixtures/injection/](../../server/__tests__/fixtures/injection/),
 y [injectionBattery.test.ts](../../server/__tests__/injectionBattery.test.ts) los
-recorre todos. SA-064 la amplía. Hay dos casos, `web-exfiltration` y
-`connector-exfiltration`. Para cada rol comprueban:
+recorre todos. SA-064 la amplía. Hay casos `web-exfiltration`,
+`connector-exfiltration` y `delegation`. Para cada rol comprueban:
 
 - que el payload solo viaja como dato JSON;
 - que ningún CLI recibe herramientas web ni conectores.
@@ -156,7 +160,17 @@ exigen que la Execution se detenga con `Policy violation`.
   compilada más el tripwire y el watcher, que detienen la ejecución en cuanto
   la detectan. Un sub-agente comparte proceso, sandbox y flags con el padre, así
   que no gana herramientas; sí podría gastar cuota con otro modelo mientras
-  dure.
+  dure. Puede actuar antes del siguiente sondeo: el intervalo nominal de 1 s
+  no impone una cota estricta a la ventana de detección. La aceptación del
+  resultado exige inspeccionar los rollouts; una inspección final inconclusa
+  falla la Execution.
+- `create_goal` y `update_goal` siguen disponibles. Las rutas protegidas del
+  repositorio no gobiernan esas herramientas ni su estado fuera del worktree.
+- Una cancelación solicita terminar el árbol y reintenta los fallos durante
+  5 s; otro `cancel()` o el timeout abre un nuevo plazo. Solo el cierre confirmado
+  permite terminar la Execution y liberar el lock; si no llega, este se conserva
+  para recuperación manual. El resumen conserva Policy violation y cualquier
+  error de terminación.
 - Las ejecuciones manuales de Codex fuera del Executor (QA, revisiones,
   implementación) usan la configuración del usuario. Lánzalas siempre con
   `-c features.apps=false` (ver AGENTS.md).

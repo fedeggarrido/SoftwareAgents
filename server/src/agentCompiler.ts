@@ -11,6 +11,7 @@ import {
 export const TOOL_POLICY_VERSION = 'sa-qa-4/v4';
 /** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
+export const CLAUDE_DELEGATION_TOOLS: readonly string[] = ['Agent', 'Task'];
 /** Claude names every MCP tool `mcp__<server>__<tool>`; slice profiles get no MCP at all. */
 export const CLAUDE_MCP_TOOL_PREFIX = 'mcp__';
 export const CODEX_WEB_ITEM_TYPE = 'web_search';
@@ -26,6 +27,7 @@ export const CODEX_WEB_EVENT_TYPES: readonly unknown[] = [
 export const CODEX_DELEGATION_ITEM_TYPES: readonly unknown[] = ['collab_tool_call'];
 export const CODEX_MCP_EVENT_TYPES: readonly unknown[] = [
   'mcp_tool_call',
+  'McpToolCall',
   'mcp_tool_call_begin',
   'mcp_tool_call_end',
 ];
@@ -138,8 +140,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       allowedTools: [...profile.tools],
       disallowedTools: [
         'Bash',
-        'Agent',
-        'Task',
+        ...CLAUDE_DELEGATION_TOOLS,
         ...CLAUDE_WEB_TOOLS,
         'NotebookEdit',
         ...(profile.sandbox === 'read-only' ? ['Edit', 'Write'] : []),

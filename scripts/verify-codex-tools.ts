@@ -24,27 +24,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { parse } from 'yaml';
 
-import {
-  CODEX_WEB_EVENT_TYPES,
-  codexCompilerFlags,
-  compileAgent,
-} from '../server/src/agentCompiler.js';
+import { codexCompilerFlags, compileAgent } from '../server/src/agentCompiler.js';
 import { CODEX_WINDOWS_SANDBOX } from '../server/src/constants.js';
 import { resolveCodexBinary } from '../server/src/executors/codexCliExecutor.js';
 import { codexSessionsDirectory } from '../server/src/executors/codexSubagents.js';
-
-/** Measured on 0.160.0 under the compiled flags (docs/security/web-access.md). */
-const EXPECTED_TOOLS = new Set([
-  'apply_patch',
-  'clock__curr_time',
-  'create_goal',
-  'exec_command',
-  'get_goal',
-  'image_gen__imagegen',
-  'update_goal',
-  'view_image',
-  'write_stdin',
-]);
+import {
+  countToolEvents,
+  INVENTORY_CODE,
+  judgeCodexTools,
+} from '../server/src/executors/codexToolVerification.js';
 
 function operatorBinary(): string | undefined {
   const flag = process.argv.indexOf('--binary');
@@ -150,69 +138,28 @@ function run(prompt: string, extra: string[] = [], agentsMd = false): Run {
           : undefined;
   return { ok: !why, stdout, rollout, why };
 }
-const messages = (records: Records) =>
-  records
-    .map((r) => r.payload as { type?: string; content?: { text?: string }[] } | undefined)
-    .filter((p) => p?.type === 'message')
-    .map((p) => (p!.content ?? []).map((c) => c.text ?? '').join(' '))
-    .join('\n');
-const webEvents = (r: Run) =>
-  [...r.stdout, ...r.rollout].filter((record) => {
-    const item = record.item as { type?: unknown } | undefined;
-    const payload = record.payload as { type?: unknown; item?: { type?: unknown } } | undefined;
-    return [item?.type, payload?.type, payload?.item?.type].some(
-      (type) => CODEX_WEB_EVENT_TYPES.includes(type) || /^web_?search/i.test(String(type ?? '')),
-    );
-  }).length;
-
 console.log(`${spawnSync(codex, ['--version'], { encoding: 'utf8' }).stdout.trim()} (${codex})`);
 console.log(`flags: ${flags.join(' ')}`);
-const problems: string[] = [];
-const inconclusive: string[] = [];
 
 const tools = run(
-  'Use your exec tool to run exactly: text(ALL_TOOLS.map(t => t.name).join("\\n")) . ' +
-    'Then reply with the output verbatim. Do not call any other tool.',
+  `Use your exec tool to run exactly: ${INVENTORY_CODE} . Then reply with the output verbatim. Do not call any other tool.`,
   [],
   true,
 );
-const names = new Set<string>();
-for (const record of tools.rollout) {
-  const payload = record.payload as { type?: string; output?: { text?: string }[] } | undefined;
-  if (payload?.type !== 'custom_tool_call_output') continue;
-  for (const chunk of payload.output ?? [])
-    for (const name of (chunk.text ?? '').split(/\r?\n/))
-      if (/^[A-Za-z0-9_.-]{3,}$/.test(name.trim())) names.add(name.trim());
-}
-console.log(`tools (${names.size}): ${[...names].sort().join(', ')}`);
-if (!tools.ok || !names.has('exec_command'))
-  inconclusive.push(`tool listing: ${tools.why ?? 'no exec_command in the captured list'}`);
-else {
-  const extra = [...names].filter((name) => !EXPECTED_TOOLS.has(name));
-  if (extra.length) problems.push(`unexpected tools: ${extra.join(', ')}`);
-  const text = messages(tools.rollout);
-  if (text.includes('# AGENTS.md instructions'))
-    problems.push('the workdir AGENTS.md was injected');
-  if (text.includes('<multi_agent_role>'))
-    console.log(
-      'WARN: delegation tools are offered (no 0.160.0 flag removes them; the Executor fails runs that use them)',
-    );
-}
-
 const searchPrompt =
   'Use your web search tool to find the title of the GitHub releases page of openai/codex. ' +
   'If you do not have a web search tool, answer exactly NO_WEB_TOOL. Do not run shell commands.';
 const web = run(searchPrompt);
 const control = run(searchPrompt, ['-c', 'web_search="live"']);
-console.log(`web events: compiled ${webEvents(web)}, live control ${webEvents(control)}`);
-if (!web.ok) inconclusive.push(`web run: ${web.why}`);
-else if (webEvents(web) > 0) problems.push(`${webEvents(web)} web events under the compiled flags`);
-if (!control.ok || webEvents(control) === 0)
-  inconclusive.push(
-    `live control produced no web event (${control.why ?? 'renamed events?'}): the web check proves nothing`,
-  );
+const { inventory, problems, inconclusive, exitCode } = judgeCodexTools(tools, web, control);
+console.log(`tools (${inventory.names.length}): ${inventory.names.join(', ')}`);
+console.log(
+  `web events: compiled ${countToolEvents([...web.stdout, ...web.rollout], 'web')}, live control ${countToolEvents([...control.stdout, ...control.rollout], 'web')}`,
+);
+if (JSON.stringify(tools.rollout).includes('<multi_agent_role>'))
+  console.log('WARN: delegation tools are offered; the Executor fails runs that use them');
 
 if (problems.length) console.log(`FAIL: ${problems.join('; ')}`);
 if (inconclusive.length) console.log(`INCONCLUSIVE: ${inconclusive.join('; ')}`);
 if (!problems.length && !inconclusive.length) console.log('OK');
-process.exitCode = problems.length ? 1 : inconclusive.length ? 2 : 0;
+process.exitCode = exitCode;

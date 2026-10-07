@@ -6,6 +6,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { canBind } from './helpers/bindable.js';
+
 // Use isolated temp HOME to avoid touching real ~/.pixel-agents/
 let tmpBase: string;
 let serverJsonDir: string;
@@ -459,15 +461,18 @@ describe('PixelAgentsServer', () => {
       second.stop();
     });
 
-    it.each(['127.0.0.2', '::1'])('discovers and reuses the specific bind %s', async (host) => {
-      const first = await server.start({ host });
-      expect(first.host).toBe(host);
-      expect(await probeServer(first)).toBe('healthy');
-      const second = new PixelAgentsServer();
-      expect((await second.start()).token).toBe(first.token);
-      expect(registryFiles()).toHaveLength(1);
-      second.stop();
-    });
+    for (const host of ['127.0.0.2', '::1']) {
+      it(`discovers and reuses the specific bind ${host}`, async (context) => {
+        if (!(await canBind(host))) context.skip(`Cannot bind ${host} on this runner`);
+        const first = await server.start({ host });
+        expect(first.host).toBe(host);
+        expect(await probeServer(first)).toBe('healthy');
+        const second = new PixelAgentsServer();
+        expect((await second.start()).token).toBe(first.token);
+        expect(registryFiles()).toHaveLength(1);
+        second.stop();
+      });
+    }
 
     it('accepts local interface IPs but rejects remote IPs, wildcards and DNS names', () => {
       for (const host of ['127.0.0.2', '::1']) {
@@ -580,7 +585,8 @@ describe('PixelAgentsServer', () => {
     // final server.json path's realpath containment, even for a malformed pointer.
     fs.symlinkSync(outside, serverJsonPath, process.platform === 'win32' ? 'junction' : 'dir');
     try {
-      await server.start();
+      const config = await server.start();
+      expect(registryFiles()).toEqual([`${process.pid}-${config.port}.json`]);
       server.stop();
       expect(fs.readFileSync(external, 'utf8')).toBe('external data');
       expect(fs.readdirSync(outside)).toEqual(['data.json']);
@@ -592,31 +598,36 @@ describe('PixelAgentsServer', () => {
 
   it('waits for an independent process to finish its locked publication', async () => {
     fs.mkdirSync(registryDir, { recursive: true });
-    const code = [
-      "const fs = require('fs'); const path = require('path');",
-      "const dir = process.argv[1]; const lock = path.join(dir, '.discovery.lock');",
-      "fs.writeFileSync(lock, JSON.stringify({pid: process.pid, nonce: '12345678-1234-1234-1234-123456789abc'}), {flag: 'wx'});",
-      "process.stdout.write('locked');",
-      "setTimeout(() => {fs.writeFileSync(path.join(dir, 'published.txt'), 'published'); fs.unlinkSync(lock);}, 100);",
-    ].join(' ');
-    const child = spawn(process.execPath, ['-e', code, registryDir], {
-      env: { ...process.env, HOME: tmpBase, USERPROFILE: tmpBase },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        child.stdout.once('data', () => resolve());
-        child.once('error', reject);
-        child.once('exit', (code) => {
-          if (code !== 0) reject(new Error('Lock holder failed'));
+    for (let iteration = 0; iteration < 20; iteration++) {
+      fs.rmSync(path.join(registryDir, 'published.txt'), { force: true });
+      const code = [
+        "const fs = require('fs'); const path = require('path');",
+        "const dir = process.argv[1]; const lock = path.join(dir, '.discovery.lock');",
+        "fs.writeFileSync(lock, JSON.stringify({pid: process.pid, nonce: '12345678-1234-1234-1234-123456789abc'}), {flag: 'wx'});",
+        "process.stdout.write('locked');",
+        "setTimeout(() => {fs.writeFileSync(path.join(dir, 'published.txt'), 'published'); fs.unlinkSync(lock);}, 100);",
+      ].join(' ');
+      const child = spawn(process.execPath, ['-e', code, registryDir], {
+        env: { ...process.env, HOME: tmpBase, USERPROFILE: tmpBase },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          child.stdout.once('data', () => resolve());
+          child.once('error', reject);
+          child.once('exit', (code) => {
+            if (code !== 0) reject(new Error('Lock holder failed'));
+          });
         });
-      });
-      withDiscoveryLock(() => {
-        expect(fs.readFileSync(path.join(registryDir, 'published.txt'), 'utf8')).toBe('published');
-      });
-    } finally {
-      child.kill();
-      if (child.exitCode === null) await new Promise((resolve) => child.once('exit', resolve));
+        withDiscoveryLock(() => {
+          expect(fs.readFileSync(path.join(registryDir, 'published.txt'), 'utf8')).toBe(
+            'published',
+          );
+        });
+      } finally {
+        child.kill();
+        if (child.exitCode === null) await new Promise((resolve) => child.once('exit', resolve));
+      }
     }
   });
 

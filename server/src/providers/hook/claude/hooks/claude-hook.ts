@@ -10,6 +10,7 @@ import {
   SERVER_JSON_NAME,
   SERVERS_DIR,
 } from '../../../../constants.js';
+import { sameServerGeneration } from '../../../../discoveryRecords.js';
 import type { ServerConfig, ServerTarget } from '../../../../serverConfig.js';
 import { isServerConfig, isServerTarget } from '../../../../serverConfig.js';
 import { probeServer } from '../../../../serverProbe.js';
@@ -41,8 +42,7 @@ function hookDebug(line: string): void {
   }
 }
 
-/** True if a process with this PID is alive. Best-effort: a false positive on
- *  PID reuse just costs one extra, harmless, failed POST -- never a crash. */
+/** PID life only: registry fan-out does not authenticate the listener. */
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -62,7 +62,7 @@ function isProcessAlive(pid: number): boolean {
  * falls back to the legacy single-target server.json (forward-compat with a
  * server that predates the registry).
  */
-function readRegistry(): ServerConfig[] {
+function readRegistry(dead: ServerTarget[]): ServerConfig[] {
   let files: string[];
   try {
     files = fs.readdirSync(SERVERS_REGISTRY_DIR).filter((f) => f.endsWith('.json'));
@@ -82,6 +82,7 @@ function readRegistry(): ServerConfig[] {
       if (isProcessAlive(entry.pid)) {
         live.push(entry);
       } else {
+        dead.push(entry);
         hookDebug(`registry-skip reason=dead-pid file=${file} pid=${entry.pid}`);
       }
     } catch (e) {
@@ -168,14 +169,22 @@ async function main(): Promise<void> {
   // Multi-server fan-out (D4): deliver to every live server in the registry.
   // Falls back to the single legacy server.json when the registry has no live
   // entries -- e.g. a server on disk that predates the registry (A1/A2).
-  let servers: ServerTarget[] = readRegistry();
+  const dead: ServerTarget[] = [];
+  let servers: ServerTarget[] = readRegistry(dead);
   if (servers.length === 0) {
     try {
       const legacy = JSON.parse(fs.readFileSync(SERVER_JSON, 'utf-8')) as unknown;
       if (!isServerTarget(legacy)) {
         throw new Error('invalid legacy server config');
       }
-      if ((await probeServer(legacy, HOOK_LEGACY_PROBE_TIMEOUT_MS)) !== 'healthy') {
+      if (
+        dead.some((entry) => sameServerGeneration(entry, legacy)) ||
+        !isProcessAlive(legacy.pid)
+      ) {
+        hookDebug(`exit reason=legacy-dead-pid event=${eventName} sid=${sid}`);
+        return;
+      }
+      if ((await probeServer(legacy, HOOK_LEGACY_PROBE_TIMEOUT_MS)) === 'stale') {
         hookDebug(`exit reason=legacy-not-healthy event=${eventName} sid=${sid}`);
         return;
       }

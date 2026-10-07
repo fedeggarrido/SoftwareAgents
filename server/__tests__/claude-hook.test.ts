@@ -5,6 +5,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { HOOK_LEGACY_PROBE_TIMEOUT_MS } from '../src/constants.js';
+import { canBind } from './helpers/bindable.js';
+
 const HOOK_SCRIPT = path.join(__dirname, '../../dist/hooks/claude-hook.js');
 
 // Isolated temp HOME
@@ -69,7 +72,8 @@ function startRecordingServer(
       res.end('ok');
     });
   });
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
     server.listen(0, host, () => {
       const port = (server.address() as { port: number }).port;
       resolve({
@@ -172,8 +176,8 @@ describe('claude-hook.js integration', () => {
     expect(code).toBe(0);
   });
 
-  // 6. Script handles server timeout
-  itBuilt('exits within 5s when server does not respond', async () => {
+  // Unknown legacy health still attempts a POST with its own timeout.
+  itBuilt('bounds legacy probe plus POST when neither responds', async () => {
     // Start a server that never responds
     const server = http.createServer(() => {
       // intentionally never respond
@@ -187,9 +191,100 @@ describe('claude-hook.js integration', () => {
     );
     const elapsed = Date.now() - start;
 
+    server.closeAllConnections();
     server.close();
     expect(code).toBe(0);
     expect(elapsed).toBeLessThan(5000);
+  });
+
+  itBuilt('pins the 300 ms legacy probe budget and delivers after unknown health', async () => {
+    expect(HOOK_LEGACY_PROBE_TIMEOUT_MS).toBe(300);
+    const requests: Array<{ method?: string; at: number }> = [];
+    const server = http.createServer((req, res) => {
+      requests.push({ method: req.method, at: Date.now() });
+      if (req.method === 'POST') {
+        req.resume();
+        res.end('ok');
+      }
+      // GET intentionally hangs; POST proves unknown is not treated as stale.
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      writeServerJson((server.address() as { port: number }).port, 'busy');
+      expect((await runHookScript('{"session_id":"busy","hook_event_name":"Stop"}')).code).toBe(0);
+      expect(requests.map((request) => request.method)).toEqual(['GET', 'POST']);
+      const elapsed = requests[1].at - requests[0].at;
+      expect(elapsed).toBeGreaterThanOrEqual(HOOK_LEGACY_PROBE_TIMEOUT_MS - 50);
+      expect(elapsed).toBeLessThan(HOOK_LEGACY_PROBE_TIMEOUT_MS + 700);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  itBuilt('bounds legacy POST timeout after healthy GET', async () => {
+    const server = http.createServer((req, res) => {
+      if (req.method === 'GET') res.end(JSON.stringify({ pid: process.pid }));
+      else req.resume();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const log = path.join(tmpBase, 'legacy-post-timeout.log');
+    try {
+      writeServerJson((server.address() as { port: number }).port, 'busy-post');
+      const began = Date.now();
+      expect(
+        (await runHookScript('{"hook_event_name":"Stop"}', { PIXEL_AGENTS_DEBUG_LOG: log })).code,
+      ).toBe(0);
+      expect(Date.now() - began).toBeLessThan(3500);
+      expect(fs.readFileSync(log, 'utf8')).toContain('POST-timeout');
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  for (const registered of [false, true]) {
+    itBuilt(`rejects dead legacy PID before probe (registered=${registered})`, async () => {
+      const squatter = await startRecordingServer('127.0.0.1', 999999);
+      try {
+        writeServerJson(squatter.port, 'dead-secret');
+        const pointer = path.join(tmpBase, '.pixel-agents', 'server.json');
+        const dead = { ...JSON.parse(fs.readFileSync(pointer, 'utf8')), pid: 999999 };
+        fs.writeFileSync(pointer, JSON.stringify(dead));
+        if (registered) {
+          const dir = path.join(tmpBase, '.pixel-agents', 'servers');
+          fs.mkdirSync(dir);
+          fs.writeFileSync(
+            path.join(dir, `999999-${squatter.port}.json`),
+            JSON.stringify({ ...dead, servesSpa: false, protocol: 1 }),
+          );
+        }
+        const log = path.join(tmpBase, 'dead.log');
+        expect(
+          (await runHookScript('{"hook_event_name":"Stop"}', { PIXEL_AGENTS_DEBUG_LOG: log })).code,
+        ).toBe(0);
+        expect(squatter.requests).toEqual([]);
+        expect(fs.readFileSync(log, 'utf8')).toContain('legacy-dead-pid');
+        expect(JSON.parse(fs.readFileSync(pointer, 'utf8'))).toEqual(dead);
+      } finally {
+        squatter.close();
+      }
+    });
+  }
+
+  itBuilt('keeps registry fan-out probe-free and skips temporarily nonlocal hosts', async () => {
+    const target = await startRecordingServer('127.0.0.1', process.pid + 1);
+    try {
+      writeRegistryEntry(process.pid, target.port, 'pid-only');
+      writeRegistryEntry(process.pid, 65000, 'missing-interface', '192.0.2.1');
+      const missing = path.join(tmpBase, '.pixel-agents', 'servers', `${process.pid}-65000.json`);
+      const before = fs.readFileSync(missing, 'utf8');
+      expect((await runHookScript('{"hook_event_name":"Stop"}')).code).toBe(0);
+      expect(target.requests).toEqual([{ method: 'POST', authorization: 'Bearer pid-only' }]);
+      expect(fs.readFileSync(missing, 'utf8')).toBe(before);
+    } finally {
+      target.close();
+    }
   });
 
   // 7. Multi-server fan-out: one event reaches every live registry entry
@@ -361,7 +456,8 @@ describe('claude-hook.js integration', () => {
 
   for (const host of ['127.0.0.2', '::1']) {
     for (const source of ['registry', 'legacy']) {
-      itBuilt('delivers using ' + source + ' specific bind ' + host, async () => {
+      itBuilt('delivers using ' + source + ' specific bind ' + host, async (context) => {
+        if (!(await canBind(host))) context.skip(`Cannot bind ${host} on this runner`);
         const target = await startRecordingServer(host);
         try {
           if (source === 'registry')

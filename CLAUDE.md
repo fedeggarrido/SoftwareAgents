@@ -381,23 +381,40 @@ Registry hook fan-out does not add a probe per event. Records may carry a valida
 local literal contact IP (`host`); missing `host` retains 127.0.0.1 compatibility.
 The contact IP comes from the actual bind; wildcard IPv4/IPv6 use 127.0.0.1/::1.
 Publication and generation-specific cleanup (token + startedAt + PID + port, also
-host) share an exclusive-create lock in servers/, with a 300 ms contention bound.
-HTTP probes never hold this lock. Dead-owner recovery elects one reaper per lock
-generation; tiny .reaped-<nonce>.lock tombstones remain to prevent a delayed second
-reaper from unlinking a new lock. Unreadable/incomplete locks fail closed.
-Mutations use `pathGuard.resolveInside` relative to ~/.pixel-agents, including
-realpath containment, and unique exclusive-create temporaries with failure cleanup.
-The directory is operator-owned: 0700 on creation and discovery/lock files 0600 on
-POSIX; on Windows, inherited profile ACLs provide ownership isolation. This does
-not repair permissive existing ACLs, and the cooperative lock cannot constrain old
+host) share an exclusive-create lock in servers/, with a 300 ms contention bound
+and a 10 s mtime lease (SERVER_DISCOVERY_LOCK_LEASE_MS). HTTP probes never hold
+this lock; critical sections must finish within the lease. A dead owner or an
+expired lease is reclaimed regardless of PID life or incomplete/invalid contents.
+Recovery elects one reaper per generation; .reaped-<nonce>.lock tombstones prevent
+a delayed second reaper from unlinking a new lock. Dead or expired tombstones
+(including corrupt ones) elect a successor. Recovery is automatic on the next
+acquisition; a failed lock-body write also releases the creator's own entry.
+The registry is published first and independently of server.json. Windows
+EPERM/EBUSY renames get short retries; unfinished publication retries in the
+background with 100 ms to 5 s backoff until success or stop(). When locking fails,
+discovery scans read-only without pruning. A live entry whose host is temporarily
+absent from local interfaces is skipped for reuse and hook fan-out, and retained.
+Mutations contain the parent with pathGuard.resolveInside, operate on lexical
+entries, and leave final symlinks alone. Unique exclusive-create temporaries are
+cleaned on failure. The directory is operator-owned: 0700 on creation and
+record/lock files 0600 on POSIX; Windows uses inherited profile ACLs. This does not
+repair permissive existing ACLs, and the cooperative lock cannot constrain old
 versions or an adversary replacing filesystem links between validation and use.
 
-Residual discovery risk: PID health is liveness, **not server authentication**. A
-local process can imitate /api/health and receive the token and events in the
-subsequent POST. Nonce/HMAC authentication without disclosing the token during the
-probe is explicitly deferred. Concurrent starts may still create separate servers;
-each publishes only after listen completes, with its own PID/port entry. The legacy
-single pointer still reaches at most one server during mixed-version operation.
+Residual discovery risk: registry fan-out sends the Bearer token and event payload
+to destinations with **only PID-liveness validation, without a health probe**.
+A recycled live PID and reused port can therefore send events to an unrelated
+local listener until a server start prunes the stale generation. The legacy
+fallback requires a live PID and excludes generations just rejected as dead;
+its 300 ms probe is **liveness, not authentication**. Only a stale verdict blocks
+delivery: unknown (busy) still attempts the POST with its 2 s timeout. A local
+process can imitate /api/health and receive legacy tokens and events. Nonce/HMAC
+authentication without disclosing the token during the probe is deferred. An OS
+pause longer than the 10 s lease can allow overlapping cooperative critical
+sections; recovery tombstones remain on disk. Concurrent starts may create separate
+servers, each publishing after listen with its own PID/port entry. Permanent
+filesystem/ACL failures still prevent publication despite retries. The legacy
+single pointer reaches at most one server during mixed-version operation.
 
 ### ClientMessageHandler
 

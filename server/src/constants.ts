@@ -85,6 +85,12 @@ export const SERVER_HEALTH_PROBE_TIMEOUT_MS = 1500;
 export const HOOK_LEGACY_PROBE_TIMEOUT_MS = 300;
 /** Publication/cleanup lock is never held over network work. */
 export const SERVER_DISCOVERY_LOCK_TIMEOUT_MS = 300;
+/** Critical sections last milliseconds; expiry also recovers recycled PIDs. */
+export const SERVER_DISCOVERY_LOCK_LEASE_MS = 10_000;
+export const SERVER_DISCOVERY_RETRY_MIN_MS = 100;
+export const SERVER_DISCOVERY_RETRY_MAX_MS = 5000;
+/** Short Windows rename retries; longer failures use publication backoff. */
+export const SERVER_DISCOVERY_RENAME_TIMEOUT_MS = 100;
 /** Our /api/health body is tiny; anything longer is not ours and is not buffered. */
 export const SERVER_HEALTH_MAX_BODY_CHARS = 4096;
 

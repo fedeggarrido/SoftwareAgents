@@ -9,8 +9,15 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
-import { SERVER_JSON_NAME, SERVER_REGISTRY_PROTOCOL_VERSION, SERVERS_DIR } from './constants.js';
 import {
+  SERVER_DISCOVERY_RETRY_MAX_MS,
+  SERVER_DISCOVERY_RETRY_MIN_MS,
+  SERVER_JSON_NAME,
+  SERVER_REGISTRY_PROTOCOL_VERSION,
+  SERVERS_DIR,
+} from './constants.js';
+import {
+  discoveryEntryPath,
   discoveryPath,
   isProcessRunning,
   sameServerGeneration,
@@ -22,7 +29,12 @@ export type { ServerProbe } from './serverProbe.js';
 export { probeServer } from './serverProbe.js';
 import { createHttpServer } from './httpServer.js';
 import type { ServerConfig, ServerTarget } from './serverConfig.js';
-import { isServerConfig, isServerTarget } from './serverConfig.js';
+import {
+  isServerConfig,
+  isServerConfigStructure,
+  isServerTarget,
+  isServerTargetStructure,
+} from './serverConfig.js';
 
 export type { ServerConfig } from './serverConfig.js';
 
@@ -51,6 +63,10 @@ export class PixelAgentsServer {
   private app: FastifyInstance | null = null;
   private config: ServerConfig | null = null;
   private ownsServer = false;
+  private publicationTimer: ReturnType<typeof setTimeout> | undefined;
+  private pendingRegistry = false;
+  private pendingLegacy = false;
+  private publicationDelay = SERVER_DISCOVERY_RETRY_MIN_MS;
   private callback: HookEventCallback | null = null;
 
   /** Register a callback for incoming hook events from any provider. */
@@ -127,16 +143,9 @@ export class PixelAgentsServer {
         : {}),
     };
     this.ownsServer = true;
-    // Dual-write: legacy single-target pointer (old hook scripts) + registry
-    // entry (new hook scripts fan out to every entry here).
-    try {
-      withDiscoveryLock(() => {
-        this.writeServerJson(this.config!);
-        this.writeRegistryEntry(this.config!);
-      });
-    } catch (error) {
-      console.error(`[Pixel Agents] Failed to publish discovery records: ${error}`);
-    }
+    this.pendingRegistry = this.pendingLegacy = true;
+    this.publicationDelay = SERVER_DISCOVERY_RETRY_MIN_MS;
+    this.publishDiscovery();
     console.log(`[Pixel Agents] Server: listening on ${host}:${port}`);
 
     return this.config;
@@ -144,6 +153,9 @@ export class PixelAgentsServer {
 
   /** Stop the server and clean up its discovery records (only if we own them). */
   stop(): void {
+    clearTimeout(this.publicationTimer);
+    this.publicationTimer = undefined;
+    this.pendingRegistry = this.pendingLegacy = false;
     if (this.app) {
       this.app.close();
       this.app = null;
@@ -160,6 +172,41 @@ export class PixelAgentsServer {
     }
     this.config = null;
     this.ownsServer = false;
+  }
+
+  /** Registry first, independent legacy failure; retry only unfinished writes. */
+  private publishDiscovery(): void {
+    if (!this.ownsServer || !this.config) return;
+    try {
+      withDiscoveryLock(() => {
+        if (this.pendingRegistry) {
+          try {
+            this.writeRegistryEntry(this.config!);
+            this.pendingRegistry = false;
+          } catch (error) {
+            console.error(`[Pixel Agents] Failed to publish registry: ${error}`);
+          }
+        }
+        if (this.pendingLegacy) {
+          try {
+            this.writeServerJson(this.config!);
+            this.pendingLegacy = false;
+          } catch (error) {
+            console.error(`[Pixel Agents] Failed to publish server.json: ${error}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error(`[Pixel Agents] Failed to publish discovery records: ${error}`);
+    }
+    if (this.pendingRegistry || this.pendingLegacy) {
+      this.publicationTimer = setTimeout(() => {
+        this.publicationTimer = undefined;
+        this.publishDiscovery();
+      }, this.publicationDelay);
+      this.publicationTimer.unref();
+      this.publicationDelay = Math.min(this.publicationDelay * 2, SERVER_DISCOVERY_RETRY_MAX_MS);
+    }
   }
 
   /** Returns the current server config, or null if not started. */
@@ -194,34 +241,49 @@ export class PixelAgentsServer {
    * treated the same as dead entries and removed. Returns only live entries.
    */
   private readAndPruneRegistry(): Array<{ config: ServerConfig; file: string }> {
-    try {
-      return withDiscoveryLock(() => {
-        const dir = this.getRegistryDir();
-        const live: Array<{ config: ServerConfig; file: string }> = [];
-        for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
-          const relative = `${SERVERS_DIR}/${file}`;
-          // Read and prune under the publication lock. Escaping or broken links
-          // fail closed, including when the final record itself is a symlink.
-          try {
-            const entry = JSON.parse(fs.readFileSync(discoveryPath(relative), 'utf8')) as unknown;
-            if (isServerConfig(entry) && isProcessRunning(entry.pid)) {
-              live.push({ config: entry, file: relative });
-            } else {
-              fs.unlinkSync(discoveryPath(relative));
-            }
-          } catch {
+    const scan = (prune: boolean): Array<{ config: ServerConfig; file: string }> => {
+      const live: Array<{ config: ServerConfig; file: string }> = [];
+      let files: string[];
+      try {
+        files = fs.readdirSync(this.getRegistryDir());
+      } catch {
+        return live;
+      }
+      for (const file of files.filter((f) => f.endsWith('.json'))) {
+        const relative = `${SERVERS_DIR}/${file}`;
+        let text: string;
+        try {
+          text = fs.readFileSync(discoveryEntryPath(relative), 'utf8');
+        } catch {
+          // An access/share violation is not evidence of a malformed record.
+          continue;
+        }
+        let entry: unknown;
+        try {
+          entry = JSON.parse(text) as unknown;
+        } catch {
+          // Invalid JSON joins malformed structures below.
+        }
+        if (!isServerConfigStructure(entry) || !isProcessRunning(entry.pid)) {
+          if (prune) {
             try {
-              fs.unlinkSync(discoveryPath(relative));
+              fs.unlinkSync(discoveryEntryPath(relative));
             } catch {
-              /* fail closed */
+              /* Leave links or entries now held by another reader. */
             }
           }
+        } else if (isServerConfig(entry)) {
+          live.push({ config: entry, file: relative });
         }
-        return live;
-      });
+        // A live PID with a temporarily nonlocal host is skipped, never pruned.
+      }
+      return live;
+    };
+    try {
+      return withDiscoveryLock(() => scan(true));
     } catch {
-      return [];
-    }
+      return scan(false);
+    } // Contention must not hide reusable servers.
   }
 
   /**
@@ -281,9 +343,9 @@ export class PixelAgentsServer {
   /** Under the publication lock: re-read and delete only this generation. */
   private deleteMatchingRecord(relative: string, target: ServerTarget): void {
     try {
-      const current = JSON.parse(fs.readFileSync(discoveryPath(relative), 'utf8')) as unknown;
-      if (isServerTarget(current) && sameServerGeneration(current, target)) {
-        fs.unlinkSync(discoveryPath(relative));
+      const current = JSON.parse(fs.readFileSync(discoveryEntryPath(relative), 'utf8')) as unknown;
+      if (isServerTargetStructure(current) && sameServerGeneration(current, target)) {
+        fs.unlinkSync(discoveryEntryPath(relative));
       }
     } catch {
       // Already gone, physically outside the root, or unreadable: leave alone.

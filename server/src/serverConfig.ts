@@ -42,6 +42,13 @@ export function isLocalContactHost(host: unknown): host is string {
 
 /** Validate the contact fields shared by current and legacy discovery records. */
 export function isServerTarget(value: unknown): value is ServerTarget {
+  return (
+    isServerTargetStructure(value) && (value.host === undefined || isLocalContactHost(value.host))
+  );
+}
+
+/** Shape only: temporarily missing interfaces must not trigger deletion. */
+export function isServerTargetStructure(value: unknown): value is ServerTarget {
   if (!isRecord(value)) return false;
   return (
     Number.isSafeInteger(value.port) &&
@@ -51,7 +58,7 @@ export function isServerTarget(value: unknown): value is ServerTarget {
     (value.pid as number) > 0 &&
     typeof value.token === 'string' &&
     value.token.length > 0 &&
-    (value.host === undefined || isLocalContactHost(value.host)) &&
+    (value.host === undefined || (typeof value.host === 'string' && !!isIP(value.host))) &&
     (value.startedAt === undefined ||
       (Number.isSafeInteger(value.startedAt) && (value.startedAt as number) >= 0)) &&
     (value.debugLog === undefined || typeof value.debugLog === 'string')
@@ -60,7 +67,11 @@ export function isServerTarget(value: unknown): value is ServerTarget {
 
 /** Validate a complete current-version registry record before reuse/fan-out. */
 export function isServerConfig(value: unknown): value is ServerConfig {
-  if (!isServerTarget(value) || !isRecord(value)) return false;
+  return isServerConfigStructure(value) && isServerTarget(value);
+}
+
+export function isServerConfigStructure(value: unknown): value is ServerConfig {
+  if (!isServerTargetStructure(value) || !isRecord(value)) return false;
   return (
     Number.isSafeInteger(value.startedAt) &&
     (value.startedAt as number) >= 0 &&

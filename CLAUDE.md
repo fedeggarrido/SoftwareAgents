@@ -188,6 +188,11 @@ solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
 - `quotaReader.ts`: obtiene cuotas observadas de logs Claude y rollouts Codex,
   incluida la ventana semanal; distingue datos desconocidos y ventanas renovadas.
   Es una lectura observacional, no una reserva de capacidad.
+- `modelTiers.ts`, `modelPolicy.ts`, `modelTierAdmission.ts`, `taskModelInputs.ts`:
+  niveles economy/standard/deep, pesos declarativos, catálogo y tope exclusivos
+  del operador, selección bajo admisión SA-036; `quotaCommand.ts` explica sin
+  lanzar. `worker.ts` registra selección en WorkStore/audit y registry →
+  `agentRoles.ts` → overlay. Véase [executor-selection.md](docs/executor-selection.md).
 - `agentRoles.ts`: extrae etiquetas de rol y departamento de metadatos y briefs
   explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar
   prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.

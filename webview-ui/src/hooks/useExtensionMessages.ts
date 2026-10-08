@@ -362,6 +362,10 @@ export function useExtensionMessages(
           label: msg.label,
           department: msg.department,
           detail: msg.detail,
+          tier: msg.tier,
+          model: msg.model,
+          effort: msg.effort,
+          selectionReason: msg.selectionReason,
         });
         seatMeetingParticipants(os);
       } else if (msg.type === 'agentClosed') {

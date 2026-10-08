@@ -3,6 +3,8 @@
 // Invoke with node fake-cli.cjs claude -p --output-format stream-json,
 // or node fake-cli.cjs codex exec --json. Never touches HOME or authentication.
 const [executor, ...args] = process.argv.slice(2);
+if (process.env.SA_TEST_ARGV)
+  require('fs').writeFileSync(process.env.SA_TEST_ARGV, JSON.stringify(args));
 const valid =
   executor === 'claude'
     ? args.includes('-p') && args.includes('--output-format') && args.includes('stream-json')

@@ -4,6 +4,12 @@ import * as path from 'path';
 
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { CONFIG_FILE_MODE, CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import {
+  claudeEffortSupported,
+  ModelTierConfigError,
+  tierPolicySchema,
+  validateModelTiers,
+} from './modelTiers.js';
 import { compileSchema } from './schemaValidation.js';
 
 export interface AdapterSettings {
@@ -88,6 +94,7 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
   properties: {
     autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
     allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
+    modelTiers: tierPolicySchema,
     protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
     binaryPaths: numberMap(nonEmptyString),
     quotaThresholds: numberMap({ ...nonNegativeNumber, maximum: 100 }),
@@ -127,6 +134,14 @@ export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfi
   const out: Record<string, ProjectOperatorConfig> = Object.create(null);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [id, policy] of Object.entries(raw)) {
+    if (policy && typeof policy === 'object' && Object.hasOwn(policy, 'modelTiers')) {
+      const candidate = policy as ProjectOperatorConfig;
+      validateModelTiers(candidate.modelTiers, () =>
+        claudeEffortSupported(candidate.binaryPaths?.claude),
+      );
+      if (!validateProjectOperator(policy))
+        throw new ModelTierConfigError(`Invalid Operator project ${id} with modelTiers`);
+    }
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || !validateProjectOperator(policy)) continue;
     if (policy.autopilot && !policy.autopilot.command[0]) continue;
     out[id] = structuredClone(policy);
@@ -273,6 +288,7 @@ export function readConfig(): PixelAgentsConfig {
       projects: parseProjects(parsed.projects),
     };
   } catch (err) {
+    if (err instanceof ModelTierConfigError) throw err;
     console.error('[Pixel Agents] Failed to read config file:', err);
     return {
       vscode: { ...DEFAULT_ADAPTER_SETTINGS },

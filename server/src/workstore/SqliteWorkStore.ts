@@ -639,7 +639,9 @@ class SqliteWorkStore implements WorkStore {
       : '';
     const result = await this.write(() =>
       this.db
-        .prepare(`INSERT INTO executions SELECT ${Array(14).fill('?').join(',')}, NULL${guard}`)
+        .prepare(
+          `INSERT INTO executions SELECT ${Array(14).fill('?').join(',')}, NULL, ?, ?, ?${guard}`,
+        )
         .run(
           this.projectId,
           execution.key,
@@ -655,6 +657,9 @@ class SqliteWorkStore implements WorkStore {
           execution.task_version,
           execution.tool_policy_version,
           identity,
+          execution.model_tier ?? null,
+          execution.model_effort ?? null,
+          execution.selection_reason ?? null,
           ...(task
             ? [
                 this.projectId,

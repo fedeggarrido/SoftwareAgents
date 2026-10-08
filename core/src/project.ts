@@ -1,3 +1,5 @@
+import type { ModelTierPolicy } from './modelTier.js';
+
 /** Repository-authored identity and paths. This document cannot grant authority. */
 export interface ProjectManifest {
   apiVersion: 'softwareagents.io/v1alpha1';
@@ -21,6 +23,7 @@ export interface ProjectAutopilotConfig {
 export interface ProjectOperatorConfig {
   autonomyLevel: AutonomyLevel;
   allowedExecutors: string[];
+  modelTiers?: ModelTierPolicy;
   /** Additive protected paths/globs from Operator config only. */
   protectedPaths?: string[];
   binaryPaths?: Record<string, string>;

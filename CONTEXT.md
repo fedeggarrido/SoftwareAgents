@@ -302,6 +302,12 @@ _Do not confuse with_: permanent assignment, permission to execute, or a guarant
 A timestamped observation of executor/account capacity, with available quota dimensions, reset times, source, and confidence; unknown capacity remains explicitly unknown.
 _Do not confuse with_: the Context gauge, a guaranteed reservation, or a single universal quota percentage.
 
+**Nivel de modelo (Model Tier)**:
+Política de recursos `economy | standard | deep` para una Execution. La regla
+declarativa solicita un nivel por capabilityClass, tipo y tamaño; Operator config
+define sus candidatos (Executor, Model y esfuerzo), su tope y bajadas permitidas.
+_No confundir con_: identidad del Agent, permisos, autonomía o cuota reservada.
+
 **Human Decision**:
 A recorded human response to an escalated question or approval request, tied to its scope and the work or gate it resolves.
 _Do not confuse with_: an agent recommendation, a visual click alone, or blanket authorization for later actions.

@@ -46,6 +46,35 @@ describe('configPersistence: areas', () => {
   });
 
   // ── parseAreaMappings ────────────────────────────────────────
+  it('invalid operator tiers fail clearly at load rather than dropping the catalogue', () => {
+    fs.mkdirSync(path.join(tempHome, '.pixel-agents'));
+    fs.writeFileSync(
+      path.join(tempHome, '.pixel-agents/config.json'),
+      JSON.stringify({
+        projects: {
+          test: {
+            autonomyLevel: 'A1',
+            allowedExecutors: ['codex'],
+            modelTiers: {
+              maxTier: 'economy',
+              tiers: {
+                economy: {
+                  candidates: [
+                    {
+                      executor: 'codex',
+                      model: 'test-model',
+                      effort: 'medium"\nfeatures.apps=true',
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+    expect(() => readConfig()).toThrow('Invalid Operator modelTiers');
+  });
 
   describe('parseAreaMappings', () => {
     it('returns empty object for non-object input (null, undefined, primitives)', () => {

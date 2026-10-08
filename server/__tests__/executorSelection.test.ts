@@ -251,3 +251,70 @@ it('rejects authority in model preferences and duplicate/invalid CLI options', (
     parseWorkerArgs(['run', '--select-executor', '--task', 'SA-036', '--brief', 'brief.md']),
   ).toMatchObject({ selectExecutor: true });
 });
+it('explains tiers without launch, with SA-036 exit codes and operator override', () => {
+  writeOperator();
+  const configFile = path.join(root, '.pixel-agents/config.json');
+  const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  const rule = parse(
+    fs.readFileSync(
+      path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+      'utf8',
+    ),
+  ).tierRule;
+  config.projects[Object.keys(config.projects)[0]].modelTiers = {
+    maxTier: 'standard',
+    rule,
+    tiers: {
+      standard: {
+        candidates: [{ executor: 'codex', model: 'test-standard-model', effort: 'medium' }],
+      },
+    },
+  };
+  fs.writeFileSync(configFile, JSON.stringify(config));
+  const args = parseQuotaArgs([
+    'check',
+    '--select-executor',
+    '--role',
+    'developer',
+    '--work-type',
+    'architecture',
+    '--size',
+    'L',
+    '--json',
+  ]);
+  const log = vi.fn();
+  expect(runQuotaCheck(args, root, log)).toBe(0);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+    status: 'probe',
+    tier: 'standard',
+    requestedTier: 'deep',
+    executor: 'codex',
+    model: 'test-standard-model',
+    effort: 'medium',
+    downgrades: [],
+  });
+  const now = Date.now() / 1000;
+  expect(runQuotaCheck({ ...args, role: 'qa', workType: 'qa', size: 'S' }, root, log)).toBe(0);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+    role: 'qa',
+    tier: 'standard',
+    executor: 'codex',
+    model: 'test-standard-model',
+    effort: 'medium',
+  });
+  observation({ ...capacity(1, now + 100), observedAt: now });
+  expect(runQuotaCheck(args, root, log)).toBe(3);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+    status: 'wait',
+    resetsAt: now + 100,
+  });
+  expect(fs.existsSync(path.join(root, '.worktrees'))).toBe(false);
+  for (const extra of [
+    ['--work-type', 'bad'],
+    ['--size', 'XL'],
+    ['--executor', 'codex'],
+  ])
+    expect(() =>
+      parseQuotaArgs(['check', '--select-executor', '--role', 'developer', ...extra]),
+    ).toThrow();
+});

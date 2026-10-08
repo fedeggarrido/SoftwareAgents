@@ -1,11 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { parse } from 'yaml';
 
+import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
+import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
+import type { WorkSize, WorkType } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { readConfig } from './configPersistence.js';
 import type { ExecutorId } from './executors/executor.js';
 import type { SelectionSnapshot } from './executorSelection.js';
+import { selectExecutor } from './executorSelection.js';
 import { readExecutorSlots, slotProcessIdentity } from './executorSlots.js';
 import { retryFileOperation } from './fileContention.js';
 import {
@@ -13,6 +18,8 @@ import {
   machineCapacityDirectory,
   type MachineCapacityObservation,
 } from './machineCapacity.js';
+import { loadModelPolicy, loadTierRule } from './modelPolicy.js';
+import { selectModelTier, WORK_TYPES } from './modelTiers.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { mergeQuotaEvidence, quotaWindowKey } from './quotaEvidence.js';
 import { quotaGate } from './quotaGate.js';
@@ -218,25 +225,33 @@ export function readSelectionSnapshot(
 }
 
 export interface QuotaArgs {
-  executor: ExecutorId;
+  executor?: ExecutorId;
   role: string;
   json: boolean;
+  selectExecutor?: boolean;
+  workType?: WorkType;
+  size?: WorkSize;
 }
 export function parseQuotaArgs(argv: string[]): QuotaArgs {
   if (argv[0] !== 'check')
     throw new Error(
-      'Usage: pixel-agents quota check --executor claude|codex --role <role> [--json]',
+      'Usage: pixel-agents quota check (--executor claude|codex | --select-executor) --role <role> [--work-type <type>] [--size S|M|L] [--json]',
     );
   const values: Record<string, string> = {};
   let json = false;
+  let selection = false;
   for (let i = 1; i < argv.length; i++) {
     const key = argv[i];
+    if (key === '--select-executor' && !selection) {
+      selection = true;
+      continue;
+    }
     if (key === '--json' && !json) {
       json = true;
       continue;
     }
     if (
-      !['--executor', '--role'].includes(key) ||
+      !['--executor', '--role', '--work-type', '--size'].includes(key) ||
       values[key] ||
       !argv[i + 1] ||
       argv[i + 1].startsWith('--')
@@ -244,20 +259,65 @@ export function parseQuotaArgs(argv: string[]): QuotaArgs {
       throw new Error('Invalid quota check arguments');
     values[key] = argv[++i];
   }
-  if (!['claude', 'codex'].includes(values['--executor']) || !values['--role'])
-    throw new Error('Executor and role are required');
-  return { executor: values['--executor'] as ExecutorId, role: values['--role'], json };
+  if (
+    (!selection && !['claude', 'codex'].includes(values['--executor'])) ||
+    !values['--role'] ||
+    (selection && values['--executor']) ||
+    (values['--work-type'] && !(WORK_TYPES as readonly string[]).includes(values['--work-type'])) ||
+    (values['--size'] && !['S', 'M', 'L'].includes(values['--size']))
+  )
+    throw new Error(
+      'Invalid quota arguments: require role and executor or --select-executor; valid work type and size S/M/L',
+    );
+  return {
+    ...(selection ? { selectExecutor: true } : { executor: values['--executor'] as ExecutorId }),
+    role: values['--role'],
+    json,
+    ...(values['--work-type'] ? { workType: values['--work-type'] as WorkType } : {}),
+    ...(values['--size'] ? { size: values['--size'] as WorkSize } : {}),
+  };
 }
 export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = console.log): number {
   const config = loadProjectConfig(cwd);
   if (!config) throw new Error('quota check requires a Project');
   const snapshot = readSelectionSnapshot(config.operator);
-  const decision = snapshot.allowedExecutors.includes(args.executor)
+  if (args.selectExecutor) {
+    if (!['developer', 'reviewer', 'qa', 'architect', 'requirements-analyst'].includes(args.role))
+      throw new Error('Unknown AgentSpec role');
+    const bundled = path.join(__dirname, `agents/templates/${args.role}.yaml`);
+    const source = path.resolve(__dirname, `../../agents/templates/${args.role}.yaml`);
+    const agent = validateSchema(
+      compileSchema<AgentSpec>(agentSchema),
+      parse(fs.readFileSync(fs.existsSync(bundled) ? bundled : source, 'utf8')),
+    );
+    const tierPolicy = config.operator.modelTiers;
+    const selected = tierPolicy
+      ? selectModelTier(agent, tierPolicy.rule ?? loadTierRule(cwd), tierPolicy, args, snapshot)
+      : selectExecutor(agent, loadModelPolicy(cwd), snapshot);
+    const result = {
+      ...selected.gate,
+      role: args.role,
+      tier: 'tier' in selected ? selected.tier : null,
+      requestedTier: 'requestedTier' in selected ? selected.requestedTier : null,
+      executor: selected.choice?.executor ?? null,
+      model: selected.choice?.model ?? null,
+      effort:
+        selected.choice && 'effort' in selected.choice ? (selected.choice.effort ?? null) : null,
+      downgrades: 'downgrades' in selected ? selected.downgrades : [],
+      reason: selected.reason,
+      active: snapshot.active,
+      coverage: snapshot.coverage,
+    };
+    log(args.json ? JSON.stringify(result) : `${result.status}: ${result.reason}`);
+    return result.status === 'wait' ? 3 : 0;
+  }
+  const executor = args.executor!;
+  const decision = snapshot.allowedExecutors.includes(executor)
     ? quotaGate(
-        args.executor,
+        executor,
         snapshot.machinePolicy,
-        snapshot.capacities[args.executor],
-        snapshot.active[args.executor] ?? NaN,
+        snapshot.capacities[executor],
+        snapshot.active[executor] ?? NaN,
         snapshot.nowS,
       )
     : {
@@ -271,7 +331,7 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
           executor: args.executor,
           role: args.role,
           ...decision,
-          active: snapshot.active[args.executor],
+          active: snapshot.active[executor],
           coverage: snapshot.coverage,
         })
       : `${decision.status}: ${decision.reason}`,

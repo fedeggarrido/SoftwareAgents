@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { ModelTier } from '../../../core/src/modelTier.js';
 import { resolveInside } from '../pathGuard.js';
 import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './executor.js';
 
@@ -10,6 +11,10 @@ export interface SessionExecution {
   executionId: string;
   role: string;
   taskKey: string;
+  tier?: ModelTier;
+  model?: string | null;
+  effort?: string;
+  selectionReason?: string;
 }
 
 export interface ExecutionRecord extends SessionExecution {
@@ -70,6 +75,14 @@ export class ExecutionRegistry {
         executionId: record.executionId,
         role: record.role,
         taskKey: record.taskKey,
+        ...(record.tier
+          ? {
+              tier: record.tier,
+              model: record.model,
+              effort: record.effort,
+              selectionReason: record.selectionReason,
+            }
+          : {}),
       });
     }
     return result;
@@ -100,6 +113,9 @@ export class ExecutionRegistry {
             taskKey: req.taskKey,
             executor: inner.id,
             model: req.model ?? null,
+            tier: req.tier,
+            effort: req.effort,
+            selectionReason: req.selectionReason,
             sessionId: handle.sessionId,
             pid: 0,
             startedAt: new Date().toISOString(),
@@ -121,6 +137,9 @@ export class ExecutionRegistry {
                     taskKey: req.taskKey,
                     executor: inner.id,
                     model: req.model ?? null,
+                    tier: req.tier,
+                    effort: req.effort,
+                    selectionReason: req.selectionReason,
                     sessionId: event.sessionId,
                     pid: event.pid,
                     startedAt: event.startedAt,

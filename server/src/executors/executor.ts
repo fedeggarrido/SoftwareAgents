@@ -1,5 +1,6 @@
 import type { AgentSpec } from '../../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../../core/src/capacity.js';
+import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { AgentCompilerTask } from '../agentCompiler.js';
 export type ExecutorId = 'claude' | 'codex';
 
@@ -16,6 +17,9 @@ export interface ExecutionRequest {
   taskData?: AgentCompilerTask;
   worktreePath: string;
   model?: string;
+  effort?: string;
+  tier?: ModelTier;
+  selectionReason?: string;
   timeoutMin: number;
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void;

@@ -11,6 +11,7 @@ import {
   compileAgent,
   validateAgentOutput,
 } from '../agentCompiler.js';
+import { claudeEffortSupported, validateModelChoice } from '../modelTiers.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
@@ -35,6 +36,11 @@ export class ClaudeCliExecutor implements Executor {
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
   start(req: ExecutionRequest): ExecutionHandle {
+    validateModelChoice(
+      req,
+      'claude',
+      req.effort ? claudeEffortSupported(this.options.binary) : [],
+    );
     if (req.flags.length || (!req.agentSpec && req.role !== 'developer')) {
       throw new Error('Caller flags are forbidden; non-Developer roles require an AgentSpec');
     }
@@ -149,6 +155,7 @@ export class ClaudeCliExecutor implements Executor {
             '--no-chrome',
             '--disable-slash-commands',
             ...(req.model ? ['--model', req.model] : []),
+            ...(req.effort ? ['--effort', req.effort] : []),
           ];
           child = spawnRegisteredProcess(
             options.binary,

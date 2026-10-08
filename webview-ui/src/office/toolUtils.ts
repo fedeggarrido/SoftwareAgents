@@ -75,6 +75,15 @@ export interface AgentRoleView {
   label: string;
   department: string;
   detail?: string;
+  tier?: 'economy' | 'standard' | 'deep';
+  model?: string;
+  effort?: string;
+  selectionReason?: string;
+}
+
+/** Historical runtime choice; never inferred from the provider or current config. */
+export function modelTierLabel(role: AgentRoleView | undefined): string | undefined {
+  return role?.tier ? `${role.tier}${role.model ? ` · ${role.model}` : ''}` : undefined;
 }
 
 const agentRoles = new Map<number, AgentRoleView>();

@@ -1,4 +1,4 @@
-# Selección y quota gate (SA-036, SA-QA-5)
+# Selección, niveles de modelo y quota gate (SA-036, SA-084, SA-QA-5)
 
 `pixel-agents quota check --executor claude|codex --role <rol> [--json]`
 devuelve 0 para `go` o `probe`, y 3 para `wait`. JSON incluye `reason` y,
@@ -11,7 +11,7 @@ El rol es informativo: no reserva porcentajes ni concede permisos.
 `quota check` observa; el lanzamiento del worker vuelve a decidir y reserva un slot.
 
 `worker run --task SA-### --brief <archivo> --select-executor` activa la selección
-por capabilityClass del Developer. Sin ese flag se conserva la preferencia Claude,
+por capabilityClass del Developer. Sin catálogo de niveles ni ese flag se conserva la preferencia Claude,
 pero se aplica igualmente el gate y la reserva. La primera preferencia permitida
 se mantiene incluso si debe esperar; no hay fallback.
 
@@ -155,4 +155,172 @@ requieren umbrales explícitos y un límite configurado. El worker manual sin `-
 usa un slot y umbral 0% cuando faltan estos campos, respeta rechazos conocidos y
 solo permite una sonda con cuota desconocida. Los slots
 reservan admisión del runtime, no cuota de cuenta: no son el ledger de SA-037.
-Ledger, fallback de SA-038 y scoring ponderado quedan fuera de este cambio.
+El ledger de cuota y la recuperación de Executions agotadas de SA-038 siguen fuera de este cambio.
+
+## Niveles de modelo (SA-084)
+
+El operador define `projects.<id>.modelTiers` exclusivamente en
+`~/.pixel-agents/config.json`. Los nombres estables son **economy, standard, deep**;
+un nivel ausente no existe. No se adoptó Executor local (ADR-0004 Rejected).
+Los modelos de este ejemplo son sintéticos: el operador debe sustituirlos por IDs
+disponibles en su cuenta antes de ejecutar. El repo nunca declara modelos.
+
+```json
+{
+  "projects": {
+    "softwareagents": {
+      "autonomyLevel": "A1",
+      "allowedExecutors": ["codex", "claude"],
+      "quotaThresholds": { "codex": 10, "claude": 10 },
+      "concurrency": { "maxExecutions": 1, "perExecutor": { "codex": 1, "claude": 1 } },
+      "modelTiers": {
+        "maxTier": "standard",
+        "tiers": {
+          "economy": {
+            "candidates": [{ "executor": "codex", "model": "test-economy-model", "effort": "low" }]
+          },
+          "standard": {
+            "candidates": [
+              { "executor": "codex", "model": "test-standard-model", "effort": "medium" },
+              { "executor": "claude", "model": "test-standard-alternative" }
+            ],
+            "fallbackTo": "economy"
+          },
+          "deep": {
+            "candidates": [{ "executor": "claude", "model": "test-deep-model", "effort": "high" }],
+            "fallbackTo": "standard"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`maxTier` es obligatorio y debe existir: limita cualquier petición del repo.
+El operador también puede poner `modelTiers.rule`, con el mismo esquema que
+`tierRule` abajo; esa regla prevalece sobre el repo y permite operar con políticas
+anteriores sin `tierRule`. `allowedExecutors` sigue siendo la única allowlist.
+Ningún candidato, peso o nivel amplía permisos, tools, sandbox o autonomía.
+
+### Regla declarativa y entradas reales
+
+En `.softwareagents/agents/model-policy.yaml`, `tierRule` contiene exclusivamente
+pesos enteros no negativos y umbrales crecientes. No admite modelos ni autoridad:
+
+```yaml
+tierRule:
+  capabilityWeights:
+    { fast_cheap: 0, standard_coding: 2, review: 2, test_analysis: 2, high_reasoning: 4 }
+  workTypeWeights:
+    { summary: 0, classification: 0, docs: 0, implementation: 0, review: 1, qa: 1, architecture: 2 }
+  sizeWeights: { S: 0, M: 1, L: 2 }
+  thresholds: { economy: 0, standard: 2, deep: 4 }
+```
+
+Se suma capabilityClass + tipo + tamaño y se elige el mayor umbral alcanzado,
+acotado por `maxTier`. Con la tabla anterior: Developer/implementation/S → standard;
+Developer/review/M → deep; fast_cheap/summary/S → economy.
+QA declara `test_analysis` (peso 2). El worker sigue ejecutando el AgentSpec Developer: el rol de la Task no cambia
+sus permisos ni el template. Un capabilityClass sin peso produce espera explícita.
+
+El tipo sale de `Task.type` del WorkStore si coincide con uno de los siete IDs
+anteriores. El tamaño sale de `items[].size` (S/M/L) del board vinculado mediante
+`project.yaml → legacy.boardFile`, con coincidencia única por Task key.
+SA-020 compila contexto/roles; no importa una estimación de Task. El brief no se
+interpreta para decidir modelos. Si falta o es desconocido **cualquiera** de tipo o
+tamaño, se utiliza solo capabilityClass; la explicación registra `fallback: missing
+work type/size, capabilityClass only`. No se adivina a partir del título o longitud.
+
+### Cuota, bajadas y admisión
+
+Cada nivel prueba sus candidatos en orden contra el mismo snapshot de SA-036,
+filtrados por `allowedExecutors`. `go` o `probe` admite el primero elegible.
+Solo un rechazo de cuota o saldo bajo permite seguir `fallbackTo`, y solo si
+`AgentSpec.modelPolicy.fallbackAllowed` es true. El destino debe existir y ser
+inferior; no hay subida, ciclos ni salto implícito sobre niveles ausentes.
+Un límite de slots por sí solo no permite bajar. El tope del operador se aplica
+antes de las bajadas por cuota. Si ningún candidato entra, devuelve `wait`/3
+con el reset conocido más temprano entre los candidatos intentados (null si no
+hay ninguno), para reevaluar; no promete disponibilidad después de ese reset.
+Dentro de cada candidato, SA-036 conserva la espera por todas sus ventanas.
+
+El worker adquiere las admisiones existentes en orden fijo claude → codex, lee
+una sola observación y reserva únicamente el slot del ganador antes de soltarlas.
+Los owners, supervisores, recuperación y duración de slots de SA-QA-5 se conservan.
+La reserva no garantiza cuota frente a trabajo externo. Los toggles futuros de
+SA-086 reutilizan este catálogo y estos nombres; la coordinación de cambios de
+autoridad inmediatamente antes del spawn sigue perteneciendo a ese diseño.
+
+### Validación y compatibilidad
+
+Modelo: ID de 1–128 caracteres, empieza con alfanumérico y solo acepta
+alfanuméricos, punto, guion bajo, dos puntos, barra y guion. No acepta opciones,
+espacios, comillas o saltos de línea. Codex recibe `-m <id>` y
+`-c model_reasoning_effort="<valor>"`; allowlist cerrada:
+`none | minimal | low | medium | high | xhigh`.
+Evidencia local: `codex-cli 0.160.0`, `codex exec --help` confirma TOML y `-m`;
+`codex app-server generate-json-schema` define ReasoningEffort como string no vacío.
+La allowlist es un subconjunto conservador de esa sintaxis, no garantía de que
+cada modelo admita todos los esfuerzos. Claude debe comprobar su modelo real.
+
+Claude recibe `--model <id>` y, si se pide esfuerzo, `--effort <valor>` únicamente
+tras comprobar `--help` del binario configurado (sin prompt, timeout 3 s,
+salida limitada, sin shell ni cwd del repo). La CLI inspeccionada anuncia
+`low | medium | high | xhigh | max`. Si el binario no anuncia el flag/valor, no
+responde o falla, la config es inválida: error claro, sin lanzamiento. Se vuelve
+a comprobar al crear la Execution. El soporte no se presume por versión.
+Los Executors vuelven a validar antes de construir argv, incluidos llamadores
+ajenos al worker. Una config de niveles inválida falla al cargar y no se ignora.
+
+Sin `modelTiers`, no se añade modelo ni esfuerzo: se conserva la ruta manual
+Claude y `--select-executor` conserva el selector SA-036. La política del repo
+admite las preferencias antiguas por capabilityClass más `tierRule` opcional;
+rechaza `model` en preferencias, ya que no debe residir en el repo. Configs y
+clientes anteriores siguen funcionando; `agentRole` solo incorpora campos
+opcionales `tier`, `model`, `effort`, `selectionReason`, sin nuevas variantes
+(35 server / 24 client). El overlay muestra la elección histórica de la Execution,
+nunca la config actual ni una inferencia de la Session interactiva.
+
+WorkStore migra idempotentemente a v6 con `model_tier`, `model_effort` y
+`selection_reason`; `model_id` y `executor` ya existían. El worker manual registra
+el intento con PID nulo: tiene lock de tarea, no lease del WorkStore. El PID real,
+identidad y Session permanecen en registry/slot del supervisor. No cambia el
+lifecycle de una Task existente. Si falta la Task se crea solo la referencia
+necesaria con tipo `unknown` y estado DRAFT, para no inventar clasificación en
+futuros intentos. La selección se audita de forma verificable
+antes de lanzar (`model_selected`) y acompaña el resultado de la Execution.
+
+### Explicación sin gastar cuota y prueba real
+
+Desde el checkout con Project válido y el catálogo del operador:
+
+```powershell
+node dist/cli.js quota check --select-executor --role developer --work-type implementation --size S --json
+node dist/cli.js quota check --select-executor --role developer --work-type architecture --size L --json
+node dist/cli.js quota check --select-executor --role reviewer --work-type review --size M --json
+node dist/cli.js quota check --select-executor --role developer --json
+```
+
+Estos comandos no lanzan Executors ni reservan slots. JSON incluye status,
+requestedTier, tier, executor, model, effort, downgrades, reason y cobertura.
+0 = go/probe; 3 = wait; argumentos o config inválidos = error/1. La forma antigua
+`quota check --executor codex --role developer --json` conserva su diagnóstico
+directo del gate, sin resolver niveles.
+
+Claude compara maxTier y fallback de entradas ausentes, observa una cuenta ya
+limitada para comprobar bajadas/espera sin provocar agotamiento, y prueba una
+Task de QA preparada (clave SA real asignada por el operador):
+
+```powershell
+node dist/cli.js worker run --task $taskKey --brief $briefPath --select-executor
+```
+
+Debe ver modelo/esfuerzo en argv efectivo del CLI, la misma selección en
+`<git-common-dir>/softwareagents/work.sqlite3` y `executions.jsonl`, y
+`model_selected` más resultado en el audit del Project bajo `~/.pixel-agents`.
+En la oficina standalone, al pasar sobre o seleccionar el Character de esa Session,
+debe aparecer `standard · <modelo>` (o el nivel elegido), con esfuerzo/motivo en
+el tooltip. Reconexionar debe mantenerlo. La oficina requiere esa Session observada;
+una sesión interactiva ajena no recibe nivel inventado. La prueba real e integración
+siguen pendientes de Claude.

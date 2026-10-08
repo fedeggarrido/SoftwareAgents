@@ -1,4 +1,5 @@
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
+import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
@@ -49,6 +50,9 @@ export interface ExecutionRecord {
   agent_template_version: string;
   executor: string;
   model_id: string;
+  model_tier?: ModelTier | null;
+  model_effort?: string | null;
+  selection_reason?: string | null;
   session_id: string | null;
   pid: number | null;
   /** OS process creation identity, not the approximate Execution timestamp. */

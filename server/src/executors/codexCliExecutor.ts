@@ -19,6 +19,7 @@ import {
   CODEX_SUBAGENT_POLL_MS,
   CODEX_WINDOWS_SANDBOX,
 } from '../constants.js';
+import { validateModelChoice } from '../modelTiers.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
@@ -104,6 +105,7 @@ export class CodexCliExecutor implements Executor {
   readonly id = 'codex' as const;
   constructor(private readonly options: CodexCliExecutorOptions) {}
   start(req: ExecutionRequest): ExecutionHandle {
+    validateModelChoice(req, 'codex');
     if (req.flags.length) throw new Error('Caller flags are forbidden');
     if (!req.agentSpec) throw new Error('Codex requires an AgentSpec');
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
@@ -165,6 +167,7 @@ export class CodexCliExecutor implements Executor {
             '-C',
             req.worktreePath,
             ...(req.model ? ['-m', req.model] : []),
+            ...(req.effort ? ['-c', `model_reasoning_effort="${req.effort}"`] : []),
             '-',
           ];
           const launchedMs = Date.now();

@@ -20,7 +20,15 @@ export interface AuditEntry {
   policyDecision: PolicyDecision | null;
   riskLevel: 'low' | 'medium' | 'high';
   inputHash: string;
-  outcome: { status: string; detail?: string };
+  outcome: {
+    status: string;
+    detail?: string;
+    tier?: string | null;
+    executor?: string | null;
+    model?: string | null;
+    effort?: string | null;
+    reason?: string;
+  };
   taskKey: string | null;
   executionId: string | null;
 }

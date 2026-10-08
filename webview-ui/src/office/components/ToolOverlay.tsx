@@ -24,7 +24,7 @@ import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import { useBoard } from '../boardStore.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { overlayProjection } from '../projection.js';
-import { getAgentRole, getProviderLabel } from '../toolUtils.js';
+import { getAgentRole, getProviderLabel, modelTierLabel } from '../toolUtils.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
 
@@ -317,6 +317,17 @@ export function ToolOverlay({
                     data-testid="agent-provider"
                   >
                     {providerName}
+                  </span>
+                )}
+                {modelTierLabel(companyRole) && (
+                  <span
+                    className="text-2xs leading-none overflow-hidden text-ellipsis block"
+                    data-testid="agent-model-tier"
+                    title={[companyRole?.model, companyRole?.effort, companyRole?.selectionReason]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  >
+                    {modelTierLabel(companyRole)}
                   </span>
                 )}
                 {teamRoleLabel && (

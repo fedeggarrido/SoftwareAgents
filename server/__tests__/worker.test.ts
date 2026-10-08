@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { AuditLog } from '../src/auditLog.js';
@@ -24,7 +25,7 @@ vi.mock('os', async (original) => {
 });
 vi.mock('child_process', async (original) => {
   const actual = await original<typeof import('child_process')>();
-  return { ...actual, spawn: vi.fn(actual.spawn) };
+  return { ...actual, spawn: vi.fn(actual.spawn), execFileSync: vi.fn(actual.execFileSync) };
 });
 
 vi.mock('fs', async (original) => ({ ...(await original<typeof import('fs')>()) }));
@@ -70,14 +71,165 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  const actual = await vi.importActual<typeof import('child_process')>('child_process');
+  vi.mocked(execFileSync).mockImplementation(actual.execFileSync);
   vi.mocked(spawn).mockClear();
   vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('supervised worker', () => {
+  it.each(['claude', 'codex'] as const)(
+    'operator tiers pass real argv to %s and persist the choice',
+    async (selected) => {
+      const execute = vi.mocked(execFileSync).getMockImplementation()!;
+      vi.mocked(execFileSync).mockImplementation(((
+        binary: string,
+        args: string[],
+        options: object,
+      ) =>
+        args[0] === '--help'
+          ? '--effort <level> Effort (low, medium, high, xhigh, max)'
+          : execute(binary, args, options)) as typeof execFileSync);
+      const configFile = path.join(root, '.pixel-agents/config.json');
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      config.projects.test.allowedExecutors = [selected];
+      config.projects.test.binaryPaths = { [selected]: process.execPath };
+      config.projects.test.quotaThresholds = { [selected]: 5 };
+      config.projects.test.concurrency.perExecutor = { [selected]: 1 };
+      config.projects.test.modelTiers = {
+        maxTier: 'standard',
+        rule: parse(
+          fs.readFileSync(
+            path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+            'utf8',
+          ),
+        ).tierRule,
+        tiers: {
+          standard: {
+            candidates: [{ executor: selected, model: 'test-standard-model', effort: 'medium' }],
+          },
+        },
+      };
+      fs.writeFileSync(configFile, JSON.stringify(config));
+      const captured = path.join(root, 'argv.json');
+      vi.stubEnv('SA_TEST_ARGV', captured);
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, selected], log: () => {} },
+      );
+      expect(result.commit).toBeNull();
+      const argv = JSON.parse(fs.readFileSync(captured, 'utf8')) as string[];
+      expect(
+        argv.slice(
+          argv.indexOf(selected === 'codex' ? '-m' : '--model'),
+          argv.indexOf(selected === 'codex' ? '-m' : '--model') + 2,
+        ),
+      ).toEqual([selected === 'codex' ? '-m' : '--model', 'test-standard-model']);
+      if (selected === 'codex') {
+        expect(argv).toContain('model_reasoning_effort="medium"');
+        expect(argv).toContain('features.apps=false');
+      } else
+        expect(argv.slice(argv.indexOf('--effort'), argv.indexOf('--effort') + 2)).toEqual([
+          '--effort',
+          'medium',
+        ]);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.getTask('SA-999')?.type).toBe('unknown');
+        expect(store.listExecutions()).toMatchObject([
+          {
+            executor: selected,
+            model_tier: 'standard',
+            model_id: 'test-standard-model',
+            model_effort: 'medium',
+            selection_reason: expect.stringContaining('fallback:'),
+            pid: null,
+          },
+        ]);
+      } finally {
+        store.close();
+      }
+      expect(new AuditLog().read('test').slice(0, 1)).toMatchObject([
+        {
+          entry: {
+            outcome: {
+              status: 'model_selected',
+              tier: 'standard',
+              executor: selected,
+              model: 'test-standard-model',
+              effort: 'medium',
+              reason: expect.stringContaining('fallback:'),
+            },
+          },
+        },
+      ]);
+      expect([...new ExecutionRegistry(repo).sessionMap().values()]).toMatchObject([
+        { tier: 'standard', model: 'test-standard-model', effort: 'medium' },
+      ]);
+    },
+  );
+  it('no catalogue leaves model and effort absent from the real CLI argv', async () => {
+    const captured = path.join(root, 'argv.json');
+    vi.stubEnv('SA_TEST_ARGV', captured);
+    await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
+    );
+    const argv = JSON.parse(fs.readFileSync(captured, 'utf8'));
+    expect(argv).not.toContain('--model');
+    expect(argv).not.toContain('--effort');
+  });
+  it('reads WorkStore type and the bound board size, applying the operator ceiling', async () => {
+    const configFile = path.join(root, '.pixel-agents/config.json');
+    const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    config.projects.test.modelTiers = {
+      maxTier: 'standard',
+      rule: parse(
+        fs.readFileSync(
+          path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+          'utf8',
+        ),
+      ).tierRule,
+      tiers: { standard: { candidates: [{ executor: 'claude', model: 'test-standard-model' }] } },
+    };
+    fs.writeFileSync(configFile, JSON.stringify(config));
+    fs.appendFileSync(
+      path.join(repo, '.softwareagents/project.yaml'),
+      'legacy:\n  boardFile: board.json\n',
+    );
+    fs.writeFileSync(
+      path.join(repo, 'board.json'),
+      JSON.stringify({ items: [{ id: 'SA-999', size: 'L' }] }),
+    );
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'board fixture');
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      store.createTask({ key: 'SA-999', type: 'architecture' });
+    } finally {
+      store.close();
+    }
+    await runWorker(
+      { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
+      { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
+    );
+    const records = new AuditLog().read('test');
+    expect(records.slice(0, 1)).toMatchObject([
+      {
+        entry: {
+          outcome: {
+            tier: 'standard',
+            reason: expect.stringContaining(
+              'architecture/L; score=6; requested=deep; maxTier=standard',
+            ),
+          },
+        },
+      },
+    ]);
+  });
   it('P2: failed slot update before lazy iteration releases slot and task lock', async () => {
     const rename = fs.renameSync;
     vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
@@ -147,98 +299,124 @@ describe('supervised worker', () => {
     },
   );
 
-  it('two real worker processes with different tasks launch only one synthetic executor at limit 1', async () => {
-    fs.writeFileSync(
-      path.join(root, '.pixel-agents/config.json'),
-      JSON.stringify({
-        projects: {
-          test: {
-            autonomyLevel: 'A1',
-            allowedExecutors: ['claude'],
-            binaryPaths: { claude: process.execPath },
-            quotaThresholds: { claude: 5 },
-            concurrency: { maxExecutions: 1, perExecutor: { claude: 1 } },
-          },
-        },
-      }),
-    );
-    const bundle = path.join(root, 'worker.cjs');
-    buildSync({
-      entryPoints: [path.resolve(__dirname, '../src/worker.ts')],
-      outfile: bundle,
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      logLevel: 'silent',
-    });
-    fs.mkdirSync(path.join(root, 'agents/templates'), { recursive: true });
-    fs.copyFileSync(
-      path.resolve(__dirname, '../../agents/templates/developer.yaml'),
-      path.join(root, 'agents/templates/developer.yaml'),
-    );
-    const launches = path.join(root, 'launches');
-    const release = path.join(root, 'release');
-    const children = [0, 1].map(() =>
-      spawn(process.execPath, [path.join(__dirname, 'fixtures/worker-slot-process.cjs'), bundle], {
-        env: {
-          ...process.env,
-          HOME: root,
-          SA_SLOT_TEST_LAUNCHES: launches,
-          SA_SLOT_TEST_RELEASE: release,
-        },
-        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-        windowsHide: true,
-      }),
-    );
-    const ready = children.map(
-      (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
-    );
-    const done = children.map(
-      (child) =>
-        new Promise<{
-          result?: { quotaDecision?: { status: string } };
-          exitCode?: number;
-          error?: string;
-        }>((resolve, reject) => {
-          child.on(
-            'message',
-            (message: {
-              ready?: boolean;
-              result?: { quotaDecision?: { status: string } };
-              exitCode?: number;
-              error?: string;
-            }) => {
-              if (!message.ready) resolve(message);
+  it.each([false, true])(
+    'two real worker processes with different tasks launch only one synthetic executor at limit 1 (tiers=%s)',
+    async (tiers) => {
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            test: {
+              autonomyLevel: 'A1',
+              allowedExecutors: ['claude'],
+              binaryPaths: { claude: process.execPath },
+              quotaThresholds: { claude: 5 },
+              concurrency: { maxExecutions: 1, perExecutor: { claude: 1 } },
+              ...(tiers
+                ? {
+                    modelTiers: {
+                      maxTier: 'standard',
+                      rule: parse(
+                        fs.readFileSync(
+                          path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+                          'utf8',
+                        ),
+                      ).tierRule,
+                      tiers: {
+                        standard: {
+                          candidates: [{ executor: 'claude', model: 'test-standard-model' }],
+                        },
+                      },
+                    },
+                  }
+                : {}),
             },
-          );
-          child.on('error', reject);
+          },
         }),
-    );
-    const exited = children.map(
-      (child) => new Promise<number | null>((resolve) => child.once('exit', resolve)),
-    );
-    try {
-      await Promise.all(ready);
-      children.forEach((child, i) => child.send({ task: `SA-${998 + i}`, repo, fake }));
-      const loser = await Promise.race(done);
-      expect(loser.error).toBeUndefined();
-      expect(loser).toMatchObject({ exitCode: 3, result: { quotaDecision: { status: 'wait' } } });
-      await vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 });
-      expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
-      expect(readExecutorSlots('claude').count).toBe(1);
-      fs.writeFileSync(release, 'release');
-      const results = await Promise.all(done);
-      expect(results.filter((r) => r.exitCode === 0)).toHaveLength(1);
-      expect((await Promise.all(exited)).sort()).toEqual([0, 3]);
-      expect(readExecutorSlots('claude').count).toBe(0);
-    } finally {
-      fs.writeFileSync(release, 'release');
-      children.forEach((child) => {
-        if (child.exitCode === null) child.kill();
+      );
+      const bundle = path.join(root, 'worker.cjs');
+      buildSync({
+        entryPoints: [path.resolve(__dirname, '../src/worker.ts')],
+        outfile: bundle,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        logLevel: 'silent',
       });
-      await Promise.all(exited);
-    }
-  }, 30000);
+      fs.mkdirSync(path.join(root, 'agents/templates'), { recursive: true });
+      fs.copyFileSync(
+        path.resolve(__dirname, '../../agents/templates/developer.yaml'),
+        path.join(root, 'agents/templates/developer.yaml'),
+      );
+      const launches = path.join(root, 'launches');
+      const release = path.join(root, 'release');
+      const children = [0, 1].map(() =>
+        spawn(
+          process.execPath,
+          [path.join(__dirname, 'fixtures/worker-slot-process.cjs'), bundle],
+          {
+            env: {
+              ...process.env,
+              HOME: root,
+              SA_SLOT_TEST_LAUNCHES: launches,
+              SA_SLOT_TEST_RELEASE: release,
+            },
+            stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+            windowsHide: true,
+          },
+        ),
+      );
+      const ready = children.map(
+        (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
+      );
+      const done = children.map(
+        (child) =>
+          new Promise<{
+            result?: { quotaDecision?: { status: string } };
+            exitCode?: number;
+            error?: string;
+          }>((resolve, reject) => {
+            child.on(
+              'message',
+              (message: {
+                ready?: boolean;
+                result?: { quotaDecision?: { status: string } };
+                exitCode?: number;
+                error?: string;
+              }) => {
+                if (!message.ready) resolve(message);
+              },
+            );
+            child.on('error', reject);
+          }),
+      );
+      const exited = children.map(
+        (child) => new Promise<number | null>((resolve) => child.once('exit', resolve)),
+      );
+      try {
+        await Promise.all(ready);
+        children.forEach((child, i) => child.send({ task: `SA-${998 + i}`, repo, fake }));
+        const loser = await Promise.race(done);
+        expect(loser.error).toBeUndefined();
+        expect(loser).toMatchObject({ exitCode: 3, result: { quotaDecision: { status: 'wait' } } });
+        await vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 });
+        expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+        expect(readExecutorSlots('claude').count).toBe(1);
+        fs.writeFileSync(release, 'release');
+        const results = await Promise.all(done);
+        expect(results.filter((r) => r.exitCode === 0)).toHaveLength(1);
+        expect((await Promise.all(exited)).sort()).toEqual([0, 3]);
+        expect(readExecutorSlots('claude').count).toBe(0);
+      } finally {
+        fs.writeFileSync(release, 'release');
+        children.forEach((child) => {
+          if (child.exitCode === null) child.kill();
+        });
+        await Promise.all(exited);
+      }
+    },
+    30000,
+  );
   it.each(['claude', 'codex'])(
     'releases the task lock after synchronous %s spawn EINVAL',
     async (selected) => {
@@ -337,7 +515,7 @@ describe('supervised worker', () => {
       fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
       fs.writeFileSync(
         path.join(repo, '.softwareagents/agents/model-policy.yaml'),
-        `standard_coding:\n  - executor: ${selected === 'claude' ? 'codex' : 'claude'}\n  - executor: ${selected}\n    model: test-model\n`,
+        `standard_coding:\n  - executor: ${selected === 'claude' ? 'codex' : 'claude'}\n  - executor: ${selected}\n`,
       );
       git(repo, 'add', '.');
       git(repo, 'commit', '-m', 'preferences');
@@ -380,7 +558,7 @@ describe('supervised worker', () => {
       );
       expect(JSON.parse(records.trim().split('\n')[0])).toMatchObject({
         executor: selected,
-        model: 'test-model',
+        model: null,
       });
     },
   );

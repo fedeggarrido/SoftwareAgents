@@ -1624,6 +1624,17 @@ components:
           type: string
         detail:
           type: string
+        tier:
+          $ref: '#/components/schemas/ModelTier'
+        model:
+          type: string
+        effort:
+          type: string
+        selectionReason:
+          type: string
+    ModelTier:
+      type: string
+      enum: [economy, standard, deep]
     AgentProviderLabel:
       type: object
       additionalProperties: false

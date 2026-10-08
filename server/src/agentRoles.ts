@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 
 import type { AgentRole as AgentRoleMessage } from '../../core/src/messages.js';
+import type { ModelTier } from '../../core/src/modelTier.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { SessionExecution } from './executors/executionRegistry.js';
 
@@ -30,6 +31,10 @@ export interface AgentRole {
   department: Department;
   /** Extra context shown small: the Codex nickname, the ClickUp task... */
   detail?: string;
+  tier?: ModelTier;
+  model?: string;
+  effort?: string;
+  selectionReason?: string;
 }
 
 export type Department =
@@ -286,6 +291,10 @@ export function roleMessage(id: number, role: AgentRole): AgentRoleMessage {
     label: role.label,
     department: role.department,
     detail: role.detail,
+    tier: role.tier,
+    model: role.model,
+    effort: role.effort,
+    selectionReason: role.selectionReason,
   };
 }
 
@@ -337,6 +346,10 @@ export class RoleResolver {
         ? {
             ...(specialistRole(recorded.role) ?? { label: recorded.role, department: 'Sesiones' }),
             detail: `tarea ${recorded.taskKey}`,
+            tier: recorded.tier,
+            model: recorded.model ?? undefined,
+            effort: recorded.effort,
+            selectionReason: recorded.selectionReason,
           }
         : task
           ? {
@@ -350,7 +363,11 @@ export class RoleResolver {
         !role ||
         (agent.role?.label === role.label &&
           agent.role.department === role.department &&
-          agent.role.detail === role.detail)
+          agent.role.detail === role.detail &&
+          agent.role.tier === role.tier &&
+          agent.role.model === role.model &&
+          agent.role.effort === role.effort &&
+          agent.role.selectionReason === role.selectionReason)
       )
         continue;
       agent.role = role;

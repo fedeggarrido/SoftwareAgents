@@ -40,7 +40,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
-  fs.rmSync(home, { recursive: true, force: true });
+  // Windows can briefly retain directory handles after the verified child exit.
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 it('serializes admission, holds slots until release, and rejects probes while another slot is held', () => {
   const slot = withExecutorAdmission('codex', 'execution-a', (owner) => {

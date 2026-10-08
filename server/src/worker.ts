@@ -1,13 +1,13 @@
 import { execFileSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { parse } from 'yaml';
 
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
-import { compileAgent } from './agentCompiler.js';
-import { recordAudit } from './auditLog.js';
+import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
+import { AuditLog, recordAudit } from './auditLog.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from './executors/codexCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -21,13 +21,17 @@ import {
   withExecutorAdmission,
 } from './executorSlots.js';
 import { HumanDecisions } from './humanDecisions.js';
-import { loadModelPolicy } from './modelPolicy.js';
+import { loadModelPolicy, loadTierRule } from './modelPolicy.js';
+import { admitModelTier } from './modelTierAdmission.js';
+import type { TierSelection } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
 import { type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
+import { taskModelInputs } from './taskModelInputs.js';
+import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface WorkerArgs {
   task: string;
@@ -117,12 +121,24 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     throw new Error('worker run requires .softwareagents/project.yaml in the main checkout');
   const decision = evaluatePolicy('launch_execution', 'human', config.operator.autonomyLevel);
   const executionId = randomUUID();
+  let tierSelection: TierSelection | undefined;
   const audit = (status: string) =>
     recordAudit(
       'launch_execution',
       'execution',
       executionId,
-      { status },
+      {
+        status,
+        ...(tierSelection
+          ? {
+              tier: tierSelection.tier,
+              executor: tierSelection.choice?.executor ?? null,
+              model: tierSelection.choice?.model ?? null,
+              effort: tierSelection.choice?.effort ?? null,
+              reason: tierSelection.reason,
+            }
+          : {}),
+      },
       {
         projectId: config.project.id,
         actorType: 'human',
@@ -135,7 +151,9 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     );
   if (
     decision.outcome !== 'allow' ||
-    (!args.selectExecutor && !config.operator.allowedExecutors.includes('claude'))
+    (!config.operator.modelTiers &&
+      !args.selectExecutor &&
+      !config.operator.allowedExecutors.includes('claude'))
   ) {
     audit('denied');
     throw new Error('Operator config must allow the claude executor for this Project');
@@ -153,7 +171,9 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     repository: { projectId: config.project.id },
   };
   const compiled = compileAgent(spec, 'developer', taskData);
-  const modelPolicy = args.selectExecutor ? loadModelPolicy(cwd) : undefined;
+  const tierPolicy = config.operator.modelTiers;
+  const tierRule = tierPolicy ? (tierPolicy.rule ?? loadTierRule(cwd)) : undefined;
+  const modelPolicy = !tierPolicy && args.selectExecutor ? loadModelPolicy(cwd) : undefined;
   let selection = modelPolicy
     ? selectExecutor(spec, modelPolicy, readSelectionSnapshot(config.operator))
     : undefined;
@@ -171,6 +191,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   let eventsStarted = false;
   let slotFailure: unknown;
   let slot: ReturnType<typeof acquireExecutorSlot>;
+  let workStore: WorkStore | undefined;
   const cancel = () => {
     interrupted = true;
     try {
@@ -182,47 +203,77 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   process.on('SIGINT', cancel);
   process.on('SIGTERM', cancel);
   try {
-    const selectedExecutor = selection?.choice?.executor ?? 'claude';
+    let selectedExecutor = selection?.choice?.executor ?? 'claude';
     // Both locks are held during the fresh gate decision and exclusive slot creation.
     // The admission lock spans projects/tasks; the slot spans the entire Execution.
-    const admission = withExecutorAdmission(selectedExecutor, executionId, (owner) => {
-      const snapshot = readSelectionSnapshot(config.operator);
-      if (modelPolicy) selection = selectExecutor(spec, modelPolicy, snapshot);
-      // Legacy manual runs retain conservative defaults for pre-quota configs.
-      if (!modelPolicy) {
-        snapshot.machinePolicy ??= { quotaThresholds: {}, maxConcurrent: {} };
-        snapshot.machinePolicy.quotaThresholds[selectedExecutor] ??= 0;
-        snapshot.machinePolicy.maxConcurrent[selectedExecutor] ??= 1;
-      }
+    const tierAdmission =
+      tierPolicy && tierRule
+        ? await (async () => {
+            const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
+            workStore = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+            return admitModelTier(
+              spec,
+              tierRule,
+              tierPolicy,
+              taskModelInputs(config, workStore.getTask(args.task), args.task),
+              config.operator,
+              executionId,
+            );
+          })()
+        : undefined;
+    if (tierAdmission) {
+      tierSelection = tierAdmission.selection;
+      selectedExecutor = tierSelection.choice?.executor ?? 'claude';
       log(
         JSON.stringify({
-          executor: selectedExecutor,
-          active: snapshot.active[selectedExecutor],
-          coverage: snapshot.coverage,
+          ...tierSelection,
+          coverage: tierAdmission.snapshot.coverage,
+          active: tierAdmission.snapshot.active,
         }),
       );
-      const gate =
-        selection?.gate ??
-        quotaGate(
-          selectedExecutor,
-          snapshot.machinePolicy,
-          snapshot.capacities[selectedExecutor],
-          snapshot.active[selectedExecutor] ?? NaN,
-          snapshot.nowS,
-        );
-      if (gate.status === 'wait') return { gate, slot: undefined };
-      const reserved = acquireExecutorSlot(selectedExecutor, gate.concurrencyLimit, owner);
-      return {
-        gate: reserved
-          ? gate
-          : ({
-              status: 'wait',
-              resetsAt: null,
-              reason: `${selectedExecutor}: no free runtime executor slot; inspect ${executorSlotsDirectory(selectedExecutor)}`,
-            } as QuotaDecision),
-        slot: reserved,
-      };
-    });
+    }
+    const admission = tierPolicy
+      ? tierAdmission
+        ? { gate: tierAdmission.selection.gate, slot: tierAdmission.slot }
+        : undefined
+      : withExecutorAdmission(selectedExecutor, executionId, (owner) => {
+          const snapshot = readSelectionSnapshot(config.operator);
+          if (modelPolicy) selection = selectExecutor(spec, modelPolicy, snapshot);
+          // Legacy manual runs retain conservative defaults for pre-quota configs.
+          if (!modelPolicy) {
+            snapshot.machinePolicy ??= { quotaThresholds: {}, maxConcurrent: {} };
+            snapshot.machinePolicy.quotaThresholds[selectedExecutor] ??= 0;
+            snapshot.machinePolicy.maxConcurrent[selectedExecutor] ??= 1;
+          }
+          log(
+            JSON.stringify({
+              executor: selectedExecutor,
+              active: snapshot.active[selectedExecutor],
+              coverage: snapshot.coverage,
+            }),
+          );
+          const gate =
+            selection?.gate ??
+            quotaGate(
+              selectedExecutor,
+              snapshot.machinePolicy,
+              snapshot.capacities[selectedExecutor],
+              snapshot.active[selectedExecutor] ?? NaN,
+              snapshot.nowS,
+            );
+          if (gate.status === 'wait') return { gate, slot: undefined };
+          const reserved = acquireExecutorSlot(selectedExecutor, gate.concurrencyLimit, owner);
+          return {
+            gate: reserved
+              ? gate
+              : ({
+                  status: 'wait',
+                  resetsAt: null,
+                  reason: `${selectedExecutor}: no free runtime executor slot; inspect ${executorSlotsDirectory(selectedExecutor)}`,
+                } as QuotaDecision),
+            slot: reserved,
+          };
+        });
     const admissionGate =
       admission?.gate ??
       ({
@@ -238,6 +289,28 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       process.exitCode = 3;
       return { branch: '', commit: null, stat: '', quotaDecision: admissionGate };
     }
+    if (tierSelection)
+      new AuditLog().append({
+        projectId: config.project.id,
+        actorType: 'human',
+        actorId: 'operator',
+        action: 'launch_execution',
+        resourceType: 'execution',
+        resourceId: executionId,
+        policyDecision: decision,
+        riskLevel: 'medium',
+        taskKey: args.task,
+        executionId,
+        input: args,
+        outcome: {
+          status: 'model_selected',
+          tier: tierSelection.tier,
+          executor: tierSelection.choice!.executor,
+          model: tierSelection.choice!.model,
+          effort: tierSelection.choice!.effort ?? null,
+          reason: tierSelection.reason,
+        },
+      });
     const tree = await new WorktreeManager({
       repositoryPath: cwd,
       defaultBranch: config.project.repo.defaultBranch,
@@ -248,7 +321,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     const base = git(tree.path, ['rev-parse', 'HEAD']);
     if (interrupted) throw new Error('Worker interrupted');
     const executor = new ExecutionRegistry(tree.path).executor(
-      selection?.choice?.executor === 'codex'
+      selectedExecutor === 'codex'
         ? new CodexCliExecutor({
             operator: config.operator,
             binaryArgs: options.binaryArgs,
@@ -271,10 +344,41 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       agentSpec: spec,
       flags: [],
       ...(selection?.choice?.model ? { model: selection.choice.model } : {}),
+      ...(tierSelection?.choice
+        ? {
+            tier: tierSelection.tier!,
+            model: tierSelection.choice.model,
+            effort: tierSelection.choice.effort,
+            selectionReason: tierSelection.reason,
+          }
+        : {}),
       worktreePath: tree.path,
       timeoutMin: 30,
       registerProcess: (pid) => slot!.setExecutionProcess(pid),
     });
+    if (workStore && tierSelection?.choice) {
+      if (!workStore.getTask(args.task))
+        workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
+      await workStore.createExecution({
+        key: executionId,
+        task_key: args.task,
+        agent_template_version: spec.metadata.version,
+        executor: selectedExecutor,
+        model_id: tierSelection.choice.model,
+        model_tier: tierSelection.tier,
+        model_effort: tierSelection.choice.effort ?? null,
+        selection_reason: tierSelection.reason,
+        session_id: handle.sessionId ?? null,
+        // The manual worker owns a task lock, not a WorkStore lease. Its real
+        // supervisor PID remains in the existing registry/slot, never in recovery.
+        pid: null,
+        started_at: new Date().toISOString(),
+        system_prompt_hash: createHash('sha256').update(compiled.context).digest('hex'),
+        project_brain_sha: base,
+        task_version: workStore.getTask(args.task)!.version,
+        tool_policy_version: TOOL_POLICY_VERSION,
+      });
+    }
     if (handle.sessionId) slot.setSession(handle.sessionId);
     let exitCode: number | undefined;
     eventsStarted = true;
@@ -363,6 +467,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     audit(interrupted ? 'interrupted' : 'failed');
     throw error;
   } finally {
+    workStore?.close();
     process.removeListener('SIGINT', cancel);
     process.removeListener('SIGTERM', cancel);
     if (!handle || !eventsStarted || executionFinished) {

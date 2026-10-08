@@ -511,7 +511,13 @@ export interface AgentRole {
   label: string;
   department: string;
   detail?: string;
+  tier?: ModelTier;
+  model?: string;
+  effort?: string;
+  selectionReason?: string;
 }
+
+export type ModelTier = 'economy' | 'standard' | 'deep';
 
 export interface AgentProviderLabel {
   type: 'agentProviderLabel';

@@ -95,6 +95,9 @@ const migrations = [
     BEGIN SELECT RAISE(ABORT, 'Active Task requires a lease'); END;`,
   `ALTER TABLE human_decisions ADD COLUMN escalation TEXT;
   ALTER TABLE human_decisions ADD COLUMN previous_states TEXT;`,
+  `ALTER TABLE executions ADD COLUMN model_tier TEXT CHECK(model_tier IN ('economy','standard','deep'));
+  ALTER TABLE executions ADD COLUMN model_effort TEXT;
+  ALTER TABLE executions ADD COLUMN selection_reason TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

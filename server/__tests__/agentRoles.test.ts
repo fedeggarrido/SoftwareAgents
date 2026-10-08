@@ -296,6 +296,48 @@ describe('worktree task labels', () => {
 });
 
 describe('RoleResolver', () => {
+  it('publishes historical model selection by session and refreshes it without changing role', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roles-'));
+    try {
+      const file = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(file, '');
+      const store = new AgentStateStore();
+      const sent: unknown[] = [];
+      store.broadcast = (message) => void sent.push(message);
+      store.set(1, { id: 1, sessionId: 'session', jsonlFile: file } as AgentState);
+      const sessions = new Map([
+        [
+          'session',
+          {
+            executionId: 'test-execution',
+            role: 'developer',
+            taskKey: 'SA-084',
+            tier: 'standard' as const,
+            model: 'test-standard-model',
+            effort: 'medium',
+            selectionReason: 'test policy',
+          },
+        ],
+      ]);
+      const resolver = new RoleResolver(store, 2000, () => sessions);
+      resolver.tick();
+      resolver.tick();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        type: 'agentRole',
+        id: 1,
+        tier: 'standard',
+        model: 'test-standard-model',
+        effort: 'medium',
+        selectionReason: 'test policy',
+      });
+      sessions.get('session')!.model = 'test-alternate-model';
+      resolver.tick();
+      expect(sent).toHaveLength(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('labels a main-checkout Claude session without a readable brief as owner, then retries', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roles-'));
     try {

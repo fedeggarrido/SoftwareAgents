@@ -8,9 +8,12 @@ export interface MachineQuotaPolicy {
   quotaThresholds: Partial<Record<ExecutorId, number>>;
   maxConcurrent: Partial<Record<ExecutorId, number>>;
 }
-export type QuotaDecision =
+export type QuotaCause =
+  'quota' | 'concurrency' | 'configuration' | 'capacity' | 'disabled' | 'selection';
+export type QuotaDecision = (
   | { status: 'go' | 'probe'; concurrencyLimit: number; reason: string }
-  | { status: 'wait'; resetsAt: number | null; reason: string };
+  | { status: 'wait'; resetsAt: number | null; reason: string }
+) & { cause?: QuotaCause };
 
 /** Pure admission decision; active = managed runtime slots; interactive sessions are observational only. */
 export function quotaGate(
@@ -22,10 +25,15 @@ export function quotaGate(
 ): QuotaDecision {
   const limit = policy?.maxConcurrent[executor];
   const threshold = policy?.quotaThresholds[executor];
-  const wait = (reason: string, resetsAt: number | null = null): QuotaDecision => ({
+  const wait = (
+    reason: string,
+    cause: QuotaCause,
+    resetsAt: number | null = null,
+  ): QuotaDecision => ({
     status: 'wait',
     resetsAt,
     reason,
+    cause,
   });
   if (
     limit === undefined ||
@@ -38,9 +46,11 @@ export function quotaGate(
     !Number.isInteger(active) ||
     active < 0
   )
-    return wait(`Missing or invalid machine quota policy/count for ${executor}`);
-  if (active >= limit) return wait(`${executor}: machine concurrency limit ${limit} reached`);
-  if (snapshot && snapshot.provider !== executor) return wait('Capacity provider mismatch');
+    return wait(`Missing or invalid machine quota policy/count for ${executor}`, 'configuration');
+  if (active >= limit)
+    return wait(`${executor}: machine concurrency limit ${limit} reached`, 'concurrency');
+  if (snapshot && snapshot.provider !== executor)
+    return wait('Capacity provider mismatch', 'capacity');
   if (
     !Number.isFinite(nowS) ||
     (snapshot?.observedAt !== undefined &&
@@ -53,12 +63,13 @@ export function quotaGate(
         (w.resetsAt !== null && !Number.isFinite(w.resetsAt)),
     )
   )
-    return wait('Invalid capacity observation');
+    return wait('Invalid capacity observation', 'capacity');
   const windows = snapshot?.windows.filter((w) => w.resetsAt === null || w.resetsAt > nowS) ?? [];
   const blocked = windows.filter((w) => w.usedRatio !== null && w.usedRatio > 1 - threshold / 100);
   if (blocked.length)
     return wait(
       `${executor}: remaining quota below ${threshold}%`,
+      'quota',
       blocked.some((w) => w.resetsAt === null)
         ? null
         : Math.max(...blocked.map((w) => w.resetsAt!)),
@@ -76,6 +87,7 @@ export function quotaGate(
   )
     return wait(
       `${executor}: capacity rejected`,
+      'quota',
       !windows.length ||
         (rejectedWindows.length ? rejectedWindows : windows).some((w) => w.resetsAt === null)
         ? null
@@ -95,7 +107,7 @@ export function quotaGate(
     windows.some((w) => w.usedRatio === null);
   if (unknown)
     return active >= 1
-      ? wait(`${executor}: probe already active (machine limit 1)`)
+      ? wait(`${executor}: probe already active (machine limit 1)`, 'concurrency')
       : {
           status: 'probe',
           concurrencyLimit: 1,

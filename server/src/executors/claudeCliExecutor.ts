@@ -11,7 +11,7 @@ import {
   compileAgent,
   validateAgentOutput,
 } from '../agentCompiler.js';
-import { claudeEffortSupported, validateModelChoice } from '../modelTiers.js';
+import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from '../modelTiers.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
@@ -36,11 +36,10 @@ export class ClaudeCliExecutor implements Executor {
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
   start(req: ExecutionRequest): ExecutionHandle {
-    validateModelChoice(
-      req,
-      'claude',
-      req.effort ? claudeEffortSupported(this.options.binary) : [],
-    );
+    const options = req.effort
+      ? { ...this.options, binary: resolveClaudeBinary(this.options.binary) }
+      : this.options;
+    validateModelChoice(req, 'claude', req.effort ? claudeEffortSupported(options.binary) : []);
     if (req.flags.length || (!req.agentSpec && req.role !== 'developer')) {
       throw new Error('Caller flags are forbidden; non-Developer roles require an AgentSpec');
     }
@@ -81,7 +80,6 @@ export class ClaudeCliExecutor implements Executor {
     const cancel = () => {
       if (!done) cancellation.cancel();
     };
-    const options = this.options;
     return {
       sessionId,
       cancel,

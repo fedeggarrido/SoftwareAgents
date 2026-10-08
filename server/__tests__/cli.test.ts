@@ -197,6 +197,73 @@ describe('dist/cli.js entry-point guard', () => {
     },
   );
 
+  itBuilt(
+    'office stays healthy with rejected Operator tiers; worker/quota exit 1 without traces',
+    async () => {
+      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-tiers-'));
+      fs.mkdirSync(path.join(tmpHome, '.pixel-agents'));
+      fs.writeFileSync(
+        path.join(tmpHome, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            sample: {
+              autonomyLevel: 'A1',
+              allowedExecutors: ['claude'],
+              modelTiers: { maxTier: 'deep', tiers: {} },
+            },
+            other: { autonomyLevel: 'A1', allowedExecutors: ['codex'] },
+          },
+        }),
+      );
+      await runCliServer(
+        tmpHome,
+        async ({ output, port }) => {
+          expect((await fetch(`http://127.0.0.1:${port}/api/health`)).ok).toBe(true);
+          expect(output()).toContain('Rejected Operator project sample');
+          const workspace = path.join(tmpHome, 'commands');
+          fs.mkdirSync(path.join(workspace, '.softwareagents'), { recursive: true });
+          fs.writeFileSync(
+            path.join(workspace, '.softwareagents/project.yaml'),
+            JSON.stringify({
+              apiVersion: 'softwareagents.io/v1alpha1',
+              kind: 'Project',
+              id: 'sample',
+              name: 'Sample',
+              repo: { remote: 'https://example.invalid/sample.git', defaultBranch: 'main' },
+              brain: { path: '.softwareagents/brain' },
+            }),
+          );
+          for (const args of [
+            ['quota', 'check', '--select-executor', '--role', 'developer'],
+            ['worker', 'run', '--task', 'SA-999', '--brief', 'absent.md'],
+            ['quota', 'check'],
+            ['worker', 'run'],
+          ]) {
+            const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+              const child = spawn(process.execPath, [CLI_BUNDLE, ...args], {
+                cwd: workspace,
+                env: {
+                  ...process.env,
+                  HOME: tmpHome,
+                  USERPROFILE: tmpHome,
+                  CODEX_HOME: path.join(tmpHome, 'codex'),
+                },
+                stdio: ['ignore', 'pipe', 'pipe'],
+              });
+              let stderr = '';
+              child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
+              child.on('close', (code) => resolve({ code, stderr }));
+            });
+            expect(result.code).toBe(1);
+            expect(result.stderr).not.toMatch(/\n\s+at /);
+            if (args.length > 2) expect(result.stderr).toContain('Invalid Operator modelTiers');
+          }
+        },
+        '127.0.0.1',
+      );
+    },
+  );
+
   /** Spawn the real bundled CLI against an isolated HOME, wait for /api/health,
    *  and hand back its output for assertions. Callers seed `tmpHome` first.
    *  `host` is the literal `--host` operand, so a caller can exercise a wildcard

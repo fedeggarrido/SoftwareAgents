@@ -23,6 +23,7 @@ import {
 import { loadBoardSelection } from './boardSources.js';
 import { BoardWatcher, latestBoardMessage } from './boardWatcher.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
+import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
 import { configureCompanyControl } from './companyControl.js';
 import {
@@ -52,7 +53,7 @@ export interface CliArgs {
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
  *  the parsing logic stays a pure, unit-testable function -- main() is the only
  *  place that turns a bad argument into an exit code. */
-export class CliArgsError extends Error {}
+export class CliArgsError extends CliUsageError {}
 
 export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = { host: '127.0.0.1' };
@@ -425,7 +426,7 @@ async function startServer(argv: string[]): Promise<void> {
 // hooks as a side effect of module load.
 if (require.main === module) {
   dispatchCli(process.argv.slice(2)).catch((err) => {
-    console.error(err);
+    console.error(cliErrorOutput(err));
     process.exit(1);
   });
 }

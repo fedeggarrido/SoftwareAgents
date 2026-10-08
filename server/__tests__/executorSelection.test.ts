@@ -294,7 +294,7 @@ it('explains tiers without launch, with SA-036 exit codes and operator override'
     downgrades: [],
   });
   const now = Date.now() / 1000;
-  expect(runQuotaCheck({ ...args, role: 'qa', workType: 'qa', size: 'S' }, root, log)).toBe(0);
+  expect(runQuotaCheck({ ...args, role: 'qa', workType: 'qa', size: 'M' }, root, log)).toBe(0);
   expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
     role: 'qa',
     tier: 'standard',

@@ -16,6 +16,7 @@ import { readExecutorSlots } from '../src/executorSlots.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { MachineCapacityPublisher } from '../src/machineCapacity.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
+import { runQuotaCheck } from '../src/quotaCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 
@@ -81,9 +82,77 @@ afterEach(async () => {
 });
 
 describe('supervised worker', () => {
+  it('invalid catalogue rejects worker and quota before locks, storage or legacy argv', async () => {
+    const file = path.join(root, '.pixel-agents/config.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    raw.projects.test.modelTiers = { maxTier: 'deep', tiers: {} };
+    fs.writeFileSync(file, JSON.stringify(raw));
+    expect(loadProjectConfig(repo)?.operator.allowedExecutors).toEqual([]);
+    await expect(runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo })).rejects.toThrow(
+      'Invalid Operator modelTiers',
+    );
+    for (const args of [
+      { selectExecutor: true, role: 'developer', json: true },
+      { executor: 'claude' as const, role: 'developer', json: true },
+    ])
+      expect(() => runQuotaCheck(args, repo)).toThrow('Invalid Operator modelTiers');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents'))).toBe(false);
+  });
+  it('runtime support uses the configured Claude binary and fails closed before launch', async () => {
+    const file = path.join(root, '.pixel-agents/config.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const binary = path.join(root, 'missing-claude.exe');
+    raw.projects.test.binaryPaths.claude = binary;
+    raw.projects.test.modelTiers = {
+      maxTier: 'standard',
+      tiers: {
+        standard: { candidates: [{ executor: 'claude', model: 'test-model', effort: 'high' }] },
+      },
+    };
+    fs.writeFileSync(file, JSON.stringify(raw));
+    vi.mocked(execFileSync).mockClear();
+    expect(loadProjectConfig(repo)?.operator.modelTiers).toBeDefined();
+    expect(execFileSync).not.toHaveBeenCalled();
+    await expect(runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo })).rejects.toThrow(
+      'unsupported claude effort',
+    );
+    expect(() =>
+      runQuotaCheck({ selectExecutor: true, role: 'developer', json: true }, repo),
+    ).toThrow('unsupported claude effort');
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(execFileSync).toHaveBeenCalledWith(binary, ['--help'], expect.any(Object));
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it('a missing capability weight is a configuration error for worker and quota', async () => {
+    const file = path.join(root, '.pixel-agents/config.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const rule = parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+        'utf8',
+      ),
+    ).tierRule;
+    delete rule.capabilityWeights.standard_coding;
+    raw.projects.test.modelTiers = {
+      maxTier: 'standard',
+      rule,
+      tiers: { standard: { candidates: [{ executor: 'codex', model: 'test-model' }] } },
+    };
+    fs.writeFileSync(file, JSON.stringify(raw));
+    expect(() =>
+      runQuotaCheck({ selectExecutor: true, role: 'developer', json: true }, repo),
+    ).toThrow('missing capabilityClass standard_coding');
+    await expect(runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo })).rejects.toThrow(
+      'missing capabilityClass standard_coding',
+    );
+    expect(spawn).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+  });
   it.each(['claude', 'codex'] as const)(
     'operator tiers pass real argv to %s and persist the choice',
     async (selected) => {
+      vi.mocked(execFileSync).mockClear();
       const execute = vi.mocked(execFileSync).getMockImplementation()!;
       vi.mocked(execFileSync).mockImplementation(((
         binary: string,
@@ -120,6 +189,10 @@ describe('supervised worker', () => {
         { task: 'SA-999', brief: 'brief.md' },
         { cwd: repo, binaryArgs: [fake, selected], log: () => {} },
       );
+      if (selected === 'claude')
+        expect(
+          vi.mocked(execFileSync).mock.calls.filter((call) => call[1]?.[0] === '--help'),
+        ).toHaveLength(1);
       expect(result.commit).toBeNull();
       const argv = JSON.parse(fs.readFileSync(captured, 'utf8')) as string[];
       expect(
@@ -223,7 +296,7 @@ describe('supervised worker', () => {
           outcome: {
             tier: 'standard',
             reason: expect.stringContaining(
-              'architecture/L; score=6; requested=deep; maxTier=standard',
+              'architecture/L; score=7; requested=deep; maxTier=standard',
             ),
           },
         },

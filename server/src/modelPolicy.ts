@@ -5,7 +5,7 @@ import type { TierRule } from '../../core/src/modelTier.js';
 import type { ModelPolicy } from './executorSelection.js';
 import { validateTierRule } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
-import { compileSchema, validateSchema } from './schemaValidation.js';
+import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 
 const validate = compileSchema<ModelPolicy>({
   type: 'object',
@@ -35,11 +35,17 @@ function readPolicy(root: string): Record<string, unknown> {
     fs.readFileSync(resolveInside(root, '.softwareagents/agents/model-policy.yaml'), 'utf8'),
     { uniqueKeys: true },
   );
-  if (document.errors.length) throw new Error(document.errors.map((e) => e.message).join('\n'));
-  const raw = document.toJS({ maxAliasCount: 100 });
+  if (document.errors.length)
+    throw new SchemaValidationError(document.errors.map((e) => e.message));
+  let raw: unknown;
+  try {
+    raw = document.toJS({ maxAliasCount: 100 });
+  } catch (error) {
+    throw new SchemaValidationError([(error as Error).message]);
+  }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-    throw new Error('Invalid model policy');
-  return raw;
+    throw new SchemaValidationError(['Invalid model policy']);
+  return raw as Record<string, unknown>;
 }
 export function loadModelPolicy(root: string): ModelPolicy {
   const raw = readPolicy(root);

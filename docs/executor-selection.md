@@ -206,31 +206,49 @@ Ningún candidato, peso o nivel amplía permisos, tools, sandbox o autonomía.
 ### Regla declarativa y entradas reales
 
 En `.softwareagents/agents/model-policy.yaml`, `tierRule` contiene exclusivamente
-pesos enteros no negativos y umbrales crecientes. No admite modelos ni autoridad:
+pesos enteros no negativos, umbrales crecientes y un fallback declarativo validado. No admite modelos ni autoridad:
 
 ```yaml
 tierRule:
+  fallback: { workType: implementation, size: M }
   capabilityWeights:
-    { fast_cheap: 0, standard_coding: 2, review: 2, test_analysis: 2, high_reasoning: 4 }
+    { fast_cheap: 0, standard_coding: 2, review: 2, test_analysis: 1, high_reasoning: 4 }
   workTypeWeights:
-    { summary: 0, classification: 0, docs: 0, implementation: 0, review: 1, qa: 1, architecture: 2 }
+    { summary: 0, classification: 0, docs: 0, implementation: 1, review: 1, qa: 1, architecture: 3 }
   sizeWeights: { S: 0, M: 1, L: 2 }
-  thresholds: { economy: 0, standard: 2, deep: 4 }
+  thresholds: { economy: 0, standard: 3, deep: 6 }
 ```
 
 Se suma capabilityClass + tipo + tamaño y se elige el mayor umbral alcanzado,
-acotado por `maxTier`. Con la tabla anterior: Developer/implementation/S → standard;
-Developer/review/M → deep; fast_cheap/summary/S → economy.
-QA declara `test_analysis` (peso 2). El worker sigue ejecutando el AgentSpec Developer: el rol de la Task no cambia
-sus permisos ni el template. Un capabilityClass sin peso produce espera explícita.
+acotado por `maxTier`. La calibración deja docs pequeñas y QA pequeña en economy;
+implementación normal y revisión mediana en standard; arquitectura compleja en deep.
+La tabla resume la regla real del repo antes del tope y de las bajadas:
+
+| Agent / capabilityClass     | Tipo           | S        | M        | L        |
+| --------------------------- | -------------- | -------- | -------- | -------- |
+| Developer / standard_coding | docs           | economy  | standard | standard |
+| Developer / standard_coding | implementation | standard | standard | standard |
+| Developer / standard_coding | architecture   | standard | deep     | deep     |
+| QA / test_analysis          | qa             | economy  | standard | standard |
+| Reviewer / review           | review         | standard | standard | standard |
+| Architect / high_reasoning  | architecture   | deep     | deep     | deep     |
+| fast_cheap                  | summary        | economy  | economy  | economy  |
+
+Sin tipo o tamaño, el fallback implementation/M da Developer standard, QA standard
+y Architect deep. El worker sigue ejecutando el AgentSpec Developer: el rol de la
+Task no cambia sus permisos ni el template. Un capabilityClass sin peso es error
+de configuración (exit 1), pues esperar no puede corregirlo.
 
 El tipo sale de `Task.type` del WorkStore si coincide con uno de los siete IDs
 anteriores. El tamaño sale de `items[].size` (S/M/L) del board vinculado mediante
 `project.yaml → legacy.boardFile`, con coincidencia única por Task key.
 SA-020 compila contexto/roles; no importa una estimación de Task. El brief no se
 interpreta para decidir modelos. Si falta o es desconocido **cualquiera** de tipo o
-tamaño, se utiliza solo capabilityClass; la explicación registra `fallback: missing
-work type/size, capabilityClass only`. No se adivina a partir del título o longitud.
+tamaño, se reemplazan **ambas** entradas por `tierRule.fallback: { workType, size }`.
+Si se omite ese campo, se usa implementation/M para compatibilidad. El fallback
+acepta solo los tipos y tamaños del esquema; la explicación registra
+`fallback: missing work type/size, implementation/M` (o los valores declarados).
+No se adivina a partir del título o longitud.
 
 ### Cuota, bajadas y admisión
 
@@ -239,7 +257,9 @@ filtrados por `allowedExecutors`. `go` o `probe` admite el primero elegible.
 Solo un rechazo de cuota o saldo bajo permite seguir `fallbackTo`, y solo si
 `AgentSpec.modelPolicy.fallbackAllowed` es true. El destino debe existir y ser
 inferior; no hay subida, ciclos ni salto implícito sobre niveles ausentes.
-Un límite de slots por sí solo no permite bajar. El tope del operador se aplica
+La bajada consulta `QuotaDecision.cause = quota`, sin analizar el texto del motivo.
+Un límite de slots por sí solo no permite bajar; executors desactivados siguen
+produciendo wait, para su futura reactivación por SA-088. El tope del operador se aplica
 antes de las bajadas por cuota. Si ningún candidato entra, devuelve `wait`/3
 con el reset conocido más temprano entre los candidatos intentados (null si no
 hay ninguno), para reevaluar; no promete disponibilidad después de ese reset.
@@ -268,10 +288,21 @@ Claude recibe `--model <id>` y, si se pide esfuerzo, `--effort <valor>` únicame
 tras comprobar `--help` del binario configurado (sin prompt, timeout 3 s,
 salida limitada, sin shell ni cwd del repo). La CLI inspeccionada anuncia
 `low | medium | high | xhigh | max`. Si el binario no anuncia el flag/valor, no
-responde o falla, la config es inválida: error claro, sin lanzamiento. Se vuelve
-a comprobar al crear la Execution. El soporte no se presume por versión.
+responde o falla, worker/quota fallan con exit 1 y mensaje claro, sin lanzamiento.
+La lectura de config solo comprueba la allowlist cerrada: no ejecuta sondas.
+Worker y quota comprueban soporte al cargar el proyecto; el executor también lo
+valida. La sonda se cachea una vez por proceso y binario resuelto, incluidos fallos:
+`binaryPaths.claude` o la resolución por defecto compartida con el executor.
+Tras actualizar un binario se reinicia el proceso para renovar el resultado.
+El soporte no se presume por versión.
 Los Executors vuelven a validar antes de construir argv, incluidos llamadores
-ajenos al worker. Una config de niveles inválida falla al cargar y no se ignora.
+ajenos al worker. Una política inválida se rechaza por proyecto, queda fuera de
+`readConfig().projects` y emite warning; settings, consentimiento, oficina y otros
+proyectos siguen funcionando. Se conserva el motivo y el contenido original
+también al guardar settings, sin reparación automática. Worker y quota de ese
+proyecto fallan cerrados con el diagnóstico de ModelTierConfigError (exit 1),
+sin recurrir al argv legado. Errores de uso/configuración muestran solo el mensaje;
+los errores inesperados conservan la traza.
 
 Sin `modelTiers`, no se añade modelo ni esfuerzo: se conserva la ruta manual
 Claude y `--select-executor` conserva el selector SA-036. La política del repo

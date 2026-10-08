@@ -10,6 +10,7 @@ import {
   getHooksEnabled,
   grantHooksConsent,
   parseAreaMappings,
+  projectConfigError,
   readConfig,
   recordHooksDecline,
   resetHooksConfig,
@@ -46,12 +47,13 @@ describe('configPersistence: areas', () => {
   });
 
   // ── parseAreaMappings ────────────────────────────────────────
-  it('invalid operator tiers fail clearly at load rather than dropping the catalogue', () => {
+  it('rejects only the invalid project, retains its error and preserves it on settings writes', () => {
     fs.mkdirSync(path.join(tempHome, '.pixel-agents'));
     fs.writeFileSync(
       path.join(tempHome, '.pixel-agents/config.json'),
       JSON.stringify({
         projects: {
+          other: { autonomyLevel: 'A1', allowedExecutors: ['claude'] },
           test: {
             autonomyLevel: 'A1',
             allowedExecutors: ['codex'],
@@ -73,7 +75,17 @@ describe('configPersistence: areas', () => {
         },
       }),
     );
-    expect(() => readConfig()).toThrow('Invalid Operator modelTiers');
+    const cfg = readConfig();
+    expect(cfg.projects.test).toBeUndefined();
+    expect(cfg.projects.other).toEqual({ autonomyLevel: 'A1', allowedExecutors: ['claude'] });
+    expect(projectConfigError(cfg.projects, 'test')?.message).toContain(
+      'Invalid Operator modelTiers',
+    );
+    const file = path.join(tempHome, '.pixel-agents/config.json');
+    const rejected = JSON.parse(fs.readFileSync(file, 'utf8')).projects.test;
+    setHooksEnabled('claude', false);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).projects.test).toEqual(rejected);
+    expect(readConfig().projects.test).toBeUndefined();
   });
 
   describe('parseAreaMappings', () => {

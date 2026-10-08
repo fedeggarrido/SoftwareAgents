@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
@@ -11,10 +12,13 @@ import { parseProjects } from '../src/configPersistence.js';
 import type { SelectionSnapshot } from '../src/executorSelection.js';
 import {
   claudeEffortSupported,
+  resolveClaudeBinary,
   selectModelTier,
   validateModelTiers,
+  validateModelTierSupport,
   validateTierRule,
 } from '../src/modelTiers.js';
+import { quotaGate } from '../src/quotaGate.js';
 
 vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
 
@@ -81,17 +85,60 @@ function snapshot(claudeLow = false, codexLow = false): SelectionSnapshot {
     capacities: { claude: capacity('claude', claudeLow), codex: capacity('codex', codexLow) },
   };
 }
-const typeSizes: [WorkType, [string, string, string], [string, string, string]][] = [
-  ['summary', ['economy', 'economy', 'standard'], ['standard', 'standard', 'deep']],
-  ['classification', ['economy', 'economy', 'standard'], ['standard', 'standard', 'deep']],
-  ['docs', ['economy', 'economy', 'standard'], ['standard', 'standard', 'deep']],
-  ['implementation', ['economy', 'economy', 'standard'], ['standard', 'standard', 'deep']],
-  ['review', ['economy', 'standard', 'standard'], ['standard', 'deep', 'deep']],
-  ['qa', ['economy', 'standard', 'standard'], ['standard', 'deep', 'deep']],
-  ['architecture', ['standard', 'standard', 'deep'], ['deep', 'deep', 'deep']],
+// Expectations use the real repository policy above, with independent calibrated outcomes.
+const typeSizes: [WorkType, string[], string[], string[], string[]][] = [
+  [
+    'summary',
+    ['economy', 'economy', 'economy'],
+    ['economy', 'standard', 'standard'],
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'deep'],
+  ],
+  [
+    'classification',
+    ['economy', 'economy', 'economy'],
+    ['economy', 'standard', 'standard'],
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'deep'],
+  ],
+  [
+    'docs',
+    ['economy', 'economy', 'economy'],
+    ['economy', 'standard', 'standard'],
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'deep'],
+  ],
+  [
+    'implementation',
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'standard'],
+    ['economy', 'standard', 'standard'],
+    ['standard', 'deep', 'deep'],
+  ],
+  [
+    'review',
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'standard'],
+    ['economy', 'standard', 'standard'],
+    ['standard', 'deep', 'deep'],
+  ],
+  [
+    'qa',
+    ['economy', 'economy', 'standard'],
+    ['standard', 'standard', 'standard'],
+    ['economy', 'standard', 'standard'],
+    ['standard', 'deep', 'deep'],
+  ],
+  [
+    'architecture',
+    ['standard', 'standard', 'standard'],
+    ['standard', 'deep', 'deep'],
+    ['standard', 'standard', 'deep'],
+    ['deep', 'deep', 'deep'],
+  ],
 ];
 describe('type × size × capabilityClass × quota table', () => {
-  for (const [type, cheap, coding] of typeSizes)
+  for (const [type, cheap, coding, qa, reasoning] of typeSizes)
     for (const [i, size] of (['S', 'M', 'L'] as WorkSize[]).entries())
       for (const capability of [
         'fast_cheap',
@@ -106,8 +153,10 @@ describe('type × size × capabilityClass × quota table', () => {
               capability === 'fast_cheap'
                 ? cheap[i]
                 : capability === 'high_reasoning'
-                  ? 'deep'
-                  : coding[i];
+                  ? reasoning[i]
+                  : capability === 'test_analysis'
+                    ? qa[i]
+                    : coding[i];
             const observation = snapshot(
               state === 'claude-low' || state === 'both-low',
               state === 'codex-low' || state === 'both-low',
@@ -157,9 +206,11 @@ it('operator ceiling and override bound hostile repo weights; absent tiers do no
       snapshot(),
     ).gate.status,
   ).toBe('wait');
-  expect(selectModelTier(spec('unknown'), rule, policy, {}, snapshot()).gate.status).toBe('wait');
+  expect(() => selectModelTier(spec('unknown'), rule, policy, {}, snapshot())).toThrow(
+    'missing capabilityClass unknown',
+  );
 });
-it('missing either input uses capability only and records fallback', () => {
+it('missing either input replaces both with declarative fallback and records it', () => {
   for (const inputs of [{}, { workType: 'architecture' as const }, { size: 'L' as const }])
     expect(
       selectModelTier(spec('standard_coding'), rule, policy, inputs, snapshot()),
@@ -200,11 +251,11 @@ it('tries candidates in operator order under the same gate; never raises tier', 
   ).toBeNull();
 });
 it('strict config validation rejects unknown tiers, injection and unsupported effort', () => {
-  expect(validateModelTiers(policy, () => ['high'])).toEqual(policy);
+  expect(validateModelTiers(policy)).toEqual(policy);
   for (const effort of ['high"\nfeatures.apps=true', 'bad', 'max']) {
     const invalid = structuredClone(policy);
     invalid.tiers.economy!.candidates[0].effort = effort;
-    expect(() => validateModelTiers(invalid, () => ['high'])).toThrow();
+    expect(() => validateModelTiers(invalid)).toThrow();
   }
   for (const model of [
     '-option',
@@ -217,20 +268,22 @@ it('strict config validation rejects unknown tiers, injection and unsupported ef
   ]) {
     const invalid = structuredClone(policy);
     invalid.tiers.economy!.candidates[0].model = model;
-    expect(() => validateModelTiers(invalid, () => ['high'])).toThrow();
+    expect(() => validateModelTiers(invalid)).toThrow();
   }
-  expect(() => validateModelTiers(policy, () => [])).toThrow('unsupported claude effort');
+  expect(() => validateModelTierSupport(policy, 'no-effort-cli')).toThrow(
+    'unsupported claude effort',
+  );
   expect(() => validateModelTiers({ ...policy, maxTier: 'absent' })).toThrow();
   const invalid = structuredClone(policy);
   invalid.tiers.standard!.fallbackTo = 'deep';
-  expect(() => validateModelTiers(invalid, () => ['high'])).toThrow('lower tier');
+  expect(() => validateModelTiers(invalid)).toThrow('lower tier');
   delete invalid.tiers.economy;
   invalid.tiers.standard!.fallbackTo = 'economy';
-  expect(() => validateModelTiers(invalid, () => ['high'])).toThrow('lower tier');
+  expect(() => validateModelTiers(invalid)).toThrow('lower tier');
   expect(() =>
     validateTierRule({ ...rule, thresholds: { economy: 0, standard: 4, deep: 2 } }),
   ).toThrow();
-  expect(() =>
+  expect(
     parseProjects({
       test: {
         autonomyLevel: 'A1',
@@ -238,7 +291,7 @@ it('strict config validation rejects unknown tiers, injection and unsupported ef
         modelTiers: { ...policy, maxTier: 'undefined' },
       },
     }),
-  ).toThrow('Operator modelTiers');
+  ).toEqual({});
 });
 
 it('detects installed Claude effort support with bounded help only; missing flag or failed probe rejects', () => {
@@ -246,6 +299,9 @@ it('detects installed Claude effort support with bounded help only; missing flag
     '--effort <level> Effort level (low, medium, high, xhigh, max)',
   );
   expect(claudeEffortSupported('test-cli')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  const calls = vi.mocked(execFileSync).mock.calls.length;
+  expect(claudeEffortSupported('test-cli')).toContain('high');
+  expect(vi.mocked(execFileSync).mock.calls.length).toBe(calls);
   expect(execFileSync).toHaveBeenCalledWith(
     'test-cli',
     ['--help'],
@@ -257,9 +313,92 @@ it('detects installed Claude effort support with bounded help only; missing flag
     }),
   );
   vi.mocked(execFileSync).mockReturnValue('--model <model>');
-  expect(claudeEffortSupported('test-cli')).toEqual([]);
+  expect(claudeEffortSupported('no-effort-cli-2')).toEqual([]);
   vi.mocked(execFileSync).mockImplementation(() => {
     throw new Error('test timeout');
   });
-  expect(claudeEffortSupported('test-cli')).toEqual([]);
+  expect(claudeEffortSupported('failed-cli')).toEqual([]);
+});
+
+it('defaults absent fallback to implementation/M and validates declared fallback', () => {
+  const { fallback, ...oldRule } = rule;
+  expect(validateTierRule(oldRule)).toEqual(oldRule);
+  for (const [capability, tier] of [
+    ['standard_coding', 'standard'],
+    ['test_analysis', 'standard'],
+    ['high_reasoning', 'deep'],
+  ]) {
+    expect(selectModelTier(spec(capability), oldRule, policy, {}, snapshot()).tier).toBe(tier);
+  }
+  const override = { ...rule, fallback: { workType: 'docs' as const, size: 'S' as const } };
+  expect(
+    selectModelTier(spec('standard_coding'), override, policy, { size: 'L' }, snapshot()),
+  ).toMatchObject({
+    tier: 'economy',
+    reason: expect.stringContaining('fallback: missing work type/size, docs/S'),
+  });
+  for (const fallback of [
+    { workType: 'bad', size: 'M' },
+    { workType: 'docs' },
+    { workType: 'qa', size: 'XL' },
+    { workType: 'qa', size: 'S', model: 'bad' },
+  ])
+    expect(() => validateTierRule({ ...rule, fallback })).toThrow();
+});
+it('parses Claude catalogues without a help probe, even with no PATH binary', () => {
+  vi.mocked(execFileSync).mockClear();
+  const parsed = parseProjects({
+    test: {
+      autonomyLevel: 'A1',
+      allowedExecutors: ['claude'],
+      binaryPaths: { claude: 'missing-cli' },
+      modelTiers: policy,
+    },
+  });
+  expect(parsed.test.modelTiers).toEqual(policy);
+  expect(execFileSync).not.toHaveBeenCalled();
+});
+it('quota gate distinguishes quota from concurrency and invalid observations structurally', () => {
+  const s = snapshot(true);
+  expect(quotaGate('claude', s.machinePolicy, s.capacities.claude, 0, 100)).toMatchObject({
+    status: 'wait',
+    cause: 'quota',
+  });
+  expect(quotaGate('claude', s.machinePolicy, s.capacities.claude, 1, 100)).toMatchObject({
+    status: 'wait',
+    cause: 'concurrency',
+  });
+  expect(quotaGate('claude', undefined, undefined, 0, 100)).toMatchObject({
+    status: 'wait',
+    cause: 'configuration',
+  });
+});
+it('default PATH resolution and explicit paths share one support probe for the same binary', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tier-binary-'));
+  const binary = path.join(
+    directory,
+    process.platform === 'win32' ? 'tier-claude.exe' : 'tier-claude',
+  );
+  const originalPath = process.env.PATH;
+  try {
+    fs.writeFileSync(binary, 'synthetic executable', { mode: 0o700 });
+    if (process.platform === 'win32')
+      fs.writeFileSync(path.join(directory, 'tier-claude'), 'npm shell shim');
+    process.env.PATH = process.platform === 'win32' ? `"${directory}"` : directory;
+    vi.mocked(execFileSync).mockReset();
+    vi.mocked(execFileSync).mockReturnValue('--effort <level> Effort (high)');
+    expect(resolveClaudeBinary('tier-claude')).toBe(fs.realpathSync.native(binary));
+    expect(claudeEffortSupported('tier-claude')).toEqual(['high']);
+    expect(claudeEffortSupported(binary)).toEqual(['high']);
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(execFileSync).toHaveBeenCalledWith(
+      fs.realpathSync.native(binary),
+      ['--help'],
+      expect.any(Object),
+    );
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

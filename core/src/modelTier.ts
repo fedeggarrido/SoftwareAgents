@@ -8,6 +8,8 @@ export interface TierRule {
   workTypeWeights: Record<WorkType, number>;
   sizeWeights: Record<WorkSize, number>;
   thresholds: Record<ModelTier, number>;
+  /** Both inputs are replaced when either is missing. Defaults to implementation/M. */
+  fallback?: { workType: WorkType; size: WorkSize };
 }
 export interface TierCandidate {
   executor: 'claude' | 'codex';

@@ -31,6 +31,7 @@ export function admitModelTier(
           status: 'wait',
           resetsAt: null,
           reason: `${choice.executor}: no free runtime executor slot`,
+          cause: 'concurrency',
         };
       return { selection, slot, snapshot };
     }),

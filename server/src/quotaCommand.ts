@@ -7,6 +7,7 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import type { WorkSize, WorkType } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
 import type { ExecutorId } from './executors/executor.js';
 import type { SelectionSnapshot } from './executorSelection.js';
@@ -19,7 +20,7 @@ import {
   type MachineCapacityObservation,
 } from './machineCapacity.js';
 import { loadModelPolicy, loadTierRule } from './modelPolicy.js';
-import { selectModelTier, WORK_TYPES } from './modelTiers.js';
+import { selectModelTier, validateModelTierSupport, WORK_TYPES } from './modelTiers.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { mergeQuotaEvidence, quotaWindowKey } from './quotaEvidence.js';
 import { quotaGate } from './quotaGate.js';
@@ -234,7 +235,7 @@ export interface QuotaArgs {
 }
 export function parseQuotaArgs(argv: string[]): QuotaArgs {
   if (argv[0] !== 'check')
-    throw new Error(
+    throw new CliUsageError(
       'Usage: pixel-agents quota check (--executor claude|codex | --select-executor) --role <role> [--work-type <type>] [--size S|M|L] [--json]',
     );
   const values: Record<string, string> = {};
@@ -256,7 +257,7 @@ export function parseQuotaArgs(argv: string[]): QuotaArgs {
       !argv[i + 1] ||
       argv[i + 1].startsWith('--')
     )
-      throw new Error('Invalid quota check arguments');
+      throw new CliUsageError('Invalid quota check arguments');
     values[key] = argv[++i];
   }
   if (
@@ -266,7 +267,7 @@ export function parseQuotaArgs(argv: string[]): QuotaArgs {
     (values['--work-type'] && !(WORK_TYPES as readonly string[]).includes(values['--work-type'])) ||
     (values['--size'] && !['S', 'M', 'L'].includes(values['--size']))
   )
-    throw new Error(
+    throw new CliUsageError(
       'Invalid quota arguments: require role and executor or --select-executor; valid work type and size S/M/L',
     );
   return {
@@ -278,12 +279,14 @@ export function parseQuotaArgs(argv: string[]): QuotaArgs {
   };
 }
 export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = console.log): number {
-  const config = loadProjectConfig(cwd);
-  if (!config) throw new Error('quota check requires a Project');
+  const config = loadProjectConfig(cwd, true);
+  if (!config) throw new CliUsageError('quota check requires a Project');
+  if (config.operator.modelTiers)
+    validateModelTierSupport(config.operator.modelTiers, config.operator.binaryPaths?.claude);
   const snapshot = readSelectionSnapshot(config.operator);
   if (args.selectExecutor) {
     if (!['developer', 'reviewer', 'qa', 'architect', 'requirements-analyst'].includes(args.role))
-      throw new Error('Unknown AgentSpec role');
+      throw new CliUsageError('Unknown AgentSpec role');
     const bundled = path.join(__dirname, `agents/templates/${args.role}.yaml`);
     const source = path.resolve(__dirname, `../../agents/templates/${args.role}.yaml`);
     const agent = validateSchema(

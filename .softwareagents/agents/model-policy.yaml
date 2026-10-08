@@ -13,11 +13,12 @@ review:
   - executor: claude
   - executor: codex
 
-# Pesos sumados; si falta tipo o tamaño se usa solo capabilityClass.
+# Pesos sumados; si falta tipo o tamaño se reemplazan ambos por fallback.
 tierRule:
+  fallback: { workType: implementation, size: M }
   capabilityWeights:
-    { fast_cheap: 0, standard_coding: 2, review: 2, test_analysis: 2, high_reasoning: 4 }
+    { fast_cheap: 0, standard_coding: 2, review: 2, test_analysis: 1, high_reasoning: 4 }
   workTypeWeights:
-    { summary: 0, classification: 0, docs: 0, implementation: 0, review: 1, qa: 1, architecture: 2 }
+    { summary: 0, classification: 0, docs: 0, implementation: 1, review: 1, qa: 1, architecture: 3 }
   sizeWeights: { S: 0, M: 1, L: 2 }
-  thresholds: { economy: 0, standard: 2, deep: 4 }
+  thresholds: { economy: 0, standard: 3, deep: 6 }

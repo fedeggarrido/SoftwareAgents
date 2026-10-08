@@ -3,7 +3,7 @@ import { parseDocument } from 'yaml';
 
 import * as projectSchema from '../../core/schemas/project.schema.json';
 import type { ProjectConfig, ProjectManifest } from '../../core/src/project.js';
-import { readConfig } from './configPersistence.js';
+import { projectConfigError, readConfig } from './configPersistence.js';
 import { resolveInside } from './pathGuard.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 
@@ -22,7 +22,10 @@ function resolveProjectPath(root: string, value: string, field: string): string 
  * companyAutopilot remains workspace-keyed for legacy companyControl; its migration
  * requires explicit operator action when that consumer adopts Project (SA-010/011).
  */
-export function loadProjectConfig(repoRoot: string): ProjectConfig | null {
+export function loadProjectConfig(
+  repoRoot: string,
+  requireValidOperator = false,
+): ProjectConfig | null {
   const file = resolveProjectPath(repoRoot, '.softwareagents/project.yaml', '/project.yaml');
   let source: string;
   try {
@@ -51,6 +54,8 @@ export function loadProjectConfig(repoRoot: string): ProjectConfig | null {
       : {}),
   };
   const projects = readConfig().projects;
+  const rejection = projectConfigError(projects, project.id);
+  if (requireValidOperator && rejection) throw rejection;
   return {
     project,
     repoRoot: fs.realpathSync.native(repoRoot),

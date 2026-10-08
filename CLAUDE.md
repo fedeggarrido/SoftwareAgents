@@ -191,7 +191,11 @@ solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
 - `modelTiers.ts`, `modelPolicy.ts`, `modelTierAdmission.ts`, `taskModelInputs.ts`:
   niveles economy/standard/deep, pesos declarativos, catálogo y tope exclusivos
   del operador, selección bajo admisión SA-036; `quotaCommand.ts` explica sin
-  lanzar. `worker.ts` registra selección en WorkStore/audit y registry →
+  lanzar. Config inválida: rechazo aislado por Project y diagnóstico conservado;
+  worker/quota fallan cerrados, oficina/settings siguen funcionando. La lectura no
+  lanza sondas; soporte Claude se cachea por binario al usar el catálogo. El fallback
+  declarativo reemplaza tipo/tamaño ausentes (implementation/M por defecto).
+  `worker.ts` registra selección en WorkStore/audit y registry →
   `agentRoles.ts` → overlay. Véase [executor-selection.md](docs/executor-selection.md).
 - `agentRoles.ts`: extrae etiquetas de rol y departamento de metadatos y briefs
   explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar

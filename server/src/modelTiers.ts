@@ -1,5 +1,7 @@
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type {
@@ -49,6 +51,12 @@ export const tierRuleSchema = {
     workTypeWeights: weights(WORK_TYPES),
     sizeWeights: weights(['S', 'M', 'L']),
     thresholds: weights(MODEL_TIERS),
+    fallback: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['workType', 'size'],
+      properties: { workType: { enum: WORK_TYPES }, size: { enum: ['S', 'M', 'L'] } },
+    },
   },
 };
 const validateRule = compileSchema<TierRule>(tierRuleSchema);
@@ -99,7 +107,12 @@ export const tierPolicySchema = {
 };
 const validatePolicy = compileSchema<ModelTierPolicy>(tierPolicySchema);
 
-export class ModelTierConfigError extends Error {}
+export class ModelTierConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ModelTierConfigError';
+  }
+}
 export function validateTierRule(raw: unknown): TierRule {
   const rule = validateSchema(validateRule, raw);
   if (
@@ -112,8 +125,38 @@ export function validateTierRule(raw: unknown): TierRule {
     );
   return rule;
 }
-/** No prompt, no shell, no repository cwd, bounded output; unknown support fails closed. */
+/** Resolve the same executable for the support probe and the actual execution. */
+export function resolveClaudeBinary(binary = 'claude'): string {
+  const extensions = process.platform === 'win32' ? ['', '.exe'] : [''];
+  const explicitPath = path.isAbsolute(binary) || /[\\/]/.test(binary);
+  const directories = explicitPath
+    ? ['']
+    : (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  for (const directory of directories) {
+    for (const extension of extensions) {
+      const candidate = path.resolve(directory.replace(/^"|"$/g, ''), binary + extension);
+      try {
+        if (!fs.statSync(candidate).isFile()) continue;
+        if (!explicitPath) {
+          // Executors launch native binaries without a shell, not npm's cmd/sh shims.
+          if (process.platform === 'win32' && !candidate.toLowerCase().endsWith('.exe')) continue;
+          if (process.platform !== 'win32') fs.accessSync(candidate, fs.constants.X_OK);
+        }
+        return fs.realpathSync.native(candidate);
+      } catch {
+        /* Missing/inaccessible binary: support fails closed below. */
+      }
+    }
+  }
+  return binary;
+}
+const effortSupport = new Map<string, readonly string[]>();
+/** No prompt, no shell, no repository cwd; cache successes and failures per resolved binary. */
 export function claudeEffortSupported(binary = 'claude'): readonly string[] {
+  binary = resolveClaudeBinary(binary);
+  const cached = effortSupport.get(binary);
+  if (cached) return cached;
+  let supported: readonly string[] = [];
   try {
     const help = execFileSync(binary, ['--help'], {
       cwd: os.tmpdir(),
@@ -128,10 +171,12 @@ export function claudeEffortSupported(binary = 'claude'): readonly string[] {
         .exec(help)?.[1]
         ?.split(',')
         .map((s) => s.trim()) ?? [];
-    return CLAUDE_EFFORTS.filter((e) => levels.includes(e));
+    supported = CLAUDE_EFFORTS.filter((e) => levels.includes(e));
   } catch {
-    return [];
+    /* Unknown support fails closed, including on subsequent uses. */
   }
+  effortSupport.set(binary, supported);
+  return supported;
 }
 export function validateModelChoice(
   choice: Partial<Pick<TierCandidate, 'model' | 'effort'>>,
@@ -150,18 +195,11 @@ export function validateModelChoice(
   )
     throw new ModelTierConfigError(`Invalid or unsupported ${executor} effort`);
 }
-export function validateModelTiers(
-  raw: unknown,
-  probe: () => readonly string[] = () => claudeEffortSupported(),
-): ModelTierPolicy {
+export function validateModelTiers(raw: unknown): ModelTierPolicy {
   try {
     const policy = validateSchema(validatePolicy, raw);
     if (!policy.tiers[policy.maxTier]) throw new Error('maxTier references an undefined tier');
     if (policy.rule) validateTierRule(policy.rule);
-    const needsClaude = Object.values(policy.tiers).some((t) =>
-      t.candidates.some((c) => c.executor === 'claude' && c.effort !== undefined),
-    );
-    const supported = needsClaude ? probe() : [];
     for (const [tier, definition] of Object.entries(policy.tiers)) {
       if (
         definition.fallbackTo &&
@@ -170,11 +208,26 @@ export function validateModelTiers(
       )
         throw new Error(`${tier}: fallbackTo must reference a defined lower tier`);
       for (const candidate of definition.candidates)
-        validateModelChoice(candidate, candidate.executor, supported);
+        validateModelChoice(candidate, candidate.executor, CLAUDE_EFFORTS);
     }
     return policy;
   } catch (error) {
     throw new ModelTierConfigError(`Invalid Operator modelTiers: ${(error as Error).message}`);
+  }
+}
+/** Runtime validation only; config readers must never launch a CLI. */
+export function validateModelTierSupport(policy: ModelTierPolicy, binary?: string): void {
+  for (const definition of Object.values(policy.tiers)) {
+    for (const candidate of definition.candidates) {
+      if (candidate.executor === 'claude' && candidate.effort !== undefined)
+        try {
+          validateModelChoice(candidate, 'claude', claudeEffortSupported(binary));
+        } catch (error) {
+          throw new ModelTierConfigError(
+            `Invalid Operator modelTiers: ${(error as Error).message} (${resolveClaudeBinary(binary)})`,
+          );
+        }
+    }
   }
 }
 export interface TierInputs {
@@ -202,11 +255,11 @@ export function selectModelTier(
     ? rule.capabilityWeights[capability]
     : undefined;
   const fallback = !input.workType || !input.size;
+  if (base === undefined)
+    throw new ModelTierConfigError(`modelTiers rule: missing capabilityClass ${capability}`);
+  const effective = fallback ? (rule.fallback ?? { workType: 'implementation', size: 'M' }) : input;
   const score =
-    base === undefined
-      ? undefined
-      : base +
-        (fallback ? 0 : rule.workTypeWeights[input.workType!] + rule.sizeWeights[input.size!]);
+    base + rule.workTypeWeights[effective.workType!] + rule.sizeWeights[effective.size!];
   const requested =
     score === undefined
       ? null
@@ -214,7 +267,7 @@ export function selectModelTier(
   const tier = requested
     ? MODEL_TIERS[Math.min(MODEL_TIERS.indexOf(requested), MODEL_TIERS.indexOf(policy.maxTier))]
     : null;
-  const prefix = `${agent.identity.role} → ${capability}; ${fallback ? 'fallback: missing work type/size, capabilityClass only' : `${input.workType}/${input.size}`}; score=${score ?? 'unknown'}; requested=${requested}; maxTier=${policy.maxTier}`;
+  const prefix = `${agent.identity.role} → ${capability}; ${fallback ? `fallback: missing work type/size, ${effective.workType}/${effective.size}` : `${input.workType}/${input.size}`}; score=${score}; requested=${requested}; maxTier=${policy.maxTier}`;
   const downgrades: ModelTier[] = [];
   const waits: Extract<QuotaDecision, { status: 'wait' }>[] = [];
   const reasons: string[] = [];
@@ -249,7 +302,7 @@ export function selectModelTier(
           reason: `${prefix}; ${reasons.join('; ')}`,
         };
       waits.push(gate);
-      quotaBlocked ||= /remaining quota below|capacity rejected/.test(gate.reason);
+      quotaBlocked ||= gate.cause === 'quota';
     }
     if (!quotaBlocked || !agent.modelPolicy.fallbackAllowed || !definition.fallbackTo) break;
     current = definition.fallbackTo;
@@ -262,7 +315,12 @@ export function selectModelTier(
     requestedTier: requested,
     choice: null,
     downgrades,
-    gate: { status: 'wait', resetsAt: resets.length ? Math.min(...resets) : null, reason },
+    gate: {
+      status: 'wait',
+      resetsAt: resets.length ? Math.min(...resets) : null,
+      reason,
+      cause: waits.some((w) => w.cause === 'quota') ? 'quota' : (waits[0]?.cause ?? 'disabled'),
+    },
     reason,
   };
 }

@@ -8,6 +8,7 @@ import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { AuditLog, recordAudit } from './auditLog.js';
+import { CliUsageError } from './cliErrors.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from './executors/codexCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -23,7 +24,7 @@ import {
 import { HumanDecisions } from './humanDecisions.js';
 import { loadModelPolicy, loadTierRule } from './modelPolicy.js';
 import { admitModelTier } from './modelTierAdmission.js';
-import type { TierSelection } from './modelTiers.js';
+import { type TierSelection, validateModelTierSupport } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -54,7 +55,7 @@ export function workerCommitSubject(task: string, brief: string): string {
 
 export function parseWorkerArgs(argv: string[]): WorkerArgs {
   if (argv[0] !== 'run')
-    throw new Error('Usage: pixel-agents worker run --task SA-### --brief <file>');
+    throw new CliUsageError('Usage: pixel-agents worker run --task SA-### --brief <file>');
   const values: Record<string, string> = {};
   let selection = false;
   for (let i = 1; i < argv.length; i += 2) {
@@ -66,11 +67,11 @@ export function parseWorkerArgs(argv: string[]): WorkerArgs {
     }
     const value = argv[i + 1];
     if (!['--task', '--brief'].includes(key) || !value || value.startsWith('--') || values[key])
-      throw new Error('Expected unique --task and --brief values');
+      throw new CliUsageError('Expected unique --task and --brief values');
     values[key] = value;
   }
   if (!/^SA-\d{3,}$/.test(values['--task'] ?? '') || !values['--brief'])
-    throw new Error('Expected --task SA-### and --brief <file>');
+    throw new CliUsageError('Expected --task SA-### and --brief <file>');
   return {
     task: values['--task'],
     brief: values['--brief'],
@@ -116,9 +117,13 @@ export interface WorkerOptions {
 export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   const cwd = options.cwd ?? process.cwd();
   const log = options.log ?? console.log;
-  const config = loadProjectConfig(cwd);
+  const config = loadProjectConfig(cwd, true);
   if (!config)
-    throw new Error('worker run requires .softwareagents/project.yaml in the main checkout');
+    throw new CliUsageError(
+      'worker run requires .softwareagents/project.yaml in the main checkout',
+    );
+  if (config.operator.modelTiers)
+    validateModelTierSupport(config.operator.modelTiers, config.operator.binaryPaths?.claude);
   const decision = evaluatePolicy('launch_execution', 'human', config.operator.autonomyLevel);
   const executionId = randomUUID();
   let tierSelection: TierSelection | undefined;
@@ -156,7 +161,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       !config.operator.allowedExecutors.includes('claude'))
   ) {
     audit('denied');
-    throw new Error('Operator config must allow the claude executor for this Project');
+    throw new CliUsageError('Operator config must allow the claude executor for this Project');
   }
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief = fs.readFileSync(path.resolve(cwd, args.brief), 'utf8');

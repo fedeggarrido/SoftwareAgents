@@ -4,13 +4,8 @@ import * as path from 'path';
 
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { CONFIG_FILE_MODE, CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
-import {
-  claudeEffortSupported,
-  ModelTierConfigError,
-  tierPolicySchema,
-  validateModelTiers,
-} from './modelTiers.js';
-import { compileSchema } from './schemaValidation.js';
+import { ModelTierConfigError, tierPolicySchema, validateModelTiers } from './modelTiers.js';
+import { compileSchema, SchemaValidationError } from './schemaValidation.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -130,21 +125,43 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
 });
 
 /** Invalid policies are rejected as a whole, never repaired into new authority. */
+const rejectedProjects = new WeakMap<
+  Record<string, ProjectOperatorConfig>,
+  Record<string, { raw: unknown; error: Error }>
+>();
+
+export function projectConfigError(
+  projects: Record<string, ProjectOperatorConfig>,
+  id: string,
+): Error | undefined {
+  return rejectedProjects.get(projects)?.[id]?.error;
+}
+
 export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfig> {
   const out: Record<string, ProjectOperatorConfig> = Object.create(null);
+  const rejected: Record<string, { raw: unknown; error: Error }> = Object.create(null);
+  rejectedProjects.set(out, rejected);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [id, policy] of Object.entries(raw)) {
-    if (policy && typeof policy === 'object' && Object.hasOwn(policy, 'modelTiers')) {
-      const candidate = policy as ProjectOperatorConfig;
-      validateModelTiers(candidate.modelTiers, () =>
-        claudeEffortSupported(candidate.binaryPaths?.claude),
-      );
-      if (!validateProjectOperator(policy))
-        throw new ModelTierConfigError(`Invalid Operator project ${id} with modelTiers`);
+    try {
+      if (policy && typeof policy === 'object' && Object.hasOwn(policy, 'modelTiers')) {
+        const candidate = policy as ProjectOperatorConfig;
+        validateModelTiers(candidate.modelTiers);
+        if (!validateProjectOperator(policy))
+          throw new ModelTierConfigError(`Invalid Operator project ${id} with modelTiers`);
+      }
+      if (
+        !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) ||
+        !validateProjectOperator(policy) ||
+        (policy.autopilot && !policy.autopilot.command[0])
+      )
+        throw new SchemaValidationError([`Invalid Operator project ${id}`]);
+      out[id] = structuredClone(policy);
+    } catch (error) {
+      const diagnostic = error as Error;
+      rejected[id] = { raw: structuredClone(policy), error: diagnostic };
+      console.warn(`[Pixel Agents] Rejected Operator project ${id}: ${diagnostic.message}`);
     }
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || !validateProjectOperator(policy)) continue;
-    if (policy.autopilot && !policy.autopilot.command[0]) continue;
-    out[id] = structuredClone(policy);
   }
   return out;
 }
@@ -288,7 +305,6 @@ export function readConfig(): PixelAgentsConfig {
       projects: parseProjects(parsed.projects),
     };
   } catch (err) {
-    if (err instanceof ModelTierConfigError) throw err;
     console.error('[Pixel Agents] Failed to read config file:', err);
     return {
       vscode: { ...DEFAULT_ADAPTER_SETTINGS },
@@ -408,7 +424,19 @@ export function writeConfig(config: PixelAgentsConfig): void {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    const json = JSON.stringify(config, null, 2);
+    // Settings/consent writes must preserve rejected policies verbatim for operator repair.
+    const rejected = rejectedProjects.get(config.projects) ?? {};
+    const json = JSON.stringify(
+      {
+        ...config,
+        projects: {
+          ...Object.fromEntries(Object.entries(rejected).map(([id, entry]) => [id, entry.raw])),
+          ...config.projects,
+        },
+      },
+      null,
+      2,
+    );
     const tmpPath = filePath + '.tmp';
     fs.writeFileSync(tmpPath, json, { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
     if (process.platform !== 'win32') fs.chmodSync(tmpPath, CONFIG_FILE_MODE);

@@ -338,6 +338,22 @@ describe('claude-hook.js integration', () => {
     expect(debugText).not.toMatch(/POST event=Stop sid=skip-dea port=9999\b/);
   });
 
+  // An EPERM PID is alive, just not ours to signal (an elevated server with Claude Code in a
+  // normal terminal). PID 4 is Windows' System process, which always answers EPERM.
+  (process.platform === 'win32' ? itBuilt : it.skip)(
+    'delivers to a registry entry whose PID it cannot signal (EPERM counts as alive)',
+    async () => {
+      const elevated = await startRecordingServer();
+      writeRegistryEntry(4, elevated.port, 'elevated-token');
+      const { code } = await runHookScript(
+        JSON.stringify({ session_id: 'eperm-live', hook_event_name: 'Stop' }),
+      );
+      elevated.close();
+      expect(code).toBe(0);
+      expect(elevated.received).toHaveLength(1);
+    },
+  );
+
   // 9. A structurally malformed live-pid entry never poisons healthy fan-out
   itBuilt('skips an invalid live-pid entry and still delivers to the healthy server', async () => {
     const healthy = await startRecordingServer();

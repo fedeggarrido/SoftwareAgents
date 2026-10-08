@@ -46,6 +46,9 @@ server/                              Lifecycle runtime + Fastify HTTP/WS server
     httpServer.ts                    Fastify: POST /api/hooks/:providerId, GET /api/health, GET /ws, SPA (standalone)
     clientMessageHandler.ts          Single dispatch point for ClientMessage from webview
     server.ts                        Top-level composition
+    serverProbe.ts                   GET /api/health with a total deadline (healthy/stale/unknown)
+    discoveryRecords.ts              Discovery records + leased cross-process lock (pathGuard-contained, link-safe)
+    serverConfig.ts                  ServerTarget/ServerConfig validation (incl. optional local contact host)
     cli.ts                           npx pixel-agents entry (npm bin)
     fileStateAdapter.ts              Namespaced ~/.pixel-agents/ persistence
     configPersistence.ts             { vscode, standalone, externalAssetDirectories, hooksConsent: {providerId: granted|declined}, hooksEnabled: {providerId: boolean} }
@@ -407,7 +410,11 @@ A recycled live PID and reused port can therefore send events to an unrelated
 local listener until a server start prunes the stale generation. The legacy
 fallback requires a live PID and excludes generations just rejected as dead;
 its 300 ms probe is **liveness, not authentication**. Only a stale verdict blocks
-delivery: unknown (busy) still attempts the POST with its 2 s timeout. A local
+delivery: any listener that neither refuses nor answers wrongly within 300 ms
+(busy, stalled or resetting) still gets the POST with its 2 s timeout, and stalling
+registry targets are not pruned. "Live" means anything but ESRCH, in the hook as in
+the server: an EPERM PID (an elevated server, or a SYSTEM process that reused a
+crashed server's PID) counts as alive. A local
 process can imitate /api/health and receive legacy tokens and events. Nonce/HMAC
 authentication without disclosing the token during the probe is deferred. An OS
 pause longer than the 10 s lease can allow overlapping cooperative critical
@@ -432,7 +439,8 @@ Per-agent runtime data: provider reference, session key, transcript-fallback fie
   vscode-state.json        { agents, seats }
   standalone-state.json    { agents, seats }
   layout.json              OfficeLayout (shared across surfaces)
-  server.json              { port, pid, authToken }
+  server.json              legacy pointer { port, pid, token, host? }
+  servers/<pid>-<port>.json  registry entry per live server (+ .discovery.lock, .reaped-*.lock)
   hooks/claude-hook.js     Bundled hook script (CJS, shebang)
 ```
 

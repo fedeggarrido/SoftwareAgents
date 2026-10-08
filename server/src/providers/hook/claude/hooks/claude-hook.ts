@@ -47,8 +47,10 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    // EPERM = alive but not ours to signal (an elevated VS Code with Claude Code in a normal
+    // terminal); only ESRCH means gone. Same rule as the server's isProcessRunning.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
 }
 

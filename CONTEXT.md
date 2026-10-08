@@ -271,7 +271,7 @@ A persistent instance of a particular AgentSpec version within a Project, with p
 _Do not confuse with_: the legacy Pixel Agents Agent (a Session), a Character, an Executor, or a Model.
 
 **Executor**:
-The local Claude Code CLI or Codex CLI integration that performs an Execution using the operator's subscription and authentication, under externally enforced policy.
+The local Claude Code CLI or Codex CLI integration that performs an Execution using the operator's subscription and authentication, under externally enforced policy. The set is the closed catalog in `core/src/executorCatalog.ts`; the Operator enables catalog entries per Project, and the selector decides which one does each Task.
 _Do not confuse with_: an Agent, its underlying Model, or a Provider that normalizes activity for the office.
 
 **Execution**:

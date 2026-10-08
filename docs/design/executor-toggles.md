@@ -445,6 +445,29 @@ T6 es opcional tras el MVP. No se solicita delegación ni se ejecuta trabajo de 
 tareas como parte de SA-086. Cada feature conserva revisión cruzada y QA individual
 de AGENTS.md, con SA-QA-n antes de pasar a la siguiente.
 
+## Estado de implementación
+
+**SA-087 (T1, contrato) — implementado.** Diferencias deliberadas respecto a la
+propuesta de arriba:
+
+- Catálogo cerrado `core/src/executorCatalog.ts` con `claude` y `codex`; el
+  destino local no existe porque ADR-0004 rechazó el LLM local. Sin él sobran
+  `localService` y los motivos `local_*`; añadirlo exige una entrada de catálogo,
+  su executor y los enums del contrato.
+- `errorCode` y `revision` de `executorToggleResult` son opcionales en lugar de
+  `null` (Modelina genera tipos estables sin uniones con null) y se añade
+  `not_supported` para servidores que aún no aplican cambios.
+- Los enums tienen nombre propio en el contrato (`ExecutorInstallation`,
+  `ExecutorToggleErrorCode`…), nunca esquemas anónimos.
+- `executionAssignment` no se crea: SA-084 ya proyecta nivel, modelo, esfuerzo y
+  motivo por Execution en `AgentRole`; los códigos estructurados y las
+  alternativas descartadas se añadirán ahí cuando el selector los produzca (T4).
+- Negociación: `webviewReady.capabilities` (`executorControls`). Solo esos
+  clientes reciben `executorState`; los antiguos ignoran tipos desconocidos.
+- Hasta SA-088 el snapshot lleva `canManage: false` y `setExecutorEnabled`
+  responde `rejected`/`not_supported` tras validar forma y privilegio, sin tocar
+  la configuración. Solo standalone, como los controles company.
+
 ## Validación y entrega a Claude
 
 La implementación debe probar: conexiones sin token/capacidad embebida, actor falso,

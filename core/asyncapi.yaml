@@ -121,6 +121,9 @@ components:
         - $ref: '#/components/schemas/AgentRole'
         - $ref: '#/components/schemas/AgentProviderLabel'
         - $ref: '#/components/schemas/CompanyNotice'
+        # Executor availability (SA-087)
+        - $ref: '#/components/schemas/ExecutorState'
+        - $ref: '#/components/schemas/ExecutorToggleResult'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
       discriminator: type
@@ -151,6 +154,8 @@ components:
         - $ref: '#/components/schemas/RequestDiagnostics'
         - $ref: '#/components/schemas/CompanyAutopilot'
         - $ref: '#/components/schemas/CompanyDecision'
+        - $ref: '#/components/schemas/SetExecutorEnabled'
+        - $ref: '#/components/schemas/RequestExecutorState'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -803,6 +808,16 @@ components:
       properties:
         type:
           const: webviewReady
+        capabilities:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ClientCapability'
+          description: >-
+            Optional features this client understands. The server only sends
+            capability-gated messages (executorState) to clients that list
+            them; an absent list is a legacy client.
 
     LaunchAgent:
       description: Launch a new Claude agent in a new terminal.
@@ -1094,6 +1109,50 @@ components:
           type: string
         answer:
           type: string
+
+    SetExecutorEnabled:
+      description: |
+        Operator command (privileged clients only): make an Executor available or
+        unavailable for NEW Executions of a Project. An absolute state, never a
+        toggle — repeating it cannot invert it. It never assigns a Task, picks a
+        Model or bypasses a gate: the selector still decides who does what.
+        Answered point-to-point with executorToggleResult.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, executorId, enabled, requestId, expectedRevision]
+      properties:
+        type:
+          const: setExecutorEnabled
+        projectId:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 64
+        executorId:
+          $ref: '#/components/schemas/ExecutorId'
+        enabled:
+          type: boolean
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        expectedRevision:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Opaque revision from the last executorState; a stale one is a revision_conflict.
+
+    RequestExecutorState:
+      description: Ask for a fresh executorState of the server's own Project (reconnect/resync). Read-only and cheap; never starts probes.
+      type: object
+      additionalProperties: false
+      required: [type, projectId]
+      properties:
+        type:
+          const: requestExecutorState
+        projectId:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 64
 
     # ── Supporting schemas ─────────────────────────────────────────
 
@@ -1635,6 +1694,179 @@ components:
     ModelTier:
       type: string
       enum: [economy, standard, deep]
+    ExecutorId:
+      type: string
+      enum: [claude, codex]
+      description: Executor catalog id (core/src/executorCatalog.ts). Local models are not offered (ADR-0004).
+    ClientCapability:
+      type: string
+      enum: [executorControls]
+    ExecutorConfigurationStatus:
+      type: string
+      enum: [ready, pending, recovery_required, invalid]
+    ExecutorInstallation:
+      type: string
+      enum: [ready, missing, unsupported, unknown]
+    ExecutorAuthentication:
+      type: string
+      enum: [ready, required, unknown]
+    ExecutorQuotaGate:
+      type: string
+      enum: [allow, block, unknown]
+    ExecutorToggleStatus:
+      type: string
+      enum: [applied, unchanged, rejected, failed]
+    ExecutorToggleErrorCode:
+      type: string
+      description: Present exactly when status is rejected or failed.
+      enum:
+        - unauthorized
+        - invalid_request
+        - unknown_project
+        - unknown_executor
+        - policy_denied
+        - revision_conflict
+        - apply_failed
+        - persist_failed
+        - audit_failed
+        - recovery_required
+        - not_supported
+    ExecutorReasonCode:
+      type: string
+      enum:
+        - operator_disabled
+        - not_installed
+        - unsupported_version
+        - auth_required
+        - probe_unknown
+        - probe_stale
+        - quota_blocked
+        - quota_unknown
+        - concurrency_full
+        - no_allowed_level
+        - configuration_unavailable
+    ExecutorAvailability:
+      description: |
+        One Executor in an executorState snapshot. enabled is the Operator's
+        choice (projects.<id>.allowedExecutors). eligible means admissible for
+        consideration now — it neither guarantees a Task will get it nor reserves
+        a slot. Observations the server has not made are unknown/null, never
+        optimistic defaults; a missing limit is unknown, not infinite.
+      type: object
+      additionalProperties: false
+      required:
+        [
+          executorId,
+          enabled,
+          eligible,
+          reasonCodes,
+          installation,
+          version,
+          authentication,
+          levels,
+          quotaGate,
+          activeExecutions,
+          concurrencyLimit,
+          checkedAt,
+          staleAfter,
+        ]
+      properties:
+        executorId:
+          $ref: '#/components/schemas/ExecutorId'
+        enabled:
+          type: boolean
+        eligible:
+          type: boolean
+        reasonCodes:
+          type: array
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/ExecutorReasonCode'
+        installation:
+          $ref: '#/components/schemas/ExecutorInstallation'
+        version:
+          type: [string, 'null']
+        authentication:
+          $ref: '#/components/schemas/ExecutorAuthentication'
+        levels:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/ModelTier'
+          description: Tiers whose Operator catalog lists this Executor, capped by maxTier (SA-084). Empty without a catalog.
+        quotaGate:
+          $ref: '#/components/schemas/ExecutorQuotaGate'
+        activeExecutions:
+          type: [integer, 'null']
+          minimum: 0
+          description: Slot-managed Executions running now; interactive Sessions excluded.
+        concurrencyLimit:
+          type: [integer, 'null']
+          minimum: 0
+        checkedAt:
+          type: [number, 'null']
+          description: Epoch seconds of the newest technical probe; null until availability is monitored.
+        staleAfter:
+          type: [number, 'null']
+    ExecutorState:
+      description: |
+        Snapshot of Executor availability for the server's Project, sent to clients
+        that announced executorControls (after webviewReady and on
+        requestExecutorState). canManage is computed per recipient. revision
+        changes only when Operator config changes; sequence orders snapshots
+        within one connection.
+      type: object
+      additionalProperties: false
+      required:
+        [type, projectId, revision, sequence, observedAt, canManage, configurationStatus, executors]
+      properties:
+        type:
+          const: executorState
+        projectId:
+          type: string
+        revision:
+          type: string
+        sequence:
+          type: integer
+          minimum: 0
+        observedAt:
+          type: number
+          description: Epoch seconds.
+        canManage:
+          type: boolean
+        configurationStatus:
+          $ref: '#/components/schemas/ExecutorConfigurationStatus'
+        executors:
+          type: array
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/ExecutorAvailability'
+    ExecutorToggleResult:
+      description: |
+        Point-to-point answer to setExecutorEnabled, correlated by requestId.
+        applied means applied AND persisted AND audited. A server that cannot
+        change availability yet answers rejected with not_supported.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, executorId, requestId, status]
+      properties:
+        type:
+          const: executorToggleResult
+        projectId:
+          type: string
+        executorId:
+          type: string
+          maxLength: 64
+          description: Echo of the request (may be an unknown id when errorCode is unknown_executor).
+        requestId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ExecutorToggleStatus'
+        errorCode:
+          $ref: '#/components/schemas/ExecutorToggleErrorCode'
+        revision:
+          type: string
+          description: Config revision after the command, when known.
     AgentProviderLabel:
       type: object
       additionalProperties: false

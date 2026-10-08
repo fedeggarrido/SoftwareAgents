@@ -10,11 +10,20 @@ import { answerDecision, companyWorkspaceRoot, setAutopilot } from './companyCon
 import {
   getHooksConsent,
   getHooksEnabled,
+  projectConfigError,
   readConfig,
   setHooksEnabled,
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import {
+  buildExecutorState,
+  clientWantsExecutorControls,
+  operatorRevision,
+  parseRequestExecutorState,
+  parseSetExecutorEnabled,
+  toggleResult,
+} from './executorState.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
@@ -23,6 +32,7 @@ import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
 import { claudeProvider, hookProviderById, hookProviders } from './providers/index.js';
+import { readSelectionSnapshot } from './quotaCommand.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
 
@@ -94,7 +104,44 @@ export function handleClientMessage(
   switch (msg.type) {
     case 'webviewReady':
       handleWebviewReady(send, ctx);
+      // Capability-gated: legacy clients never receive executorState.
+      if (clientWantsExecutorControls(msg)) sendExecutorState(send, ctx);
       break;
+
+    case 'requestExecutorState': {
+      const request = parseRequestExecutorState(msg);
+      // Only the server's own Project; other ids get nothing (no config probing on request).
+      if (request && executorProject()?.id === request.projectId) sendExecutorState(send, ctx);
+      break;
+    }
+
+    case 'setExecutorEnabled': {
+      const parsed = parseSetExecutorEnabled(msg);
+      if (!parsed.ok) {
+        if (parsed.echo) send({ ...toggleResult(parsed.echo, 'rejected', parsed.errorCode) });
+        break;
+      }
+      const echo = {
+        projectId: parsed.msg.projectId,
+        executorId: parsed.msg.executorId,
+        requestId: parsed.msg.requestId,
+      };
+      // Privilege first, so unprivileged clients learn nothing about Project ids.
+      if (!ctx.privileged) {
+        send({ ...toggleResult(echo, 'rejected', 'unauthorized') });
+        break;
+      }
+      const project = executorProject();
+      if (!project || project.id !== parsed.msg.projectId) {
+        send({ ...toggleResult(echo, 'rejected', 'unknown_project') });
+        break;
+      }
+      // The durable authority change is SA-088; until then the contract answers honestly.
+      send({
+        ...toggleResult(echo, 'rejected', 'not_supported', operatorRevision(project.operator)),
+      });
+      break;
+    }
 
     case 'closeAgent': {
       // Standalone agents are always external (no terminal), so mirror the VS
@@ -369,6 +416,49 @@ export function handleClientMessage(
       // require IDE-specific handling (not yet implemented for standalone)
       break;
   }
+}
+
+/** Per-connection ordering of executorState snapshots (restarts with each connection). */
+const executorStateSequence = new WeakMap<WsSend, number>();
+/** False until SA-088 can apply, persist and audit availability changes. */
+const EXECUTOR_TOGGLES_SUPPORTED = false;
+
+function executorProject():
+  | { id: string; operator: ReturnType<typeof readConfig>['projects'][string] | undefined }
+  | undefined {
+  const root = companyWorkspaceRoot();
+  if (!root) return undefined;
+  try {
+    const config = loadProjectConfig(root);
+    if (!config) return undefined;
+    const rejected = projectConfigError(readConfig().projects, config.project.id);
+    return { id: config.project.id, operator: rejected ? undefined : config.operator };
+  } catch {
+    return undefined;
+  }
+}
+
+function sendExecutorState(send: WsSend, ctx: ClientMessageContext): void {
+  const project = executorProject();
+  if (!project) return;
+  let snapshot: ReturnType<typeof readSelectionSnapshot> | undefined;
+  try {
+    snapshot = project.operator ? readSelectionSnapshot(project.operator) : undefined;
+  } catch {
+    snapshot = undefined;
+  }
+  const sequence = executorStateSequence.get(send) ?? 0;
+  executorStateSequence.set(send, sequence + 1);
+  send({
+    ...buildExecutorState({
+      projectId: project.id,
+      operator: project.operator,
+      snapshot,
+      sequence,
+      canManage: EXECUTOR_TOGGLES_SUPPORTED && ctx.privileged === true,
+      nowS: Date.now() / 1000,
+    }),
+  });
 }
 
 function allowCompanyAction(action: PolicyAction, send: WsSend): PolicyDecision | null {

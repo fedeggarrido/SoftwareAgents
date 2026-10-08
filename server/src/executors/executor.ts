@@ -2,7 +2,8 @@ import type { AgentSpec } from '../../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../../core/src/capacity.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { AgentCompilerTask } from '../agentCompiler.js';
-export type ExecutorId = 'claude' | 'codex';
+export type { ExecutorId } from '../../../core/src/executorCatalog.js';
+import type { ExecutorId } from '../../../core/src/executorCatalog.js';
 
 /** Caller must authorize execution externally; CLI adapters compile bounded AgentSpec input. */
 export interface ExecutionRequest {

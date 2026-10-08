@@ -42,6 +42,8 @@ export type ServerMessage =
   | AgentRole
   | AgentProviderLabel
   | CompanyNotice
+  | ExecutorState
+  | ExecutorToggleResult
   | AgentDiagnostics;
 
 export type ClientMessage =
@@ -68,7 +70,9 @@ export type ClientMessage =
   | SetShowAreas
   | RequestDiagnostics
   | CompanyAutopilot
-  | CompanyDecision;
+  | CompanyDecision
+  | SetExecutorEnabled
+  | RequestExecutorState;
 
 export interface ProviderCapabilities {
   type: 'providerCapabilities';
@@ -530,6 +534,81 @@ export interface CompanyNotice {
   text: string;
 }
 
+export interface ExecutorState {
+  type: 'executorState';
+  projectId: string;
+  revision: string;
+  sequence: number;
+  observedAt: number;
+  canManage: boolean;
+  configurationStatus: ExecutorConfigurationStatus;
+  executors: ExecutorAvailability[];
+}
+
+export type ExecutorConfigurationStatus = 'ready' | 'pending' | 'recovery_required' | 'invalid';
+
+export interface ExecutorAvailability {
+  executorId: ExecutorId;
+  enabled: boolean;
+  eligible: boolean;
+  reasonCodes: ExecutorReasonCode[];
+  installation: ExecutorInstallation;
+  version: string | null;
+  authentication: ExecutorAuthentication;
+  levels: ModelTier[];
+  quotaGate: ExecutorQuotaGate;
+  activeExecutions: number | null;
+  concurrencyLimit: number | null;
+  checkedAt: number | null;
+  staleAfter: number | null;
+}
+
+export type ExecutorId = 'claude' | 'codex';
+
+export type ExecutorReasonCode =
+  | 'operator_disabled'
+  | 'not_installed'
+  | 'unsupported_version'
+  | 'auth_required'
+  | 'probe_unknown'
+  | 'probe_stale'
+  | 'quota_blocked'
+  | 'quota_unknown'
+  | 'concurrency_full'
+  | 'no_allowed_level'
+  | 'configuration_unavailable';
+
+export type ExecutorInstallation = 'ready' | 'missing' | 'unsupported' | 'unknown';
+
+export type ExecutorAuthentication = 'ready' | 'required' | 'unknown';
+
+export type ExecutorQuotaGate = 'allow' | 'block' | 'unknown';
+
+export interface ExecutorToggleResult {
+  type: 'executorToggleResult';
+  projectId: string;
+  executorId: string;
+  requestId: string;
+  status: ExecutorToggleStatus;
+  errorCode?: ExecutorToggleErrorCode;
+  revision?: string;
+}
+
+export type ExecutorToggleStatus = 'applied' | 'unchanged' | 'rejected' | 'failed';
+
+export type ExecutorToggleErrorCode =
+  | 'unauthorized'
+  | 'invalid_request'
+  | 'unknown_project'
+  | 'unknown_executor'
+  | 'policy_denied'
+  | 'revision_conflict'
+  | 'apply_failed'
+  | 'persist_failed'
+  | 'audit_failed'
+  | 'recovery_required'
+  | 'not_supported';
+
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
@@ -537,7 +616,10 @@ export interface AgentDiagnostics {
 
 export interface WebviewReady {
   type: 'webviewReady';
+  capabilities?: ClientCapability[];
 }
+
+export type ClientCapability = 'executorControls';
 
 export interface LaunchAgent {
   type: 'launchAgent';
@@ -659,4 +741,18 @@ export interface CompanyDecision {
   type: 'companyDecision';
   id: string;
   answer: string;
+}
+
+export interface SetExecutorEnabled {
+  type: 'setExecutorEnabled';
+  projectId: string;
+  executorId: ExecutorId;
+  enabled: boolean;
+  requestId: string;
+  expectedRevision: string;
+}
+
+export interface RequestExecutorState {
+  type: 'requestExecutorState';
+  projectId: string;
 }

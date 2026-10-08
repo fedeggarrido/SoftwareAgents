@@ -201,6 +201,10 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     store.on('agentRemoved', onAgentRemoved);
     store.on('broadcast', onBroadcast);
 
+    // One send per connection: handlers key per-connection state (e.g. the
+    // executorState sequence) by it, so a fresh closure per message would reset it.
+    const send = (m: Record<string, unknown>) => safeSend(socket, m);
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -208,7 +212,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
-        handleClientMessage(msg, (m) => safeSend(socket, m), {
+        handleClientMessage(msg, send, {
           store,
           runtime: options.runtime,
           cache: options.assetCache ?? null,

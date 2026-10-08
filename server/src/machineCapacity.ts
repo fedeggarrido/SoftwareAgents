@@ -11,11 +11,13 @@ import {
   MACHINE_CAPACITY_PUBLISH_MS,
 } from './constants.js';
 import type { ExecutorId } from './executors/executor.js';
+import { slotProcessIdentity } from './executorSlots.js';
+import { retryFileOperation } from './fileContention.js';
 import { mergeQuotaEvidence, retainQuotaEvidence } from './quotaEvidence.js';
 
 export interface MachineCapacityObservation {
   observedAt: number;
-  publisher: { id: string; pid: number; bootId: string; sequence: number };
+  publisher: { id: string; pid: number; bootId: string; sequence: number; startIdentity?: string };
   coverage: { scope: 'office'; workspaces: string[]; source: 'office_store' };
   sessions: Record<ExecutorId, string[]>;
   capacities: Partial<Record<ExecutorId, CapacitySnapshot>>;
@@ -65,30 +67,36 @@ export function writeMachineCapacityObservation(
   observation: MachineCapacityObservation,
   file: string,
 ): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  retryFileOperation(() => fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }));
   const tmp = `${file}.${randomUUID()}.tmp`;
   let fd: number | undefined;
   try {
-    fd = fs.openSync(tmp, 'wx', 0o600);
+    fd = retryFileOperation(() => fs.openSync(tmp, 'wx', 0o600));
     if (process.platform !== 'win32' && (fs.fstatSync(fd).mode & 0o777) !== 0o600)
       throw new Error('Capacity temporary file must have mode 0600');
     fs.writeFileSync(fd, JSON.stringify(observation));
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
-    fs.renameSync(tmp, file);
+    retryFileOperation(() => fs.renameSync(tmp, file));
     if (process.platform !== 'win32' && (fs.statSync(file).mode & 0o777) !== 0o600)
       throw new Error('Capacity file must have mode 0600');
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
-    if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    retryFileOperation(() => {
+      try {
+        fs.unlinkSync(tmp);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    });
   }
 }
 
 const seen = new Map<string, { observedAt: number; sequence: number; monotonic: number }>();
 
 /** Expiry tombstones survive reader restarts, so wall-clock rollback cannot revive
- * a generation already rejected. Publisher also refuses timestamps going backwards.
+ * a generation already rejected. Publisher starts a new epoch on clock rollback.
  */
 export function isFreshMachineObservation(
   observation: MachineCapacityObservation,
@@ -105,7 +113,14 @@ export function isFreshMachineObservation(
   // cannot become authoritative merely because a different CLI process reads it.
   let accepted: string[] = [];
   try {
-    accepted = fs.readdirSync(invalidDir).filter((n) => n.startsWith('accepted-'));
+    accepted = retryFileOperation(() => {
+      try {
+        return fs.readdirSync(invalidDir);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    }).filter((n) => n.startsWith('accepted-'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -114,7 +129,7 @@ export function isFreshMachineObservation(
     return { sequence: Number(sequence), observedAt: Number(at) };
   });
   const invalid =
-    observedAt > nowS ||
+    observedAt > nowS + 1 ||
     nowS - observedAt > 60 ||
     prior.some((entry) => entry.observedAt > observedAt || entry.sequence > publisher.sequence) ||
     (old &&
@@ -122,18 +137,18 @@ export function isFreshMachineObservation(
         publisher.sequence < old.sequence ||
         (publisher.sequence === old.sequence && monotonic - old.monotonic > 60_000)));
   if (invalid) {
-    fs.mkdirSync(invalidDir, { recursive: true, mode: 0o700 });
+    retryFileOperation(() => fs.mkdirSync(invalidDir, { recursive: true, mode: 0o700 }));
     try {
-      fs.closeSync(fs.openSync(marker, 'wx', 0o600));
+      fs.closeSync(retryFileOperation(() => fs.openSync(marker, 'wx', 0o600)));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
   }
-  if (invalid || fs.existsSync(marker)) return false;
+  if (invalid || fs.existsSync(marker) || observedAt > nowS + 1) return false;
   fs.mkdirSync(invalidDir, { recursive: true, mode: 0o700 });
   const acceptedFile = path.join(invalidDir, `accepted-${publisher.sequence}_${observedAt}`);
   try {
-    fs.closeSync(fs.openSync(acceptedFile, 'wx', 0o600));
+    fs.closeSync(retryFileOperation(() => fs.openSync(acceptedFile, 'wx', 0o600)));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
   }
@@ -145,7 +160,7 @@ export function isFreshMachineObservation(
 export class MachineCapacityPublisher {
   private timer: NodeJS.Timeout | undefined;
   private warned = false;
-  private readonly bootId = randomUUID();
+  private bootId = randomUUID();
   private sequence = 0;
   private lastObservedAt = -Infinity;
   private evidence: Partial<Record<ExecutorId, CapacitySnapshot[]>> = {};
@@ -172,7 +187,10 @@ export class MachineCapacityPublisher {
     if (!this.ownsServer()) return;
     try {
       const nowS = this.now() / 1000;
-      if (nowS < this.lastObservedAt) return;
+      if (nowS < this.lastObservedAt) {
+        this.bootId = randomUUID();
+        this.sequence = 0;
+      }
       const capacities = this.capacities();
       const combined: Partial<Record<ExecutorId, CapacitySnapshot>> = {};
       for (const executor of ['claude', 'codex'] as const) {
@@ -188,7 +206,13 @@ export class MachineCapacityPublisher {
         this.store,
         combined,
         nowS,
-        { id: this.bootId, pid: process.pid, bootId: this.bootId, sequence: ++this.sequence },
+        {
+          id: this.bootId,
+          pid: process.pid,
+          bootId: this.bootId,
+          sequence: ++this.sequence,
+          startIdentity: slotProcessIdentity(process.pid) ?? undefined,
+        },
         this.workspaces,
       );
       observation.evidence = this.evidence;

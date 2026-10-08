@@ -6,14 +6,15 @@ import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { readConfig } from './configPersistence.js';
 import type { ExecutorId } from './executors/executor.js';
 import type { SelectionSnapshot } from './executorSelection.js';
-import { readExecutorSlots } from './executorSlots.js';
+import { readExecutorSlots, slotProcessIdentity } from './executorSlots.js';
+import { retryFileOperation } from './fileContention.js';
 import {
   isFreshMachineObservation,
   machineCapacityDirectory,
   type MachineCapacityObservation,
 } from './machineCapacity.js';
 import { loadProjectConfig } from './projectConfig.js';
-import { mergeQuotaEvidence } from './quotaEvidence.js';
+import { mergeQuotaEvidence, quotaWindowKey } from './quotaEvidence.js';
 import { quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
@@ -32,6 +33,7 @@ const validateObservation = compileSchema<MachineCapacityObservation>({
         bootId: { type: 'string', pattern: '^[a-zA-Z0-9-]+$' },
         pid: { type: 'integer', minimum: 1 },
         sequence: { type: 'integer', minimum: 1 },
+        startIdentity: { type: 'string' },
       },
     },
     coverage: {
@@ -74,6 +76,7 @@ const validateObservation = compileSchema<MachineCapacityObservation>({
               required: ['kind', 'usedRatio', 'resetsAt'],
               properties: {
                 kind: { enum: ['five_hour', 'weekly', 'other'] },
+                limitId: { type: 'string' },
                 usedRatio: { type: ['number', 'null'], minimum: 0, maximum: 1 },
                 resetsAt: { type: ['number', 'null'] },
               },
@@ -105,7 +108,8 @@ export function readSelectionSnapshot(
   for (const executor of ['claude', 'codex'] as const) {
     const limits = policies
       .filter((p) => p.allowedExecutors.includes(executor))
-      .map((p) => p.concurrency?.perExecutor?.[executor]);
+      .map((p) => p.concurrency?.perExecutor?.[executor])
+      .filter((n): n is number => n !== undefined);
     if (limits.length && limits.every((n) => n !== undefined))
       maxConcurrent[executor] = Math.min(...(limits as number[]));
   }
@@ -114,7 +118,14 @@ export function readSelectionSnapshot(
   const directory = machineCapacityDirectory();
   let files: string[] = [];
   try {
-    files = fs.readdirSync(directory).filter((name) => name.endsWith('.json'));
+    files = retryFileOperation(() => {
+      try {
+        return fs.readdirSync(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    }).filter((name) => name.endsWith('.json'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
@@ -123,7 +134,7 @@ export function readSelectionSnapshot(
     try {
       const observation = validateSchema(
         validateObservation,
-        JSON.parse(fs.readFileSync(file, 'utf8')),
+        JSON.parse(retryFileOperation(() => fs.readFileSync(file, 'utf8'), 100)),
       );
       observations.push(observation);
       if (isFreshMachineObservation(observation, file, nowS)) current.push(observation);
@@ -133,12 +144,38 @@ export function readSelectionSnapshot(
   }
   const active: Partial<Record<ExecutorId, number>> = {};
   const capacities: Partial<Record<ExecutorId, CapacitySnapshot>> = {};
+  const counts = {
+    claude: {
+      runtimeSlots: 0,
+      observedSessions: 0,
+      observedRuntimeSessions: 0,
+      blockedSlots: [] as string[],
+    },
+    codex: {
+      runtimeSlots: 0,
+      observedSessions: 0,
+      observedRuntimeSessions: 0,
+      blockedSlots: [] as string[],
+    },
+  };
   for (const executor of ['claude', 'codex'] as const) {
     const slots = readExecutorSlots(executor);
     const runtimeSessions = new Set(slots.sessions);
-    const observedSessions = new Set(current.flatMap((o) => o.sessions[executor]));
-    active[executor] =
-      slots.count + [...observedSessions].filter((s) => !runtimeSessions.has(s)).length;
+    const sessionSources = observations.filter(
+      (o) =>
+        current.includes(o) ||
+        (o.observedAt > nowS &&
+          o.publisher.startIdentity &&
+          slotProcessIdentity(o.publisher.pid) === o.publisher.startIdentity),
+    );
+    const observedSessions = new Set(sessionSources.flatMap((o) => o.sessions[executor]));
+    active[executor] = slots.count;
+    counts[executor] = {
+      runtimeSlots: slots.count,
+      observedSessions: observedSessions.size,
+      observedRuntimeSessions: [...observedSessions].filter((s) => runtimeSessions.has(s)).length,
+      blockedSlots: slots.blocked,
+    };
     const evidence = mergeQuotaEvidence(
       observations
         .flatMap((o) => o.evidence?.[executor] ?? [o.capacities[executor]])
@@ -155,7 +192,7 @@ export function readSelectionSnapshot(
             ['high', 'exact'].includes(s.confidence) &&
             s.windows.some(
               (live) =>
-                live.kind === w.kind &&
+                quotaWindowKey(live) === quotaWindowKey(w) &&
                 live.usedRatio === w.usedRatio &&
                 live.resetsAt === w.resetsAt,
             ),
@@ -169,7 +206,9 @@ export function readSelectionSnapshot(
     machinePolicy: { quotaThresholds: operator.quotaThresholds ?? {}, maxConcurrent },
     active,
     coverage: {
-      scope: 'runtime_slots_and_observed_sessions',
+      scope: 'runtime_slots',
+      interactiveSessions: 'excluded_from_worker_limit',
+      counts,
       offices: current.map((o) => o.coverage),
       unobservedInteractiveSessions: 'not_counted',
     },
@@ -228,7 +267,13 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
       };
   log(
     args.json
-      ? JSON.stringify({ executor: args.executor, role: args.role, ...decision })
+      ? JSON.stringify({
+          executor: args.executor,
+          role: args.role,
+          ...decision,
+          active: snapshot.active[args.executor],
+          coverage: snapshot.coverage,
+        })
       : `${decision.status}: ${decision.reason}`,
   );
   return decision.status === 'wait' ? 3 : 0;

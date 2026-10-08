@@ -116,7 +116,8 @@ it('aggregates publishers from different workspaces; an empty writer cannot eras
     ['project-b'],
   ).publish();
   expect(readSelectionSnapshot(operator, 1010).coverage?.offices).toHaveLength(2);
-  expect(gate(1010).status).toBe('wait');
+  expect(gate(1010).status).toBe('go');
+  expect(readSelectionSnapshot(operator, 1010).coverage?.counts.codex.observedSessions).toBe(2);
 });
 it('deduplicates the same session across offices', () => {
   const a = new AgentStateStore();
@@ -125,7 +126,8 @@ it('deduplicates the same session across offices', () => {
   b.set(9, agent(9, 'codex', 'shared'));
   publisher(a).publish();
   publisher(b).publish();
-  expect(readSelectionSnapshot(operator, 1010).active.codex).toBe(1);
+  expect(readSelectionSnapshot(operator, 1010).active.codex).toBe(0);
+  expect(readSelectionSnapshot(operator, 1010).coverage?.counts.codex.observedSessions).toBe(1);
   expect(gate(1010).status).toBe('go');
 });
 it('partial or absent offices do not claim an interactive machine total; runtime probes remain possible', () => {
@@ -138,7 +140,8 @@ it('expires sessions irreversibly across wall-clock rollback, while old quota be
   store.set(1, agent(1, 'codex'));
   store.set(2, agent(2, 'codex'));
   publisher(store).publish();
-  expect(gate(1030).status).toBe('wait');
+  expect(gate(1030).status).toBe('go');
+  expect(readSelectionSnapshot(operator, 1030).coverage?.counts.codex.observedSessions).toBe(2);
   expect(gate(1061).status).toBe('probe');
   expect(gate(1050).status).toBe('probe');
   expect(readSelectionSnapshot(operator, 1050).active.codex).toBe(0);
@@ -150,7 +153,7 @@ it('rejects a later sequence with a timestamp older than the last accepted publi
   store.set(2, agent(2, 'codex'));
   const p = publisher(store, () => ({}));
   p.publish();
-  expect(gate(1000).status).toBe('wait');
+  expect(gate(1000).status).toBe('probe');
   const o = JSON.parse(fs.readFileSync(p.file, 'utf8'));
   o.publisher.sequence++;
   o.observedAt = 990;
@@ -163,7 +166,8 @@ it('a new reader process cannot revive expired or backward publications from the
   store.set(2, agent(2, 'codex'));
   const p = publisher(store, () => ({}));
   p.publish();
-  expect(gate(1000).status).toBe('wait');
+  expect(gate(1000).status).toBe('probe');
+  expect(readSelectionSnapshot(operator, 1000).coverage?.counts.codex.observedSessions).toBe(2);
   expect(gate(1061).status).toBe('probe');
   const bundle = path.join(home, 'reader.cjs');
   buildSync({
@@ -214,7 +218,7 @@ it('a new reader process cannot revive expired or backward publications from the
   writeMachineCapacityObservation(o, p.file);
   expect(await readInNewProcess()).toBe('probe');
 }, 15000);
-it('publisher refuses backward time; a new boot and a new forward heartbeat are accepted', () => {
+it('publisher starts a new epoch after backward time and keeps publishing', () => {
   let now = 1000000;
   const p = publisher(
     new AgentStateStore(),
@@ -225,7 +229,7 @@ it('publisher refuses backward time; a new boot and a new forward heartbeat are 
   const read = () => JSON.parse(fs.readFileSync(p.file, 'utf8'));
   now = 999000;
   p.publish();
-  expect(read().observedAt).toBe(1000);
+  expect(read().observedAt).toBe(999);
   expect(read().publisher.sequence).toBe(1);
   expect(gate(1061).status).toBe('probe');
   now = 1062000;
@@ -247,7 +251,7 @@ it('a stalled heartbeat expires on monotonic time even when wall time is frozen'
   store.set(1, agent(1, 'codex'));
   store.set(2, agent(2, 'codex'));
   publisher(store).publish();
-  expect(gate(1000).status).toBe('wait');
+  expect(gate(1000).status).toBe('go');
   monotonic += 60001;
   expect(gate(1000).status).toBe('probe');
   expect(readSelectionSnapshot(operator, 1000).active.codex).toBe(0);
@@ -406,3 +410,31 @@ it.each(['writeFileSync', 'renameSync'] as const)(
     expect(fs.existsSync(p.file)).toBe(false);
   },
 );
+it.each(['EPERM', 'EBUSY', 'EBADF', 'ENOENT'])(
+  'retries transient %s on per-boot publication without losing the previous observation',
+  (code) => {
+    const p = publisher();
+    p.publish();
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync')
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error('race'), { code });
+      })
+      .mockImplementation(rename);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    p.publish();
+    expect(warn).not.toHaveBeenCalled();
+    expect(JSON.parse(fs.readFileSync(p.file, 'utf8')).publisher.sequence).toBe(2);
+    expect(gate(1000).status).toBe('go');
+  },
+);
+it('an empty or truncated per-boot contribution yields a probe and a complete replacement restores capacity', () => {
+  const p = publisher();
+  p.publish();
+  for (const partial of ['', '{"publisher":']) {
+    fs.writeFileSync(p.file, partial);
+    expect(gate(1000).status).toBe('probe');
+  }
+  p.publish();
+  expect(gate(1000).status).toBe('go');
+});

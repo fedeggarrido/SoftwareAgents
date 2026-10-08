@@ -78,6 +78,7 @@ function newestFiles(dir: string, limit: number, recursive = false): string[] {
 function capacity(
   q: ProviderQuota,
   kind: 'five_hour' | 'weekly' | 'other' = 'other',
+  limitId?: string,
 ): ProviderQuota {
   q.capacity = {
     provider: q.provider,
@@ -101,6 +102,7 @@ function capacity(
         : [
             {
               kind,
+              ...(limitId ? { limitId } : {}),
               usedRatio: q.usedPercent === null ? null : q.usedPercent / 100,
               resetsAt: q.resetsAt,
             },
@@ -267,6 +269,7 @@ export function parseClaudeRateLimit(
       : info.rateLimitType === 'seven_day'
         ? 'weekly'
         : 'other',
+    typeof info.rateLimitType === 'string' ? info.rateLimitType : undefined,
   );
 }
 

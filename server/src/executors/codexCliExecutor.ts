@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline';
@@ -23,6 +23,7 @@ import { parseCodexRateLimits } from '../quotaReader.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 import { processCancellation } from './processCancellation.js';
+import { spawnRegisteredProcess } from './registeredProcess.js';
 
 /** `server.tool` of an MCP call record (exec item or envelope), for the violation message. */
 function codexMcpToolName(shape: {
@@ -167,12 +168,7 @@ export class CodexCliExecutor implements Executor {
             '-',
           ];
           const launchedMs = Date.now();
-          child = spawn(binary, args, {
-            cwd: req.worktreePath,
-            windowsHide: true,
-            detached: process.platform !== 'win32',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          });
+          child = spawnRegisteredProcess(binary, args, req.worktreePath, req.registerProcess);
           const proc = child;
           let failure: Error | undefined;
           const completion = new Promise<number>((resolve) => {

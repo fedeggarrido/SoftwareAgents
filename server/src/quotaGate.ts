@@ -12,7 +12,7 @@ export type QuotaDecision =
   | { status: 'go' | 'probe'; concurrencyLimit: number; reason: string }
   | { status: 'wait'; resetsAt: number | null; reason: string };
 
-/** Pure admission decision; active = runtime slots + observed non-runtime sessions. */
+/** Pure admission decision; active = managed runtime slots; interactive sessions are observational only. */
 export function quotaGate(
   executor: ExecutorId,
   policy: MachineQuotaPolicy | undefined,
@@ -99,7 +99,7 @@ export function quotaGate(
       : {
           status: 'probe',
           concurrencyLimit: 1,
-          reason: `${executor}: unknown capacity; one runtime probe (unobserved interactive sessions excluded)`,
+          reason: `${executor}: unknown capacity; one runtime probe (interactive sessions excluded from worker limit)`,
         };
   return {
     status: 'go',

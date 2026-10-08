@@ -1,4 +1,8 @@
-import type { CapacitySnapshot } from '../../core/src/capacity.js';
+import type { CapacitySnapshot, CapacityWindow } from '../../core/src/capacity.js';
+
+export function quotaWindowKey(window: CapacityWindow): string {
+  return window.limitId ?? window.kind;
+}
 
 /** Compact evidence by window, preserving its own event time. A later reliable
  * observation supersedes that window; low confidence can only add restrictions.
@@ -8,7 +12,16 @@ export function retainQuotaEvidence(
   nowS: number,
 ): CapacitySnapshot[] {
   const parts = snapshots
-    .filter((s) => s.observedAt === null || s.observedAt <= nowS)
+    .filter(
+      (s) =>
+        s.observedAt === null ||
+        s.observedAt <= nowS ||
+        s.status === 'rejected' ||
+        s.windows.some((w) => (w.usedRatio ?? 0) > 0),
+    )
+    .map((s) =>
+      s.observedAt !== null && s.observedAt > nowS ? { ...s, confidence: 'low' as const } : s,
+    )
     .flatMap((s) => {
       if (!s.windows.length) return [s];
       const located = s.windows.some((w) => w.usedRatio === null || (w.usedRatio ?? 0) >= 1);
@@ -33,7 +46,7 @@ export function retainQuotaEvidence(
           later.observedAt !== null &&
           later.observedAt > (s.observedAt ?? -Infinity) &&
           (s.windows.length
-            ? later.windows[0]?.kind === s.windows[0].kind
+            ? later.windows[0] && quotaWindowKey(later.windows[0]) === quotaWindowKey(s.windows[0])
             : later.windows.length > 0),
       ),
   );
@@ -49,7 +62,7 @@ export function mergeQuotaEvidence(
   for (const s of evidence) {
     const w = s.windows[0];
     if (!w) continue;
-    const old = selected.get(w.kind);
+    const old = selected.get(quotaWindowKey(w));
     const live = w.resetsAt === null || w.resetsAt > nowS;
     const oldWindow = old?.windows[0];
     const oldLive = oldWindow && (oldWindow.resetsAt === null || oldWindow.resetsAt > nowS);
@@ -58,7 +71,7 @@ export function mergeQuotaEvidence(
       (live && !oldLive) ||
       (live === !!oldLive && (w.usedRatio ?? -1) > (oldWindow!.usedRatio ?? -1))
     )
-      selected.set(w.kind, s);
+      selected.set(quotaWindowKey(w), s);
   }
   const contributing = [...selected.values()];
   const unlocated = evidence.filter((s) => !s.windows.length && s.status === 'rejected');

@@ -6,6 +6,12 @@ import * as path from 'path';
 
 import { LAYOUT_FILE_DIR } from './constants.js';
 import type { ExecutorId } from './executors/executor.js';
+import {
+  contentionNow,
+  contentionPause,
+  isFileContention,
+  retryFileOperation,
+} from './fileContention.js';
 
 interface Owner {
   pid: number;
@@ -15,182 +21,350 @@ interface Owner {
   sessionId?: string;
   child?: { pid: number; startIdentity: string };
   launchPending?: boolean;
+  launchProtocol?: 'registered_wrapper';
 }
-
+export const INCOMPLETE_LOCK_LEASE_MS = 10_000;
 let ownStartIdentity: string | undefined;
+const incompleteLeases = new Map<string, { stamp: string; at: number }>();
+const processIdentities = new Map<number, { identity: string; at: number }>();
 
-/** Query only a registered PID (including our own), never enumerate host processes. */
-export function slotProcessIdentity(pid: number): string | null {
-  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid slot PID');
+/** null = dead; undefined = alive but unverifiable. Query registered PIDs only. */
+export function slotProcessIdentity(pid: number): string | null | undefined {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
   if (pid === process.pid && ownStartIdentity) return ownStartIdentity;
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return null;
-    throw error;
-  }
-  if (process.platform === 'win32') {
-    const result = execFileSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `$ErrorActionPreference='Stop'; try { (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString() } catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { throw } }`,
-      ],
-      { encoding: 'utf8', windowsHide: true, timeout: 5000 },
-    ).trim();
-    if (!result) return null;
-    if (!/^\d+$/.test(result)) throw new Error('Unverifiable slot process identity');
-    if (pid === process.pid) ownStartIdentity = result;
-    return result;
-  }
-  if (process.platform === 'linux') {
+  const dead = () => {
     try {
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const identity = `${fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()}:${stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]}`;
-      if (pid === process.pid) ownStartIdentity = identity;
-      return identity;
+      process.kill(pid, 0);
+      return false;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw error;
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
     }
+  };
+  if (dead()) {
+    processIdentities.delete(pid);
+    return null;
   }
-  throw new Error('Slot process identity unsupported on this platform');
+  const cached = processIdentities.get(pid);
+  if (cached && contentionNow() - cached.at < 30_000) return cached.identity;
+  try {
+    let identity: string;
+    if (process.platform === 'win32') {
+      identity = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$ErrorActionPreference='Stop'; try { (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString() } catch { $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().Ticks.ToString() } }`,
+        ],
+        { encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
+      if (!/^\d+$/.test(identity)) return dead() ? null : undefined;
+    } else if (process.platform === 'linux') {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+      if (!start || !/^\d+$/.test(start)) return undefined;
+      identity = `${fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()}:${start}`;
+    } else {
+      // Darwin/BSD: ps is locale-stable, second precision. Never enumerate processes.
+      identity = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: { ...process.env, LC_ALL: 'C' },
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (!identity) return dead() ? null : undefined;
+    }
+    processIdentities.set(pid, { identity, at: contentionNow() });
+    if (pid === process.pid) ownStartIdentity = identity;
+    return identity;
+  } catch {
+    return dead() ? null : undefined;
+  }
 }
 
 export function executorSlotsDirectory(executor: ExecutorId): string {
   return path.join(os.homedir(), LAYOUT_FILE_DIR, 'executor-slots', executor);
 }
-
-function readOwner(file: string): Owner {
-  const owner = JSON.parse(fs.readFileSync(file, 'utf8')) as Owner;
-  if (
-    !Number.isSafeInteger(owner.pid) ||
-    !owner.startIdentity ||
-    !owner.token ||
-    !owner.executionId
-  )
-    throw new Error('Invalid slot owner; manual recovery required');
-  return owner;
+function readOwner(file: string): Owner | undefined {
+  try {
+    const owner = JSON.parse(
+      retryFileOperation(() => {
+        try {
+          return fs.readFileSync(file, 'utf8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+          throw error;
+        }
+      }),
+    ) as Owner;
+    if (
+      !owner ||
+      typeof owner !== 'object' ||
+      !Number.isSafeInteger(owner.pid) ||
+      typeof owner.startIdentity !== 'string' ||
+      !owner.startIdentity ||
+      !owner.token ||
+      !owner.executionId
+    )
+      return undefined;
+    return owner;
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
 }
-
-function createLock(file: string, owner: Owner): (() => void) | undefined {
+function unlink(file: string): void {
+  incompleteLeases.delete(file);
+  retryFileOperation(() => {
+    try {
+      fs.unlinkSync(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  });
+}
+function writeExclusive(file: string, data: unknown): boolean {
   let fd: number;
   try {
-    fd = fs.openSync(file, 'wx', 0o600);
+    fd = retryFileOperation(() => fs.openSync(file, 'wx', 0o600));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return undefined;
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
     throw error;
   }
+  let failed = false;
   try {
-    fs.writeFileSync(fd, JSON.stringify(owner));
+    fs.writeFileSync(fd, JSON.stringify(data));
     fs.fsyncSync(fd);
   } catch (error) {
-    fs.unlinkSync(file);
+    failed = true;
     throw error;
   } finally {
-    fs.closeSync(fd);
+    try {
+      fs.closeSync(fd);
+    } finally {
+      if (failed) unlink(file);
+    }
   }
+  return true;
+}
+function createLock(file: string, owner: Owner): (() => void) | undefined {
+  if (!writeExclusive(file, owner)) return undefined;
   return () => {
-    if (readOwner(file).token !== owner.token) throw new Error('Slot ownership changed');
-    fs.unlinkSync(file);
+    const current = readOwner(file);
+    if (!current || current.token !== owner.token)
+      throw new Error(`Slot ownership unverifiable: ${file}`);
+    unlink(file);
   };
 }
-
-/** Preserve a complete owner record even if the process crashes during an update. */
+/** A failed replacement leaves the complete previous record intact. */
 function updateSlotOwner(file: string, owner: Owner): void {
   const tmp = `${file}.${randomUUID()}.tmp`;
-  let fd: number | undefined;
   try {
-    fd = fs.openSync(tmp, 'wx', 0o600);
-    fs.writeFileSync(fd, JSON.stringify(owner));
-    fs.fsyncSync(fd);
-    fs.closeSync(fd);
-    fd = undefined;
-    if (readOwner(file).token !== owner.token) throw new Error('Slot ownership changed');
-    fs.renameSync(tmp, file);
+    writeExclusive(tmp, owner);
+    if (readOwner(file)?.token !== owner.token) throw new Error(`Slot ownership changed: ${file}`);
+    retryFileOperation(() => fs.renameSync(tmp, file));
   } finally {
-    if (fd !== undefined) fs.closeSync(fd);
-    if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    unlink(tmp);
+  }
+}
+function stopped(pid: number, identity: string): boolean {
+  let current = slotProcessIdentity(pid);
+  // A cached previous lifetime cannot prove a newly registered owner is dead.
+  if (current !== null && current !== undefined && current !== identity) {
+    processIdentities.delete(pid);
+    current = slotProcessIdentity(pid);
+  }
+  return (
+    current === null || (current !== undefined && identity !== 'unverified' && current !== identity)
+  );
+}
+function incompleteExpired(file: string): boolean {
+  try {
+    const stat = retryFileOperation(() => {
+      try {
+        return fs.statSync(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw error;
+      }
+    });
+    if (!stat) return true; // Gone contenders must not stall the next directory sweep.
+    const wallNow = Date.now();
+    // Persist a fresh lease after wall-clock rollback, including across short-lived
+    // CLI readers. This is only reached for incomplete records, never live owners.
+    if (stat.mtimeMs > wallNow)
+      retryFileOperation(() => fs.utimesSync(file, new Date(wallNow), new Date(wallNow)));
+    const stamp = String(stat.ino) + ':' + stat.mtimeMs + ':' + stat.size;
+    const old = incompleteLeases.get(file);
+    if (!old || old.stamp !== stamp) incompleteLeases.set(file, { stamp, at: contentionNow() });
+    return (
+      wallNow - stat.mtimeMs > INCOMPLETE_LOCK_LEASE_MS ||
+      contentionNow() - incompleteLeases.get(file)!.at > INCOMPLETE_LOCK_LEASE_MS
+    );
+  } catch (error) {
+    if (isFileContention(error)) return false;
+    throw error;
   }
 }
 
-/** Serializes gate + slot allocation per executor across repositories/processes.
- * Recovery is serialized too: two reclaimers must never unlink a new owner's lock.
- * An unverifiable/half-written lock fails closed, as does a crashed recovery helper.
+const held = new Set<ExecutorId>();
+/** Lamport bakery admission: unique per-attempt files avoid shared recovery-lock ABA.
+ * The claim (choosing) precedes its immutable ticket. New arrivals see our ticket;
+ * existing choosers must finish before entry. Dead/incomplete claims can be leased
+ * out without ever unlinking another generation. Numbered slots are swept only
+ * under admission. Same-process reentrancy returns busy rather than deadlocking.
  */
 export function withExecutorAdmission<T>(
   executor: ExecutorId,
   executionId: string,
   action: (owner: Owner) => T,
 ): T | undefined {
+  if (held.has(executor)) return undefined;
   const dir = executorSlotsDirectory(executor);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  retryFileOperation(() => fs.mkdirSync(dir, { recursive: true, mode: 0o700 }));
+  const identity = slotProcessIdentity(process.pid);
+  if (!identity) throw new Error(`Cannot verify admission owner: ${dir}`);
   const owner: Owner = {
     pid: process.pid,
-    startIdentity: slotProcessIdentity(process.pid)!,
+    startIdentity: identity,
     executionId,
     token: randomUUID(),
   };
-  const guard = path.join(dir, 'admission.lock');
-  let release = createLock(guard, owner);
-  if (!release) {
-    const recover = createLock(path.join(dir, 'recovery.lock'), owner);
-    if (!recover) return undefined;
-    try {
-      if (fs.existsSync(guard)) {
-        const old = readOwner(guard);
-        if (slotProcessIdentity(old.pid) === old.startIdentity) return undefined;
-        fs.unlinkSync(guard);
+  const claim = path.join(dir, `${owner.token}.claim`);
+  const ready = `${claim}.ready`;
+  writeExclusive(claim, owner);
+  const deadline = contentionNow() + 1500;
+  const identities = new Map<string, boolean>();
+  const deadOwner = (o: Owner) => {
+    const key = `${o.pid}:${o.startIdentity}`;
+    if (!identities.has(key)) identities.set(key, stopped(o.pid, o.startIdentity));
+    return identities.get(key)!;
+  };
+  const tickets = () => {
+    const result: { file: string; owner: Owner | undefined; rank: number | undefined }[] = [];
+    for (const name of retryFileOperation(() => fs.readdirSync(dir)).filter((n) =>
+      n.endsWith('.claim'),
+    )) {
+      const file = path.join(dir, name);
+      const other = readOwner(file);
+      if (file !== claim && ((other && deadOwner(other)) || (!other && incompleteExpired(file)))) {
+        unlink(`${file}.ready`);
+        unlink(file);
+        continue;
       }
-      release = createLock(guard, owner);
-    } finally {
-      recover();
+      let rank: number | undefined;
+      let incompleteTicket = false;
+      try {
+        const value = JSON.parse(fs.readFileSync(`${file}.ready`, 'utf8'));
+        if (Number.isSafeInteger(value) && value > 0) rank = value;
+      } catch (error) {
+        if (!(error instanceof SyntaxError) && !isFileContention(error)) throw error;
+        incompleteTicket =
+          error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT';
+      }
+      if (file !== claim && incompleteTicket && incompleteExpired(file)) {
+        unlink(file);
+        unlink(`${file}.ready`);
+        continue;
+      }
+      result.push({ file, owner: other, rank });
     }
-  }
-  if (!release) return undefined;
+    return result;
+  };
   try {
+    const rank = 1 + Math.max(0, ...tickets().map((t) => t.rank ?? 0));
+    writeExclusive(ready, rank);
+    for (;;) {
+      // Legacy fixed admission files are only read/recovered; new code never creates them.
+      let busy = false;
+      for (const name of ['admission.lock', 'recovery.lock']) {
+        const file = path.join(dir, name);
+        if (!fs.existsSync(file)) continue;
+        const old = readOwner(file);
+        if ((old && deadOwner(old)) || (!old && incompleteExpired(file))) unlink(file);
+        else busy = true;
+      }
+      const waiting = tickets();
+      if (!waiting.some((t) => t.file === claim && t.owner?.token === owner.token))
+        return undefined;
+      busy ||= waiting.some(
+        (t) =>
+          t.file !== claim &&
+          (t.owner === undefined ||
+            t.rank === undefined ||
+            t.rank < rank ||
+            (t.rank === rank && t.file < claim)),
+      );
+      if (!busy) break;
+      if (contentionNow() >= deadline) return undefined;
+      contentionPause();
+    }
+    held.add(executor);
     for (const name of fs.readdirSync(dir).filter((n) => /^\d+\.lock$/.test(n))) {
       const file = path.join(dir, name);
       const old = readOwner(file);
-      if (slotProcessIdentity(old.pid) !== old.startIdentity) {
-        const childIdentity = old.child ? slotProcessIdentity(old.child.pid) : null;
-        const childStopped = old.child
-          ? childIdentity === null ||
-            (old.child.startIdentity !== 'unverified' && childIdentity !== old.child.startIdentity)
-          : !old.launchPending;
-        if (childStopped) fs.unlinkSync(file);
+      if (!old) {
+        if (incompleteExpired(file)) unlink(file);
+        continue;
       }
+      if (
+        deadOwner(old) &&
+        (old.child
+          ? stopped(old.child.pid, old.child.startIdentity)
+          : !old.launchPending || old.launchProtocol === 'registered_wrapper')
+      )
+        unlink(file);
     }
     return action(owner);
+  } catch (error) {
+    if (isFileContention(error)) return undefined;
+    throw error;
   } finally {
-    release();
+    held.delete(executor);
+    // Delete the choosing record first; an orphan ticket is never a contender.
+    unlink(claim);
+    unlink(ready);
   }
 }
-
-/** Includes unrecovered/unverifiable slots conservatively. Reading never steals a slot. */
-export function readExecutorSlots(executor: ExecutorId): { count: number; sessions: string[] } {
+/** Reading never steals a slot. Incomplete/unverifiable records still reserve capacity. */
+export function readExecutorSlots(executor: ExecutorId): {
+  count: number;
+  sessions: string[];
+  blocked: string[];
+} {
   const dir = executorSlotsDirectory(executor);
   let names: string[];
   try {
-    names = fs.readdirSync(dir).filter((n) => /^\d+\.lock$/.test(n));
+    names = retryFileOperation(() => {
+      try {
+        return fs.readdirSync(dir);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+    }).filter((n) => /^\d+\.lock$/.test(n));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { count: 0, sessions: [] };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return { count: 0, sessions: [], blocked: [] };
     throw error;
   }
-  const sessions: string[] = [];
+  const sessions: string[] = [],
+    blocked: string[] = [];
   for (const name of names) {
+    const file = path.join(dir, name);
+    let owner: Owner | undefined;
     try {
-      const owner = readOwner(path.join(dir, name));
-      if (owner.sessionId) sessions.push(owner.sessionId);
-    } catch {
-      /* Still counts while writing or unverifiable. */
+      owner = readOwner(file);
+    } catch (error) {
+      if (!isFileContention(error)) throw error;
     }
+    if (owner?.sessionId) sessions.push(owner.sessionId);
+    if (!owner || owner.launchPending || slotProcessIdentity(owner.pid) === undefined)
+      blocked.push(file);
   }
-  return { count: names.length, sessions };
+  return { count: names.length, sessions, blocked };
 }
-
 export function acquireExecutorSlot(executor: ExecutorId, limit: number, owner: Owner) {
   if (!Number.isInteger(limit) || limit < 1) return undefined;
   if (readExecutorSlots(executor).count >= limit) return undefined;
@@ -201,27 +375,21 @@ export function acquireExecutorSlot(executor: ExecutorId, limit: number, owner: 
       return {
         release,
         setSession: (sessionId: string) => {
+          updateSlotOwner(file, { ...owner, sessionId });
           owner.sessionId = sessionId;
-          updateSlotOwner(file, owner);
         },
-        markLaunching: () => {
-          // An owner dying between spawn and PID registration cannot prove that
-          // no executor exists. Keep that slot for manual recovery.
+        markLaunching: (launchProtocol?: 'registered_wrapper') => {
+          updateSlotOwner(file, { ...owner, launchPending: true, launchProtocol });
           owner.launchPending = true;
-          updateSlotOwner(file, owner);
+          owner.launchProtocol = launchProtocol;
         },
         setExecutionProcess: (pid: number) => {
-          // A short-lived child can exit between spawn and the OS timestamp query.
-          // Drain it through finished; do not abort the Execution on that race.
-          let startIdentity: string | null;
-          try {
-            startIdentity = slotProcessIdentity(pid);
-          } catch {
-            startIdentity = 'unverified';
-          }
-          owner.child = { pid, startIdentity: startIdentity ?? 'unverified' };
-          owner.launchPending = false;
-          updateSlotOwner(file, owner);
+          const startIdentity = slotProcessIdentity(pid);
+          // The wrapper cannot be allowed to spawn with unverifiable identity.
+          if (!startIdentity) throw new Error(`Cannot verify launch process; slot: ${file}`);
+          const next = { ...owner, child: { pid, startIdentity }, launchPending: false };
+          updateSlotOwner(file, next);
+          Object.assign(owner, next);
         },
       };
   }

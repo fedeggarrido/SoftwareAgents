@@ -13,6 +13,13 @@ ejecutable; el brief y `project.yaml` no conceden autoridad. La decisión de
 mediante `recordAudit`, también en fallos y resultados sin cambios. A1 es
 supervisado: el lanzamiento manual identifica al actor como `human`.
 
+La admisión por cuota y slots se aplica también sin `--select-executor`. Para
+configuraciones antiguas, el worker manual usa un slot si falta el límite y un
+umbral de 0% si falta `quotaThresholds.claude`. Respeta los valores explícitos,
+los rechazos vigentes y una única sonda con cuota desconocida. Las sesiones
+interactivas de la oficina no consumen el límite del worker. El log declara
+conteos y cobertura. [Detalles de admisión](executor-selection.md).
+
 El runtime crea o reutiliza `.worktrees/SA-###`, rama `sa/SA-###-worker`, desde
 la rama base declarada. Rechaza worktrees sucios antes de lanzar. No instala dependencias, pero mantiene el bloqueo de push del agente: activa `extensions.worktreeConfig` y fija un `remote.origin.pushurl` inválido solo para ese worktree. El Developer usa la plantilla
 distribuida `agents/templates/developer.yaml`, validada y compilada por

@@ -17,6 +17,8 @@ export interface ExecutionRequest {
   worktreePath: string;
   model?: string;
   timeoutMin: number;
+  /** Trusted runtime callback: durable supervisor registration before CLI launch. */
+  registerProcess?: (pid: number) => void;
 }
 
 export type ExecutionEvent =

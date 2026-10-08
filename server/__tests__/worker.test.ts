@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AgentStateStore } from '../src/agentStateStore.js';
 import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
 import { parseProjects } from '../src/configPersistence.js';
@@ -12,6 +13,7 @@ import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
+import { MachineCapacityPublisher } from '../src/machineCapacity.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
@@ -24,6 +26,8 @@ vi.mock('child_process', async (original) => {
   const actual = await original<typeof import('child_process')>();
   return { ...actual, spawn: vi.fn(actual.spawn) };
 });
+
+vi.mock('fs', async (original) => ({ ...(await original<typeof import('fs')>()) }));
 
 let root: string;
 let repo: string;
@@ -67,12 +71,82 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.mocked(spawn).mockClear();
   vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('supervised worker', () => {
+  it('P2: failed slot update before lazy iteration releases slot and task lock', async () => {
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+      if (
+        String(target).endsWith('0.lock') &&
+        JSON.parse(fs.readFileSync(String(source), 'utf8')).sessionId
+      )
+        throw Object.assign(new Error('synthetic persistent EPERM'), { code: 'EPERM' });
+      return rename(source, target);
+    });
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
+      ),
+    ).rejects.toThrow('EPERM');
+    expect(readExecutorSlots('claude').count).toBe(0);
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+  });
+
+  it.each([false, true])(
+    'P1: no-flag worker launches with interactive office session and legacy config=%s',
+    async (legacy) => {
+      const operator = {
+        autonomyLevel: 'A1',
+        allowedExecutors: ['claude'],
+        binaryPaths: { claude: process.execPath },
+        ...(legacy
+          ? {}
+          : {
+              quotaThresholds: { claude: 5 },
+              concurrency: { maxExecutions: 1, perExecutor: { claude: 1 } },
+            }),
+      };
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            test: operator,
+            unrelated: { autonomyLevel: 'A1', allowedExecutors: ['claude'] },
+          },
+        }),
+      );
+      const store = new AgentStateStore();
+      store.set(1, {
+        id: 1,
+        sessionId: 'operator',
+        providerId: 'claude',
+      } as import('../src/types.js').AgentState);
+      new MachineCapacityPublisher(
+        store,
+        () => ({}),
+        Date.now,
+        undefined,
+        ['test'],
+        () => true,
+      ).publish();
+      const log = vi.fn();
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'claude'], log },
+      );
+      expect(result.branch).toContain('SA-999');
+      expect(result.commit).toBeNull();
+      expect(log.mock.calls.some(([line]) => line.includes('"observedSessions":1'))).toBe(true);
+      expect(readExecutorSlots('claude').count).toBe(0);
+    },
+  );
+
   it('two real worker processes with different tasks launch only one synthetic executor at limit 1', async () => {
     fs.writeFileSync(
       path.join(root, '.pixel-agents/config.json'),
@@ -281,10 +355,16 @@ describe('supervised worker', () => {
           },
         }),
       );
-      fs.writeFileSync(
-        path.join(root, '.pixel-agents/machine-capacity.json'),
-        JSON.stringify({ observedAt: Date.now() / 1000, active: { [selected]: 0 } }),
+      const publisher = new MachineCapacityPublisher(
+        new AgentStateStore(),
+        () => ({}),
+        Date.now,
+        undefined,
+        ['test'],
+        () => true,
       );
+      publisher.publish();
+      expect(fs.existsSync(publisher.file)).toBe(true);
       const log = vi.fn();
       const result = await runWorker(
         { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
@@ -292,7 +372,8 @@ describe('supervised worker', () => {
       );
       expect(result.branch).toContain('SA-999');
       expect(result.commit).toBeNull();
-      expect(log.mock.calls[0][0]).toContain('probe');
+      expect(log.mock.calls.some(([line]) => line.includes('probe'))).toBe(true);
+      expect(log.mock.calls.some(([line]) => line.includes('office_store'))).toBe(true);
       const records = fs.readFileSync(
         path.join(repo, '.git/softwareagents/executions.jsonl'),
         'utf8',

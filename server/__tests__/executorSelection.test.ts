@@ -178,7 +178,11 @@ it('CLI returns 0 for probe and 3 for wait with a JSON reason; role grants nothi
   });
   expect(runQuotaCheck({ ...args, executor: 'claude' }, root, log)).toBe(3);
   observation(undefined, ['observed']);
-  expect(runQuotaCheck(args, root, log)).toBe(3);
+  expect(runQuotaCheck(args, root, log)).toBe(0);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+    active: 0,
+    coverage: { scope: 'runtime_slots', counts: { codex: { observedSessions: 1 } } },
+  });
   observation(undefined, ['observed'], 0);
   expect(runQuotaCheck(args, root, log)).toBe(0);
 });

@@ -409,6 +409,7 @@ export interface CapacitySnapshot {
 
 export interface CapacityWindow {
   kind: CapacityWindowKind;
+  limitId?: string;
   usedRatio: number | null;
   resetsAt: number | null;
 }

@@ -3,6 +3,10 @@
 `pixel-agents quota check --executor claude|codex --role <rol> [--json]`
 devuelve 0 para `go` o `probe`, y 3 para `wait`. JSON incluye `reason` y,
 en espera por cuota, `resetsAt` (epoch seconds; null si no se conoce).
+También incluye `active` (slots gestionados) y `coverage`: oficinas, sesiones
+observadas, sesiones del runtime, rutas de slots que requieren inspección y
+exclusión de sesiones interactivas del límite del worker. El worker registra
+esa misma cobertura.
 El rol es informativo: no reserva porcentajes ni concede permisos.
 `quota check` observa; el lanzamiento del worker vuelve a decidir y reserva un slot.
 
@@ -34,27 +38,35 @@ se mantiene durante toda la Execution y se libera tras confirmar su fin.
 Sin slot libre o con otra admisión en curso se devuelve `wait` con razón.
 La sonda tiene límite 1, incluso si Operator config permite más concurrencia.
 
-Cada lock registra PID, identidad de creación del proceso, executionId y token de
-propiedad. La recuperación consulta únicamente esos PIDs registrados, nunca
-explora procesos ajenos. Un propietario muerto o un PID reutilizado se recupera
-bajo exclusión de admisión. Si se registró el hijo del Executor, también se exige
-que haya desaparecido o cambiado de identidad; un hijo con identidad no verificable
-se conserva mientras siga vivo. Locks corruptos, incompletos o una recuperación
-interrumpida requieren comprobación manual y fallan cerrados.
-Si el worker muere entre spawn y registro del PID hijo, una marca previa de
-lanzamiento conserva el slot para recuperación manual: no se supone que el hijo
-haya terminado. La identidad OS está
-implementada para Windows (StartTime ticks) y Linux (boot ID + start ticks); otros
-sistemas fallan cerrados. El lock de tarea conserva su recuperación manual previa.
+Cada slot registra PID, identidad de creación, executionId y token. La admisión
+usa turnos de Lamport: cada intento crea `<token>.claim` antes de elegir su turno,
+seguido de `<token>.claim.ready`. Los nombres únicos evitan borrar el lock de una
+generación nueva durante recuperación. Los turnos muertos se retiran por identidad;
+los registros vacíos o incompletos tienen arrendamiento de 10 segundos. Un intento
+que perdió su claim no puede entrar. EPERM/EACCES/EBUSY/EBADF/ENOENT se tratan como
+contienda con reintento y plazo monotónico. Una identidad inaccesible conserva
+capacidad, nunca demuestra muerte; los diagnósticos incluyen rutas de inspección.
 
-El gate suma slots y sesiones observadas por oficinas, deduplicando sessionId
-entre publicadores y contra los slots del runtime. Cuenta todas las sesiones
-observadas, incluidas las que esperan, de forma conservadora. **No establece un
-total de sesiones interactivas de máquina:** si falta observación o la cobertura
-es parcial, su número total es desconocido; las sesiones interactivas no observadas
-no se cuentan. Por tanto, el límite garantiza admisión del runtime, con una
-reducción adicional por las sesiones observadas. No garantiza la concurrencia ni
-la cuota de otros programas. No inspecciona archivos, datos ni procesos de Fundtrinsic.
+El worker arranca un supervisor Node que solo puede lanzar el CLI después de
+registrar durablemente su PID e identidad en el slot y recibir confirmación.
+El supervisor permanece hasta el cierre del CLI. Antes del registro, una muerte
+del worker hace salir al supervisor sin lanzar el executor; después, el slot
+mantiene el proceso registrado hasta verificar su fin. Las marcas `launchPending`
+antiguas sin este protocolo conservan recuperación manual. Solo se consultan PIDs
+registrados. Windows usa StartTime con fallback CIM por PID; Linux usa boot ID y
+start ticks; Darwin/BSD usa `ps -o lstart= -p PID`, con precisión de un segundo.
+La caché de identidad dura 30 s, comprueba existencia en cada consulta y fuerza
+consulta nueva ante discrepancias. El lock de tarea conserva recuperación manual
+tras una muerte abrupta.
+
+**Qué cuenta.** `concurrency.perExecutor` limita exclusivamente Executions
+gestionadas mediante slots del runtime, entre repositorios. Las sesiones
+interactivas, incluidas las inactivas, se deduplican y declaran en `coverage.counts`,
+pero no consumen slots ni la sonda. El Operator puede mantener su sesión Claude
+abierta y ejecutar un worker con límite 1. Las oficinas siguen aportando evidencia
+de cuota. No se garantiza la concurrencia ni la cuota de otros programas, ni se
+establece un total global de sesiones interactivas. No se inspeccionan archivos,
+datos ni procesos de Fundtrinsic.
 
 **Publicación.** Solo el proceso que posee HTTP publica; reutilizar otro servidor
 no concede propiedad. Cada arranque tiene un fichero distinto en
@@ -79,15 +91,15 @@ caducan a los 60 s. Watch All Sessions puede ampliar la observación de Claude;
 de `undefined`/`claude` y `codex` no se atribuyen a ninguno de esos executors.
 La cobertura publicada es siempre de oficina, nunca global.
 
-El publicador no emite timestamps anteriores al último publicado en su arranque.
-El lector rechaza retrocesos de timestamp o contador y limita la vida de una misma
-generación con tiempo monotónico. Una generación caducada/futura/retrocedida se
-marca en un directorio `.invalid` junto a su contribución; esa marca impide
-revivirla tras un cambio de reloj, incluso al reiniciar el lector. Un nuevo
-heartbeat válido o un nuevo arranque puede aportar nueva evidencia. No borrar
-marcas mientras siga existiendo su contribución: la retención y limpieza de
-publicadores históricos se deja al operador. Un salto adelante puede provocar
-caducidad conservadora; se necesita un nuevo heartbeat válido para recuperar.
+Al retroceder el reloj, el publicador abre una época nueva y sigue publicando,
+conservando restricciones de cuota. El lector limita una generación con tiempo
+monotónico y marcas de caducidad compartidas en `.invalid`. Rechaza fechas futuras
+por más de 1 s; el margen evita invalidar un heartbeat escrito unos milisegundos
+después de tomar `nowS`. El gate sigue negando `go` a eventos de cuota futuros.
+Las sesiones de publicaciones futuras siguen como telemetría si el PID y la
+identidad del publicador están vivos. Un nuevo heartbeat o época restablece
+cobertura fresca. No borrar marcas mientras exista su contribución: su limpieza
+histórica corresponde al operador.
 
 **Evidencia de cuota.** El heartbeat de sesiones y el evento de cuota son tiempos
 distintos. `observedAt` de CapacitySnapshot procede del evento o su timestamp,
@@ -96,6 +108,10 @@ nunca del mtime; si no se conoce, queda null. Los ficheros contienen también
 
 Un rechazo o porcentaje por encima del umbral se conserva hasta su `resetsAt`,
 o hasta una observación posterior fiable de la misma ventana. Una observación
+se asocia por `limitId` del Provider (seven_day_opus, seven_day_sonnet, overage),
+con `kind` como fallback para evidencia anterior. Tipos distintos no se sustituyen.
+Un reloj que retrocede no elimina restricciones futuras; estas solo pueden
+restringir y se degradan a confianza baja. Una observación
 nueva con confianza baja/desconocida puede añadir restricciones, pero no borrar
 las anteriores. Los lectores también conservan restricciones de publicadores
 caducados. Un rechazo sin reset conocido requiere evidencia fiable posterior;
@@ -117,7 +133,7 @@ cuenta y cuentas administrativas necesarias, como describe
 [company-autopilot.md](company-autopilot.md). La QA real de Windows debe verificar
 las ACL y el reemplazo; las pruebas sintéticas no acreditan la DACL del perfil.
 
-**Configuración necesaria** (la escribe el operador fuera del repo):
+**Configuración para selección automática** (la escribe el operador fuera del repo):
 
 ```json
 {
@@ -132,6 +148,11 @@ las ACL y el reemplazo; las pruebas sintéticas no acreditan la DACL del perfil.
 }
 ```
 
-`quotaThresholds` es el porcentaje mínimo restante por executor. Los slots
+`quotaThresholds` es el porcentaje mínimo restante por executor. Los Projects
+con configuración antigua sin límite no anulan los límites explícitos de otros
+Projects; estos se agregan por el mínimo. `quota check` y selección automática
+requieren umbrales explícitos y un límite configurado. El worker manual sin `--select-executor`
+usa un slot y umbral 0% cuando faltan estos campos, respeta rechazos conocidos y
+solo permite una sonda con cuota desconocida. Los slots
 reservan admisión del runtime, no cuota de cuenta: no son el ledger de SA-037.
 Ledger, fallback de SA-038 y scoring ponderado quedan fuera de este cambio.

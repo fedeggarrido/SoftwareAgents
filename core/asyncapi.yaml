@@ -1351,6 +1351,9 @@ components:
       properties:
         kind:
           $ref: '#/components/schemas/CapacityWindowKind'
+        limitId:
+          type: string
+          description: Provider limit type; independent model and overage windows.
         usedRatio:
           type: [number, 'null']
           minimum: 0

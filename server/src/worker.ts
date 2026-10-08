@@ -15,7 +15,11 @@ import type { ExecutionHandle } from './executors/executor.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
 import { selectExecutor } from './executorSelection.js';
-import { acquireExecutorSlot, withExecutorAdmission } from './executorSlots.js';
+import {
+  acquireExecutorSlot,
+  executorSlotsDirectory,
+  withExecutorAdmission,
+} from './executorSlots.js';
 import { HumanDecisions } from './humanDecisions.js';
 import { loadModelPolicy } from './modelPolicy.js';
 import { resolveInside } from './pathGuard.js';
@@ -164,6 +168,8 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   let handle: ExecutionHandle | undefined;
   let interrupted = false;
   let executionFinished = false;
+  let eventsStarted = false;
+  let slotFailure: unknown;
   let slot: ReturnType<typeof acquireExecutorSlot>;
   const cancel = () => {
     interrupted = true;
@@ -182,6 +188,19 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
     const admission = withExecutorAdmission(selectedExecutor, executionId, (owner) => {
       const snapshot = readSelectionSnapshot(config.operator);
       if (modelPolicy) selection = selectExecutor(spec, modelPolicy, snapshot);
+      // Legacy manual runs retain conservative defaults for pre-quota configs.
+      if (!modelPolicy) {
+        snapshot.machinePolicy ??= { quotaThresholds: {}, maxConcurrent: {} };
+        snapshot.machinePolicy.quotaThresholds[selectedExecutor] ??= 0;
+        snapshot.machinePolicy.maxConcurrent[selectedExecutor] ??= 1;
+      }
+      log(
+        JSON.stringify({
+          executor: selectedExecutor,
+          active: snapshot.active[selectedExecutor],
+          coverage: snapshot.coverage,
+        }),
+      );
       const gate =
         selection?.gate ??
         quotaGate(
@@ -199,7 +218,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
           : ({
               status: 'wait',
               resetsAt: null,
-              reason: `${selectedExecutor}: no free runtime executor slot`,
+              reason: `${selectedExecutor}: no free runtime executor slot; inspect ${executorSlotsDirectory(selectedExecutor)}`,
             } as QuotaDecision),
         slot: reserved,
       };
@@ -209,7 +228,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       ({
         status: 'wait',
         resetsAt: null,
-        reason: `${selectedExecutor}: runtime admission is busy`,
+        reason: `${selectedExecutor}: runtime admission is busy; inspect ${executorSlotsDirectory(selectedExecutor)}`,
       } as QuotaDecision);
     slot = admission?.slot;
     if (selection) log(selection.reason);
@@ -241,7 +260,7 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
             runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
           }),
     );
-    slot.markLaunching();
+    slot.markLaunching('registered_wrapper');
     handle = executor.start({
       executionId,
       projectId: config.project.id,
@@ -254,19 +273,30 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
       ...(selection?.choice?.model ? { model: selection.choice.model } : {}),
       worktreePath: tree.path,
       timeoutMin: 30,
+      registerProcess: (pid) => slot!.setExecutionProcess(pid),
     });
     if (handle.sessionId) slot.setSession(handle.sessionId);
     let exitCode: number | undefined;
+    eventsStarted = true;
     for await (const event of handle.events) {
       if (event.type === 'started') {
-        slot.setSession(event.sessionId);
-        slot.setExecutionProcess(event.pid);
+        try {
+          slot.setSession(event.sessionId);
+        } catch (error) {
+          slotFailure = error;
+          try {
+            handle.cancel();
+          } catch {
+            log('Executor cancellation failed; draining events before releasing locks.');
+          }
+        }
       }
       if (event.type === 'finished') {
         exitCode = event.exitCode;
         executionFinished = true;
       }
     }
+    if (slotFailure) throw slotFailure;
     if (interrupted || exitCode !== 0)
       throw new Error('Execution failed or was interrupted; changes retained for review');
     if (
@@ -335,9 +365,12 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   } finally {
     process.removeListener('SIGINT', cancel);
     process.removeListener('SIGTERM', cancel);
-    if (!handle || executionFinished) {
-      slot?.release();
-      release();
+    if (!handle || !eventsStarted || executionFinished) {
+      try {
+        slot?.release();
+      } finally {
+        release();
+      }
     } else log('Task lock and executor slot retained: executor termination was not confirmed.');
   }
 }

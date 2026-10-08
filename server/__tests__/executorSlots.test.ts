@@ -195,3 +195,81 @@ it('recovers a slot after the real owning process exits without releasing it', a
     await exited;
   }
 }, 15000);
+it.each(['unregistered', 'registered', 'launched'])(
+  'recovers a real dead worker at launch phase %s without overlooking a live synthetic child',
+  async (phase) => {
+    const bundle = path.join(home, 'launch.cjs');
+    buildSync({
+      stdin: {
+        contents: "export * from './executorSlots'; export * from './executors/registeredProcess';",
+        resolveDir: path.resolve(__dirname, '../src'),
+        loader: 'ts',
+      },
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      logLevel: 'silent',
+    });
+    const child = spawn(
+      process.execPath,
+      [path.join(__dirname, 'fixtures/slot-launch-process.cjs'), bundle, phase],
+      {
+        env: {
+          ...process.env,
+          HOME: home,
+          USERPROFILE: home,
+          CODEX_HOME: path.join(home, '.codex'),
+        },
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        windowsHide: true,
+      },
+    );
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    let supervisor: number | undefined;
+    try {
+      const result = await new Promise<{ supervisor: number }>((resolve, reject) => {
+        child.once('message', resolve);
+        child.once('error', reject);
+      });
+      supervisor = result.supervisor;
+      if (phase === 'launched')
+        await vi.waitFor(() => expect(fs.existsSync(path.join(home, 'launched'))).toBe(true), {
+          timeout: 5000,
+        });
+      child.kill();
+      await exited;
+      if (phase === 'launched') {
+        // Windows sandbox jobs may terminate the entire descendant tree. Either
+        // both are dead (recovery is safe), or the live supervisor retains the slot.
+        const syntheticPid = Number(fs.readFileSync(path.join(home, 'launched'), 'utf8'));
+        const supervisorAlive = slotProcessIdentity(supervisor!) !== null;
+        if (supervisorAlive)
+          expect(
+            withExecutorAdmission('codex', 'new', (owner) =>
+              acquireExecutorSlot('codex', 1, owner),
+            ),
+          ).toBeUndefined();
+        else expect(slotProcessIdentity(syntheticPid)).toBeNull();
+        fs.writeFileSync(path.join(home, 'finish'), 'finish');
+      } else expect(fs.existsSync(path.join(home, 'launched'))).toBe(false);
+      await vi.waitFor(() => expect(slotProcessIdentity(supervisor!)).toBeNull(), {
+        timeout: 15000,
+      });
+      const slot = withExecutorAdmission('codex', 'new', (owner) =>
+        acquireExecutorSlot('codex', 1, owner),
+      );
+      expect(slot).toBeDefined();
+      slot?.release();
+    } finally {
+      fs.writeFileSync(path.join(home, 'finish'), 'finish');
+      if (child.exitCode === null) child.kill();
+      await exited;
+      if (supervisor)
+        await vi.waitFor(() => expect(slotProcessIdentity(supervisor!)).toBeNull(), {
+          timeout: 15000,
+        });
+    }
+  },
+  30000,
+);

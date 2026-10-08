@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,6 +16,7 @@ import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 import { processCancellation } from './processCancellation.js';
+import { spawnRegisteredProcess } from './registeredProcess.js';
 
 export interface ClaudeCliExecutorOptions {
   /** Trusted operator executable, not project content. Native executable on Windows. */
@@ -149,12 +150,12 @@ export class ClaudeCliExecutor implements Executor {
             '--disable-slash-commands',
             ...(req.model ? ['--model', req.model] : []),
           ];
-          child = spawn(options.binary, args, {
-            cwd: req.worktreePath,
-            windowsHide: true,
-            detached: process.platform !== 'win32',
-            stdio: ['pipe', 'pipe', 'pipe'],
-          });
+          child = spawnRegisteredProcess(
+            options.binary,
+            args,
+            req.worktreePath,
+            req.registerProcess,
+          );
           const processChild = child;
           let failure: Error | undefined;
           const completion = new Promise<number>((resolve) => {

@@ -15,7 +15,17 @@ export interface SelectionSnapshot {
   active: Partial<Record<ExecutorId, number>>;
   nowS: number;
   coverage?: {
-    scope: 'runtime_slots_and_observed_sessions';
+    scope: 'runtime_slots';
+    interactiveSessions: 'excluded_from_worker_limit';
+    counts: Record<
+      ExecutorId,
+      {
+        runtimeSlots: number;
+        observedSessions: number;
+        observedRuntimeSessions: number;
+        blockedSlots: string[];
+      }
+    >;
     offices: { scope: 'office'; workspaces: string[]; source: 'office_store' }[];
     unobservedInteractiveSessions: 'not_counted';
   };

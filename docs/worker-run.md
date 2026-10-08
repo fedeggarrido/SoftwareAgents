@@ -32,7 +32,10 @@ Tras una ejecución exitosa, el runtime verifica que HEAD y la rama no hayan
 cambiado, añade los cambios y crea un commit `feat(SA-###): ...` con trailer
 `SoftwareAgents-Execution`. Desactiva hooks Git **solo para ese comando** para
 no ejecutar código del repo como parte del commit. Requiere identidad Git ya
-configurada por el Operator. Imprime «rama lista para revisión», rama, SHA y
+configurada por el Operator: comprueba `git var GIT_AUTHOR_IDENT` y
+`git var GIT_COMMITTER_IDENT` antes de admitir/reservar, sin escribir config.
+Si falta, termina con error claro (exit 1), sin slot ni Execution. Un fallo
+posterior de commit muestra un mensaje sin traza y conserva los cambios. Imprime «rama lista para revisión», rama, SHA y
 `diff --stat`; si no hay cambios imprime «sin cambios» sin commit. Nunca hace
 push, PR, merge, ni invoca `gh`. Los fallos retienen los cambios para inspección.
 Las dependencias y los tests quedan para preparación y revisión humanas.
@@ -75,3 +78,13 @@ legacy del RoleResolver sigue intacta. Verificar commit y trailer, diff limpio,
 audit con actor human y policyDecision allow, main intacto y ausencia de push.
 La prueba automatizada usa `fixtures/fake-cli.cjs` y un repo Git temporal;
 no ejecuta Claude real ni acredita la visualización en la oficina real.
+
+Con catálogo de niveles, el worker manual registra cada intento admitido en el
+WorkStore antes de preparar el worktree. Si la Task no existe, crea una referencia
+DRAFT con `type: unknown`; la clasificación usa el fallback del tierRule.
+Una Task existente conserva su lifecycle. La fila Execution comienza con Session
+y PID nulos y recibe session_id cuando el Executor lo conoce (started en Codex).
+Los intentos fallidos o cancelados conservan su fila. No se crea fila si espera
+por cuota/concurrencia o falla el preflight de identidad Git.
+El tope total maxExecutions cuenta slots de Claude y Codex bajo admisión en
+orden Claude → Codex, también sin catálogo: ausente no añade tope y 0 espera.

@@ -4,33 +4,37 @@ const os = require('os');
 if (!process.env.HOME) throw new Error('An isolated HOME is required');
 os.homedir = () => process.env.HOME;
 const runtime = require(process.argv[2]);
-process.on('message', async ({ task, repo, fake, operator, nowS }) => {
-  try {
-    if (task === 'read-capacity') {
-      process.send({ snapshot: runtime.readSelectionSnapshot(operator, nowS) });
-      return;
+process.on(
+  'message',
+  async ({ task, repo, fake, operator, nowS, executor = 'claude', selectExecutor = false }) => {
+    const logs = [];
+    try {
+      if (task === 'read-capacity') {
+        process.send({ snapshot: runtime.readSelectionSnapshot(operator, nowS) });
+        return;
+      }
+      if (task === 'reserve-slot') {
+        runtime.withExecutorAdmission('codex', 'crashed-execution', (owner) => {
+          runtime.acquireExecutorSlot('codex', 1, owner);
+        });
+        process.send({ reserved: true });
+        return;
+      }
+      const result = await runtime.runWorker(
+        { task, brief: 'brief.md', selectExecutor },
+        {
+          cwd: repo,
+          binaryArgs: [fake, executor, '--slot-hold'],
+          log: (line) => logs.push(line),
+        },
+      );
+      process.send({ result, logs, exitCode: process.exitCode ?? 0 });
+    } catch (error) {
+      process.send({ error: error.message, logs });
+      process.exitCode = 1;
+    } finally {
+      if (task !== 'reserve-slot') process.disconnect();
     }
-    if (task === 'reserve-slot') {
-      runtime.withExecutorAdmission('codex', 'crashed-execution', (owner) => {
-        runtime.acquireExecutorSlot('codex', 1, owner);
-      });
-      process.send({ reserved: true });
-      return;
-    }
-    const result = await runtime.runWorker(
-      { task, brief: 'brief.md' },
-      {
-        cwd: repo,
-        binaryArgs: [fake, 'claude', '--slot-hold'],
-        log: () => {},
-      },
-    );
-    process.send({ result, exitCode: process.exitCode ?? 0 });
-  } catch (error) {
-    process.send({ error: error.message });
-    process.exitCode = 1;
-  } finally {
-    if (task !== 'reserve-slot') process.disconnect();
-  }
-});
+  },
+);
 process.send({ ready: true });

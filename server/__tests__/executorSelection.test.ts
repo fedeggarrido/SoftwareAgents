@@ -62,9 +62,29 @@ it('reevaluates rejected against every live window instead of waiting for a heal
   expect(quotaGate('codex', policy, s, 0, 100)).toMatchObject({ status: 'wait', resetsAt: 300 });
 });
 it('keeps model identifiers out of selection and policy modules; Provider knowledge is allowed', () => {
-  for (const name of ['executorSelection', 'quotaGate', 'modelPolicy', 'worker']) {
-    const text = fs.readFileSync(path.resolve(__dirname, `../src/${name}.ts`), 'utf8');
-    expect(text).not.toMatch(/\b(?:opus|sonnet|haiku|gpt-\d|o[134](?:-|\b)|claude-[123])/i);
+  // Excluded: providers/hook/claude and its tests need real IDs for contextWindowForModel;
+  // docs/research/local-llm.md and ADR-0004 preserve historical benchmark evidence.
+  // AgentSpec rejection tests exercise recognition of forbidden families, not selection policy.
+  const files = [
+    'executorSelection',
+    'quotaGate',
+    'modelPolicy',
+    'worker',
+    'modelTiers',
+    'modelTierAdmission',
+    'taskModelInputs',
+    'quotaCommand',
+  ].map((name) => path.resolve(__dirname, `../src/${name}.ts`));
+  files.push(
+    ...fs
+      .readdirSync(path.resolve(__dirname, '../src/executors'))
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => path.resolve(__dirname, '../src/executors', name)),
+    path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+  );
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    expect(text, file).not.toMatch(/\b(?:opus|sonnet|haiku|gpt-\d|o[134](?:-|\b)|claude-[123])/i);
   }
 });
 it('waits until all blocked windows reset', () => {
@@ -317,4 +337,62 @@ it('explains tiers without launch, with SA-036 exit codes and operator override'
     expect(() =>
       parseQuotaArgs(['check', '--select-executor', '--role', 'developer', ...extra]),
     ).toThrow();
+});
+
+it('reports strict explicit total caps, with zero waiting and missing caps ignored', () => {
+  writeOperator();
+  const file = path.join(root, '.pixel-agents/config.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete config.projects.other.concurrency.maxExecutions;
+  const project = Object.keys(config.projects)[0];
+  config.projects[project].concurrency.maxExecutions = 0;
+  config.projects[project].modelTiers = {
+    rule: parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+        'utf8',
+      ),
+    ).tierRule,
+    maxTier: 'standard',
+    tiers: {
+      standard: { candidates: [{ executor: 'codex', model: 'test-model' }] },
+      deep: {
+        candidates: [{ executor: 'claude', model: 'test-unreachable-model', effort: 'high' }],
+      },
+    },
+  };
+  fs.writeFileSync(file, JSON.stringify(config));
+  const log = vi.fn();
+  for (const args of [{ executor: 'codex' as const }, { selectExecutor: true }]) {
+    expect(runQuotaCheck({ ...args, role: 'developer', json: true }, root, log)).toBe(3);
+    expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+      status: 'wait',
+      maxExecutions: 0,
+      activeTotal: 0,
+      reason: expect.stringContaining('Total runtime concurrency limit 0'),
+    });
+  }
+  delete config.projects[project].concurrency.maxExecutions;
+  fs.writeFileSync(file, JSON.stringify(config));
+  expect(runQuotaCheck({ executor: 'codex', role: 'developer', json: true }, root, log)).toBe(0);
+  expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+    maxExecutions: null,
+    activeTotal: 0,
+  });
+});
+
+it('documents system behavior without stale integration status and explains manual Task fallback', () => {
+  const selection = fs.readFileSync(
+    path.resolve(__dirname, '../../docs/executor-selection.md'),
+    'utf8',
+  );
+  expect(selection).not.toContain('siguen pendientes de Claude');
+  expect(selection).not.toContain(
+    'si alguno carece de tope expl' + String.fromCharCode(237) + 'cito, el gate espera',
+  );
+  for (const doc of ['executor-selection.md', 'worker-run.md']) {
+    const text = fs.readFileSync(path.resolve(__dirname, '../../docs', doc), 'utf8');
+    for (const term of ['maxExecutions', 'DRAFT', 'unknown', 'fallback'])
+      expect(text).toContain(term);
+  }
 });

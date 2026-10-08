@@ -29,7 +29,7 @@ export interface ProjectOperatorConfig {
   binaryPaths?: Record<string, string>;
   /** Minimum remaining quota percentages, by executor. */
   quotaThresholds?: Record<string, number>;
-  concurrency?: { maxExecutions: number; perExecutor?: Record<string, number> };
+  concurrency?: { maxExecutions?: number; perExecutor?: Record<string, number> };
   budgets?: { maxTokens?: number; maxCostUsd?: number; maxExecutionSeconds?: number };
   autopilot?: ProjectAutopilotConfig;
 }

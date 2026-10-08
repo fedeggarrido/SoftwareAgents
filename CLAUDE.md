@@ -193,9 +193,16 @@ solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
   del operador, selección bajo admisión SA-036; `quotaCommand.ts` explica sin
   lanzar. Config inválida: rechazo aislado por Project y diagnóstico conservado;
   worker/quota fallan cerrados, oficina/settings siguen funcionando. La lectura no
-  lanza sondas; soporte Claude se cachea por binario al usar el catálogo. El fallback
+  lanza sondas; soporte Claude se cachea por binario y se comprueba solo para
+  candidatos alcanzables y permitidos. El fallback
   declarativo reemplaza tipo/tamaño ausentes (implementation/M por defecto).
-  `worker.ts` registra selección en WorkStore/audit y registry →
+  Todos los workers admiten bajo orden Claude → Codex; maxExecutions limita los
+  slots totales (ausente sin tope, 0 espera). `worker.ts` comprueba identidad Git
+  antes de reservar y registra el intento antes de preparar/lanzar, con Session
+  y PID nulos; actualiza session_id cuando se conoce. Si falta la Task, crea
+  DRAFT/unknown y usa fallback. Al iniciar un publicador se recogen publicaciones
+  muertas y sus tombstones tras 24 h; vivos/dudosos se conservan.
+  Registra selección en WorkStore/audit y registry →
   `agentRoles.ts` → overlay. Véase [executor-selection.md](docs/executor-selection.md).
 - `agentRoles.ts`: extrae etiquetas de rol y departamento de metadatos y briefs
   explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar

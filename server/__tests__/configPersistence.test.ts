@@ -10,6 +10,7 @@ import {
   getHooksEnabled,
   grantHooksConsent,
   parseAreaMappings,
+  parseProjects,
   projectConfigError,
   readConfig,
   recordHooksDecline,
@@ -324,4 +325,27 @@ describe('configPersistence: areas', () => {
       expect(reloaded.standalone.areaMappings).toEqual({});
     });
   });
+});
+
+it('warns once per process for each rejected project and reason', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const project = 'qa-eight-warning';
+    const raw = {
+      [project]: {
+        autonomyLevel: 'A1',
+        allowedExecutors: ['codex'],
+        modelTiers: { maxTier: 'bad', tiers: {} },
+      },
+    };
+    for (let i = 0; i < 5; i++) expect(parseProjects(raw)[project]).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    raw[project].modelTiers.maxTier = 'standard';
+    parseProjects(raw);
+    expect(warn).toHaveBeenCalledTimes(2);
+    parseProjects({ 'qa-eight-warning-other': raw[project] });
+    expect(warn).toHaveBeenCalledTimes(3);
+  } finally {
+    warn.mockRestore();
+  }
 });

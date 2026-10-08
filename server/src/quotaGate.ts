@@ -6,6 +6,7 @@ export const MAX_QUOTA_OBSERVATION_AGE_S = 60;
 /** Trusted machine policy: thresholds are minimum remaining percentages. */
 export interface MachineQuotaPolicy {
   quotaThresholds: Partial<Record<ExecutorId, number>>;
+  maxExecutions?: number;
   maxConcurrent: Partial<Record<ExecutorId, number>>;
 }
 export type QuotaCause =
@@ -22,6 +23,7 @@ export function quotaGate(
   snapshot: CapacitySnapshot | undefined,
   active: number,
   nowS: number,
+  activeTotal?: number,
 ): QuotaDecision {
   const limit = policy?.maxConcurrent[executor];
   const threshold = policy?.quotaThresholds[executor];
@@ -35,6 +37,21 @@ export function quotaGate(
     reason,
     cause,
   });
+  if (policy?.maxExecutions !== undefined) {
+    if (
+      !Number.isInteger(policy.maxExecutions) ||
+      policy.maxExecutions < 0 ||
+      activeTotal === undefined ||
+      !Number.isInteger(activeTotal) ||
+      activeTotal < 0
+    )
+      return wait('Missing or invalid total runtime concurrency policy/count', 'configuration');
+    if (activeTotal >= policy.maxExecutions)
+      return wait(
+        `Total runtime concurrency limit ${policy.maxExecutions} reached (${activeTotal} active executions)`,
+        'concurrency',
+      );
+  }
   if (
     limit === undefined ||
     threshold === undefined ||

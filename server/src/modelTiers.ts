@@ -216,10 +216,33 @@ export function validateModelTiers(raw: unknown): ModelTierPolicy {
   }
 }
 /** Runtime validation only; config readers must never launch a CLI. */
-export function validateModelTierSupport(policy: ModelTierPolicy, binary?: string): void {
-  for (const definition of Object.values(policy.tiers)) {
+export function validateModelTierSupport(
+  policy: ModelTierPolicy,
+  binary?: string,
+  agent?: AgentSpec,
+  rule?: TierRule,
+  input: TierInputs = {},
+  allowed: readonly string[] = ['claude', 'codex'],
+): void {
+  const reachable = new Set<ModelTier>();
+  if (agent && rule) {
+    let tier: ModelTier | undefined = initialModelTier(agent, rule, policy, input).tier;
+    while (tier) {
+      reachable.add(tier);
+      tier = agent.modelPolicy.fallbackAllowed ? policy.tiers[tier]?.fallbackTo : undefined;
+    }
+  } else
+    for (const tier of MODEL_TIERS.slice(0, MODEL_TIERS.indexOf(policy.maxTier) + 1))
+      reachable.add(tier);
+  for (const tier of reachable) {
+    const definition = policy.tiers[tier];
+    if (!definition) continue;
     for (const candidate of definition.candidates) {
-      if (candidate.executor === 'claude' && candidate.effort !== undefined)
+      if (
+        allowed.includes('claude') &&
+        candidate.executor === 'claude' &&
+        candidate.effort !== undefined
+      )
         try {
           validateModelChoice(candidate, 'claude', claudeEffortSupported(binary));
         } catch (error) {
@@ -242,14 +265,12 @@ export interface TierSelection {
   gate: QuotaDecision;
   reason: string;
 }
-/** Deterministic and pure; every candidate sees exactly the same gate snapshot. */
-export function selectModelTier(
+function initialModelTier(
   agent: AgentSpec,
   rule: TierRule,
   policy: ModelTierPolicy,
   input: TierInputs,
-  snapshot: SelectionSnapshot,
-): TierSelection {
+) {
   const capability = agent.modelPolicy.capabilityClass;
   const base = Object.hasOwn(rule.capabilityWeights, capability)
     ? rule.capabilityWeights[capability]
@@ -267,7 +288,18 @@ export function selectModelTier(
   const tier = requested
     ? MODEL_TIERS[Math.min(MODEL_TIERS.indexOf(requested), MODEL_TIERS.indexOf(policy.maxTier))]
     : null;
-  const prefix = `${agent.identity.role} → ${capability}; ${fallback ? `fallback: missing work type/size, ${effective.workType}/${effective.size}` : `${input.workType}/${input.size}`}; score=${score}; requested=${requested}; maxTier=${policy.maxTier}`;
+  const prefix = `${agent.identity.role} → ${capability}; ${fallback ? `fallback: missing or invalid work type/size, ${effective.workType}/${effective.size}` : `${input.workType}/${input.size}`}; score=${score}; requested=${requested}; maxTier=${policy.maxTier}`;
+  return { tier: tier!, requested, prefix };
+}
+/** Deterministic and pure; every candidate sees exactly the same gate snapshot. */
+export function selectModelTier(
+  agent: AgentSpec,
+  rule: TierRule,
+  policy: ModelTierPolicy,
+  input: TierInputs,
+  snapshot: SelectionSnapshot,
+): TierSelection {
+  const { tier, requested, prefix } = initialModelTier(agent, rule, policy, input);
   const downgrades: ModelTier[] = [];
   const waits: Extract<QuotaDecision, { status: 'wait' }>[] = [];
   const reasons: string[] = [];
@@ -290,6 +322,7 @@ export function selectModelTier(
         snapshot.capacities[choice.executor],
         snapshot.active[choice.executor] ?? NaN,
         snapshot.nowS,
+        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
       );
       reasons.push(`${current}/${choice.executor}: ${gate.reason}`);
       if (gate.status !== 'wait')

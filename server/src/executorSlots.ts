@@ -168,7 +168,7 @@ function updateSlotOwner(file: string, owner: Owner): void {
     unlink(tmp);
   }
 }
-function stopped(pid: number, identity: string): boolean {
+export function stopped(pid: number, identity: string): boolean {
   let current = slotProcessIdentity(pid);
   // A cached previous lifetime cannot prove a newly registered owner is dead.
   if (current !== null && current !== undefined && current !== identity) {
@@ -365,7 +365,30 @@ export function readExecutorSlots(executor: ExecutorId): {
   }
   return { count: names.length, sessions, blocked };
 }
-export function acquireExecutorSlot(executor: ExecutorId, limit: number, owner: Owner) {
+/** All worker paths hold both admissions in this order before counting/reserving. */
+export function withMachineAdmission<T>(
+  executionId: string,
+  action: (owners: Record<ExecutorId, Owner>) => T,
+): T | undefined {
+  return withExecutorAdmission('claude', executionId, (claude) =>
+    withExecutorAdmission('codex', executionId, (codex) => action({ claude, codex })),
+  );
+}
+export function acquireExecutorSlot(
+  executor: ExecutorId,
+  limit: number,
+  owner: Owner,
+  maxExecutions?: number,
+) {
+  if (
+    maxExecutions !== undefined &&
+    (!held.has('claude') ||
+      !held.has('codex') ||
+      !Number.isInteger(maxExecutions) ||
+      maxExecutions < 0 ||
+      readExecutorSlots('claude').count + readExecutorSlots('codex').count >= maxExecutions)
+  )
+    return undefined;
   if (!Number.isInteger(limit) || limit < 1) return undefined;
   if (readExecutorSlots(executor).count >= limit) return undefined;
   for (let index = 0; index < limit; index++) {

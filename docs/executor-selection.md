@@ -18,13 +18,18 @@ se mantiene incluso si debe esperar; no hay fallback.
 `.softwareagents/agents/model-policy.yaml` es un catálogo ordenado de preferencias
 declarativas. Su parser rechaza campos de autoridad. La ruta permanece protegida
 por SA-063. Solo `~/.pixel-agents/config.json → projects.<id>` autoriza executors,
-`quotaThresholds` (porcentaje mínimo restante) y `concurrency.perExecutor`.
+`quotaThresholds` (porcentaje mínimo restante), `concurrency.perExecutor`
+y `concurrency.maxExecutions`.
 El tope efectivo es el mínimo entre todos los proyectos que permiten ese executor;
-si alguno carece de tope explícito, el gate espera. No se modifica esa config.
+se descartan los topes ausentes y se agregan solo los explícitos. Sin ningún
+tope por executor, el gate espera por configuración incompleta. No se modifica esa config.
 
 La regla «sin nombres de modelo» se aplica a selección y política:
 `executorSelection.ts`, `quotaGate.ts`, `modelPolicy.ts` y `worker.ts`.
-Una regresión realiza el grep acotado a esos módulos. El Provider puede conocer
+Una regresión incluye también modelTiers, modelTierAdmission, taskModelInputs,
+quotaCommand, los executors y `.softwareagents/agents/model-policy.yaml`.
+Excluye el Provider Claude y sus tests (conocimiento de ventanas) y los
+benchmarks históricos de local-llm.md / ADR-0004. El Provider puede conocer
 identificadores de modelo para interpretar su contexto; la tabla de ventanas de
 `providers/hook/claude/constants.ts` permanece en el Provider. Los modelos opcionales
 de Operator preferences se pasan al Executor sin fijarlos en esos módulos.
@@ -33,7 +38,8 @@ de Operator preferences se pasan al Executor sin fijarlos en esos módulos.
 `~/.pixel-agents/executor-slots/<executor>/<n>.lock` son la autoridad para
 lanzamientos del worker en esta máquina, entre repositorios y tareas distintas.
 `concurrencyLimit` determina el número admisible de slots. La admisión serializa
-la decisión actual del gate y el exclusive-create del slot por executor; un slot
+la decisión actual del gate y el exclusive-create del slot bajo el orden fijo
+Claude → Codex, tanto en la ruta de niveles como en la ruta legado; un slot
 se mantiene durante toda la Execution y se libera tras confirmar su fin.
 Sin slot libre o con otra admisión en curso se devuelve `wait` con razón.
 La sonda tiene límite 1, incluso si Operator config permite más concurrencia.
@@ -247,7 +253,7 @@ interpreta para decidir modelos. Si falta o es desconocido **cualquiera** de tip
 tamaño, se reemplazan **ambas** entradas por `tierRule.fallback: { workType, size }`.
 Si se omite ese campo, se usa implementation/M para compatibilidad. El fallback
 acepta solo los tipos y tamaños del esquema; la explicación registra
-`fallback: missing work type/size, implementation/M` (o los valores declarados).
+`fallback: missing or invalid work type/size, implementation/M` (o los valores declarados).
 No se adivina a partir del título o longitud.
 
 ### Cuota, bajadas y admisión
@@ -290,7 +296,9 @@ salida limitada, sin shell ni cwd del repo). La CLI inspeccionada anuncia
 `low | medium | high | xhigh | max`. Si el binario no anuncia el flag/valor, no
 responde o falla, worker/quota fallan con exit 1 y mensaje claro, sin lanzamiento.
 La lectura de config solo comprueba la allowlist cerrada: no ejecuta sondas.
-Worker y quota comprueban soporte al cargar el proyecto; el executor también lo
+Worker y quota con selección comprueban solo candidatos Claude alcanzables
+desde el nivel inicial (recortado por maxTier), por fallbackTo y permisos de rol
+y allowedExecutors. El diagnóstico directo de Codex no depende de Claude; el executor también lo
 valida. La sonda se cachea una vez por proceso y binario resuelto, incluidos fallos:
 `binaryPaths.claude` o la resolución por defecto compartida con el executor.
 Tras actualizar un binario se reinicia el proceso para renovar el resultado.
@@ -315,12 +323,13 @@ nunca la config actual ni una inferencia de la Session interactiva.
 
 WorkStore migra idempotentemente a v6 con `model_tier`, `model_effort` y
 `selection_reason`; `model_id` y `executor` ya existían. El worker manual registra
-el intento con PID nulo: tiene lock de tarea, no lease del WorkStore. El PID real,
+el intento antes de preparar o lanzar, con Session y PID nulos; conserva la fila
+si falla o se cancela y actualiza session_id cuando llega started: tiene lock de tarea, no lease del WorkStore. El PID real,
 identidad y Session permanecen en registry/slot del supervisor. No cambia el
 lifecycle de una Task existente. Si falta la Task se crea solo la referencia
 necesaria con tipo `unknown` y estado DRAFT, para no inventar clasificación en
 futuros intentos. La selección se audita de forma verificable
-antes de lanzar (`model_selected`) y acompaña el resultado de la Execution.
+tras reservar y antes de preparar el worktree (`model_selected`) y acompaña el resultado de la Execution.
 
 ### Explicación sin gastar cuota y prueba real
 
@@ -353,5 +362,13 @@ Debe ver modelo/esfuerzo en argv efectivo del CLI, la misma selección en
 En la oficina standalone, al pasar sobre o seleccionar el Character de esa Session,
 debe aparecer `standard · <modelo>` (o el nivel elegido), con esfuerzo/motivo en
 el tooltip. Reconexionar debe mantenerlo. La oficina requiere esa Session observada;
-una sesión interactiva ajena no recibe nivel inventado. La prueba real e integración
-siguen pendientes de Claude.
+una sesión interactiva ajena no recibe nivel inventado.
+
+El tope total efectivo es el mínimo de los `concurrency.maxExecutions` explícitos
+entre Projects; ausente significa sin tope total y 0 devuelve wait sin lanzar.
+Cuenta slots de ambos executors, excluye Sessions interactivas y se verifica en
+la decisión y la reserva bajo ambas admisiones. JSON de quota check y explicación
+de selección incluyen maxExecutions (null si falta), activeTotal y el motivo.
+Al iniciar un publicador se retiran las publicaciones de procesos confirmados
+muertos con observedAt de más de 24 horas y sus tombstones de la misma generación.
+Identidades dudosas, EPERM y publicadores vivos se conservan; no se siguen enlaces.

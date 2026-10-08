@@ -141,6 +141,7 @@ export interface WorkStore {
   addTaskDependency(taskKey: string, dependsOnKey: string): void;
   listTaskDependencies(taskKey: string): TaskDependencyRecord[];
   createExecution(execution: Omit<ExecutionRecord, 'project_id' | 'tree_closed_at'>): Promise<void>;
+  setExecutionSession(key: string, sessionId: string): Promise<void>;
   getExecution(key: string): ExecutionRecord | undefined;
   listExecutions(): ExecutionRecord[];
   recordHumanDecision(decision: Omit<HumanDecisionRecord, 'project_id'>): void;

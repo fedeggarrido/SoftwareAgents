@@ -678,6 +678,13 @@ class SqliteWorkStore implements WorkStore {
     if (result.changes !== 1)
       throw new Error('Task changed or lease expired before Execution registration');
   }
+  setExecutionSession(key: string, sessionId: string): Promise<void> {
+    return this.write(() => {
+      this.db
+        .prepare('UPDATE executions SET session_id = ? WHERE project_id = ? AND key = ?')
+        .run(sessionId, this.projectId, key);
+    });
+  }
   getExecution(key: string): ExecutionRecord | undefined {
     return this.db
       .prepare('SELECT * FROM executions WHERE project_id = ? AND key = ?')

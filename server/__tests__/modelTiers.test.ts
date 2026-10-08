@@ -335,7 +335,7 @@ it('defaults absent fallback to implementation/M and validates declared fallback
     selectModelTier(spec('standard_coding'), override, policy, { size: 'L' }, snapshot()),
   ).toMatchObject({
     tier: 'economy',
-    reason: expect.stringContaining('fallback: missing work type/size, docs/S'),
+    reason: expect.stringContaining('fallback: missing or invalid work type/size, docs/S'),
   });
   for (const fallback of [
     { workType: 'bad', size: 'M' },
@@ -401,4 +401,60 @@ it('default PATH resolution and explicit paths share one support probe for the s
     else process.env.PATH = originalPath;
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+it('probes only reachable and allowed Claude tiers, including explicit fallback edges', () => {
+  vi.mocked(execFileSync).mockReset();
+  vi.mocked(execFileSync).mockImplementation(() => {
+    throw new Error('synthetic unavailable CLI');
+  });
+  const capped = { ...policy, maxTier: 'standard' as const };
+  expect(() =>
+    validateModelTierSupport(capped, 'unreachable-cli', spec('standard_coding'), rule, {}, [
+      'codex',
+    ]),
+  ).not.toThrow();
+  expect(() =>
+    validateModelTierSupport(policy, 'unreachable-cli', spec('standard_coding'), rule, {}, [
+      'claude',
+      'codex',
+    ]),
+  ).not.toThrow();
+  expect(execFileSync).not.toHaveBeenCalled();
+  expect(() =>
+    validateModelTierSupport(policy, 'reachable-cli', spec('high_reasoning'), rule, {}, [
+      'claude',
+      'codex',
+    ]),
+  ).toThrow('unsupported claude effort');
+  const viaFallback = structuredClone(policy);
+  viaFallback.tiers.economy!.candidates = [
+    { executor: 'claude', model: 'test-small-model', effort: 'high' },
+  ];
+  expect(() =>
+    validateModelTierSupport(viaFallback, 'fallback-cli', spec('standard_coding'), rule, {}, [
+      'claude',
+      'codex',
+    ]),
+  ).toThrow('unsupported claude effort');
+  expect(() =>
+    validateModelTierSupport(
+      viaFallback,
+      'unused-fallback-cli',
+      spec('standard_coding', false),
+      rule,
+      {},
+      ['claude', 'codex'],
+    ),
+  ).not.toThrow();
+});
+it.each([0, 1])('total limit %s blocks all executors without quota downgrade', (maxExecutions) => {
+  const state = snapshot(true, false);
+  state.machinePolicy!.maxExecutions = maxExecutions;
+  state.active.claude = maxExecutions;
+  expect(selectModelTier(spec('high_reasoning'), rule, policy, {}, state)).toMatchObject({
+    choice: null,
+    downgrades: [],
+    gate: { status: 'wait', cause: 'concurrency' },
+  });
 });

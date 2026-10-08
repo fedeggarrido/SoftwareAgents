@@ -112,6 +112,10 @@ export function readSelectionSnapshot(
   nowS = Date.now() / 1000,
 ): SelectionSnapshot {
   const policies = Object.values(readConfig().projects);
+  const totalLimits = [...policies, operator]
+    .map((p) => p.concurrency?.maxExecutions)
+    .filter((n): n is number => n !== undefined);
+  const maxExecutions = totalLimits.length ? Math.min(...totalLimits) : undefined;
   const maxConcurrent: Partial<Record<ExecutorId, number>> = {};
   for (const executor of ['claude', 'codex'] as const) {
     const limits = policies
@@ -211,7 +215,11 @@ export function readSelectionSnapshot(
   }
   return {
     allowedExecutors: operator.allowedExecutors,
-    machinePolicy: { quotaThresholds: operator.quotaThresholds ?? {}, maxConcurrent },
+    machinePolicy: {
+      quotaThresholds: operator.quotaThresholds ?? {},
+      maxConcurrent,
+      maxExecutions,
+    },
     active,
     coverage: {
       scope: 'runtime_slots',
@@ -281,8 +289,6 @@ export function parseQuotaArgs(argv: string[]): QuotaArgs {
 export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = console.log): number {
   const config = loadProjectConfig(cwd, true);
   if (!config) throw new CliUsageError('quota check requires a Project');
-  if (config.operator.modelTiers)
-    validateModelTierSupport(config.operator.modelTiers, config.operator.binaryPaths?.claude);
   const snapshot = readSelectionSnapshot(config.operator);
   if (args.selectExecutor) {
     if (!['developer', 'reviewer', 'qa', 'architect', 'requirements-analyst'].includes(args.role))
@@ -294,6 +300,15 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
       parse(fs.readFileSync(fs.existsSync(bundled) ? bundled : source, 'utf8')),
     );
     const tierPolicy = config.operator.modelTiers;
+    if (tierPolicy)
+      validateModelTierSupport(
+        tierPolicy,
+        config.operator.binaryPaths?.claude,
+        agent,
+        tierPolicy.rule ?? loadTierRule(cwd),
+        args,
+        snapshot.allowedExecutors,
+      );
     const selected = tierPolicy
       ? selectModelTier(agent, tierPolicy.rule ?? loadTierRule(cwd), tierPolicy, args, snapshot)
       : selectExecutor(agent, loadModelPolicy(cwd), snapshot);
@@ -309,6 +324,8 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
       downgrades: 'downgrades' in selected ? selected.downgrades : [],
       reason: selected.reason,
       active: snapshot.active,
+      maxExecutions: snapshot.machinePolicy?.maxExecutions ?? null,
+      activeTotal: (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
       coverage: snapshot.coverage,
     };
     log(args.json ? JSON.stringify(result) : `${result.status}: ${result.reason}`);
@@ -322,6 +339,7 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
         snapshot.capacities[executor],
         snapshot.active[executor] ?? NaN,
         snapshot.nowS,
+        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
       )
     : {
         status: 'wait',
@@ -335,6 +353,8 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
           role: args.role,
           ...decision,
           active: snapshot.active[executor],
+          maxExecutions: snapshot.machinePolicy?.maxExecutions ?? null,
+          activeTotal: (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
           coverage: snapshot.coverage,
         })
       : `${decision.status}: ${decision.reason}`,

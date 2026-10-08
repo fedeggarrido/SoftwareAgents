@@ -12,6 +12,7 @@ import {
   readExecutorSlots,
   slotProcessIdentity,
   withExecutorAdmission,
+  withMachineAdmission,
 } from '../src/executorSlots.js';
 import { MachineCapacityPublisher } from '../src/machineCapacity.js';
 import { readSelectionSnapshot } from '../src/quotaCommand.js';
@@ -51,7 +52,14 @@ it('serializes admission, holds slots until release, and rejects probes while an
   expect(readExecutorSlots('codex').count).toBe(1);
   const s = readSelectionSnapshot(operator, 1000);
   expect(
-    quotaGate('codex', s.machinePolicy, s.capacities.codex, s.active.codex!, 1000).status,
+    quotaGate(
+      'codex',
+      s.machinePolicy,
+      s.capacities.codex,
+      s.active.codex!,
+      1000,
+      (s.active.claude ?? 0) + (s.active.codex ?? 0),
+    ).status,
   ).toBe('wait');
   expect(
     withExecutorAdmission('codex', 'execution-b', (owner) =>
@@ -88,15 +96,29 @@ it('deduplicates a runtime session observed by an office, and waits at the total
   p.publish();
   const s = readSelectionSnapshot(operator, now);
   expect(s.active.codex).toBe(1);
-  expect(quotaGate('codex', s.machinePolicy, s.capacities.codex, s.active.codex!, now).status).toBe(
-    'go',
-  );
+  expect(
+    quotaGate(
+      'codex',
+      s.machinePolicy,
+      s.capacities.codex,
+      s.active.codex!,
+      now,
+      (s.active.claude ?? 0) + (s.active.codex ?? 0),
+    ).status,
+  ).toBe('go');
   const second = withExecutorAdmission('codex', 'execution-b', (owner) =>
     acquireExecutorSlot('codex', 2, owner),
   )!;
   const full = readSelectionSnapshot(operator, now);
   expect(
-    quotaGate('codex', full.machinePolicy, full.capacities.codex, full.active.codex!, now).status,
+    quotaGate(
+      'codex',
+      full.machinePolicy,
+      full.capacities.codex,
+      full.active.codex!,
+      now,
+      (full.active.claude ?? 0) + (full.active.codex ?? 0),
+    ).status,
   ).toBe('wait');
   second.release();
   slot.release();
@@ -137,7 +159,16 @@ it('does not recover a dead worker slot while its registered executor process is
     withExecutorAdmission('codex', 'new', (owner) => acquireExecutorSlot('codex', 1, owner)),
   ).toBeUndefined();
   const s = readSelectionSnapshot(operator, 1000);
-  expect(quotaGate('codex', s.machinePolicy, undefined, s.active.codex!, 1000).status).toBe('wait');
+  expect(
+    quotaGate(
+      'codex',
+      s.machinePolicy,
+      undefined,
+      s.active.codex!,
+      1000,
+      (s.active.claude ?? 0) + (s.active.codex ?? 0),
+    ).status,
+  ).toBe('wait');
 });
 it('fails closed if the worker dies between spawn and registering the executor PID', () => {
   const dir = executorSlotsDirectory('codex');
@@ -156,7 +187,16 @@ it('fails closed if the worker dies between spawn and registering the executor P
     withExecutorAdmission('codex', 'new', (owner) => acquireExecutorSlot('codex', 1, owner)),
   ).toBeUndefined();
   const s = readSelectionSnapshot(operator, 1000);
-  expect(quotaGate('codex', s.machinePolicy, undefined, s.active.codex!, 1000).status).toBe('wait');
+  expect(
+    quotaGate(
+      'codex',
+      s.machinePolicy,
+      undefined,
+      s.active.codex!,
+      1000,
+      (s.active.claude ?? 0) + (s.active.codex ?? 0),
+    ).status,
+  ).toBe('wait');
 });
 it('recovers a slot after the real owning process exits without releasing it', async () => {
   const bundle = path.join(home, 'slots.cjs');
@@ -274,3 +314,25 @@ it.each(['unregistered', 'registered', 'launched'])(
   },
   30000,
 );
+
+it('total cap is checked again during reservation under both admissions', () => {
+  const slots = withMachineAdmission('total-check', (owners) => {
+    expect(acquireExecutorSlot('claude', 2, owners.claude, 0)).toBeUndefined();
+    const first = acquireExecutorSlot('claude', 2, owners.claude, 1)!;
+    expect(first).toBeDefined();
+    expect(acquireExecutorSlot('codex', 2, owners.codex, 1)).toBeUndefined();
+    // Missing total cap preserves the previous per-executor semantics.
+    const second = acquireExecutorSlot('codex', 2, owners.codex)!;
+    return [first, second];
+  })!;
+  try {
+    expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(2);
+  } finally {
+    slots.forEach((slot) => slot.release());
+  }
+  expect(
+    withExecutorAdmission('codex', 'one-lock', (owner) =>
+      acquireExecutorSlot('codex', 2, owner, 1),
+    ),
+  ).toBeUndefined();
+});

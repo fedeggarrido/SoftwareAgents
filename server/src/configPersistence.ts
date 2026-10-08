@@ -96,7 +96,6 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     concurrency: {
       type: 'object',
       additionalProperties: false,
-      required: ['maxExecutions'],
       properties: { maxExecutions: concurrencyLimit, perExecutor: numberMap(concurrencyLimit) },
     },
     budgets: {
@@ -137,6 +136,8 @@ export function projectConfigError(
   return rejectedProjects.get(projects)?.[id]?.error;
 }
 
+const warnedProjects = new Set<string>();
+
 export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfig> {
   const out: Record<string, ProjectOperatorConfig> = Object.create(null);
   const rejected: Record<string, { raw: unknown; error: Error }> = Object.create(null);
@@ -160,7 +161,11 @@ export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfi
     } catch (error) {
       const diagnostic = error as Error;
       rejected[id] = { raw: structuredClone(policy), error: diagnostic };
-      console.warn(`[Pixel Agents] Rejected Operator project ${id}: ${diagnostic.message}`);
+      const warning = `[Pixel Agents] Rejected Operator project ${id}: ${diagnostic.message}`;
+      if (!warnedProjects.has(warning)) {
+        warnedProjects.add(warning);
+        console.warn(warning);
+      }
     }
   }
   return out;

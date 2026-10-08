@@ -45,6 +45,7 @@ export function selectExecutor(agent: AgentSpec, policy: ModelPolicy, snapshot: 
         snapshot.capacities[choice.executor],
         snapshot.active[choice.executor] ?? NaN,
         snapshot.nowS,
+        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
       )
     : { status: 'wait', resetsAt: null, reason: `No allowed executor for ${capability}` };
   return {

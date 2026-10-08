@@ -183,3 +183,6 @@ export const EXECUTOR_TERMINATION_TIMEOUT_MS = 5_000;
 export const EXECUTOR_TERMINATION_RETRY_MS = 250;
 /** Every taskkill gets a full budget, even near the end of the retry window. */
 export const EXECUTOR_TASKKILL_TIMEOUT_MS = 2000;
+
+/** Dead office publications are retained for quota diagnostics for one day. */
+export const MACHINE_CAPACITY_RETENTION_S = 24 * 60 * 60;

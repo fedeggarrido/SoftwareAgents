@@ -7,8 +7,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
+import { MACHINE_CAPACITY_RETENTION_S } from '../src/constants.js';
+import * as slotRuntime from '../src/executorSlots.js';
 import {
   buildMachineCapacityObservation,
+  collectDeadMachinePublishers,
   machineCapacityDirectory,
   MachineCapacityPublisher,
   writeMachineCapacityObservation,
@@ -66,7 +69,14 @@ function publisher(
 }
 function gate(nowS: number) {
   const s = readSelectionSnapshot(operator, nowS);
-  return quotaGate('codex', s.machinePolicy, s.capacities.codex, s.active.codex!, s.nowS);
+  return quotaGate(
+    'codex',
+    s.machinePolicy,
+    s.capacities.codex,
+    s.active.codex!,
+    s.nowS,
+    (s.active.claude ?? 0) + (s.active.codex ?? 0),
+  );
 }
 it('declares office coverage/provenance and maps only known providers', () => {
   const store = new AgentStateStore();
@@ -205,6 +215,7 @@ it('a new reader process cannot revive expired or backward publications from the
         snapshot.capacities.codex,
         snapshot.active.codex!,
         snapshot.nowS,
+        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
       ).status;
     } finally {
       if (child.exitCode === null) child.kill();
@@ -437,4 +448,137 @@ it('an empty or truncated per-boot contribution yields a probe and a complete re
   }
   p.publish();
   expect(gate(1000).status).toBe('go');
+});
+
+function gcPublication(
+  name: string,
+  pid = 2147483647,
+  age = MACHINE_CAPACITY_RETENTION_S + 1,
+  identity?: string,
+) {
+  const file = path.join(machineCapacityDirectory(), name + '.json');
+  const observation = buildMachineCapacityObservation(
+    new AgentStateStore(),
+    {},
+    1000000 - age,
+    { id: name, pid, bootId: name, sequence: 1, startIdentity: identity },
+    ['isolated'],
+  );
+  writeMachineCapacityObservation(observation, file);
+  const invalid = file + '.invalid';
+  fs.mkdirSync(path.join(invalid, name), { recursive: true });
+  fs.writeFileSync(path.join(invalid, name, '1'), '');
+  return { file, invalid, boot: path.join(invalid, name) };
+}
+it('publisher startup collects only dead and expired publications and their own tombstones', () => {
+  const dead = gcPublication('dead');
+  const recent = gcPublication('recent', 2147483647, 1);
+  const boundary = gcPublication('boundary', 2147483647, MACHINE_CAPACITY_RETENTION_S);
+  const live = gcPublication('live', process.pid);
+  const malformed = gcPublication('malformed');
+  fs.writeFileSync(malformed.file, '{broken');
+  const future = gcPublication('future', 2147483647, -1);
+  const own = publisher(
+    new AgentStateStore(),
+    () => ({}),
+    () => 1000000000,
+  );
+  try {
+    own.start();
+  } finally {
+    own.dispose();
+  }
+  expect(fs.existsSync(dead.file)).toBe(false);
+  expect(fs.existsSync(dead.invalid)).toBe(false);
+  for (const kept of [recent, boundary, live, malformed, future]) {
+    expect(fs.existsSync(kept.file)).toBe(true);
+    expect(fs.existsSync(kept.boot)).toBe(true);
+  }
+});
+it('GC preserves unverifiable and EPERM publishers and reclaims reused PID identities', () => {
+  const unknown = gcPublication(
+    'unknown',
+    process.pid,
+    MACHINE_CAPACITY_RETENTION_S + 1,
+    'unverified',
+  );
+  const denied = gcPublication(
+    'denied',
+    process.pid + 1,
+    MACHINE_CAPACITY_RETENTION_S + 1,
+    'old-identity',
+  );
+  const reused = gcPublication(
+    'reused',
+    process.pid,
+    MACHINE_CAPACITY_RETENTION_S + 1,
+    'old-identity',
+  );
+  const kill = process.kill;
+  vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal: NodeJS.Signals | number) => {
+    if (pid === process.pid + 1) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+    return kill(pid, signal);
+  }) as typeof process.kill);
+  collectDeadMachinePublishers(1000000);
+  expect(fs.existsSync(unknown.file)).toBe(true);
+  expect(fs.existsSync(denied.file)).toBe(true);
+  expect(fs.existsSync(reused.file)).toBe(false);
+  const doubtful = gcPublication('doubtful', process.pid, MACHINE_CAPACITY_RETENTION_S + 1, 'old');
+  vi.spyOn(slotRuntime, 'stopped').mockReturnValue(false);
+  collectDeadMachinePublishers(1000000);
+  expect(fs.existsSync(doubtful.file)).toBe(true);
+});
+it('GC retries file contention and concurrent collectors tolerate missing generations', () => {
+  const dead = gcPublication('contention');
+  const unlink = fs.unlinkSync;
+  let tries = 0;
+  vi.spyOn(fs, 'unlinkSync').mockImplementation((file) => {
+    if (String(file) === dead.file && tries++ < 2)
+      throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    return unlink(file);
+  });
+  collectDeadMachinePublishers(1000000);
+  collectDeadMachinePublishers(1000000);
+  expect(tries).toBe(3);
+  expect(fs.existsSync(dead.file)).toBe(false);
+});
+it('GC removes tombstone junctions as links and never follows linked publication roots or files', () => {
+  const target = path.join(home, 'untouched');
+  fs.mkdirSync(target);
+  fs.writeFileSync(path.join(target, 'keep'), 'keep');
+  const dead = gcPublication('links');
+  fs.symlinkSync(
+    target,
+    path.join(dead.boot, 'junction'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  const linkedBoot = gcPublication('linked-boot');
+  fs.unlinkSync(path.join(linkedBoot.boot, '1'));
+  fs.rmdirSync(linkedBoot.boot);
+  fs.symlinkSync(target, linkedBoot.boot, process.platform === 'win32' ? 'junction' : 'dir');
+  const linkedInvalid = gcPublication('linked-invalid');
+  fs.unlinkSync(path.join(linkedInvalid.boot, '1'));
+  fs.rmdirSync(linkedInvalid.boot);
+  fs.rmdirSync(linkedInvalid.invalid);
+  fs.symlinkSync(target, linkedInvalid.invalid, process.platform === 'win32' ? 'junction' : 'dir');
+  const linkedFile = path.join(machineCapacityDirectory(), 'linked-file.json');
+  // A directory junction also counts as a linked publication entry on Windows.
+  fs.symlinkSync(target, linkedFile, process.platform === 'win32' ? 'junction' : 'dir');
+  collectDeadMachinePublishers(1000000);
+  expect(fs.readFileSync(path.join(target, 'keep'), 'utf8')).toBe('keep');
+  for (const item of [dead, linkedBoot, linkedInvalid]) {
+    expect(fs.existsSync(item.file)).toBe(false);
+    expect(fs.existsSync(item.invalid)).toBe(false);
+  }
+  expect(fs.lstatSync(linkedFile).isSymbolicLink()).toBe(true);
+  fs.unlinkSync(linkedFile);
+  fs.rmdirSync(machineCapacityDirectory());
+  fs.symlinkSync(
+    target,
+    machineCapacityDirectory(),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  collectDeadMachinePublishers(1000000);
+  expect(fs.readFileSync(path.join(target, 'keep'), 'utf8')).toBe('keep');
+  fs.unlinkSync(machineCapacityDirectory());
 });

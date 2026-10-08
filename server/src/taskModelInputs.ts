@@ -27,7 +27,11 @@ export function taskModelInputs(
       const items = (raw as { items?: { id?: unknown; size?: unknown }[] })?.items;
       if (Array.isArray(items)) {
         const matches = items.filter((i) => i?.id === key);
-        if (matches.length === 1 && ['S', 'M', 'L'].includes(String(matches[0].size)))
+        if (
+          matches.length === 1 &&
+          typeof matches[0].size === 'string' &&
+          ['S', 'M', 'L'].includes(matches[0].size)
+        )
           size = matches[0].size as WorkSize;
       }
     } catch {

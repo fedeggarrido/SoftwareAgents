@@ -50,7 +50,14 @@ afterEach(() => {
 });
 function gate(now: number) {
   const s = readSelectionSnapshot(operator, now);
-  return quotaGate('claude', s.machinePolicy, s.capacities.claude, s.active.claude!, now);
+  return quotaGate(
+    'claude',
+    s.machinePolicy,
+    s.capacities.claude,
+    s.active.claude!,
+    now,
+    (s.active.claude ?? 0) + (s.active.codex ?? 0),
+  );
 }
 it('P1: an interactive session does not consume the worker limit or probe', () => {
   const store = new AgentStateStore();

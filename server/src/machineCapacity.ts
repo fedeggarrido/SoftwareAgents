@@ -9,10 +9,12 @@ import {
   LAYOUT_FILE_DIR,
   MACHINE_CAPACITY_FILE_NAME,
   MACHINE_CAPACITY_PUBLISH_MS,
+  MACHINE_CAPACITY_RETENTION_S,
 } from './constants.js';
 import type { ExecutorId } from './executors/executor.js';
-import { slotProcessIdentity } from './executorSlots.js';
+import { slotProcessIdentity, stopped } from './executorSlots.js';
 import { retryFileOperation } from './fileContention.js';
+import { resolveInside } from './pathGuard.js';
 import { mergeQuotaEvidence, retainQuotaEvidence } from './quotaEvidence.js';
 
 export interface MachineCapacityObservation {
@@ -179,6 +181,11 @@ export class MachineCapacityPublisher {
 
   start(): void {
     if (!this.ownsServer() || this.timer) return;
+    try {
+      collectDeadMachinePublishers(this.now() / 1000);
+    } catch (error) {
+      console.warn('[Pixel Agents] Could not collect dead machine publishers:', error);
+    }
     this.publish();
     this.timer = setInterval(() => this.publish(), MACHINE_CAPACITY_PUBLISH_MS);
     this.timer.unref();
@@ -227,5 +234,103 @@ export class MachineCapacityPublisher {
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+  }
+}
+
+/** Remove lexical entries without following links, including nested junctions.
+ * resolveInside contains every ordinary entry; lstat distinguishes links first.
+ * The private operator-owned directory must not be concurrently replaced by links.
+ */
+function removePublisherEntry(root: string, name: string): void {
+  const lexical = path.join(root, name);
+  const stat = retryFileOperation(() => fs.lstatSync(lexical));
+  if (stat.isSymbolicLink()) {
+    retryFileOperation(() => fs.unlinkSync(lexical));
+    return;
+  }
+  const file = resolveInside(root, name);
+  if (stat.isDirectory()) {
+    for (const child of retryFileOperation(() => fs.readdirSync(file)))
+      removePublisherEntry(file, child);
+    retryFileOperation(() => fs.rmdirSync(file));
+  } else retryFileOperation(() => fs.unlinkSync(file));
+}
+
+/** Unknown identity/EPERM, malformed or recent publications confer no GC authority. */
+export function collectDeadMachinePublishers(nowS: number): void {
+  if (!Number.isFinite(nowS)) return;
+  const home = os.homedir();
+  const configDir = path.join(home, LAYOUT_FILE_DIR);
+  const directory = machineCapacityDirectory();
+  // A linked publication root must never redirect garbage collection elsewhere.
+  for (const dir of [configDir, directory]) {
+    try {
+      const stat = retryFileOperation(() => fs.lstatSync(dir));
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+  resolveInside(home, LAYOUT_FILE_DIR + '/' + MACHINE_CAPACITY_FILE_NAME + '.d');
+  for (const name of retryFileOperation(() => fs.readdirSync(directory))) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const lexical = path.join(directory, name);
+      const stat = retryFileOperation(() => fs.lstatSync(lexical));
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+      const file = resolveInside(directory, name);
+      const content = retryFileOperation(() => fs.readFileSync(file, 'utf8'));
+      const observation = JSON.parse(content) as MachineCapacityObservation;
+      const p = observation?.publisher;
+      if (
+        !Number.isFinite(observation?.observedAt) ||
+        nowS - observation.observedAt <= MACHINE_CAPACITY_RETENTION_S ||
+        !p ||
+        !Number.isSafeInteger(p.pid) ||
+        p.pid <= 0 ||
+        typeof p.bootId !== 'string' ||
+        !/^[a-zA-Z0-9-]+$/.test(p.bootId) ||
+        (p.startIdentity !== undefined && (typeof p.startIdentity !== 'string' || !p.startIdentity))
+      )
+        continue;
+      try {
+        process.kill(p.pid, 0);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue;
+      }
+      const dead = p.startIdentity
+        ? stopped(p.pid, p.startIdentity)
+        : slotProcessIdentity(p.pid) === null;
+      if (!dead) continue;
+      // Recheck the exact generation before deleting its publication and tombstones.
+      if (
+        retryFileOperation(() => fs.lstatSync(file)).isSymbolicLink() ||
+        retryFileOperation(() => fs.readFileSync(file, 'utf8')) !== content
+      )
+        continue;
+      const invalidName = name + '.invalid';
+      const invalid = path.join(directory, invalidName);
+      try {
+        const invalidStat = retryFileOperation(() => fs.lstatSync(invalid));
+        if (invalidStat.isSymbolicLink()) removePublisherEntry(directory, invalidName);
+        else if (invalidStat.isDirectory()) {
+          const contained = resolveInside(directory, invalidName);
+          try {
+            removePublisherEntry(contained, p.bootId);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
+          if (!retryFileOperation(() => fs.readdirSync(contained)).length)
+            retryFileOperation(() => fs.rmdirSync(contained));
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      retryFileOperation(() => fs.unlinkSync(file));
+      seen.delete(file + ':' + p.bootId);
+    } catch {
+      // Malformed data, links, concurrent cleanup and persistent contention are kept safely.
+    }
   }
 }

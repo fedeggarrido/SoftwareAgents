@@ -105,6 +105,12 @@ describe('supervised worker', () => {
     const binary = path.join(root, 'missing-claude.exe');
     raw.projects.test.binaryPaths.claude = binary;
     raw.projects.test.modelTiers = {
+      rule: parse(
+        fs.readFileSync(
+          path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+          'utf8',
+        ),
+      ).tierRule,
       maxTier: 'standard',
       tiers: {
         standard: { candidates: [{ executor: 'claude', model: 'test-model', effort: 'high' }] },
@@ -120,7 +126,9 @@ describe('supervised worker', () => {
     expect(() =>
       runQuotaCheck({ selectExecutor: true, role: 'developer', json: true }, repo),
     ).toThrow('unsupported claude effort');
-    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(execFileSync).mock.calls.filter((call) => call[1]?.[0] === '--help'),
+    ).toHaveLength(1);
     expect(execFileSync).toHaveBeenCalledWith(binary, ['--help'], expect.any(Object));
     expect(spawn).not.toHaveBeenCalled();
   });
@@ -220,6 +228,7 @@ describe('supervised worker', () => {
             model_effort: 'medium',
             selection_reason: expect.stringContaining('fallback:'),
             pid: null,
+            session_id: selected === 'codex' ? 'fake-codex-session' : expect.any(String),
           },
         ]);
       } finally {
@@ -480,6 +489,150 @@ describe('supervised worker', () => {
         expect(results.filter((r) => r.exitCode === 0)).toHaveLength(1);
         expect((await Promise.all(exited)).sort()).toEqual([0, 3]);
         expect(readExecutorSlots('claude').count).toBe(0);
+      } finally {
+        fs.writeFileSync(release, 'release');
+        children.forEach((child) => {
+          if (child.exitCode === null) child.kill();
+        });
+        await Promise.all(exited);
+      }
+    },
+    30000,
+  );
+  it.each([false, true, 'mixed'] as const)(
+    'two real workers across executors launch only one at total limit 1 (tiers=%s)',
+    async (tiers) => {
+      const codexRepo = path.join(root, 'repo-codex');
+      git(root, 'clone', '--quiet', repo, codexRepo);
+      const projects: Record<string, unknown> = {};
+      for (const [executor, checkout] of [
+        ['claude', repo],
+        ['codex', codexRepo],
+      ] as const) {
+        const project = executor === 'claude' ? 'test' : 'test-codex';
+        const manifest = path.join(checkout, '.softwareagents/project.yaml');
+        fs.writeFileSync(
+          manifest,
+          fs.readFileSync(manifest, 'utf8').replace('id: test', 'id: ' + project),
+        );
+        fs.mkdirSync(path.join(checkout, '.softwareagents/agents'), { recursive: true });
+        fs.writeFileSync(
+          path.join(checkout, '.softwareagents/agents/model-policy.yaml'),
+          'standard_coding:\n  - executor: ' + executor + '\n',
+        );
+        git(checkout, 'add', '.');
+        git(checkout, 'commit', '--allow-empty', '-m', 'worker fixture');
+        const useTiers = tiers === true || (tiers === 'mixed' && executor === 'codex');
+        projects[project] = {
+          autonomyLevel: 'A1',
+          allowedExecutors: [executor],
+          binaryPaths: { [executor]: process.execPath },
+          quotaThresholds: { [executor]: 5 },
+          concurrency: { maxExecutions: 1, perExecutor: { [executor]: 2 } },
+          ...(useTiers
+            ? {
+                modelTiers: {
+                  maxTier: 'standard',
+                  rule: parse(
+                    fs.readFileSync(
+                      path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+                      'utf8',
+                    ),
+                  ).tierRule,
+                  tiers: { standard: { candidates: [{ executor, model: 'test-model' }] } },
+                },
+              }
+            : {}),
+        };
+      }
+      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify({ projects }));
+      const bundle = path.join(root, 'worker.cjs');
+      buildSync({
+        entryPoints: [path.resolve(__dirname, '../src/worker.ts')],
+        outfile: bundle,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        logLevel: 'silent',
+      });
+      fs.mkdirSync(path.join(root, 'agents/templates'), { recursive: true });
+      fs.copyFileSync(
+        path.resolve(__dirname, '../../agents/templates/developer.yaml'),
+        path.join(root, 'agents/templates/developer.yaml'),
+      );
+      const launches = path.join(root, 'launches');
+      const release = path.join(root, 'release');
+      const children = [0, 1].map(() =>
+        spawn(
+          process.execPath,
+          [path.join(__dirname, 'fixtures/worker-slot-process.cjs'), bundle],
+          {
+            env: {
+              ...process.env,
+              HOME: root,
+              USERPROFILE: root,
+              SA_SLOT_TEST_LAUNCHES: launches,
+              SA_SLOT_TEST_RELEASE: release,
+            },
+            stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+            windowsHide: true,
+          },
+        ),
+      );
+      const ready = children.map(
+        (child) => new Promise<void>((resolve) => child.once('message', () => resolve())),
+      );
+      const done = children.map(
+        (child) =>
+          new Promise<{
+            result?: { quotaDecision?: { status: string } };
+            exitCode?: number;
+            error?: string;
+          }>((resolve, reject) => {
+            child.on(
+              'message',
+              (message: {
+                ready?: boolean;
+                result?: { quotaDecision?: { status: string } };
+                exitCode?: number;
+                error?: string;
+              }) => {
+                if (!message.ready) resolve(message);
+              },
+            );
+            child.on('error', reject);
+          }),
+      );
+      const exited = children.map(
+        (child) => new Promise<number | null>((resolve) => child.once('exit', resolve)),
+      );
+      try {
+        await Promise.all(ready);
+        children.forEach((child, i) =>
+          child.send({
+            task: `SA-${998 + i}`,
+            repo: i ? codexRepo : repo,
+            fake,
+            executor: i ? 'codex' : 'claude',
+            selectExecutor: i === 1 && tiers === false,
+          }),
+        );
+        const loser = await Promise.race(done);
+        expect(loser.error).toBeUndefined();
+        expect(loser).toMatchObject({ exitCode: 3, result: { quotaDecision: { status: 'wait' } } });
+        await Promise.race([
+          vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 }),
+          Promise.all(done).then((results) => {
+            throw new Error('Both workers ended before a held launch: ' + JSON.stringify(results));
+          }),
+        ]);
+        expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+        expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(1);
+        fs.writeFileSync(release, 'release');
+        const results = await Promise.all(done);
+        expect(results.filter((r) => r.exitCode === 0)).toHaveLength(1);
+        expect((await Promise.all(exited)).sort()).toEqual([0, 3]);
+        expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(0);
       } finally {
         fs.writeFileSync(release, 'release');
         children.forEach((child) => {
@@ -920,3 +1073,189 @@ describe('supervised worker', () => {
     expect(fs.existsSync(path.join(repo, '.worktrees'))).toBe(false);
   });
 });
+
+function tierOperator(
+  executor: 'claude' | 'codex' = 'codex',
+  maxExecutions: number | undefined = 2,
+) {
+  const file = path.join(root, '.pixel-agents/config.json');
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  raw.projects.test.allowedExecutors = [executor];
+  raw.projects.test.binaryPaths = { [executor]: process.execPath };
+  raw.projects.test.quotaThresholds = { [executor]: 5 };
+  raw.projects.test.concurrency = { maxExecutions, perExecutor: { [executor]: 2 } };
+  raw.projects.test.modelTiers = {
+    rule: parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+        'utf8',
+      ),
+    ).tierRule,
+    maxTier: 'standard',
+    tiers: { standard: { candidates: [{ executor, model: 'test-model' }] } },
+  };
+  fs.writeFileSync(file, JSON.stringify(raw));
+  return raw;
+}
+it.each(['start', 'prepare', 'cancel'] as const)(
+  'retains admitted attempt when %s fails before start',
+  async (failure) => {
+    const raw = tierOperator();
+    if (failure === 'start') {
+      raw.projects.test.binaryPaths.codex = path.join(root, 'missing-codex.exe');
+      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(raw));
+    } else {
+      const { WorktreeManager } = await import('../src/executors/worktreeManager.js');
+      const create = WorktreeManager.prototype.create;
+      vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (
+        this: import('../src/executors/worktreeManager.js').WorktreeManager,
+        ...args
+      ) {
+        if (failure === 'prepare') throw new Error('synthetic preparation failure');
+        process.emit('SIGTERM');
+        return create.apply(this, args);
+      });
+    }
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {} },
+      ),
+    ).rejects.toThrow();
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')).toMatchObject({ type: 'unknown', status: 'DRAFT' });
+      expect(store.listExecutions()).toMatchObject([
+        { executor: 'codex', model_id: 'test-model', session_id: null, pid: null },
+      ]);
+      expect(store.listExecutions()).toHaveLength(1);
+      expect(
+        new AuditLog().read('test').map((r) => (!r.corrupt ? r.entry.outcome.status : 'corrupt')),
+      ).toEqual(['model_selected', failure === 'cancel' ? 'interrupted' : 'failed']);
+    } finally {
+      store.close();
+    }
+    expect(readExecutorSlots('codex').count).toBe(0);
+  },
+);
+it.each([false, true])('missing Git identity fails before admission (tiers=%s)', async (tiers) => {
+  if (tiers) tierOperator();
+  vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(root, 'no-global-config'));
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+  for (const key of [
+    'GIT_AUTHOR_NAME',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_COMMITTER_EMAIL',
+    'EMAIL',
+  ])
+    vi.stubEnv(key, '');
+  const { cliErrorOutput } = await import('../src/cliErrors.js');
+  let error: unknown;
+  try {
+    await runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo });
+  } catch (caught) {
+    error = caught;
+  }
+  expect(cliErrorOutput(error)).toBe(
+    'worker run requires valid Git author and committer identity; configure it before launching',
+  );
+  expect(spawn).not.toHaveBeenCalled();
+  expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(0);
+  expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+  expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+  // No admissions were created either.
+  expect(fs.existsSync(path.join(root, '.pixel-agents/executor-slots'))).toBe(false);
+});
+it('runtime commit failure has no trace and retains staged changes', async () => {
+  const execute = vi.mocked(execFileSync).getMockImplementation()!;
+  vi.mocked(execFileSync).mockImplementation(((binary: string, args: string[], options: object) => {
+    if (binary === 'git' && args.includes('core.hooksPath=') && args.includes('commit'))
+      throw new Error('synthetic git commit failure with trace');
+    return execute(binary, args, options);
+  }) as typeof execFileSync);
+  const { cliErrorOutput } = await import('../src/cliErrors.js');
+  let error: unknown;
+  try {
+    await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude', '--write-doc'], log: () => {} },
+    );
+  } catch (caught) {
+    error = caught;
+  }
+  expect(cliErrorOutput(error)).toBe('Runtime Git commit failed; changes retained for review');
+  expect(git(path.join(repo, '.worktrees/SA-999'), 'diff', '--cached', '--name-only')).toContain(
+    'worker-result.md',
+  );
+});
+it('unreachable Claude effort does not prevent a Codex worker or direct diagnosis', async () => {
+  const raw = tierOperator();
+  raw.projects.test.binaryPaths.claude = path.join(root, 'missing-claude.exe');
+  raw.projects.test.modelTiers.tiers.deep = {
+    candidates: [{ executor: 'claude', model: 'test-deep-model', effort: 'high' }],
+  };
+  fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(raw));
+  expect(runQuotaCheck({ executor: 'codex', role: 'developer', json: true }, repo, () => {})).toBe(
+    0,
+  );
+  await runWorker(
+    { task: 'SA-999', brief: 'brief.md' },
+    { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {} },
+  );
+  expect(
+    vi
+      .mocked(execFileSync)
+      .mock.calls.some(([binary]) => binary === raw.projects.test.binaryPaths.claude),
+  ).toBe(false);
+});
+it.each([['L'], { size: 'L' }, 3, null, 'l', 'XL'])(
+  'invalid board size %j uses and explains fallback',
+  async (size) => {
+    const raw = tierOperator();
+    raw.projects.test.modelTiers.maxTier = 'deep';
+    raw.projects.test.modelTiers.tiers.deep = {
+      candidates: [{ executor: 'codex', model: 'test-deep-model' }],
+    };
+    fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(raw));
+    fs.appendFileSync(
+      path.join(repo, '.softwareagents/project.yaml'),
+      'legacy:\n  boardFile: board.json\n',
+    );
+    fs.writeFileSync(
+      path.join(repo, 'board.json'),
+      JSON.stringify({ items: [{ id: 'SA-999', size }] }),
+    );
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      store.createTask({ key: 'SA-999', type: 'architecture' });
+      const task = store.getTask('SA-999');
+      const { taskModelInputs } = await import('../src/taskModelInputs.js');
+      const { selectModelTier } = await import('../src/modelTiers.js');
+      const { loadTierRule } = await import('../src/modelPolicy.js');
+      const spec = parse(
+        fs.readFileSync(path.resolve(__dirname, '../../agents/templates/developer.yaml'), 'utf8'),
+      );
+      const config = loadProjectConfig(repo)!;
+      const inputs = taskModelInputs(config, task, 'SA-999');
+      expect(inputs).toEqual({ workType: 'architecture' });
+      const { readSelectionSnapshot } = await import('../src/quotaCommand.js');
+      expect(
+        selectModelTier(
+          spec,
+          loadTierRule(path.resolve(__dirname, '../..')),
+          config.operator.modelTiers!,
+          inputs,
+          readSelectionSnapshot(config.operator),
+        ),
+      ).toMatchObject({
+        tier: 'standard',
+        reason: expect.stringContaining(
+          'fallback: missing or invalid work type/size, implementation/M',
+        ),
+      });
+    } finally {
+      store.close();
+    }
+  },
+);

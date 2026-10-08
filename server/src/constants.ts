@@ -166,6 +166,9 @@ export const CODEX_PROJECT_DOC_MAX_BYTES = 0;
  *  fails the run on a `collab_tool_call` item and on any rollout whose `parent_thread_id` is its
  *  thread, polled at this interval. */
 export const CODEX_SUBAGENT_POLL_MS = 1000;
+/** Allow concurrent rollout writers to finish their headers after the CLI closes. */
+export const CODEX_SUBAGENT_FINAL_TIMEOUT_MS = 2500;
+export const CODEX_SUBAGENT_FINAL_RETRY_MS = 100;
 /** session_meta carries base instructions (~20 KB); the parent id sits before them. */
 export const CODEX_SUBAGENT_HEADER_BYTES = 256 * 1024;
 /** Repository-provided Codex configuration or skills: the Codex Executor refuses such a worktree. */
@@ -178,3 +181,5 @@ export const WORKSTORE_PROCESS_WAIT_MS = 10_000;
 /** Retry failed process-tree termination for this long; an unconfirmed close never finishes. */
 export const EXECUTOR_TERMINATION_TIMEOUT_MS = 5_000;
 export const EXECUTOR_TERMINATION_RETRY_MS = 250;
+/** Every taskkill gets a full budget, even near the end of the retry window. */
+export const EXECUTOR_TASKKILL_TIMEOUT_MS = 2000;

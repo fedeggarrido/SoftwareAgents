@@ -1,6 +1,10 @@
 import { type ChildProcess, execFileSync } from 'child_process';
 
-import { EXECUTOR_TERMINATION_RETRY_MS, EXECUTOR_TERMINATION_TIMEOUT_MS } from '../constants.js';
+import {
+  EXECUTOR_TASKKILL_TIMEOUT_MS,
+  EXECUTOR_TERMINATION_RETRY_MS,
+  EXECUTOR_TERMINATION_TIMEOUT_MS,
+} from '../constants.js';
 
 /** Request cancellation independently of process-close confirmation. Failed kills retry within
  * a bounded window; later cancel/timeout requests start another window. Only close finishes a run. */
@@ -13,17 +17,30 @@ export function processCancellation(child: () => ChildProcess | undefined) {
   const attempt = () => {
     const proc = child();
     if (confirmed || !proc?.pid) return;
+    // Node releases the process handle at exit, before stdio drains and close fires.
+    // Its PID may already belong to another process; never target it again.
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      failure = undefined;
+      return;
+    }
+    if (process.platform === 'win32' && Date.now() + EXECUTOR_TASKKILL_TIMEOUT_MS > deadline)
+      return;
     try {
       if (process.platform === 'win32')
         execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
           windowsHide: true,
-          timeout: Math.max(1, deadline - Date.now()),
+          timeout: EXECUTOR_TASKKILL_TIMEOUT_MS,
         });
       else process.kill(-proc.pid, 'SIGKILL');
+      failure = undefined;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+        failure = undefined;
+        return;
+      }
       failure = error instanceof Error ? error : new Error(String(error));
-      if (!retry && Date.now() + EXECUTOR_TERMINATION_RETRY_MS <= deadline) {
+      const attemptBudget = process.platform === 'win32' ? EXECUTOR_TASKKILL_TIMEOUT_MS : 0;
+      if (!retry && Date.now() + EXECUTOR_TERMINATION_RETRY_MS + attemptBudget <= deadline) {
         retry = setTimeout(() => {
           retry = undefined;
           try {
@@ -51,6 +68,7 @@ export function processCancellation(child: () => ChildProcess | undefined) {
     },
     confirmClose() {
       confirmed = true;
+      failure = undefined;
       if (retry) clearTimeout(retry);
       retry = undefined;
     },

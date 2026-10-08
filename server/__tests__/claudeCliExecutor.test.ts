@@ -126,9 +126,13 @@ it('refuses runtime settings located inside the worktree', async () => {
     binary: process.execPath,
     runtimeDirectory: path.join(req.worktreePath, 'runtime'),
   }).start(req);
-  await expect(handle.events[Symbol.asyncIterator]().next()).rejects.toThrow(
-    'outside the worktree',
-  );
+  await expect(handle.events[Symbol.asyncIterator]().next()).resolves.toMatchObject({
+    value: {
+      type: 'finished',
+      exitCode: 1,
+      resultSummary: expect.stringContaining('outside the worktree'),
+    },
+  });
 });
 it('uses fixed isolation flags, hooks and an empty MCP config without bypassPermissions', async () => {
   req.model = 'requested-model';

@@ -361,6 +361,15 @@ export class ClaudeCliExecutor implements Executor {
               [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
               (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
           };
+        } catch (error) {
+          // Setup and synchronous spawn failures leave no process to confirm or cancel.
+          if (child) throw error;
+          done = true;
+          yield {
+            type: 'finished',
+            exitCode: 1,
+            resultSummary: error instanceof Error ? error.message : String(error),
+          };
         } finally {
           if (timer) clearTimeout(timer);
           if (!done) cancel();

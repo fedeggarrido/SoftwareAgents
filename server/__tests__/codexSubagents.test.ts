@@ -119,6 +119,37 @@ it('does not treat a parent-id string inside instructions as metadata', () => {
   });
 });
 
+it('does not treat an unescaped nested git parent-id as delegation metadata', () => {
+  const file = rollout('rollout-git.jsonl', { git: { parent_thread_id: 'parent' } });
+  // Positive control: the old substring matcher would wrongly accept this fixture.
+  expect(fs.readFileSync(file, 'utf8')).toContain('"parent_thread_id":"parent"');
+  expect(findSubagentRollout(root, 'parent', Date.now() - 1000, new Set())).toEqual({
+    status: 'none',
+  });
+});
+
+it('requires the own thread rollout in the final scan, including when headers are cached', () => {
+  const since = Date.now() - 1000;
+  const seen = new Set<string>();
+  expect(
+    findSubagentRollout(path.join(root, 'absent'), 'parent', since, seen, Date.now(), true),
+  ).toMatchObject({
+    status: 'inconclusive',
+    reason: expect.stringContaining('Own thread rollout'),
+  });
+  rollout('rollout-other.jsonl', { id: 'someone-else' });
+  expect(findSubagentRollout(root, 'parent', since, seen, Date.now(), true)).toMatchObject({
+    status: 'inconclusive',
+  });
+  rollout('rollout-parent.jsonl', { id: 'parent' });
+  expect(findSubagentRollout(root, 'parent', since, seen, Date.now(), true)).toEqual({
+    status: 'none',
+  });
+  expect(findSubagentRollout(root, 'parent', since, seen, Date.now(), true)).toEqual({
+    status: 'none',
+  });
+});
+
 it('keeps oversized and malformed headers inconclusive and uncached', () => {
   const file = rollout('rollout-long.jsonl', {
     instructions: 'x'.repeat(300_000),

@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -17,6 +17,10 @@ import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
+});
+vi.mock('child_process', async (original) => {
+  const actual = await original<typeof import('child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
 });
 
 let root: string;
@@ -59,11 +63,66 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  vi.mocked(spawn).mockClear();
   vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('supervised worker', () => {
+  it.each(['claude', 'codex'])(
+    'releases the task lock after synchronous %s spawn EINVAL',
+    async (selected) => {
+      fs.mkdirSync(path.join(repo, '.softwareagents/agents'));
+      fs.writeFileSync(
+        path.join(repo, '.softwareagents/agents/model-policy.yaml'),
+        `standard_coding:\n  - executor: ${selected}\n`,
+      );
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-m', 'spawn fixture');
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: {
+            test: {
+              autonomyLevel: 'A1',
+              allowedExecutors: [selected],
+              binaryPaths: { [selected]: process.execPath },
+              quotaThresholds: { [selected]: 5 },
+              concurrency: { maxExecutions: 2, perExecutor: { [selected]: 2 } },
+            },
+          },
+        }),
+      );
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/machine-capacity.json'),
+        JSON.stringify({ observedAt: Date.now() / 1000, active: { [selected]: 0 } }),
+      );
+      const log = vi.fn();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.mocked(spawn).mockImplementationOnce(() => {
+          throw Object.assign(new Error('spawn EINVAL'), { code: 'EINVAL' });
+        });
+        await expect(
+          runWorker(
+            { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
+            { cwd: repo, binaryArgs: [fake, selected], log },
+          ),
+        ).rejects.toThrow('Execution failed');
+        expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+      }
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(log).not.toHaveBeenCalledWith(expect.stringContaining('Task lock retained'));
+      const runs = path.join(repo, '.git/softwareagents/runs');
+      for (const file of fs.readdirSync(runs)) {
+        const records = fs
+          .readFileSync(path.join(runs, file), 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(records).toEqual([{ type: 'finished', exitCode: 1, resultSummary: 'spawn EINVAL' }]);
+      }
+    },
+  );
   it.each(['.codex', '.agents'])(
     'releases the task lock after Codex preflight rejects %s',
     async (shipped) => {

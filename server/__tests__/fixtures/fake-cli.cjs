@@ -11,6 +11,7 @@ if (!valid) {
   process.stderr.write('Expected claude -p --output-format stream-json or codex exec --json\n');
   process.exitCode = 2;
 } else {
+  if (executor === 'codex') require('./codex-rollout.cjs')('fake-codex-session');
   if (args.includes('--write-doc')) {
     require('fs').writeFileSync('worker-result.md', 'Synthetic documentation correction\n');
   }

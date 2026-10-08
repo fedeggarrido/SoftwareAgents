@@ -14,6 +14,8 @@ import {
 } from '../agentCompiler.js';
 import {
   CODEX_REPO_CONFIG_DIRS,
+  CODEX_SUBAGENT_FINAL_RETRY_MS,
+  CODEX_SUBAGENT_FINAL_TIMEOUT_MS,
   CODEX_SUBAGENT_POLL_MS,
   CODEX_WINDOWS_SANDBOX,
 } from '../constants.js';
@@ -164,6 +166,7 @@ export class CodexCliExecutor implements Executor {
             ...(req.model ? ['-m', req.model] : []),
             '-',
           ];
+          const launchedMs = Date.now();
           child = spawn(binary, args, {
             cwd: req.worktreePath,
             windowsHide: true,
@@ -216,17 +219,22 @@ export class CodexCliExecutor implements Executor {
           // stream: the sub-agent's own rollout (parent_thread_id = our thread) is the signal.
           const sessionsRoot =
             options.sessionsDirectory ?? codexSessionsDirectory(process.env, req.worktreePath);
-          const launchedMs = Date.now();
           const seenRollouts = new Set<string>();
           const checkSubagents = (final = false) => {
             if (!sessionId || violation) return;
-            const rollout = findSubagentRollout(sessionsRoot, sessionId, launchedMs, seenRollouts);
+            const rollout = findSubagentRollout(
+              sessionsRoot,
+              sessionId,
+              launchedMs,
+              seenRollouts,
+              Date.now(),
+              final,
+            );
             if (rollout.status === 'found')
               violate(
                 `Codex spawned a sub-agent (${path.basename(rollout.file)}); slice profiles have no delegated agents`,
               );
-            else if (final && rollout.status === 'inconclusive')
-              violate(`could not verify that no sub-agent was spawned: ${rollout.reason}`);
+            return rollout;
           };
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: proc[stream]! })) {
@@ -362,12 +370,24 @@ export class CodexCliExecutor implements Executor {
           });
           let closed = false,
             exitCode = 1;
-          void Promise.allSettled([completion, ...readers]).then((results) => {
+          void Promise.allSettled([completion, ...readers]).then(async (results) => {
             const result = results[0];
             exitCode = result.status === 'fulfilled' ? (result.value as number) : 1;
             for (const r of results) if (r.status === 'rejected') failure = r.reason;
             if (watcher) clearInterval(watcher);
-            checkSubagents(true); // an unreadable final check cannot accept the result
+            // Closure confirms termination; the remaining timeout must not turn a clean
+            // result into cancellation while we wait for a concurrent rollout writer.
+            if (timer) clearTimeout(timer);
+            const deadline = Date.now() + CODEX_SUBAGENT_FINAL_TIMEOUT_MS;
+            let rollout = checkSubagents(true);
+            while (rollout?.status === 'inconclusive' && Date.now() < deadline) {
+              await new Promise<void>((resolve) =>
+                setTimeout(resolve, Math.min(CODEX_SUBAGENT_FINAL_RETRY_MS, deadline - Date.now())),
+              );
+              rollout = checkSubagents(true);
+            }
+            if (rollout?.status === 'inconclusive')
+              violate(`could not verify that no sub-agent was spawned: ${rollout.reason}`);
             closed = true;
             wake?.();
           });
@@ -405,6 +425,16 @@ export class CodexCliExecutor implements Executor {
             resultSummary:
               [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
               (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
+          };
+        } catch (error) {
+          // No process exists when setup or spawn throws synchronously. Report completion
+          // so the worker can release its lock; post-spawn failures still require close.
+          if (child) throw error;
+          done = true;
+          yield {
+            type: 'finished',
+            exitCode: 1,
+            resultSummary: error instanceof Error ? error.message : String(error),
           };
         } finally {
           if (timer) clearTimeout(timer);

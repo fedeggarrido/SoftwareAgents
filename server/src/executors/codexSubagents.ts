@@ -48,8 +48,10 @@ export function findSubagentRollout(
   sinceMs: number,
   seen: Set<string>,
   nowMs = Date.now(),
+  final = false,
 ): SubagentRolloutStatus {
   let reason: string | undefined;
+  let ownRolloutFound = false;
   for (const folder of dayFolders(root, sinceMs, nowMs)) {
     let names: string[];
     try {
@@ -61,10 +63,18 @@ export function findSubagentRollout(
     }
     for (const name of names) {
       const file = path.join(folder, name);
+      const ownRollout = name.endsWith(`${parentThreadId}.jsonl`);
+      if (ownRollout) ownRolloutFound = true;
       if (!name.endsWith('.jsonl') || seen.has(file)) continue;
       let fd: number | undefined;
       try {
-        if (fs.statSync(file).mtimeMs < sinceMs) {
+        const stat = fs.statSync(file);
+        // An existing session cannot be a newly spawned child, even if it keeps writing.
+        // Unknown creation times remain candidates and therefore fail closed on parse errors.
+        if (
+          !ownRollout &&
+          (stat.mtimeMs < sinceMs || (stat.birthtimeMs > 0 && stat.birthtimeMs < sinceMs))
+        ) {
           seen.add(file);
           continue;
         }
@@ -101,5 +111,7 @@ export function findSubagentRollout(
       }
     }
   }
+  if (final && !ownRolloutFound)
+    return { status: 'inconclusive', reason: 'Own thread rollout not found in scanned days' };
   return reason ? { status: 'inconclusive', reason } : { status: 'none' };
 }

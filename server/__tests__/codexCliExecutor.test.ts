@@ -24,8 +24,14 @@ vi.mock('child_process', async (original) => {
 
 let root: string;
 let req: ExecutionRequest;
+vi.mock('os', async (original) => {
+  const actual = await original<typeof import('os')>();
+  return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };
+});
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-executor-'));
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('FAKE_CODEX_SESSIONS', path.join(root, 'sessions'));
   fs.mkdirSync(path.join(root, 'worktree'));
   req = {
     executionId: 'run',
@@ -41,7 +47,10 @@ beforeEach(() => {
     ),
   };
 });
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  fs.rmSync(root, { recursive: true, force: true });
+});
 function executor(mode?: string, runtimeDirectory = path.join(root, 'runtime')) {
   return new CodexCliExecutor({
     operator: { binaryPaths: { codex: process.execPath } },
@@ -253,7 +262,7 @@ it.each(['--web-search', '--mcp-call', '--collab'])(
   },
 );
 
-it('fails when the final rollout inspection is inconclusive', async () => {
+it('ignores incomplete concurrent sessions created before launch even if still writing', async () => {
   const day = new Date();
   const folder = path.join(
     root,
@@ -267,9 +276,9 @@ it('fails when the final rollout inspection is inconclusive', async () => {
   const file = path.join(folder, 'rollout-incomplete.jsonl');
   fs.writeFileSync(file, '{"type":"session_meta"');
   fs.utimesSync(file, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+  await new Promise((resolve) => setTimeout(resolve, 20));
   expect((await collect()).at(-1)).toMatchObject({
-    exitCode: 1,
-    resultSummary: expect.stringContaining('could not verify that no sub-agent was spawned'),
+    exitCode: 0,
   });
 });
 it('fails closed on truncated real startup without a completed turn', async () => {
@@ -294,5 +303,11 @@ it('rejects runtime storage inside the worktree', async () => {
       .start(req)
       .events[Symbol.asyncIterator]()
       .next(),
-  ).rejects.toThrow('outside the worktree');
+  ).resolves.toMatchObject({
+    value: {
+      type: 'finished',
+      exitCode: 1,
+      resultSummary: expect.stringContaining('outside the worktree'),
+    },
+  });
 });

@@ -5,6 +5,7 @@ let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (data) => (input += data));
 process.stdin.on('end', () => {
+  require('./codex-rollout.cjs')('00000000-0000-7000-a000-000000000034');
   const emit = (record) => console.log(JSON.stringify(record));
   if (args.includes('--inspect'))
     emit({

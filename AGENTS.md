@@ -37,6 +37,25 @@ Este archivo fija el flujo de colaboración del Development Project.
 - Sin PRs ni `gh` (decisión de Fede): tras integrar, Claude hace `git push origin main`
   después de pasar gitleaks. El enlace a ClickUp va en los comentarios de la tarea.
 
+## Trabajo en paralelo: local y cloud
+
+- Una sesión = una tarea. Al empezar, pon la tarea en «in progress» en ClickUp
+  (es el claim) y parte de `main` recién traído (`git fetch`). No cojas una tarea que
+  ya esté en curso ni una que dependa de otra sin integrar.
+- Local trabaja en `sa/SA-###-slug` (worktree); una sesión cloud, solo en su rama
+  `claude/...`, y deja en ClickUp el commit y la rama para integrar.
+- **Solo la sesión local integra en `main`**: rebase de la rama sobre `main`,
+  revisión cruzada de Codex, validación, `git merge --ff-only`, gitleaks y push. Cloud
+  nunca hace push a `main`.
+- Lo que necesita Codex, Windows o la oficina real con las cuentas del operador va a
+  local; cloud no tiene Codex ni Windows y lo declara como pendiente en la tarea.
+- Ficheros que chocan: `CLAUDE.md`, `core/asyncapi.yaml`, `server/src/constants.ts`,
+  `docs/design/*`. Solo una tarea en curso a la vez cambia el contrato AsyncAPI; en
+  un conflicto, `core/src/messages.ts` se regenera (`npm run asyncapi:generate`),
+  nunca se resuelve a mano.
+- Las sesiones cloud se preparan solas con `.claude/hooks/session-start.sh`
+  (dependencias, gitleaks fijado y verificado por SHA-256, build completo).
+
 ## QA y fixes tras cada feature
 
 - Después de integrar **cada feature** (cada tarea SA-###, no cada tanda) y antes de

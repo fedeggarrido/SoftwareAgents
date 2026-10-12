@@ -117,12 +117,13 @@ export const LAYOUT_FILE_POLL_INTERVAL_MS = 2000;
 export const LAYOUT_REVISION_KEY = 'layoutRevision';
 export const CONFIG_FILE_NAME = 'config.json';
 export const CONFIG_FILE_MODE = 0o600;
-/** Whole-file config lock shared by every writer (SA-088). Critical sections are
- *  a read, a rename and a verify; the lease recovers a crashed owner. */
+/** Whole-file config lock shared by every writer (SA-088). An availability change
+ *  holds it across up to three audit appends (each may wait AUDIT_LOCK_TIMEOUT_MS),
+ *  so the lease must exceed that; a dead owner is reclaimed at once by PID. */
 export const CONFIG_LOCK_DIR = 'locks';
 export const CONFIG_LOCK_NAME = 'config.lock';
 export const CONFIG_LOCK_TIMEOUT_MS = 2000;
-export const CONFIG_LOCK_LEASE_MS = 10_000;
+export const CONFIG_LOCK_LEASE_MS = 30_000;
 
 // ── Avatar Customization ────────────────────────────────────
 /** Number of pre-colored bundled character palettes (char_0.png–char_5.png).

@@ -15,6 +15,13 @@ import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from 
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
+import {
+  auditContainmentDenial,
+  claudeToolContainment,
+  CONTAINMENT_HOOK_TIMEOUT_SEC,
+  type ContainmentContext,
+  type ContainmentVerdict,
+} from './agentContainment.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 import { processCancellation } from './processCancellation.js';
 import { spawnRegisteredProcess } from './registeredProcess.js';
@@ -28,6 +35,29 @@ export interface ClaudeCliExecutorOptions {
   runtimeDirectory: string;
   /** Installed Pixel Agents hook command; omit to use the installer's default. */
   hookCommand?: string;
+  /** Bundled SA-062 containment hook; omit to use dist/hooks/containment-hook.js. */
+  containmentHookScript?: string;
+}
+
+/** The bundled CLI sits next to dist/hooks; running from source uses the built copy. */
+export function containmentHookScriptPath(): string {
+  const bundled = path.join(__dirname, 'hooks', 'containment-hook.js');
+  return fs.existsSync(bundled)
+    ? bundled
+    : path.resolve(__dirname, '../../../dist/hooks/containment-hook.js');
+}
+
+/** Claude runs hook commands through a shell. Paths are quoted, so characters a shell still
+ * expands inside double quotes are refused instead of escaped. Under Electron, execPath is the
+ * editor, not Node. */
+function containmentHookCommand(script: string, contextFile: string): string {
+  const node = process.versions.electron ? 'node' : process.execPath;
+  const quote = (value: string) => {
+    const portable = process.platform === 'win32' ? value.replace(/\\/g, '/') : value;
+    if (/["$`\\\x00-\x1f%!]/.test(portable)) throw new Error('Unsafe containment hook path');
+    return `"${portable}"`;
+  };
+  return [node, script, contextFile].map(quote).join(' ');
 }
 
 /** Configuration isolation is not an OS sandbox. Caller argv never grants authority. */
@@ -73,6 +103,13 @@ export class ClaudeCliExecutor implements Executor {
     );
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
     const sessionId = randomUUID();
+    const containment: ContainmentContext = {
+      worktreeRoot: req.worktreePath,
+      projectId: req.projectId,
+      taskKey: req.taskKey,
+      executionId: req.executionId,
+      executor: 'claude',
+    };
     let child: ChildProcess | undefined;
     let done = false;
     let violation: string | undefined;
@@ -108,17 +145,36 @@ export class ClaudeCliExecutor implements Executor {
           const settings = path.join(directory, compiled.claude.settingsFile);
           const mcp = path.join(directory, 'mcp.json');
           const hooksAvailable = fs.existsSync(getHookScriptPath());
+          // SA-062: containment is mandatory, unlike the consent-gated office hooks.
+          const containmentScript = options.containmentHookScript ?? containmentHookScriptPath();
+          if (!fs.statSync(containmentScript, { throwIfNoEntry: false })?.isFile())
+            throw new Error('Containment hook is not built; refusing to launch Claude');
+          const contextFile = path.join(directory, 'containment.json');
+          fs.writeFileSync(contextFile, JSON.stringify(containment), { mode: 0o600 });
+          const office: Record<string, unknown[]> = hooksAvailable
+            ? Object.fromEntries(
+                CLAUDE_HOOK_EVENTS.map((event) => [event, [makeHookEntry(options.hookCommand)]]),
+              )
+            : {};
           fs.writeFileSync(
             settings,
             JSON.stringify({
-              hooks: hooksAvailable
-                ? Object.fromEntries(
-                    CLAUDE_HOOK_EVENTS.map((event) => [
-                      event,
-                      [makeHookEntry(options.hookCommand)],
-                    ]),
-                  )
-                : undefined,
+              hooks: {
+                ...office,
+                PreToolUse: [
+                  {
+                    matcher: '',
+                    hooks: [
+                      {
+                        type: 'command',
+                        command: containmentHookCommand(containmentScript, contextFile),
+                        timeout: CONTAINMENT_HOOK_TIMEOUT_SEC,
+                      },
+                    ],
+                  },
+                  ...(office.PreToolUse ?? []),
+                ],
+              },
               permissions: { defaultMode: compiled.claude.permissionMode },
             }),
             { mode: 0o600 },
@@ -200,6 +256,11 @@ export class ClaudeCliExecutor implements Executor {
               /* surfaced after the process closes */
             }
           };
+          const pendingContained = new Map<
+            string,
+            { verdict: ContainmentVerdict; toolName: string; input: unknown }
+          >();
+          let contained: ContainmentVerdict;
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: processChild[stream]! })) {
               if (stream === 'stderr') {
@@ -264,7 +325,26 @@ export class ClaudeCliExecutor implements Executor {
                         violate(
                           `Claude used ${content.name}; slice profiles have no delegated agents`,
                         );
-                      else
+                      else if (
+                        !(contained = claudeToolContainment(
+                          content.name,
+                          content.input,
+                          req.worktreePath,
+                        )).allowed
+                      ) {
+                        // The hook denies and audits it; the input is never forwarded (may hold
+                        // credentials). Its tool_result must come back as an error.
+                        pendingContained.set(content.id, {
+                          verdict: contained,
+                          toolName: String(content.name),
+                          input: content.input,
+                        });
+                        push({
+                          type: 'output',
+                          stream,
+                          text: `Containment: ${content.name} denied (${contained.rule})`,
+                        });
+                      } else
                         push({
                           type: 'toolUse',
                           toolId: content.id,
@@ -274,6 +354,43 @@ export class ClaudeCliExecutor implements Executor {
                     }
                     if (content.type === 'text')
                       push({ type: 'output', text: content.text, stream });
+                  }
+                }
+                // Tripwire: a contained tool that did not come back as an error means the
+                // hook failed open (missing node, timeout, hooks disabled by managed policy).
+                if (record.type === 'user') {
+                  const results: unknown[] = Array.isArray(record.message?.content)
+                    ? record.message.content
+                    : [];
+                  for (const result of results) {
+                    const {
+                      type,
+                      tool_use_id: id,
+                      is_error: isError,
+                    } = (result ?? {}) as Record<string, unknown>;
+                    if (type !== 'tool_result' || typeof id !== 'string') continue;
+                    const attempt = pendingContained.get(id);
+                    if (!attempt) continue;
+                    pendingContained.delete(id);
+                    if (isError === true || attempt.verdict.allowed) continue;
+                    try {
+                      auditContainmentDenial(
+                        containment,
+                        attempt.verdict,
+                        attempt.toolName,
+                        attempt.input,
+                      );
+                    } catch {
+                      // The violation below still fails the run.
+                      push({
+                        type: 'output',
+                        stream: 'stderr',
+                        text: 'Containment audit persistence failed',
+                      });
+                    }
+                    violate(
+                      `Claude ran ${attempt.toolName} despite agent containment (${attempt.verdict.rule})`,
+                    );
                   }
                 }
                 // Result usage is cumulative; assistant usage must not be counted twice.

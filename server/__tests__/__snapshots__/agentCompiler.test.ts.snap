@@ -85,9 +85,11 @@ UNTRUSTED_CONTEXT_JSON
     "features.in_app_browser=false",
     "-c",
     "project_doc_max_bytes=0",
+    "-c",
+    "sandbox_workspace_write.network_access=false",
   ],
   "hash": "78b18995d56b4cf27a3381bb1757d6849a405f3d1d284607bbbe46351e9d4d13",
-  "version": "sa-qa-4/v4",
+  "version": "sa-062/v5",
 }
 `;
 
@@ -176,9 +178,11 @@ UNTRUSTED_CONTEXT_JSON
     "features.in_app_browser=false",
     "-c",
     "project_doc_max_bytes=0",
+    "-c",
+    "sandbox_workspace_write.network_access=false",
   ],
   "hash": "6c2e68e01de6ff852907ed6c976771c835dd32c5a2d9b88dc54ac31fe8675f0f",
-  "version": "sa-qa-4/v4",
+  "version": "sa-062/v5",
 }
 `;
 
@@ -267,9 +271,11 @@ UNTRUSTED_CONTEXT_JSON
     "features.in_app_browser=false",
     "-c",
     "project_doc_max_bytes=0",
+    "-c",
+    "sandbox_workspace_write.network_access=false",
   ],
   "hash": "a776120b646c54f06c8ffae219eba11632a19874f63ea804410ec7681dba1a70",
-  "version": "sa-qa-4/v4",
+  "version": "sa-062/v5",
 }
 `;
 
@@ -358,9 +364,11 @@ UNTRUSTED_CONTEXT_JSON
     "features.in_app_browser=false",
     "-c",
     "project_doc_max_bytes=0",
+    "-c",
+    "sandbox_workspace_write.network_access=false",
   ],
   "hash": "32c86a829ca8dbecee6181a7d6b59b705963659b26483d8cf9e0ad14af3d752d",
-  "version": "sa-qa-4/v4",
+  "version": "sa-062/v5",
 }
 `;
 
@@ -449,8 +457,10 @@ UNTRUSTED_CONTEXT_JSON
     "features.in_app_browser=false",
     "-c",
     "project_doc_max_bytes=0",
+    "-c",
+    "sandbox_workspace_write.network_access=false",
   ],
   "hash": "ee0c187cbe10795e9920845f78de7f8f7714c09b3494bff5cbe419d93e98eb3f",
-  "version": "sa-qa-4/v4",
+  "version": "sa-062/v5",
 }
 `;

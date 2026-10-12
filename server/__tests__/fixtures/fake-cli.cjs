@@ -39,6 +39,53 @@ if (!valid) {
     );
     return;
   }
+  // Emulates Claude Code's PreToolUse contract (SA-062): every registered hook command runs
+  // through a shell with the tool call on stdin; exit 2 blocks the tool and returns an error
+  // result. --containment-failopen reports the tool as run whatever the hooks said.
+  if (args.includes('--containment-push') || args.includes('--containment-failopen')) {
+    const fs = require('fs');
+    const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
+    const settings = JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1]));
+    const tool = { name: 'Bash', input: { command: 'git push origin HEAD:main' } };
+    emit({ type: 'system', subtype: 'init', session_id: 'fake-claude-session', tools: ['Read'] });
+    emit({
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'push-1', ...tool }] },
+    });
+    const hookInput = JSON.stringify({
+      session_id: 'fake-claude-session',
+      cwd: process.cwd(),
+      hook_event_name: 'PreToolUse',
+      tool_name: tool.name,
+      tool_input: tool.input,
+    });
+    let blocked = '';
+    for (const entry of settings.hooks?.PreToolUse ?? [])
+      for (const hook of entry.hooks) {
+        const result = require('child_process').spawnSync(hook.command, {
+          shell: true,
+          input: hookInput,
+          encoding: 'utf8',
+        });
+        if (result.status === 2) blocked = result.stderr;
+      }
+    const isError = args.includes('--containment-failopen') ? false : Boolean(blocked);
+    emit({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'push-1',
+            is_error: isError,
+            content: isError ? blocked : 'pushed',
+          },
+        ],
+      },
+    });
+    emit({ type: 'result', result: blocked ? 'Push denied' : 'Pushed', is_error: false });
+    return;
+  }
   if (args.includes('--child')) {
     const child = require('child_process').spawn(
       process.execPath,

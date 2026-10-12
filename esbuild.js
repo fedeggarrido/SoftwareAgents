@@ -58,7 +58,14 @@ function buildHooks() {
   );
   if (!fs.existsSync(entry)) return;
   require('esbuild').buildSync({
-    entryPoints: [entry],
+    // SA-062: the runtime's containment hook ships beside the office hook.
+    entryPoints: [
+      entry,
+      {
+        in: path.join(__dirname, 'server', 'src', 'executors', 'containmentHook.ts'),
+        out: 'containment-hook',
+      },
+    ],
     bundle: true,
     platform: 'node',
     target: 'node18',

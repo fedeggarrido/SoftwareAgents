@@ -26,6 +26,25 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
   validar acciones fuera del LLM y someter los cambios a revisión humana. Se acepta
   el riesgo residual de que el modelo siga contenido malicioso; esta política
   documental no es una barrera técnica ni autoriza ejecutar código no confiable.
+- **SA-062 (contención del agente):** el push, las PRs, `git config` y `git remote`
+  son del runtime, nunca del agente, en cualquier nivel de autonomía. Claude: el
+  `--settings` privado del runtime registra un hook PreToolUse obligatorio
+  (`dist/hooks/containment-hook.js`, sin consentimiento porque no toca
+  `~/.claude`) que deniega `git push`/`send-pack`/`http-push`, `git config`,
+  `git remote` y `gh`, y cualquier escritura en `.git/**`, `.claude/**`,
+  `.gitconfig` o fuera del worktree (con realpath); falla cerrado (exit 2) si no
+  puede leer su contexto o su entrada, y el Executor no lanza Claude sin el
+  script. Si una herramienta denegada vuelve sin error (hook caído, timeout,
+  hooks deshabilitados por política gestionada), el Executor detiene y falla la
+  Execution. Codex no tiene hooks: lo impiden `workspace-write` (red desactivada,
+  fijada con `sandbox_workspace_write.network_access=false`, y `.git` fuera de
+  las raíces escribibles) y `--ignore-user-config`; un intento visible en el
+  stream detiene y falla la Execution. Cada denegación queda en el audit log
+  (`agent_containment`, decisión de `policy.ts`, solo el hash de la entrada).
+  Es una guardia sobre comandos y rutas, no un parser de shell ni un sandbox:
+  la ofuscación (variables, `eval`, alias de git del usuario) queda cubierta por
+  el pushurl neutralizado (SA-032), la guardia de rutas protegidas (SA-063) y,
+  en el futuro, SA-058.
 - **Revisit when:** antes de procesar repos externos o contenido adversarial, o
   ampliar herramientas/autonomía; evaluar aislamiento mediante SA-058.
 

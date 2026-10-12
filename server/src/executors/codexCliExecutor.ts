@@ -21,6 +21,7 @@ import {
 } from '../constants.js';
 import { validateModelChoice } from '../modelTiers.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
+import { auditContainmentDenial, codexItemContainment } from './agentContainment.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
 import { processCancellation } from './processCancellation.js';
@@ -219,6 +220,7 @@ export class CodexCliExecutor implements Executor {
           const sessionsRoot =
             options.sessionsDirectory ?? codexSessionsDirectory(process.env, req.worktreePath);
           const seenRollouts = new Set<string>();
+          const auditedContained = new Set<string>();
           const checkSubagents = (final = false) => {
             if (!sessionId || violation) return;
             const rollout = findSubagentRollout(
@@ -306,8 +308,41 @@ export class CodexCliExecutor implements Executor {
                 violate(
                   `Codex delegated to a sub-agent (${typeof delegation.tool === 'string' ? delegation.tool : delegation.type}); slice profiles have no delegated agents`,
                 );
-              if (!web && !mcp && !delegation && record.type === 'item.started') {
-                const item = record.item;
+              // SA-062: no pre-execution hook exists in Codex; the sandbox (no network, .git
+              // outside the writable roots) enforces, and an attempt stops and fails the run.
+              const item =
+                record.type === 'item.started' || record.type === 'item.completed'
+                  ? record.item
+                  : undefined;
+              const contained = codexItemContainment(item, req.worktreePath);
+              if (!contained.allowed) {
+                const key = typeof item?.id === 'string' ? item.id : JSON.stringify(item);
+                if (!auditedContained.has(key)) {
+                  auditedContained.add(key);
+                  try {
+                    auditContainmentDenial(
+                      {
+                        worktreeRoot: req.worktreePath,
+                        projectId: req.projectId,
+                        taskKey: req.taskKey,
+                        executionId: req.executionId,
+                        executor: 'codex',
+                      },
+                      contained,
+                      String(item.type),
+                      item,
+                    );
+                  } catch {
+                    // The violation below still fails the run.
+                    push({
+                      type: 'output',
+                      stream: 'stderr',
+                      text: 'Containment audit persistence failed',
+                    });
+                  }
+                }
+                violate(`Codex attempted ${contained.rule}; ${contained.reason}`);
+              } else if (!web && !mcp && !delegation && record.type === 'item.started') {
                 if (['command_execution', 'file_change'].includes(item?.type))
                   push({ type: 'toolUse', toolId: item.id, toolName: item.type, input: item });
               }

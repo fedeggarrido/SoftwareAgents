@@ -8,7 +8,7 @@ import {
   CODEX_WEB_SEARCH_MODE,
 } from './constants.js';
 
-export const TOOL_POLICY_VERSION = 'sa-qa-4/v4';
+export const TOOL_POLICY_VERSION = 'sa-062/v5';
 /** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
 export const CLAUDE_DELEGATION_TOOLS: readonly string[] = ['Agent', 'Task'];
@@ -181,6 +181,9 @@ export function codexCompilerFlags(
     ...compiled.codex.disabledFeatures.flatMap((feature) => ['-c', `features.${feature}=false`]),
     '-c',
     `project_doc_max_bytes=${compiled.codex.projectDocMaxBytes}`,
+    // SA-062: already Codex's default; pinned so a future default cannot open the network.
+    '-c',
+    'sandbox_workspace_write.network_access=false',
     ...(compiled.outputSchema ? ['--output-schema', schemaFile!] : []),
   ];
 }

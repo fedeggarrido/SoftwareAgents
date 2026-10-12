@@ -149,6 +149,13 @@ it('uses fixed isolation flags, hooks and an empty MCP config without bypassPerm
   expect(report.args[report.args.indexOf('--model') + 1]).toBe('requested-model');
   expect(report.mcp).toEqual({ mcpServers: {} });
   expect(report.settings.hooks.SessionStart[0].hooks[0].command).toBe('node "trusted-hook.js"');
+  // SA-062: containment runs first in PreToolUse; the office hook still follows it.
+  const preToolUse = report.settings.hooks.PreToolUse.map(
+    (entry: { hooks: { command: string }[] }) => entry.hooks[0].command,
+  );
+  expect(preToolUse).toHaveLength(2);
+  expect(preToolUse[0]).toMatch(/containment-hook\.js" ".*containment\.json"$/);
+  expect(preToolUse[1]).toBe('node "trusted-hook.js"');
   expect(report.cwd).toBe(req.worktreePath);
   expect(events.filter((event) => event.type === 'output')).toHaveLength(1);
 });
@@ -163,7 +170,10 @@ it('omits absent hooks with one informational event and no error', async () => {
     text: expect.stringContaining('Hooks omitted'),
   });
   const report = JSON.parse(outputs[1].text);
-  expect(report.settings).not.toHaveProperty('hooks');
+  // Only the mandatory SA-062 containment hook remains.
+  expect(Object.keys(report.settings.hooks)).toEqual(['PreToolUse']);
+  expect(report.settings.hooks.PreToolUse).toHaveLength(1);
+  expect(report.settings.hooks.PreToolUse[0].hooks[0].command).toContain('containment-hook.js');
   expect(events.some((event) => event.type === 'output' && event.stream === 'stderr')).toBe(false);
   expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
   expect(fs.existsSync(getHookScriptPath())).toBe(false);

@@ -430,6 +430,12 @@ describe('supervised worker', () => {
         path.resolve(__dirname, '../../agents/templates/developer.yaml'),
         path.join(root, 'agents/templates/developer.yaml'),
       );
+      // SA-062: the bundle needs the containment hook beside it, as in dist/.
+      fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+      fs.copyFileSync(
+        path.resolve(__dirname, '../../dist/hooks/containment-hook.js'),
+        path.join(root, 'hooks/containment-hook.js'),
+      );
       const launches = path.join(root, 'launches');
       const release = path.join(root, 'release');
       const children = [0, 1].map(() =>
@@ -559,6 +565,12 @@ describe('supervised worker', () => {
       fs.copyFileSync(
         path.resolve(__dirname, '../../agents/templates/developer.yaml'),
         path.join(root, 'agents/templates/developer.yaml'),
+      );
+      // SA-062: the bundle needs the containment hook beside it, as in dist/.
+      fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+      fs.copyFileSync(
+        path.resolve(__dirname, '../../dist/hooks/containment-hook.js'),
+        path.join(root, 'hooks/containment-hook.js'),
       );
       const launches = path.join(root, 'launches');
       const release = path.join(root, 'release');

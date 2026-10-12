@@ -10,6 +10,7 @@ import { AgentStateStore } from '../src/agentStateStore.js';
 import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
 import { parseProjects } from '../src/configPersistence.js';
+import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
@@ -19,6 +20,7 @@ import { loadProjectConfig } from '../src/projectConfig.js';
 import { runQuotaCheck } from '../src/quotaCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { readyProbeFor } from './helpers/readyProbe.js';
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
@@ -30,7 +32,15 @@ vi.mock('child_process', async (original) => {
 });
 
 vi.mock('fs', async (original) => ({ ...(await original<typeof import('fs')>()) }));
+// Launch-time availability probes (SA-090) answer as a supported, logged-in CLI
+// unless a test overrides them; real CLIs are never run.
+vi.mock('../src/executorProbes.js', async (original) => {
+  const actual = await original<typeof import('../src/executorProbes.js')>();
+  const { readyProbeFor } = await import('./helpers/readyProbe.js');
+  return { ...actual, runProbe: readyProbeFor(actual.EXECUTOR_PROBE_CATALOG) };
+});
 
+const readyProbe = readyProbeFor(EXECUTOR_PROBE_CATALOG);
 let root: string;
 let repo: string;
 const fake = path.join(__dirname, 'fixtures/fake-cli.cjs');
@@ -1109,14 +1119,12 @@ function tierOperator(
   fs.writeFileSync(file, JSON.stringify(raw));
   return raw;
 }
-it.each(['start', 'prepare', 'cancel'] as const)(
+// A binary missing at start is now caught by the SA-090 spawn probe (see below).
+it.each(['prepare', 'cancel'] as const)(
   'retains admitted attempt when %s fails before start',
   async (failure) => {
-    const raw = tierOperator();
-    if (failure === 'start') {
-      raw.projects.test.binaryPaths.codex = path.join(root, 'missing-codex.exe');
-      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(raw));
-    } else {
+    tierOperator();
+    {
       const { WorktreeManager } = await import('../src/executors/worktreeManager.js');
       const create = WorktreeManager.prototype.create;
       vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (
@@ -1303,3 +1311,243 @@ it.each(['legacy', 'tier'] as const)(
     expect(readExecutorSlots('claude').count).toBe(0);
   },
 );
+
+// SA-090: availability is revalidated at the real spawn; no executor → one Human Decision.
+describe('executor selection and drain (SA-090)', () => {
+  const configFile = () => path.join(root, '.pixel-agents/config.json');
+  const setAllowed = (allowed: string[]) => {
+    const raw = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    raw.projects.test.allowedExecutors = allowed;
+    fs.writeFileSync(configFile(), JSON.stringify(raw));
+  };
+  const statuses = () =>
+    new AuditLog().read('test').map((r) => (r.corrupt ? 'corrupt' : r.entry.outcome.status));
+  afterEach(() => {
+    process.exitCode = 0;
+  });
+
+  it('all executors disabled waits for a human once, deduplicated, and reopens when enabled', async () => {
+    tierOperator('claude');
+    setAllowed([]);
+    const argv = path.join(root, 'argv.json');
+    vi.stubEnv('SA_TEST_ARGV', argv);
+    const run = () =>
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
+      );
+    const first = await run();
+    expect(process.exitCode).toBe(3);
+    expect(first).toMatchObject({
+      commit: null,
+      quotaDecision: { status: 'wait', cause: 'disabled' },
+      availabilityBlock: { code: 'no_enabled_executor', decisionId: expect.any(String) },
+    });
+    const second = await run();
+    expect(second.availabilityBlock?.decisionId).toBe(first.availabilityBlock?.decisionId);
+    expect(fs.existsSync(argv)).toBe(false);
+    expect(readExecutorSlots('claude').count).toBe(0);
+    let store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.listDecisions()).toHaveLength(1);
+      expect(store.listDecisions()[0]).toMatchObject({ status: 'open', blocks: ['SA-999'] });
+      expect(store.getTask('SA-999')?.status).toBe('WAITING_HUMAN');
+      expect(store.listExecutions()).toEqual([]);
+    } finally {
+      store.close();
+    }
+    setAllowed(['claude']);
+    process.exitCode = 0;
+    const third = await run();
+    expect(process.exitCode).toBe(0);
+    expect(third.commit).toBeNull();
+    expect(fs.existsSync(argv)).toBe(true);
+    store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.listDecisions()[0]).toMatchObject({
+        status: 'answered',
+        answer: 'reevaluate',
+        answeredBy: 'system',
+      });
+      expect(store.getTask('SA-999')?.status).toBe('DRAFT');
+      expect(store.listExecutions()).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+    expect(statuses()).toEqual([
+      'availability_blocked',
+      'availability_blocked',
+      'availability_blocked',
+      'availability_restored_pending',
+      'availability_restored',
+      'model_selected',
+      'no_changes',
+    ]);
+  });
+
+  it.each([
+    ['missing', 'not_installed'],
+    ['logged out', 'auth_required'],
+  ] as const)('a CLI %s escalates instead of launching', async (_name, code) => {
+    const probe = async (file: string, args: readonly string[]) =>
+      code === 'not_installed' && args.includes('--version')
+        ? { code: 'missing' as const, output: '' }
+        : args[0] === 'auth'
+          ? { code: 0, output: '{"loggedIn":false}' }
+          : readyProbe(file, args);
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {}, probe },
+    );
+    expect(result.availabilityBlock?.code).toBe(code);
+    expect(process.exitCode).toBe(3);
+    expect(fs.existsSync(path.join(repo, '.worktrees/SA-999'))).toBe(false);
+    expect(readExecutorSlots('claude').count).toBe(0);
+  });
+
+  it('an unproven installation waits for a new probe without a Human Decision', async () => {
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'claude'],
+        log: () => {},
+        probe: async () => ({ code: null, output: '' }),
+      },
+    );
+    expect(result.quotaDecision).toMatchObject({ status: 'wait', cause: 'availability' });
+    expect(result).not.toHaveProperty('availabilityBlock');
+    expect(process.exitCode).toBe(3);
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+  });
+
+  it('a toggle before the spawn invalidates the admitted selection: no CLI, slot released', async () => {
+    const { setExecutorAvailability } = await import('../src/executorAvailability.js');
+    const { operatorRevision } = await import('../src/executorState.js');
+    const { WorktreeManager } = await import('../src/executors/worktreeManager.js');
+    const create = WorktreeManager.prototype.create;
+    vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (
+      this: import('../src/executors/worktreeManager.js').WorktreeManager,
+      ...args
+    ) {
+      const tree = await create.apply(this, args);
+      const operator = loadProjectConfig(repo)!.operator;
+      expect(
+        setExecutorAvailability(
+          {
+            projectId: 'test',
+            executorId: 'codex',
+            enabled: true,
+            requestId: 'r1',
+            expectedRevision: operatorRevision(operator),
+          },
+          { privileged: true, boundProjectId: 'test' },
+        ).status,
+      ).toBe('applied');
+      return tree;
+    });
+    const argv = path.join(root, 'argv.json');
+    vi.stubEnv('SA_TEST_ARGV', argv);
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude', '--write-doc'], log: () => {} },
+    );
+    expect(result).toMatchObject({
+      commit: null,
+      quotaDecision: {
+        status: 'wait',
+        cause: 'selection',
+        reason: expect.stringContaining('changed since this run started'),
+      },
+    });
+    expect(process.exitCode).toBe(3);
+    expect(fs.existsSync(argv)).toBe(false);
+    expect(readExecutorSlots('claude').count).toBe(0);
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+    expect(statuses()).toContain('selection_invalidated');
+  });
+
+  it('a binary gone after admission is caught by the spawn probe, before any start', async () => {
+    tierOperator();
+    let gone = false;
+    const { WorktreeManager } = await import('../src/executors/worktreeManager.js');
+    const create = WorktreeManager.prototype.create;
+    vi.spyOn(WorktreeManager.prototype, 'create').mockImplementation(async function (
+      this: import('../src/executors/worktreeManager.js').WorktreeManager,
+      ...args
+    ) {
+      gone = true;
+      return create.apply(this, args);
+    });
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'codex'],
+        log: () => {},
+        probe: async (file, args) =>
+          gone && args.includes('--version')
+            ? { code: 'missing', output: '' }
+            : readyProbe(file, args),
+      },
+    );
+    expect(result.quotaDecision).toMatchObject({
+      cause: 'selection',
+      reason: 'codex: not_installed',
+    });
+    expect(spawn).not.toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(['-e']),
+      expect.anything(),
+    );
+    expect(readExecutorSlots('codex').count).toBe(0);
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      // The admitted attempt is retained, never reused; a new run selects again.
+      expect(store.listExecutions()).toMatchObject([{ executor: 'codex', pid: null }]);
+    } finally {
+      store.close();
+    }
+    expect(statuses()).toEqual(['model_selected', 'selection_invalidated']);
+  });
+
+  it('a toggle after the spawn frontier never cancels the running execution', async () => {
+    const { setExecutorAvailability } = await import('../src/executorAvailability.js');
+    const { operatorRevision } = await import('../src/executorState.js');
+    const rename = fs.renameSync;
+    let toggled: string | undefined;
+    vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+      // The slot records the supervisor right after the spawn revalidation passed.
+      if (
+        !toggled &&
+        String(target).endsWith('0.lock') &&
+        JSON.parse(fs.readFileSync(String(source), 'utf8')).child
+      ) {
+        toggled = 'pending';
+        rename(source, target);
+        const operator = loadProjectConfig(repo)!.operator;
+        toggled = setExecutorAvailability(
+          {
+            projectId: 'test',
+            executorId: 'claude',
+            enabled: false,
+            requestId: 'r-off',
+            expectedRevision: operatorRevision(operator),
+          },
+          { privileged: true, boundProjectId: 'test' },
+        ).status;
+        return;
+      }
+      return rename(source, target);
+    });
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude', '--write-doc'], log: () => {} },
+    );
+    expect(toggled).toBe('applied');
+    expect(loadProjectConfig(repo)!.operator.allowedExecutors).toEqual([]);
+    expect(result.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(process.exitCode).not.toBe(3);
+    expect(readExecutorSlots('claude').count).toBe(0);
+  });
+});

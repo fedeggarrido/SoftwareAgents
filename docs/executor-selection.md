@@ -372,3 +372,63 @@ de selección incluyen maxExecutions (null si falta), activeTotal y el motivo.
 Al iniciar un publicador se retiran las publicaciones de procesos confirmados
 muertos con observedAt de más de 24 horas y sus tombstones de la misma generación.
 Identidades dudosas, EPERM y publicadores vivos se conservan; no se siguen enlaces.
+
+## Selección y drenaje según disponibilidad (SA-090)
+
+Principio (SA-086): el operador decide qué executors están disponibles
+(`allowedExecutors`, SA-088) y la política decide quién hace cada tarea. Nunca hay
+asignación manual: el worker no acepta executor, modelo ni nivel por argumento.
+
+**Filtro técnico.** Las sondas de SA-089 viven en el proceso del servidor; el
+worker es otro proceso y no ve esa caché. Antes de la admisión sondea, con el
+mismo código y límites (`observeExecutors`: sin shell, cwd tmpdir, 3 s, 128 KB),
+solo los executors habilitados que podría lanzar, y pasa los hechos al snapshot
+(`SelectionSnapshot.availability`). `launchBlock` (en `executorSelection.ts`)
+decide qué significan:
+
+| Observación                                      | Selección                                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `missing` / `unsupported` / auth `required`      | Candidato excluido (como un executor desactivado); sigue el siguiente |
+| instalación `unknown`, sin observación, caducada | Espera automática `cause: availability`; sin fallback ni bajada       |
+| `ready` con auth `unknown`                       | Admisible: la versión y las opciones están probadas                   |
+
+Auth desconocida no bloquea a propósito: Codex no ofrece un `login status`
+verificado en este repo, y un CLI sin sesión falla por sí solo sin generar.
+`quota check` y el snapshot de la oficina no pasan `availability` y no filtran.
+La elegibilidad del snapshot sigue la misma regla sin frescura (el worker vuelve a
+sondear): una instalación sin probar ya no es «eligible».
+
+**Revalidación en la frontera real.** La preparación del worktree es lenta, así
+que la selección se revalida después de ella, inmediatamente antes de arrancar el
+executor, bajo la admisión de máquina (la misma que toma un toggle, SA-088):
+autoridad (`executorAuthorityBlock`), una sonda nueva del executor elegido y la
+cuota (descontando el slot propio; la concurrencia ya se decidió al admitir). Si
+algo falla, no se crea ningún proceso: el slot y el lock se liberan, el intento
+queda en WorkStore sin PID, se audita `selection_invalidated` y el worker sale con
+3 (`cause: selection`); la siguiente ejecución vuelve a seleccionar, sin reutilizar
+la selección anterior. Esa comprobación es la frontera: un cambio posterior drena,
+y **un toggle nunca cancela ni mata una ejecución en curso**. Entre la comprobación
+y el spawn solo queda la preparación síncrona del executor (milisegundos); no se
+revalida dentro de `registerProcess` porque un registro rechazado deja al executor
+esperando un `close` que nunca llega (defecto de `registeredProcess.ts`, anotado
+para SA-062). La coordinación entre procesos y los slots compartidos son los
+existentes (admisión Lamport + `executor-slots`); no hace falta el ledger de SA-037.
+
+**Sin executor elegible.** Si todos los candidatos quedan excluidos por causas que
+solo el operador corrige (`no_enabled_executor`, `no_allowed_level`,
+`not_installed`, `unsupported_version`, `auth_required`), el worker abre una Human
+Decision (`requestedBy: system`) que pone la Task en `WAITING_HUMAN`, salvo que ya
+exista una abierta para el mismo Project, alcance y causa (primera línea del
+contexto `executor-availability/<alcance>/<causa>`; alcance `tier:<nivel pedido>`,
+`capability:<clase>` o `executor:claude`). Ese intento sale con 3 sin worktree ni
+slot. Cuota, concurrencia y sondas sin probar nunca generan decisiones: esperan.
+Cuando una ejecución del mismo alcance vuelve a ser admitida, sus decisiones de
+disponibilidad abiertas se cierran solas (respuesta `reevaluate`, auditada como
+`system`), devolviendo las Tasks a su estado anterior; otras Human Decisions no se
+tocan. El operador también puede responder «Reevaluar». No registrar la decisión
+(WorkStore no disponible, Task con lease ajeno) nunca convierte la espera en lanzamiento.
+
+Pendiente (contrato AsyncAPI, fuera de esta tarea): proyectar códigos y alternativas
+descartadas estructurados en `AgentRole`/overlay; hoy viajan en `selection_reason`
+y en el audit. Residual: dos workers que bloquean a la vez por la misma causa
+pueden abrir dos decisiones (comprobación y apertura no comparten transacción).

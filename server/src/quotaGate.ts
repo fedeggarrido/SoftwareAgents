@@ -10,7 +10,14 @@ export interface MachineQuotaPolicy {
   maxConcurrent: Partial<Record<ExecutorId, number>>;
 }
 export type QuotaCause =
-  'quota' | 'concurrency' | 'configuration' | 'capacity' | 'disabled' | 'selection';
+  | 'quota'
+  | 'concurrency'
+  | 'configuration'
+  | 'capacity'
+  | 'disabled'
+  | 'selection'
+  /** SA-090: the Executor's installation could not be proven right now; retried. */
+  | 'availability';
 export type QuotaDecision = (
   | { status: 'go' | 'probe'; concurrencyLimit: number; reason: string }
   | { status: 'wait'; resetsAt: number | null; reason: string }

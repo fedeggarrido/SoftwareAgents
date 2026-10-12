@@ -204,6 +204,28 @@ export async function probeExecutor(
   return { installation: 'ready', version, ...auth };
 }
 
+/**
+ * The worker is its own process: the server's monitor cache is not visible here,
+ * so it probes the Executors it may launch, now, with the same rules and limits.
+ */
+export async function observeExecutors(
+  executors: readonly ExecutorId[],
+  operator: Pick<ProjectOperatorConfig, 'binaryPaths'>,
+  run: ProbeRunner = runProbe,
+  now: () => number = Date.now,
+): Promise<Partial<Record<ExecutorId, ExecutorObservation>>> {
+  const monitor = new ExecutorMonitor(run, now);
+  const observed: Partial<Record<ExecutorId, ExecutorObservation>> = {};
+  await Promise.all(
+    [...new Set(executors)].map(async (id) => {
+      await monitor.refresh(id, operator);
+      const observation = monitor.observation(id, operator);
+      if (observation) observed[id] = observation;
+    }),
+  );
+  return observed;
+}
+
 /** Same resolution the Executors use; an invalid Operator override never falls back. */
 export function resolveExecutorBinary(
   executor: ExecutorId,

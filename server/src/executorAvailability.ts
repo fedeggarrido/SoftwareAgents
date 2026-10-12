@@ -5,7 +5,7 @@ import * as path from 'path';
 
 import type { ExecutorId } from '../../core/src/executorCatalog.js';
 import type { ExecutorToggleResult } from '../../core/src/messages.js';
-import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import type { AutonomyLevel, ProjectOperatorConfig } from '../../core/src/project.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import {
@@ -18,9 +18,11 @@ import {
   writeRawConfigFile,
 } from './configPersistence.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
+import type { SelectionBlock } from './executorSelection.js';
 import { withMachineAdmission } from './executorSlots.js';
 import { operatorRevision } from './executorState.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
+import type { WorkStore } from './workstore/WorkStore.js';
 
 /**
  * SA-088: the one service that changes which Executors a Project may use.
@@ -400,4 +402,130 @@ export function runExecutorsCommand(argv: string[], out: (line: string) => void 
   out(
     `Recovered ${argv[1]}: ${state}. allowedExecutors = ${JSON.stringify(report.allowedExecutors ?? null)}. Launches are open again.`,
   );
+}
+
+/**
+ * SA-090: no Executor can run a Task and waiting will not fix it (all disabled, no
+ * level offered, CLI missing/unsupported/logged out). One open Human Decision per
+ * Project (the store), selection scope and cause blocks the Task in WAITING_HUMAN;
+ * later runs with the same cause reuse it instead of opening one per attempt.
+ * Quota, concurrency and unproven probes never come here: they wait automatically.
+ */
+const DECISION_PREFIX = 'executor-availability/';
+const OPTION = 'reevaluate';
+
+export function availabilityDecisionKey(scope: string, code: string): string {
+  return `${DECISION_PREFIX}${scope}/${code}`;
+}
+
+const BLOCK_TEXT: Record<SelectionBlock['code'], string> = {
+  no_enabled_executor: 'ningún executor que la política admite para ella está habilitado',
+  no_allowed_level: 'la política no ofrece ningún executor para su nivel',
+  not_installed: 'el CLI del executor habilitado no está instalado',
+  unsupported_version: 'el CLI del executor habilitado no tiene la versión u opciones probadas',
+  auth_required: 'el CLI del executor habilitado necesita que el operador inicie sesión',
+};
+
+function decisionKey(context: string): string {
+  return context.split('\n', 1)[0];
+}
+
+export async function escalateUnavailable(
+  store: WorkStore,
+  level: AutonomyLevel,
+  taskKey: string,
+  scope: string,
+  block: SelectionBlock,
+  executionId: string,
+): Promise<{ decisionId: string; created: boolean }> {
+  const key = availabilityDecisionKey(scope, block.code);
+  const open = store
+    .listDecisions()
+    .find((d) => d.status === 'open' && decisionKey(d.context) === key);
+  if (open) return { decisionId: open.id, created: false };
+  // The system cannot change availability: this records that a human must.
+  const policy = evaluatePolicy(ACTION, 'system', level);
+  if (!store.getTask(taskKey)) store.createTask({ key: taskKey, type: 'unknown', status: 'DRAFT' });
+  const excluded = block.exclusions.map(
+    (e) => `${e.tier ? `${e.tier}/` : ''}${e.executor}: ${e.code}`,
+  );
+  const decision = await store.openDecision({
+    id: randomUUID(),
+    context: [
+      key,
+      `${taskKey} no puede lanzarse: ${BLOCK_TEXT[block.code]}.`,
+      ...(excluded.length ? [`Descartados: ${excluded.join('; ')}.`] : []),
+      'Habilita un executor en la oficina, ajusta allowedExecutors/modelTiers en ~/.pixel-agents/config.json, o instala, actualiza o autentica su CLI.',
+      'Se cierra sola cuando una ejecución con el mismo alcance vuelve a encontrar un executor admisible.',
+    ].join('\n'),
+    blocks: [taskKey],
+    requestedBy: 'system',
+    options: [
+      {
+        id: OPTION,
+        label: 'Reevaluar',
+        benefit: 'Devuelve la tarea a su estado anterior para volver a seleccionar executor',
+        cost: 'Si la causa persiste, el siguiente intento vuelve a esperar',
+        risk: 'Ninguno: responder no lanza ninguna ejecución',
+      },
+    ],
+    recommendation:
+      'Corregir la disponibilidad (habilitar, instalar o autenticar) y responder Reevaluar',
+    disagreement: [],
+    impact: policy.reason,
+    urgency: 'high',
+  });
+  new AuditLog().append({
+    projectId: store.projectId,
+    actorType: 'system',
+    actorId: null,
+    action: 'launch_execution',
+    resourceType: 'human_decision',
+    resourceId: decision.id,
+    policyDecision: policy,
+    riskLevel: 'medium',
+    taskKey,
+    executionId,
+    input: { scope, code: block.code },
+    outcome: { status: 'availability_blocked', detail: JSON.stringify({ key, excluded }) },
+  });
+  return { decisionId: decision.id, created: true };
+}
+
+/**
+ * The cause is gone for this scope (a run was just admitted): close its open
+ * availability decisions, restoring the Tasks they blocked so they are evaluated
+ * again. Other Human Decisions are never touched.
+ */
+export async function closeAvailabilityDecisions(
+  store: WorkStore,
+  scope: string,
+  executionId: string,
+): Promise<string[]> {
+  const prefix = `${DECISION_PREFIX}${scope}/`;
+  const closed: string[] = [];
+  const audit = new AuditLog();
+  for (const decision of store.listDecisions()) {
+    if (decision.status !== 'open' || !decisionKey(decision.context).startsWith(prefix)) continue;
+    const entry = (status: string) => ({
+      projectId: store.projectId,
+      actorType: 'system' as const,
+      actorId: null,
+      action: 'answer_decision',
+      resourceType: 'human_decision',
+      resourceId: decision.id,
+      policyDecision: null,
+      riskLevel: 'medium' as const,
+      taskKey: null,
+      executionId,
+      input: { scope, decisionKey: decisionKey(decision.context) },
+      outcome: { status, detail: 'executor availability restored for this scope' },
+    });
+    await store.resolveDecision(decision.id, OPTION, 'system', () =>
+      audit.append(entry('availability_restored_pending')),
+    );
+    audit.append(entry('availability_restored'));
+    closed.push(decision.id);
+  }
+  return closed;
 }

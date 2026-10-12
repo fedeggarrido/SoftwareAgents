@@ -12,7 +12,14 @@ import type {
   WorkSize,
   WorkType,
 } from '../../core/src/modelTier.js';
-import type { SelectionSnapshot } from './executorSelection.js';
+import {
+  type CandidateExclusion,
+  excludeCandidate,
+  type SelectionBlock,
+  selectionBlock,
+  type SelectionSnapshot,
+  unprovenWait,
+} from './executorSelection.js';
 import { type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
@@ -264,6 +271,9 @@ export interface TierSelection {
   downgrades: ModelTier[];
   gate: QuotaDecision;
   reason: string;
+  /** SA-090: candidates only the Operator can bring back, and whether that blocks. */
+  exclusions?: CandidateExclusion[];
+  block?: SelectionBlock;
 }
 function initialModelTier(
   agent: AgentSpec,
@@ -303,6 +313,8 @@ export function selectModelTier(
   const downgrades: ModelTier[] = [];
   const waits: Extract<QuotaDecision, { status: 'wait' }>[] = [];
   const reasons: string[] = [];
+  const exclusions: CandidateExclusion[] = [];
+  let candidates = 0;
   let current = tier;
   while (current) {
     const definition = policy.tiers[current];
@@ -312,18 +324,25 @@ export function selectModelTier(
     }
     let quotaBlocked = false;
     for (const choice of definition.candidates) {
-      if (!snapshot.allowedExecutors.includes(choice.executor)) {
-        reasons.push(`${current}/${choice.executor}: operator disabled`);
+      candidates++;
+      const excluded = excludeCandidate(choice.executor, snapshot);
+      if (excluded) {
+        exclusions.push({ executor: choice.executor, tier: current, code: excluded });
+        reasons.push(
+          `${current}/${choice.executor}: ${excluded === 'operator_disabled' ? 'operator disabled' : excluded}`,
+        );
         continue;
       }
-      const gate = quotaGate(
-        choice.executor,
-        snapshot.machinePolicy,
-        snapshot.capacities[choice.executor],
-        snapshot.active[choice.executor] ?? NaN,
-        snapshot.nowS,
-        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
-      );
+      const gate =
+        unprovenWait(choice.executor, snapshot) ??
+        quotaGate(
+          choice.executor,
+          snapshot.machinePolicy,
+          snapshot.capacities[choice.executor],
+          snapshot.active[choice.executor] ?? NaN,
+          snapshot.nowS,
+          (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
+        );
       reasons.push(`${current}/${choice.executor}: ${gate.reason}`);
       if (gate.status !== 'wait')
         return {
@@ -333,6 +352,7 @@ export function selectModelTier(
           downgrades,
           gate,
           reason: `${prefix}; ${reasons.join('; ')}`,
+          exclusions,
         };
       waits.push(gate);
       quotaBlocked ||= gate.cause === 'quota';
@@ -343,6 +363,7 @@ export function selectModelTier(
   }
   const resets = waits.map((w) => w.resetsAt).filter((r): r is number => r !== null);
   const reason = `${prefix}; ${reasons.join('; ') || 'no_allowed_level: unknown capabilityClass'}`;
+  const block = selectionBlock(candidates, waits.length > 0, exclusions);
   return {
     tier,
     requestedTier: requested,
@@ -355,5 +376,7 @@ export function selectModelTier(
       cause: waits.some((w) => w.cause === 'quota') ? 'quota' : (waits[0]?.cause ?? 'disabled'),
     },
     reason,
+    exclusions,
+    ...(block ? { block } : {}),
   };
 }

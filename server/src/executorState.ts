@@ -13,7 +13,7 @@ import type {
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { canonicalJson } from './configPersistence.js';
 import type { ExecutorObservation } from './executorProbes.js';
-import type { SelectionSnapshot } from './executorSelection.js';
+import { launchBlock, type SelectionSnapshot } from './executorSelection.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { quotaGate } from './quotaGate.js';
 
@@ -115,7 +115,13 @@ export interface ExecutorStateInput {
   observations?: Partial<Record<ExecutorId, ExecutorObservation>>;
 }
 
-/** Probe facts as reason codes. Unknown never blocks; a proven problem does. */
+/**
+ * Probe facts as reason codes. Eligibility follows the worker's launch rule
+ * (SA-090 `launchBlock`, without freshness: the worker re-probes before every
+ * launch): a proven problem or an unproven installation blocks; an Executor not
+ * observed yet, unknown authentication on a verified binary or a stale reading
+ * only flag it.
+ */
 function probeReasons(observation: ExecutorObservation | undefined, nowS: number) {
   const reasons: ExecutorReasonCode[] = [];
   if (!observation) return { reasons: ['probe_unknown' as const], blocked: false };
@@ -132,10 +138,7 @@ function probeReasons(observation: ExecutorObservation | undefined, nowS: number
   if (nowS > observation.staleAfter) reasons.push('probe_stale');
   return {
     reasons,
-    blocked:
-      observation.installation === 'missing' ||
-      observation.installation === 'unsupported' ||
-      observation.authentication === 'required',
+    blocked: launchBlock(observation) !== undefined,
   };
 }
 

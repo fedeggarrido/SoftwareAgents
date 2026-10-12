@@ -24,4 +24,6 @@ export type {
   PlacedFurniture,
   SpriteData,
 } from './schemas.js';
+export type { DagTask, DagTaskType, TaskDag, TaskDagAnalysis, TaskDagIssue } from './taskDag.js';
 export type { TeamProvider } from './teamProvider.js';
+export type { TechnicalDesign } from './technicalDesign.js';

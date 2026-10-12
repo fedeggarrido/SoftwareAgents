@@ -12,7 +12,11 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
-import { handleClientMessage } from './clientMessageHandler.js';
+import {
+  type ClientMessageContext,
+  handleClientMessage,
+  refreshExecutorState,
+} from './clientMessageHandler.js';
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
@@ -205,6 +209,17 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     // executorState sequence) by it, so a fresh closure per message would reset it.
     const send = (m: Record<string, unknown>) => safeSend(socket, m);
 
+    const ctx: ClientMessageContext = {
+      store,
+      runtime: options.runtime,
+      cache: options.assetCache ?? null,
+      onSetHooksEnabled: options.onSetHooksEnabled,
+      onReloadAssets: options.onReloadAssets,
+      privileged,
+    };
+    const onExecutorStateChanged = () => refreshExecutorState(send, ctx);
+    store.on('executorStateChanged', onExecutorStateChanged);
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -212,14 +227,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
-        handleClientMessage(msg, send, {
-          store,
-          runtime: options.runtime,
-          cache: options.assetCache ?? null,
-          onSetHooksEnabled: options.onSetHooksEnabled,
-          onReloadAssets: options.onReloadAssets,
-          privileged,
-        });
+        handleClientMessage(msg, send, ctx);
       } catch {
         // Malformed JSON, ignore
       }
@@ -229,6 +237,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      store.off('executorStateChanged', onExecutorStateChanged);
     });
   });
 }

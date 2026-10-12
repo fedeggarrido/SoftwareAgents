@@ -9,6 +9,7 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
+import { executorAuthorityBlock } from './executorAvailability.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from './executors/codexCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -219,6 +220,8 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
   };
   process.on('SIGINT', cancel);
   process.on('SIGTERM', cancel);
+  // Re-checked inside machine admission, which availability changes also hold (SA-088).
+  const authorityBlock = () => executorAuthorityBlock(config.project.id, config.operator);
   try {
     let selectedExecutor = selection?.choice?.executor ?? 'claude';
     // Both locks are held during the fresh gate decision and exclusive slot creation.
@@ -237,7 +240,15 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
               inputs,
               config.operator.allowedExecutors,
             );
-            return admitModelTier(spec, tierRule, tierPolicy, inputs, config.operator, executionId);
+            return admitModelTier(
+              spec,
+              tierRule,
+              tierPolicy,
+              inputs,
+              config.operator,
+              executionId,
+              authorityBlock,
+            );
           })()
         : undefined;
     if (tierAdmission) {
@@ -260,6 +271,17 @@ export async function runWorker(args: WorkerArgs, options: WorkerOptions = {}) {
         ? { gate: tierAdmission.selection.gate, slot: tierAdmission.slot }
         : undefined
       : withMachineAdmission(executionId, (owners) => {
+          const blocked = authorityBlock();
+          if (blocked)
+            return {
+              gate: {
+                status: 'wait',
+                resetsAt: null,
+                reason: blocked,
+                cause: 'configuration',
+              } as QuotaDecision,
+              slot: undefined,
+            };
           const snapshot = readSelectionSnapshot(config.operator);
           if (modelPolicy) selection = selectExecutor(spec, modelPolicy, snapshot);
           // Legacy manual runs retain conservative defaults for pre-quota configs.

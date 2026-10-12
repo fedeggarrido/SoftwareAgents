@@ -24,6 +24,8 @@ export const POLICY_ACTIONS = Object.freeze({
   push_main: null,
   bypass_permissions: null,
   change_autonomy: null,
+  /** SA-088: Executor availability is Operator authority; never delegated to agents. */
+  change_executor_availability: null,
   use_new_secret: null,
   clickup_write: 'A3',
   delete_worktree: null,

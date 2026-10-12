@@ -1259,3 +1259,35 @@ it.each([['L'], { size: 'L' }, 3, null, 'l', 'XL'])(
     }
   },
 );
+
+// SA-088: an availability change lands between the worker's config read and its
+// admission (here: while it checks the Git identity). Admission must re-read the
+// Operator authority and drop the stale selection instead of launching.
+it.each(['legacy', 'tier'] as const)(
+  '%s admission drops a run whose Operator policy changed after it started',
+  async (mode) => {
+    if (mode === 'tier') tierOperator('claude');
+    const file = path.join(root, '.pixel-agents/config.json');
+    const actual = await vi.importActual<typeof import('child_process')>('child_process');
+    vi.mocked(execFileSync).mockImplementation(((cmd: string, args: string[], opts: unknown) => {
+      if (cmd === 'git' && args[0] === 'var' && args[1] === 'GIT_AUTHOR_IDENT') {
+        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        raw.projects.test.allowedExecutors = [];
+        fs.writeFileSync(file, JSON.stringify(raw));
+      }
+      return actual.execFileSync(cmd, args, opts as never);
+    }) as typeof execFileSync);
+    const log = vi.fn();
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude', '--write-doc'], log },
+    );
+    expect(result.commit).toBeNull();
+    expect(result.quotaDecision).toMatchObject({
+      status: 'wait',
+      reason: expect.stringContaining('changed since this run started'),
+    });
+    expect(fs.existsSync(path.join(repo, '.worktrees/SA-999'))).toBe(false);
+    expect(readExecutorSlots('claude').count).toBe(0);
+  },
+);

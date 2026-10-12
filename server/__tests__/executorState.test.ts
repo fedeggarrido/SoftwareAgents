@@ -300,11 +300,11 @@ describe('executor messages over the wire', () => {
     handleClientMessage({ type: 'requestExecutorState', projectId: 'other' }, modern, c);
     const states = ofType(modern, 'executorState');
     expect(states.map((s) => s.sequence)).toEqual([0, 1]);
-    // Toggles cannot be applied before SA-088, so nobody may manage yet.
-    expect(states[0]).toMatchObject({ projectId: 'test', canManage: false });
+    // canManage is per recipient: only a privileged connection may change availability.
+    expect(states[0]).toMatchObject({ projectId: 'test', canManage: true });
   });
 
-  it('answers setExecutorEnabled honestly: unauthorized, unknown project, then not_supported', () => {
+  it('answers setExecutorEnabled: unauthorized, unknown project, stale revision, malformed', () => {
     const anonymous = sent();
     handleClientMessage(valid, anonymous, ctx(false));
     expect(ofType(anonymous, 'executorToggleResult')).toEqual([
@@ -321,7 +321,7 @@ describe('executor messages over the wire', () => {
       expect.objectContaining({
         requestId: 'req-1',
         status: 'rejected',
-        errorCode: 'not_supported',
+        errorCode: 'revision_conflict',
         revision: operatorRevision(readConfig().projects.test),
       }),
       expect.objectContaining({ errorCode: 'invalid_request' }),

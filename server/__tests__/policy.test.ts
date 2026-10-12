@@ -33,6 +33,7 @@ const expected: Record<PolicyAction, PolicyOutcome[]> = {
   push_main: gate,
   bypass_permissions: gate,
   change_autonomy: gate,
+  change_executor_availability: gate,
   use_new_secret: gate,
   clickup_write: routine,
   delete_worktree: gate,
@@ -57,7 +58,7 @@ describe('deterministic policy', () => {
   );
   it('covers the complete action catalogue', () => {
     expect(Object.keys(expected).sort()).toEqual(Object.keys(POLICY_ACTIONS).sort());
-    expect(cases).toHaveLength(225);
+    expect(cases).toHaveLength(240);
   });
   it.each(cases)('$action / $actor / $level => $outcome', ({ action, actor, level, outcome }) => {
     const decision = evaluatePolicy(action, actor, level);

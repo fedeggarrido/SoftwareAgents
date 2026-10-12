@@ -33,6 +33,7 @@ import {
   readConfig,
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
+import { runExecutorsCommand } from './executorAvailability.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
@@ -148,6 +149,8 @@ export async function dispatchCli(
 ): Promise<void> {
   if (argv[0] === 'quota') {
     process.exitCode = runQuotaCheck(parseQuotaArgs(argv.slice(1)));
+  } else if (argv[0] === 'executors') {
+    runExecutorsCommand(argv.slice(1));
   } else if (argv[0] === 'worker') {
     await handlers.worker(parseWorkerArgs(argv.slice(1)));
   } else {

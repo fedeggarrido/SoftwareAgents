@@ -1,9 +1,20 @@
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
-import { CONFIG_FILE_MODE, CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import {
+  CONFIG_FILE_MODE,
+  CONFIG_FILE_NAME,
+  CONFIG_LOCK_DIR,
+  CONFIG_LOCK_LEASE_MS,
+  CONFIG_LOCK_NAME,
+  CONFIG_LOCK_TIMEOUT_MS,
+  LAYOUT_FILE_DIR,
+} from './constants.js';
+import { retryFileOperation } from './fileContention.js';
+import { withLeaseLock } from './leaseLock.js';
 import { ModelTierConfigError, tierPolicySchema, validateModelTiers } from './modelTiers.js';
 import { compileSchema, SchemaValidationError } from './schemaValidation.js';
 
@@ -122,6 +133,21 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     },
   },
 });
+
+/** The raw `projects` block each readConfig() result was parsed from, so a legacy
+ *  writer only writes back the Projects it actually changed (see mergeProjects). */
+const projectsAsRead = new WeakMap<
+  Record<string, ProjectOperatorConfig>,
+  Record<string, unknown>
+>();
+
+/** Defaults also merge against disk: a missing or unreadable file read as "no
+ *  Projects" must not erase Projects another writer added meanwhile. */
+function emptyProjects(): Record<string, ProjectOperatorConfig> {
+  const projects: Record<string, ProjectOperatorConfig> = {};
+  projectsAsRead.set(projects, {});
+  return projects;
+}
 
 /** Invalid policies are rejected as a whole, never repaired into new authority. */
 const rejectedProjects = new WeakMap<
@@ -293,11 +319,16 @@ export function readConfig(): PixelAgentsConfig {
         hooksConsent: {},
         hooksEnabled: {},
         companyAutopilot: {},
-        projects: {},
+        projects: emptyProjects(),
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<PixelAgentsConfig>;
+    const projects = parseProjects(parsed.projects);
+    projectsAsRead.set(
+      projects,
+      isPlainObject(parsed.projects) ? structuredClone(parsed.projects) : {},
+    );
     return {
       vscode: parseAdapterSettings(parsed.vscode),
       standalone: parseAdapterSettings(parsed.standalone),
@@ -307,7 +338,7 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
       companyAutopilot: parseCompanyAutopilot(parsed.companyAutopilot),
-      projects: parseProjects(parsed.projects),
+      projects,
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -318,7 +349,7 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: {},
       hooksEnabled: {},
       companyAutopilot: {},
-      projects: {},
+      projects: emptyProjects(),
     };
   }
 }
@@ -422,30 +453,126 @@ export function resetHooksConfig(): void {
   writeConfig(cfg);
 }
 
-export function writeConfig(config: PixelAgentsConfig): void {
-  const filePath = getConfigFilePath();
-  const dir = path.dirname(filePath);
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Object keys sorted at every depth; arrays keep their order. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (isPlainObject(value))
+    return `{${Object.keys(value)
+      .filter((k) => value[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(value ?? null);
+}
+
+/** The config file exists but cannot be used as a base for a write. Never replaced by defaults. */
+export class ConfigReadError extends Error {}
+
+/** Raw parsed config.json, `null` when absent. Throws ConfigReadError on anything
+ *  else: a read failure must never become `{}` that a writer then persists. */
+export function readRawConfig(): Record<string, unknown> | null {
+  let text: string;
   try {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    text = retryFileOperation(() => {
+      try {
+        return fs.readFileSync(getConfigFilePath(), 'utf-8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null as unknown as string;
+        throw error;
+      }
+    });
+  } catch (error) {
+    throw new ConfigReadError(`Cannot read config file: ${(error as Error).message}`);
+  }
+  if (text === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ConfigReadError('Config file is not valid JSON');
+  }
+  if (!isPlainObject(parsed)) throw new ConfigReadError('Config file is not a JSON object');
+  return parsed;
+}
+
+/** Whole-file mutex that every config writer takes (legacy writeConfig included). */
+export function withConfigLock<T>(action: () => T): T {
+  return withLeaseLock(
+    {
+      dir: path.join(os.homedir(), LAYOUT_FILE_DIR, CONFIG_LOCK_DIR),
+      name: CONFIG_LOCK_NAME,
+      timeoutMs: CONFIG_LOCK_TIMEOUT_MS,
+      leaseMs: CONFIG_LOCK_LEASE_MS,
+      label: 'Config',
+    },
+    action,
+  );
+}
+
+/** Under withConfigLock. Unique exclusive temporary, fsync, rename; THROWS on any failure. */
+export function writeRawConfigFile(value: Record<string, unknown>): void {
+  const filePath = getConfigFilePath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+  let created = false;
+  try {
+    const fd = fs.openSync(tmpPath, 'wx', CONFIG_FILE_MODE);
+    created = true;
+    try {
+      fs.writeFileSync(fd, JSON.stringify(value, null, 2), 'utf-8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
     }
-    // Settings/consent writes must preserve rejected policies verbatim for operator repair.
-    const rejected = rejectedProjects.get(config.projects) ?? {};
-    const json = JSON.stringify(
-      {
-        ...config,
-        projects: {
-          ...Object.fromEntries(Object.entries(rejected).map(([id, entry]) => [id, entry.raw])),
-          ...config.projects,
-        },
-      },
-      null,
-      2,
-    );
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, json, { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
     if (process.platform !== 'win32') fs.chmodSync(tmpPath, CONFIG_FILE_MODE);
-    fs.renameSync(tmpPath, filePath);
+    retryFileOperation(() => fs.renameSync(tmpPath, filePath));
+    created = false;
+  } finally {
+    if (created) fs.rmSync(tmpPath, { force: true });
+  }
+}
+
+/** Projects to persist for a legacy write: what is on disk now, plus only the
+ *  entries this caller changed since its readConfig(). A concurrent Operator
+ *  change (SA-088) is never reverted by a stale settings write. */
+function mergeProjects(
+  projects: Record<string, ProjectOperatorConfig>,
+  disk: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const rejected = rejectedProjects.get(projects) ?? {};
+  const asRead = projectsAsRead.get(projects);
+  if (!asRead)
+    return {
+      ...Object.fromEntries(Object.entries(rejected).map(([id, entry]) => [id, entry.raw])),
+      ...projects,
+    };
+  const out: Record<string, unknown> = isPlainObject(disk?.projects) ? { ...disk.projects } : {};
+  for (const id of new Set([...Object.keys(asRead), ...Object.keys(projects)])) {
+    const mine = Object.hasOwn(projects, id)
+      ? projects[id]
+      : Object.hasOwn(rejected, id)
+        ? asRead[id]
+        : undefined;
+    if (canonicalJson(mine) === canonicalJson(asRead[id])) continue;
+    if (mine === undefined) delete out[id];
+    else out[id] = mine;
+  }
+  return out;
+}
+
+/** Settings/consent writer. Takes the config lock and refuses to write over a file
+ *  it cannot read (it would otherwise persist defaults over the operator's file).
+ *  Failures are logged, not thrown: callers re-read to learn the outcome. */
+export function writeConfig(config: PixelAgentsConfig): void {
+  try {
+    withConfigLock(() => {
+      const disk = readRawConfig();
+      writeRawConfigFile({ ...config, projects: mergeProjects(config.projects, disk) });
+    });
   } catch (err) {
     console.error('[Pixel Agents] Failed to write config file:', err);
   }

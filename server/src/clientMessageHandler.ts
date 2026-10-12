@@ -16,10 +16,10 @@ import {
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import { hasPendingChange, setExecutorAvailability } from './executorAvailability.js';
 import {
   buildExecutorState,
   clientWantsExecutorControls,
-  operatorRevision,
   parseRequestExecutorState,
   parseSetExecutorEnabled,
   toggleResult,
@@ -105,7 +105,10 @@ export function handleClientMessage(
     case 'webviewReady':
       handleWebviewReady(send, ctx);
       // Capability-gated: legacy clients never receive executorState.
-      if (clientWantsExecutorControls(msg)) sendExecutorState(send, ctx);
+      if (clientWantsExecutorControls(msg)) {
+        executorControlClients.add(send);
+        sendExecutorState(send, ctx);
+      }
       break;
 
     case 'requestExecutorState': {
@@ -126,20 +129,15 @@ export function handleClientMessage(
         executorId: parsed.msg.executorId,
         requestId: parsed.msg.requestId,
       };
-      // Privilege first, so unprivileged clients learn nothing about Project ids.
-      if (!ctx.privileged) {
-        send({ ...toggleResult(echo, 'rejected', 'unauthorized') });
-        break;
-      }
-      const project = executorProject();
-      if (!project || project.id !== parsed.msg.projectId) {
-        send({ ...toggleResult(echo, 'rejected', 'unknown_project') });
-        break;
-      }
-      // The durable authority change is SA-088; until then the contract answers honestly.
-      send({
-        ...toggleResult(echo, 'rejected', 'not_supported', operatorRevision(project.operator)),
+      // One common service: privilege first, then binding, policy, CAS, audit, persist.
+      const outcome = setExecutorAvailability(parsed.msg, {
+        privileged: ctx.privileged === true,
+        boundProjectId: executorProject()?.id,
       });
+      send({ ...toggleResult(echo, outcome.status, outcome.errorCode, outcome.revision) });
+      // Every capable connection re-reads its own snapshot (canManage is per recipient).
+      if (outcome.status === 'applied' || outcome.errorCode === 'recovery_required')
+        ctx.store.notifyExecutorStateChanged(parsed.msg.projectId);
       break;
     }
 
@@ -420,8 +418,13 @@ export function handleClientMessage(
 
 /** Per-connection ordering of executorState snapshots (restarts with each connection). */
 const executorStateSequence = new WeakMap<WsSend, number>();
-/** False until SA-088 can apply, persist and audit availability changes. */
-const EXECUTOR_TOGGLES_SUPPORTED = false;
+/** Connections that announced executorControls; only they ever receive executorState. */
+const executorControlClients = new WeakSet<WsSend>();
+
+/** Re-send this connection's snapshot after an availability change, if it negotiated one. */
+export function refreshExecutorState(send: WsSend, ctx: ClientMessageContext): void {
+  if (executorControlClients.has(send)) sendExecutorState(send, ctx);
+}
 
 function executorProject():
   | { id: string; operator: ReturnType<typeof readConfig>['projects'][string] | undefined }
@@ -455,8 +458,9 @@ function sendExecutorState(send: WsSend, ctx: ClientMessageContext): void {
       operator: project.operator,
       snapshot,
       sequence,
-      canManage: EXECUTOR_TOGGLES_SUPPORTED && ctx.privileged === true,
+      canManage: ctx.privileged === true,
       nowS: Date.now() / 1000,
+      recoveryRequired: hasPendingChange(project.id),
     }),
   });
 }

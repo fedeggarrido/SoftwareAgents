@@ -14,10 +14,17 @@ export function admitModelTier(
   inputs: TierInputs,
   operator: ProjectOperatorConfig,
   executionId: string,
+  /** Inside admission: why the Operator authority this run started with no longer holds (SA-088). */
+  authorityBlock?: () => string | undefined,
 ) {
   return withMachineAdmission(executionId, (owners) => {
     const snapshot = readSelectionSnapshot(operator);
     const selection: TierSelection = selectModelTier(agent, rule, policy, inputs, snapshot);
+    const blocked = authorityBlock?.();
+    if (blocked) {
+      selection.gate = { status: 'wait', resetsAt: null, reason: blocked, cause: 'configuration' };
+      return { selection, slot: undefined, snapshot };
+    }
     const { choice, gate } = selection;
     if (!choice || gate.status === 'wait') return { selection, slot: undefined, snapshot };
     const slot = acquireExecutorSlot(

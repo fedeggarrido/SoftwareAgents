@@ -11,6 +11,7 @@ import type {
   SetExecutorEnabled,
 } from '../../core/src/messages.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { canonicalJson } from './configPersistence.js';
 import type { SelectionSnapshot } from './executorSelection.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { quotaGate } from './quotaGate.js';
@@ -78,18 +79,6 @@ export function clientWantsExecutorControls(msg: Record<string, unknown>): boole
   return Array.isArray(caps) && caps.length <= 8 && caps.includes('executorControls');
 }
 
-/** Object keys sorted at every depth; arrays keep their order (tier candidates are ranked). */
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object')
-    return `{${Object.keys(value)
-      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`)
-      .join(',')}}`;
-  return JSON.stringify(value ?? null);
-}
-
 /**
  * Opaque, changes only when this Project's Operator policy changes. Canonical, so a
  * config rewrite that merely reorders keys is not a spurious SA-088 CAS conflict.
@@ -119,6 +108,8 @@ export interface ExecutorStateInput {
   sequence: number;
   canManage: boolean;
   nowS: number;
+  /** An availability change has no verified result: launches are blocked (SA-088). */
+  recoveryRequired?: boolean;
 }
 
 /**
@@ -173,15 +164,22 @@ export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
     else if (quota === 'unknown') reasons.push('quota_unknown');
     const full = gate.status === 'wait' && gate.cause === 'concurrency';
     if (full) reasons.push('concurrency_full');
-    // Missing/invalid machine policy: the worker fails closed, so this is not admissible.
-    if (enabled && gate.status === 'wait' && gate.cause === 'configuration')
+    // Missing/invalid machine policy, or a change awaiting recovery: launches fail closed.
+    if (
+      (enabled && gate.status === 'wait' && gate.cause === 'configuration') ||
+      input.recoveryRequired
+    )
       reasons.push('configuration_unavailable');
     reasons.push('probe_unknown');
     return {
       ...base,
       enabled,
       // Eligible only where the worker's own gate would admit (go) or probe.
-      eligible: enabled && gate.status !== 'wait' && !(operator.modelTiers && !levels.length),
+      eligible:
+        enabled &&
+        !input.recoveryRequired &&
+        gate.status !== 'wait' &&
+        !(operator.modelTiers && !levels.length),
       levels,
       quotaGate: quota,
       activeExecutions: active,
@@ -195,7 +193,11 @@ export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
     sequence: input.sequence,
     observedAt: input.nowS,
     canManage: input.canManage,
-    configurationStatus: operator && snapshot ? 'ready' : 'invalid',
+    configurationStatus: input.recoveryRequired
+      ? 'recovery_required'
+      : operator && snapshot
+        ? 'ready'
+        : 'invalid',
     executors,
   };
 }

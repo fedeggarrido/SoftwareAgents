@@ -35,6 +35,8 @@ export interface StoreEvents {
   agentRemoved: (id: number) => void;
   agentUpdated: (id: number, agent: AgentState, field: string) => void;
   broadcast: (message: Record<string, unknown>) => void;
+  /** Operator availability changed (SA-088): each connection re-sends its own executorState. */
+  executorStateChanged: (projectId: string) => void;
 }
 
 /**
@@ -136,6 +138,11 @@ export class AgentStateStore {
   broadcast(message: Record<string, unknown>): void {
     debugLogBroadcast(message);
     this.emitter.emit('broadcast', message);
+  }
+
+  /** Not a broadcast message: executorState is per recipient (capability, canManage). */
+  notifyExecutorStateChanged(projectId: string): void {
+    this.emitter.emit('executorStateChanged', projectId);
   }
 
   // ── Lifecycle ───────────────────────────────────────────────

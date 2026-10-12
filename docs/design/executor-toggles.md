@@ -473,6 +473,33 @@ propuesta de arriba:
   responde `rejected`/`not_supported` tras validar forma y privilegio, sin tocar
   la configuración. Solo standalone, como los controles company.
 
+**SA-088 (T2, autoridad durable) — implementado** en
+`server/src/executorAvailability.ts`, servicio único llamado por el handler
+standalone. Correspondencia con los pasos 1–7 de arriba y diferencias:
+
+- Pasos 1–3: privilegio antes de revelar Projects, binding del servidor,
+  `change_executor_availability: null` en la política, lock de admisión de
+  máquina + lock de archivo completo (`withConfigLock`, al que ahora se acogen
+  todos los writers), relectura estricta (`readRawConfig` nunca convierte un fallo
+  en `{}`) y CAS sobre la revisión canónica.
+- Paso 5 («congelar y aplicar en runtime»): no hay allowlist en memoria; el estado
+  efectivo es el disco, que cada worker lee. El toggle mantiene el lock de admisión
+  mientras escribe y el worker vuelve a leer el bloque Operator **dentro** de la
+  admisión: o admitió antes (Execution existente, no se toca) o ve el cambio y
+  descarta la selección planificada con la política antigua.
+- Pasos 4, 6 y 7: marcador de intención durable antes del audit de intención; se
+  persiste solo la membresía de `allowedExecutors` y se verifica releyendo. Con
+  disco intacto se audita `failed` y se libera; si el disco no cuadra, o falla el
+  audit de resultado o el borrado del marcador, queda `recovery_required`: el
+  snapshot lo muestra, los toggles se rechazan y los workers fallan cerrados.
+- Recuperación: `pixel-agents executors recover <project>` (solo CLI). No
+  reaplica ni revierte: audita qué lado del cambio está en disco y reabre los
+  lanzamientos; el operador decide cualquier toggle posterior.
+- Broadcast: tras un cambio, cada conexión con `executorControls` recibe su propio
+  snapshot (`canManage` por destinatario).
+- Fuera de alcance: adapter VS Code (los controles company siguen siendo solo
+  standalone) y probes (SA-089).
+
 ## Validación y entrega a Claude
 
 La implementación debe probar: conexiones sin token/capacidad embebida, actor falso,

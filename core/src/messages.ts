@@ -44,6 +44,8 @@ export type ServerMessage =
   | CompanyNotice
   | ExecutorState
   | ExecutorToggleResult
+  | WorkSnapshot
+  | DomainEventMessage
   | AgentDiagnostics;
 
 export type ClientMessage =
@@ -608,6 +610,94 @@ export type ExecutorToggleErrorCode =
   | 'audit_failed'
   | 'recovery_required'
   | 'not_supported';
+
+export interface WorkSnapshot {
+  type: 'workSnapshot';
+  projectId: string;
+  source: WorkSnapshotSource;
+  lastEventId: number | null;
+  tasks: WorkTask[];
+  decisions: WorkDecision[];
+  generatedAt: number;
+}
+
+export type WorkSnapshotSource = 'ok' | 'missing' | 'unreadable';
+
+export interface WorkTask {
+  key: string;
+  type: string;
+  status: WorkTaskStatus;
+  priority: number;
+  agentRole: string | null;
+  featureKey: string | null;
+  version: number;
+  attempt: number;
+  dependsOn: string[];
+  updatedAt: number;
+}
+
+export type WorkTaskStatus =
+  | 'DRAFT'
+  | 'READY'
+  | 'QUEUED'
+  | 'LEASED'
+  | 'RUNNING'
+  | 'REVIEW'
+  | 'QA'
+  | 'DONE'
+  | 'BLOCKED'
+  | 'FAILED_RETRYABLE'
+  | 'FAILED_FINAL'
+  | 'WAITING_HUMAN'
+  | 'WAITING_QUOTA'
+  | 'CANCELLED';
+
+export interface WorkDecision {
+  id: string;
+  status: WorkDecisionStatus;
+  context: string;
+  options: HumanDecisionOption[];
+  recommendation: string;
+  urgency: DecisionUrgency;
+  impact: string;
+  requestedBy: string;
+  blocks: string[];
+}
+
+export type WorkDecisionStatus = 'open' | 'expired';
+
+export interface DomainEventMessage {
+  type: 'domainEvent';
+  event: DomainEventPayload;
+}
+
+export interface DomainEventPayload {
+  eventId: number;
+  kind: DomainEventKind;
+  projectId: string;
+  taskKey: string;
+  agentRole: string | null;
+  executionId: string | null;
+  at: number;
+  fromStatus?: WorkTaskStatus;
+  toStatus?: WorkTaskStatus;
+  taskVersion?: number;
+  attempt?: number;
+  decisionId?: string | null;
+}
+
+export type DomainEventKind =
+  | 'task.created'
+  | 'task.state_changed'
+  | 'task.leased'
+  | 'execution.started'
+  | 'execution.finished'
+  | 'review.requested'
+  | 'qa.requested'
+  | 'quota.waiting'
+  | 'quota.exhausted'
+  | 'human.decision.required'
+  | 'human.decision.answered';
 
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';

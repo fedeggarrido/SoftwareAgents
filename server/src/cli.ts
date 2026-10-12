@@ -37,6 +37,7 @@ import {
   readConfig,
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
+import { createDomainEventRelay } from './domainEventRelay.js';
 import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -380,6 +381,9 @@ async function startServer(argv: string[]): Promise<void> {
     configureCompanyControl(cwd, boardSelection);
     const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
+    // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).
+    const domainEventRelay = createDomainEventRelay(store, cwd, boardSelection);
+    domainEventRelay?.start();
     // Technical availability of the bound Project's enabled Executors (SA-089).
     startExecutorMonitoring(store, executorProject);
 
@@ -416,6 +420,7 @@ async function startServer(argv: string[]): Promise<void> {
       codexWatcher.dispose();
       roleResolver.dispose();
       boardWatcher.dispose();
+      domainEventRelay?.dispose();
       machineCapacity.dispose();
       runtime.dispose();
       server.stop();

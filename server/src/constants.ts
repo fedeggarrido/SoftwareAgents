@@ -197,6 +197,13 @@ export const WORKSTORE_DEFAULT_MAX_ATTEMPTS = 3;
 /** Async OS helper deadline, including native-helper compilation and descendant discovery. */
 export const WORKSTORE_PROCESS_TIMEOUT_MS = 60_000;
 export const WORKSTORE_PROCESS_WAIT_MS = 10_000;
+/** Reason a reconciled (expired) Human Decision writes on each Task it releases. */
+export const WORKSTORE_RECONCILE_REASON_PREFIX = 'Reconcile expired decision: ';
+/** Domain-event relay (SA-029): how often the office polls domain_events, and rows per read. */
+export const DOMAIN_EVENT_POLL_MS = 1000;
+export const DOMAIN_EVENT_BATCH_LIMIT = 200;
+/** Batches per poll before yielding; a backlog beyond this drains over the next polls. */
+export const DOMAIN_EVENT_MAX_BATCHES_PER_POLL = 5;
 /** Retry failed process-tree termination for this long; an unconfirmed close never finishes. */
 export const EXECUTOR_TERMINATION_TIMEOUT_MS = 5_000;
 export const EXECUTOR_TERMINATION_RETRY_MS = 250;

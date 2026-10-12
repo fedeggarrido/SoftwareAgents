@@ -17,6 +17,7 @@ import {
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import { currentWorkSnapshot } from './domainEventRelay.js';
 import { hasPendingChange, setExecutorAvailability } from './executorAvailability.js';
 import { executorMonitor } from './executorProbes.js';
 import {
@@ -746,6 +747,11 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // into characters once seats are rebuilt.
   const savedLayout = readLayoutFromFile();
   send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+
+  // 7b. Work state of the server's Project (SA-029): live domainEvent notices only
+  // say that something changed since; this snapshot is the state itself.
+  const work = currentWorkSnapshot();
+  if (work) send({ ...work });
 
   // 8. Agent state, AFTER layoutLoaded -- the characters they target only
   // exist once the layout flush creates them. Without this a reconnecting

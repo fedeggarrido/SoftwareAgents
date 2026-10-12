@@ -14,6 +14,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { readAutopilot } from './companyControl.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
+import { readRows } from './sqliteReadOnly.js';
 
 /**
  * The agent company's backlog, as the office shows it: which task is in which
@@ -147,35 +148,8 @@ export function latestBoardMessage(): BoardState | undefined {
   return latest;
 }
 
-type Db = { prepare(sql: string): { all(...params: unknown[]): unknown[] }; close(): void };
-
-function openReadOnly(file: string): Db | undefined {
-  if (!fs.existsSync(file)) return undefined;
-  try {
-    // node:sqlite ships with Node 22.5+; older hosts simply get no live claims.
-
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (f: string, o: { readOnly: boolean }) => Db;
-    };
-    return new DatabaseSync(file, { readOnly: true });
-  } catch {
-    return undefined;
-  }
-}
-
-function readRows<T>(file: string, sql: string, ...params: unknown[]): T[] | undefined {
-  const db = openReadOnly(file);
-  if (!db) return undefined;
-  try {
-    return db.prepare(sql).all(...params) as T[];
-  } catch {
-    return undefined; // table not created yet, or locked mid-write: retry next poll
-  } finally {
-    db.close();
-  }
-}
-
-function gitCommonDir(workspace: string): string | undefined {
+/** The Git common dir shared by every worktree of the workspace, where WorkStore lives. */
+export function gitCommonDir(workspace: string): string | undefined {
   try {
     const out = execFileSync(
       'git',

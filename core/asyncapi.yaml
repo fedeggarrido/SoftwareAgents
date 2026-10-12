@@ -124,6 +124,9 @@ components:
         # Executor availability (SA-087)
         - $ref: '#/components/schemas/ExecutorState'
         - $ref: '#/components/schemas/ExecutorToggleResult'
+        # Work domain events (SA-029)
+        - $ref: '#/components/schemas/WorkSnapshot'
+        - $ref: '#/components/schemas/DomainEventMessage'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
       discriminator: type
@@ -1981,3 +1984,187 @@ components:
         - rejected
         - reset
         - unknown
+    # ── Work domain events (SA-029) ───────────────────────────────
+    WorkTaskStatus:
+      description: Task state from the WorkStore state machine (server/src/workstore/taskStateMachine.ts).
+      type: string
+      enum:
+        - DRAFT
+        - READY
+        - QUEUED
+        - LEASED
+        - RUNNING
+        - REVIEW
+        - QA
+        - DONE
+        - BLOCKED
+        - FAILED_RETRYABLE
+        - FAILED_FINAL
+        - WAITING_HUMAN
+        - WAITING_QUOTA
+        - CANCELLED
+    DomainEventKind:
+      description: Closed catalog mirrored by DOMAIN_EVENT_KINDS in core/src/domainEvents.ts.
+      type: string
+      enum:
+        - task.created
+        - task.state_changed
+        - task.leased
+        - execution.started
+        - execution.finished
+        - review.requested
+        - qa.requested
+        - quota.waiting
+        - quota.exhausted
+        - human.decision.required
+        - human.decision.answered
+    DomainEventPayload:
+      description: |
+        One notice derived from an append-only domain_events row. Several kinds may
+        share one eventId (a transition is always task.state_changed, plus the
+        semantic kind it implies). Notices are not durable: a client that missed
+        some re-reads the state from workSnapshot on its next connect. agentRole and
+        executionId are null when the WorkStore does not record them; free-text
+        reasons and actors are never sent.
+      type: object
+      additionalProperties: false
+      required: [eventId, kind, projectId, taskKey, agentRole, executionId, at]
+      properties:
+        eventId:
+          type: integer
+          minimum: 1
+          description: domain_events.id, monotonic within the Project's WorkStore.
+        kind:
+          $ref: '#/components/schemas/DomainEventKind'
+        projectId:
+          type: string
+        taskKey:
+          type: string
+        agentRole:
+          type: [string, 'null']
+        executionId:
+          type: [string, 'null']
+        at:
+          type: number
+          description: Epoch milliseconds when the WorkStore recorded the event.
+        fromStatus:
+          $ref: '#/components/schemas/WorkTaskStatus'
+        toStatus:
+          $ref: '#/components/schemas/WorkTaskStatus'
+        taskVersion:
+          type: integer
+          minimum: 1
+        attempt:
+          type: integer
+          minimum: 0
+        decisionId:
+          type: [string, 'null']
+          description: Human Decision behind a human.decision.* event, when the log names one.
+    DomainEventMessage:
+      description: |
+        Live notice of a work domain event, broadcast by the server's relay for its
+        own Project. Best effort: delivery is never acknowledged. Drop events whose
+        eventId is not greater than the last workSnapshot's lastEventId.
+      type: object
+      additionalProperties: false
+      required: [type, event]
+      properties:
+        type:
+          const: domainEvent
+        event:
+          $ref: '#/components/schemas/DomainEventPayload'
+    WorkTask:
+      type: object
+      additionalProperties: false
+      required:
+        [key, type, status, priority, agentRole, featureKey, version, attempt, dependsOn, updatedAt]
+      properties:
+        key:
+          type: string
+        type:
+          type: string
+        status:
+          $ref: '#/components/schemas/WorkTaskStatus'
+        priority:
+          type: integer
+        agentRole:
+          type: [string, 'null']
+        featureKey:
+          type: [string, 'null']
+        version:
+          type: integer
+          minimum: 1
+        attempt:
+          type: integer
+          minimum: 0
+        dependsOn:
+          type: array
+          items:
+            type: string
+        updatedAt:
+          type: number
+          description: Epoch milliseconds.
+    WorkDecisionStatus:
+      type: string
+      enum: [open, expired]
+    WorkDecision:
+      description: An unresolved structured Human Decision (expired ones still hold their gate).
+      type: object
+      additionalProperties: false
+      required: [id, status, context, options, recommendation, urgency, impact, requestedBy, blocks]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/WorkDecisionStatus'
+        context:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/HumanDecisionOption'
+        recommendation:
+          type: string
+        urgency:
+          $ref: '#/components/schemas/DecisionUrgency'
+        impact:
+          type: string
+        requestedBy:
+          type: string
+        blocks:
+          type: array
+          items:
+            type: string
+    WorkSnapshotSource:
+      description: ok = read; missing = no WorkStore yet (empty is real); unreadable = state unknown.
+      type: string
+      enum: [ok, missing, unreadable]
+    WorkSnapshot:
+      description: |
+        The server Project's tasks and unresolved Human Decisions, read from the
+        WorkStore when the client sends webviewReady. lastEventId is the newest
+        domain_events id the snapshot reflects (null when none): live domainEvent
+        notices at or below it are already included.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, source, lastEventId, tasks, decisions, generatedAt]
+      properties:
+        type:
+          const: workSnapshot
+        projectId:
+          type: string
+        source:
+          $ref: '#/components/schemas/WorkSnapshotSource'
+        lastEventId:
+          type: [integer, 'null']
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkTask'
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkDecision'
+        generatedAt:
+          type: number
+          description: Epoch milliseconds.

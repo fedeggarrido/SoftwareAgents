@@ -204,6 +204,8 @@ solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
   muertas y sus tombstones tras 24 h; vivos/dudosos se conservan.
   Registra selección en WorkStore/audit y registry →
   `agentRoles.ts` → overlay. Véase [executor-selection.md](docs/executor-selection.md).
+- `domainEventRelay.ts`: snapshot de trabajo al conectar y avisos en vivo desde
+  `domain_events` del WorkStore (solo lectura, cursor en memoria; SA-029).
 - `agentRoles.ts`: extrae etiquetas de rol y departamento de metadatos y briefs
   explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar
   prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.
@@ -277,10 +279,12 @@ Adding a new CLI integration is one subdirectory under `server/src/providers/hoo
 
 `core/asyncapi.yaml` is the contract. Pinned to **3.0.0** because `@asyncapi/modelina@5.10.1` declares `supportedVersions: ['3.0.0']` only; bumping to 3.1.0 produces `export type Root = any`. Revisit when Modelina ships 3.1.0 support.
 
-- **37 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, assets, settings + workspace, company, executor availability, diagnostics.
+- **39 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, assets, settings + workspace, company, executor availability, work domain events, diagnostics.
 - **26 ClientMessage variants** (client → server): lifecycle (`webviewReady`, `launchAgent`, `focusAgent`, `closeAgent`), layout (`saveAgentSeats`, `saveLayout`, `exportLayout`, `importLayout`), settings (`setSoundEnabled`, `setHooksEnabled`, `setWatchAllSessions`, `setAlwaysShowLabels`, `setHooksInfoShown`, `setLastSeenVersion`), discovery + assets, company, executor availability (`setExecutorEnabled`, `requestExecutorState`), diagnostics.
 
 SA-035 extends the existing `boardState.quota` with optional typed `CapacitySnapshot` observations (source, confidence, windows, epoch-second timestamps); message counts were 35/24 then. Legacy quota fields stay compatible.
+
+SA-029 adds work domain events to the office: `workSnapshot` (the bound Project's tasks + unresolved structured Human Decisions + `lastEventId`, read fresh from the WorkStore in the `webviewReady` handshake, `source` ok/missing/unreadable) and `domainEvent` (live notices). The `DomainEvent` union and its closed kind catalog live in `core/src/domainEvents.ts`, type-checked against the generated wire payload. `server/src/domainEventRelay.ts` polls `domain_events` READ-ONLY (never through `openWorkStore`, whose sweeper writes) with an in-memory cursor: history before start is state (served by the snapshot), not news; nothing is acked or persisted, so a lost notice is recovered by the next snapshot. Each transition yields `task.state_changed` plus the kinds the state machine makes certain (leased, execution started/finished, review/qa requested, quota.waiting, human.decision.required/answered — answered only when the log names the decision). `executionId` is attributed only within the transition's own lease window; reasons and actors never leave the server. `task.created`/`quota.exhausted` are in the catalog but no WorkStore writer records them yet. Standalone only; broadcasts go through the AgentStateStore.
 
 SA-087 adds the Executor availability contract (design: docs/design/executor-toggles.md): the closed catalog `core/src/executorCatalog.ts` (`claude`, `codex`; no local model per ADR-0004) mirrored by the `ExecutorId` enum, `webviewReady.capabilities` (`executorControls`), `executorState`/`executorToggleResult` and `setExecutorEnabled`/`requestExecutorState`. Capability-gated: only clients that announce `executorControls` receive `executorState`. `server/src/executorState.ts` validates the client messages at runtime and builds a read-only snapshot (Operator `allowedExecutors`, SA-036 gate, SA-084 tiers; installation/auth stay `unknown` until SA-089). `canManage` is per recipient (privileged connections only). Standalone only, like the company controls.
 

@@ -10,6 +10,7 @@ import {
   WORKSTORE_BUSY_TIMEOUT_MS,
   WORKSTORE_DEFAULT_MAX_ATTEMPTS,
   WORKSTORE_INITIAL_TASK_STATUS,
+  WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
@@ -898,7 +899,7 @@ class SqliteWorkStore implements WorkStore {
             task,
             ['LEASED', 'RUNNING'].includes(status) ? 'READY' : status,
             actor,
-            reconcile ? `Reconcile expired decision: ${id}` : id,
+            reconcile ? `${WORKSTORE_RECONCILE_REASON_PREFIX}${id}` : id,
           );
       }
       decision.status = answer === null ? 'expired' : 'answered';

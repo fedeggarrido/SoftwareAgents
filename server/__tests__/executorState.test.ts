@@ -202,6 +202,23 @@ describe('buildExecutorState', () => {
     expect(full.reasonCodes).toContain('concurrency_full');
   });
 
+  it('is not eligible when the quota gate would fail closed on the machine policy', () => {
+    // quotaThresholds/concurrency are optional in Operator config; without them the
+    // worker never launches, so the office must not call the executor eligible.
+    const codex = buildExecutorState({
+      projectId: 'test',
+      operator: operator({ quotaThresholds: undefined }),
+      snapshot: snapshot({
+        machinePolicy: { quotaThresholds: {}, maxConcurrent: { codex: 1 }, maxExecutions: 2 },
+      }),
+      sequence: 0,
+      canManage: false,
+      nowS: 1000,
+    }).executors[1];
+    expect(codex).toMatchObject({ enabled: true, eligible: false, quotaGate: 'unknown' });
+    expect(codex.reasonCodes).toContain('configuration_unavailable');
+  });
+
   it('reports an unavailable configuration without inventing availability', () => {
     const state = buildExecutorState({
       projectId: 'test',
@@ -223,6 +240,20 @@ describe('buildExecutorState', () => {
   it('revision changes only with the Operator policy', () => {
     expect(operatorRevision(operator())).toBe(operatorRevision(operator()));
     expect(operatorRevision(operator())).not.toBe(
+      operatorRevision(operator({ allowedExecutors: ['claude', 'codex'] })),
+    );
+    // Canonical: a rewrite that only reorders keys is not a policy change (SA-088 CAS).
+    const { autonomyLevel, allowedExecutors, quotaThresholds, concurrency } = operator();
+    expect(
+      operatorRevision({
+        concurrency: { perExecutor: { codex: 1, claude: 1 }, maxExecutions: 2 },
+        quotaThresholds: { codex: 10, claude: 10 },
+        allowedExecutors,
+        autonomyLevel,
+      }),
+    ).toBe(operatorRevision({ autonomyLevel, allowedExecutors, quotaThresholds, concurrency }));
+    // Arrays keep their order: at worst a reorder is a spurious conflict, never a missed one.
+    expect(operatorRevision(operator({ allowedExecutors: ['codex', 'claude'] }))).not.toBe(
       operatorRevision(operator({ allowedExecutors: ['claude', 'codex'] })),
     );
   });

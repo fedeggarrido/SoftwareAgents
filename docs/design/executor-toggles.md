@@ -464,6 +464,11 @@ propuesta de arriba:
   alternativas descartadas se añadirán ahí cuando el selector los produzca (T4).
 - Negociación: `webviewReady.capabilities` (`executorControls`). Solo esos
   clientes reciben `executorState`; los antiguos ignoran tipos desconocidos.
+- `eligible` exige que el gate SA-036 del propio worker admita (`go`) o sondee
+  (`probe`): cualquier `wait` (cuota, concurrencia, observación inválida o política
+  de máquina ausente, con `configuration_unavailable`) no es admisible (SA-QA-9).
+- `revision` es el SHA-256 de la serialización canónica (claves ordenadas) del
+  bloque Operator: reordenar claves no provoca conflictos CAS en SA-088.
 - Hasta SA-088 el snapshot lleva `canManage: false` y `setExecutorEnabled`
   responde `rejected`/`not_supported` tras validar forma y privilegio, sin tocar
   la configuración. Solo standalone, como los controles company.

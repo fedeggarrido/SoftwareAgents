@@ -12,6 +12,7 @@ import type {
 } from '../../core/src/messages.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { canonicalJson } from './configPersistence.js';
+import type { ExecutorObservation } from './executorProbes.js';
 import type { SelectionSnapshot } from './executorSelection.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { quotaGate } from './quotaGate.js';
@@ -110,12 +111,38 @@ export interface ExecutorStateInput {
   nowS: number;
   /** An availability change has no verified result: launches are blocked (SA-088). */
   recoveryRequired?: boolean;
+  /** Technical probes (SA-089); absent = not observed yet. */
+  observations?: Partial<Record<ExecutorId, ExecutorObservation>>;
+}
+
+/** Probe facts as reason codes. Unknown never blocks; a proven problem does. */
+function probeReasons(observation: ExecutorObservation | undefined, nowS: number) {
+  const reasons: ExecutorReasonCode[] = [];
+  if (!observation) return { reasons: ['probe_unknown' as const], blocked: false };
+  if (observation.installation === 'missing') reasons.push('not_installed');
+  else if (observation.installation === 'unsupported') reasons.push('unsupported_version');
+  if (observation.authentication === 'required') reasons.push('auth_required');
+  // Auth of a binary that is missing or unsupported is moot, not unknown.
+  const installed = observation.installation === 'ready' || observation.installation === 'unknown';
+  if (
+    observation.installation === 'unknown' ||
+    (installed && observation.authentication === 'unknown')
+  )
+    reasons.push('probe_unknown');
+  if (nowS > observation.staleAfter) reasons.push('probe_stale');
+  return {
+    reasons,
+    blocked:
+      observation.installation === 'missing' ||
+      observation.installation === 'unsupported' ||
+      observation.authentication === 'required',
+  };
 }
 
 /**
- * Read-only projection for the office. It reports what the Operator enabled and what
- * the SA-036 gate says now; technical probes (installation, auth) are SA-089 and stay
- * `unknown` until then, flagged with `probe_unknown` without blocking eligibility.
+ * Read-only projection for the office: what the Operator enabled, what the SA-036
+ * gate says now and what the SA-089 probes observed. Unobserved or unknown probe
+ * facts are flagged with `probe_unknown` without blocking eligibility.
  */
 export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
   const { operator, snapshot } = input;
@@ -170,14 +197,26 @@ export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
       input.recoveryRequired
     )
       reasons.push('configuration_unavailable');
-    reasons.push('probe_unknown');
+    const observation = input.observations?.[id];
+    const probe = probeReasons(observation, input.nowS);
+    reasons.push(...probe.reasons);
     return {
       ...base,
+      ...(observation
+        ? {
+            installation: observation.installation,
+            version: observation.version,
+            authentication: observation.authentication,
+            checkedAt: observation.checkedAt,
+            staleAfter: observation.staleAfter,
+          }
+        : {}),
       enabled,
       // Eligible only where the worker's own gate would admit (go) or probe.
       eligible:
         enabled &&
         !input.recoveryRequired &&
+        !probe.blocked &&
         gate.status !== 'wait' &&
         !(operator.modelTiers && !levels.length),
       levels,

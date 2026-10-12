@@ -500,6 +500,21 @@ standalone. Correspondencia con los pasos 1–7 de arriba y diferencias:
 - Fuera de alcance: adapter VS Code (los controles company siguen siendo solo
   standalone) y probes (SA-089).
 
+**SA-089 (T3, monitor) — implementado** en `server/src/executorProbes.ts`, sin
+destino local (ADR-0004):
+
+- Versión mínima = la probada en el repo (Claude 2.1.220, Codex 0.160.0); anterior
+  o con prerelease de esa versión → `unsupported`; sin versión parseable → `unknown`.
+- Capabilities: la ayuda (`claude --help`, `codex exec --help`) debe listar todas
+  las opciones que pasa su executor; si falta alguna → `unsupported`.
+- Auth solo por subcomando que la ayuda del propio CLI anuncia (`claude auth
+status --json`, verificado contra 2.1.296: se lee solo `loggedIn`; `codex login
+status`, no verificado aquí por no haber Codex en el entorno: exit 0 + «logged in»
+  → ready, exit ≠ 0 + «not logged in» → required, lo demás unknown).
+- Caché por binario resuelto, refresco 60 s, backoff hasta 5 min, TTL 120 s,
+  solo destinos habilitados; nueva observación no cambia `revision`.
+- Pendiente para T4: reverificar al lanzar en el selector del worker.
+
 ## Validación y entrega a Claude
 
 La implementación debe probar: conexiones sin token/capacidad embebida, actor falso,

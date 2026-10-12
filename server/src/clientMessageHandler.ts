@@ -1,3 +1,4 @@
+import { EXECUTOR_IDS } from '../../core/src/executorCatalog.js';
 import type { CompanyNotice } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
@@ -17,6 +18,7 @@ import {
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { hasPendingChange, setExecutorAvailability } from './executorAvailability.js';
+import { executorMonitor } from './executorProbes.js';
 import {
   buildExecutorState,
   clientWantsExecutorControls,
@@ -426,7 +428,8 @@ export function refreshExecutorState(send: WsSend, ctx: ClientMessageContext): v
   if (executorControlClients.has(send)) sendExecutorState(send, ctx);
 }
 
-function executorProject():
+/** The Project this server is bound to, with its Operator policy (undefined if rejected). */
+export function executorProject():
   | { id: string; operator: ReturnType<typeof readConfig>['projects'][string] | undefined }
   | undefined {
   const root = companyWorkspaceRoot();
@@ -461,6 +464,11 @@ function sendExecutorState(send: WsSend, ctx: ClientMessageContext): void {
       canManage: ctx.privileged === true,
       nowS: Date.now() / 1000,
       recoveryRequired: hasPendingChange(project.id),
+      observations: project.operator
+        ? Object.fromEntries(
+            EXECUTOR_IDS.map((id) => [id, executorMonitor.observation(id, project.operator!)]),
+          )
+        : undefined,
     }),
   });
 }

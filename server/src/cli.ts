@@ -22,7 +22,11 @@ import {
 } from './assetReload.js';
 import { loadBoardSelection } from './boardSources.js';
 import { BoardWatcher, latestBoardMessage } from './boardWatcher.js';
-import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
+import {
+  type AssetCache,
+  executorProject,
+  type ReloadAssetsSideEffect,
+} from './clientMessageHandler.js';
 import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
 import { configureCompanyControl } from './companyControl.js';
@@ -34,6 +38,7 @@ import {
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { runExecutorsCommand } from './executorAvailability.js';
+import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
@@ -375,6 +380,8 @@ async function startServer(argv: string[]): Promise<void> {
     configureCompanyControl(cwd, boardSelection);
     const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
+    // Technical availability of the bound Project's enabled Executors (SA-089).
+    startExecutorMonitoring(store, executorProject);
 
     // Office-scoped evidence; only the process owning HTTP may publish.
     const machineCapacity = new MachineCapacityPublisher(

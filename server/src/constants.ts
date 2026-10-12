@@ -125,6 +125,18 @@ export const CONFIG_LOCK_NAME = 'config.lock';
 export const CONFIG_LOCK_TIMEOUT_MS = 2000;
 export const CONFIG_LOCK_LEASE_MS = 30_000;
 
+// ── Executor availability probes (SA-089) ──────────────────
+/** Per probe command; a hung CLI is killed and reads as unknown. */
+export const EXECUTOR_PROBE_TIMEOUT_MS = 3000;
+/** Probe stdout/stderr beyond this is discarded (never shown, only parsed). */
+export const EXECUTOR_PROBE_MAX_OUTPUT = 128 * 1024;
+/** Enabled Executors are re-probed this often while healthy. */
+export const EXECUTOR_PROBE_REFRESH_MS = 60_000;
+/** Failing probes back off exponentially up to this. */
+export const EXECUTOR_PROBE_MAX_BACKOFF_MS = 300_000;
+/** An observation older than this is reported probe_stale. */
+export const EXECUTOR_PROBE_TTL_MS = 120_000;
+
 // ── Avatar Customization ────────────────────────────────────
 /** Number of pre-colored bundled character palettes (char_0.png–char_5.png).
  *  Mirrors `PALETTE_COUNT` in webview-ui/src/constants.ts; kept separate

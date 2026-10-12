@@ -32,7 +32,10 @@ allure-report/
 !.env.example
 
 # Project-specific
-.claude
+# Local Claude state stays ignored; the cloud SessionStart hook is versioned.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .mcp.json
 /sprites-export
 .vercel/

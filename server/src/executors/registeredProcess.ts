@@ -41,10 +41,12 @@ export function spawnRegisteredProcess(
       register(child.pid!);
       child.send('launch');
     } catch (error) {
-      // Before ACK there is no executor. Disconnect makes the supervisor exit;
-      // existing executor adapters drain close/finished and report the failure.
+      // Before ACK there is no executor: the supervisor has launched nothing, so
+      // killing it is safe. Never disconnect here: when the supervisor then exits on
+      // its own, Node emits 'exit' but never 'close', and the executor adapters,
+      // which drain close/finished to release the slot and lock, would wait forever.
       child.emit('error', error);
-      if (child.connected) child.disconnect();
+      child.kill();
     }
   });
   return child;

@@ -562,8 +562,9 @@ export async function runWorker(
      * it, immediately before the executor starts, under machine admission like
      * SA-088: authority, a fresh probe and quota. That check is the frontier: a
      * change before it invalidates the run (no process, slot released); a change
-     * after it drains. Not inside registerProcess: a refused registration leaves
-     * the executor waiting for a close event that never comes.
+     * after it drains. Not inside registerProcess: a refused registration ends the
+     * Execution as failed (the supervisor is killed before ACK), which would turn a
+     * policy change into a failure instead of a clean invalidation.
      */
     const spawnObservation = (await observeExecutors([selectedExecutor], config.operator, probe))[
       selectedExecutor

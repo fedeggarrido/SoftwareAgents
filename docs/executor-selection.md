@@ -409,9 +409,10 @@ queda en WorkStore sin PID, se audita `selection_invalidated` y el worker sale c
 la selección anterior. Esa comprobación es la frontera: un cambio posterior drena,
 y **un toggle nunca cancela ni mata una ejecución en curso**. Entre la comprobación
 y el spawn solo queda la preparación síncrona del executor (milisegundos); no se
-revalida dentro de `registerProcess` porque un registro rechazado deja al executor
-esperando un `close` que nunca llega (defecto de `registeredProcess.ts`, anotado
-para SA-062). La coordinación entre procesos y los slots compartidos son los
+revalida dentro de `registerProcess` porque un registro rechazado termina la
+ejecución como fallo, no como invalidación limpia. (Antes, además, dejaba al executor
+esperando un `close` que nunca llegaba; corregido en `registeredProcess.ts`: antes del
+ACK se mata el supervisor en lugar de desconectarlo.) La coordinación entre procesos y los slots compartidos son los
 existentes (admisión Lamport + `executor-slots`); no hace falta el ledger de SA-037.
 
 **Sin executor elegible.** Si todos los candidatos quedan excluidos por causas que

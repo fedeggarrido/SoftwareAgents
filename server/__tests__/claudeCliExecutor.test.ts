@@ -121,6 +121,20 @@ it('reports a missing executable and cleans runtime settings', async () => {
   expect(fs.readdirSync(path.join(root, 'runtime'))).toEqual([]);
 });
 
+it('finishes as failed when the launch process cannot be registered (no hang)', async () => {
+  const handle = executor().start({
+    ...req,
+    registerProcess: () => {
+      throw new Error('Cannot verify launch process; slot: test');
+    },
+  });
+  const events: ExecutionEvent[] = [];
+  for await (const event of handle.events) events.push(event);
+  expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 1 });
+  expect(JSON.stringify(events)).toContain('Cannot verify launch process');
+  expect(fs.readdirSync(path.join(root, 'runtime'))).toEqual([]);
+}, 15_000);
+
 it('refuses runtime settings located inside the worktree', async () => {
   const handle = new ClaudeCliExecutor({
     binary: process.execPath,

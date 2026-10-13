@@ -315,6 +315,16 @@ export const QUOTA_COLORS = {
   rejected: '#d14249',
   unknown: '#b7c3d9',
 };
+/** Executor availability panel (SA-091): unknown never reads as available. */
+export const EXECUTOR_STATUS_COLORS = {
+  available: '#89d185',
+  warning: '#ff8d14',
+  blocked: '#d14249',
+  unknown: '#b7c3d9',
+  off: '#6c6c8a',
+};
+/** A toggle with no answer by then is dropped and the snapshot re-requested. */
+export const EXECUTOR_TOGGLE_TIMEOUT_MS = 10_000;
 export const PRIORITY_COLORS: Record<string, string> = {
   urgent: '#d14249',
   high: '#ff8d14',

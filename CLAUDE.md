@@ -222,6 +222,13 @@ Las acciones se envían por Transport y el runtime valida su autoridad.
   envía la respuesta elegida para que el manager la aplique.
 - `MeetingPanel.tsx`: reunión reciente, rondas, intervenciones, espera de cuota y
   decisión o escalado al propietario.
+- `ExecutorPanel.tsx` (SA-091): «Executors para nuevas tareas» en el HUD, también sin
+  board. Estado en `office/executorStore.ts`, vista pura en `office/executorPanelView.ts`.
+  El switch es la elección del operador y solo cambia con el resultado confirmado
+  (sin actualización optimista; «Guardando…», timeout → resync); sin privilegio es de
+  solo lectura. Desconocido nunca se pinta como disponible. El overlay muestra la razón
+  registrada de la asignación (`assignmentReason`) o «Sesión externa · asignación no
+  gestionada»; nunca la infiere.
 
 ### AgentSpec v1alpha1 permission profiles
 

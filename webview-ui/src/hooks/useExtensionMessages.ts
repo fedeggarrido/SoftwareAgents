@@ -8,6 +8,12 @@ import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setGhostHeadlessAgents as setRendererGhostHeadlessAgents } from '../office/engine/renderer.js';
 import { isMeetingArea } from '../office/engine/seatPlacement.js';
+import {
+  applyExecutorState,
+  applyToggleResult,
+  getExecutorStore,
+  setExecutorStore,
+} from '../office/executorStore.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
@@ -348,6 +354,17 @@ export function useExtensionMessages(
         setProviderLabel(msg.id, msg.label);
       } else if (msg.type === 'companyNotice') {
         setCompanyNotice(msg.text);
+      } else if (msg.type === 'executorState') {
+        setExecutorStore(applyExecutorState(getExecutorStore(), msg));
+      } else if (msg.type === 'executorToggleResult') {
+        const settled = applyToggleResult(getExecutorStore(), msg);
+        setExecutorStore(settled.store);
+        // Any non-applied answer may mean our view is stale: ask, never guess.
+        if (settled.resync && settled.store.state)
+          transport.send({
+            type: 'requestExecutorState',
+            projectId: settled.store.state.projectId,
+          });
       } else if (msg.type === 'boardState') {
         const next = msg;
         const activeMeeting = next.meeting?.status === 'running' ? next.meeting.id : null;
@@ -819,7 +836,8 @@ export function useExtensionMessages(
       }
     };
     const unsubscribe = transport.onMessage(handler);
-    transport.send({ type: 'webviewReady' });
+    // Announcing executorControls opts in to executorState (servers never send it otherwise).
+    transport.send({ type: 'webviewReady', capabilities: ['executorControls'] });
     return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);

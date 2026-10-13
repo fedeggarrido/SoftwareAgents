@@ -23,8 +23,9 @@ import {
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import { useBoard } from '../boardStore.js';
 import type { OfficeState } from '../engine/officeState.js';
+import { useExecutorStore } from '../executorStore.js';
 import { overlayProjection } from '../projection.js';
-import { getAgentRole, getProviderLabel, modelTierLabel } from '../toolUtils.js';
+import { assignmentReason, getAgentRole, getProviderLabel, modelTierLabel } from '../toolUtils.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
 
@@ -99,6 +100,8 @@ export function ToolOverlay({
   alwaysShowOverlay,
 }: ToolOverlayProps) {
   const board = useBoard();
+  // A Project whose server announces executor state manages its launches (SA-091).
+  const managedProject = useExecutorStore().state !== null;
   const [, setTick] = useState(0);
   useEffect(() => {
     let rafId = 0;
@@ -328,6 +331,15 @@ export function ToolOverlay({
                       .join(' · ')}
                   >
                     {modelTierLabel(companyRole)}
+                  </span>
+                )}
+                {!isSub && assignmentReason(companyRole, managedProject) && (
+                  <span
+                    className="text-2xs leading-none overflow-hidden text-ellipsis whitespace-nowrap block text-text-muted"
+                    data-testid="agent-assignment-reason"
+                    title={assignmentReason(companyRole, managedProject)}
+                  >
+                    {assignmentReason(companyRole, managedProject)}
                   </span>
                 )}
                 {teamRoleLabel && (

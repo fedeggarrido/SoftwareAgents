@@ -86,6 +86,20 @@ export function modelTierLabel(role: AgentRoleView | undefined): string | undefi
   return role?.tier ? `${role.tier}${role.model ? ` · ${role.model}` : ''}` : undefined;
 }
 
+/**
+ * Why this character runs what it runs (SA-091). Only the recorded launch
+ * decision speaks; with executor controls active, a Session with no recorded
+ * decision is labelled unmanaged rather than given an invented reason.
+ */
+export function assignmentReason(
+  role: AgentRoleView | undefined,
+  managedProject: boolean,
+): string | undefined {
+  if (role?.selectionReason) return role.selectionReason;
+  if (role?.tier) return undefined;
+  return managedProject ? 'Sesión externa · asignación no gestionada' : undefined;
+}
+
 const agentRoles = new Map<number, AgentRoleView>();
 
 export function setAgentRole(id: number, role: AgentRoleView): void {

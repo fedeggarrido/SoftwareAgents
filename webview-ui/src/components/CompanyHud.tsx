@@ -6,7 +6,9 @@ import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import { capacityHudView, capacityView, visibleProviderCounts } from '../office/capacityView.js';
 import { decisionsHudView } from '../office/decisionsHudView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
+import { ExecutorPanel } from './ExecutorPanel.js';
 
 function clock(epochS: number | null | undefined): string {
   if (!epochS) return '—';
@@ -86,13 +88,34 @@ export function CompanyHud({
 }: CompanyHudProps) {
   const board = useBoard();
   const notice = useCompanyNotice();
+  const executors = useExecutorStore();
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(t);
   }, []);
-  if (!board) return null;
+  // The executor state comes from the Project runtime, not the backlog mirror:
+  // without a board the HUD still shows it.
+  if (!board) {
+    if (!executors.state) return null;
+    return (
+      <div
+        className="absolute top-10 left-1/2 -translate-x-1/2 z-30 pixel-panel w-[min(460px,calc(100vw-120px))] p-8 flex flex-col gap-6"
+        data-testid="company-hud"
+      >
+        <button
+          className="min-w-0 truncate text-left text-xs cursor-pointer"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          title={open ? 'Ocultar detalles' : 'Ver executors del proyecto'}
+        >
+          {open ? '▾' : '▸'} {executors.state.projectId}
+        </button>
+        {open && <ExecutorPanel />}
+      </div>
+    );
+  }
 
   const capacity = capacityHudView(board);
   const decisions = decisionsHudView(board);
@@ -130,6 +153,7 @@ export function CompanyHud({
             <QuotaRow name="Codex" q={board.quota.codex} running={counts.codex} />
           </>
         )}
+        {open && <ExecutorPanel />}
       </div>
     );
   }
@@ -241,6 +265,7 @@ export function CompanyHud({
             )}
             {ap?.enabled && !ap.running && <span>Proceso del piloto no activo</span>}
           </div>
+          <ExecutorPanel />
           {board.quota && (
             <div className="flex flex-col gap-4">
               <div className="text-2xs text-text-muted">{capacity.title}</div>

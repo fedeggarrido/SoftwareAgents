@@ -515,6 +515,15 @@ status`, no verificado aquí por no haber Codex en el entorno: exit 0 + «logged
   solo destinos habilitados; nueva observación no cambia `revision`.
 - Pendiente para T4: reverificar al lanzar en el selector del worker.
 
+**SA-091 (T5, panel) — implementado** (`webview-ui/src/components/ExecutorPanel.tsx`,
+`office/executorStore.ts`, `office/executorPanelView.ts`): el webview anuncia
+`executorControls`; panel en el HUD expandido y HUD mínimo sin board; switch accesible
+(`role=switch`, nombre con Project y Executor, `aria-live`), sin optimismo, resync ante
+rechazo o timeout; aviso persistente si todos están apagados o hay `recovery_required`;
+overlay con la razón registrada por el lanzamiento. Fuera de alcance: adapter VS Code
+(standalone, como el resto de controles) y alternativas estructuradas en el overlay
+(viajan en `selectionReason` hasta que el contrato las proyecte).
+
 ## Validación y entrega a Claude
 
 La implementación debe probar: conexiones sin token/capacidad embebida, actor falso,

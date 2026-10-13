@@ -1,10 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { DagTask, TaskDag } from '../../core/src/taskDag.js';
-import type { TechnicalDesign } from '../../core/src/technicalDesign.js';
+import type {
+  DagTask,
+  DagTaskType,
+  TaskDag,
+  TaskDagAnalysis,
+  TaskDagIssue,
+  TechnicalDesign,
+} from '../../core/src/index.js';
 import { loadFeatureSpec } from '../src/featureSpec.js';
 import { SchemaValidationError } from '../src/schemaValidation.js';
 import { analyzeTaskDag, parseTaskDag, parseTechnicalDesign } from '../src/taskDag.js';
@@ -148,6 +154,15 @@ describe('analyzeTaskDag', () => {
     ]);
   });
 
+  it('preserves dependency visit order and rotates cycles to declaration order', () => {
+    const result = analyzeTaskDag(covered(task(1, [3, 2]), task(2, [3]), task(3, [2, 1, 3])), spec);
+    expect(result.issues).toEqual([
+      { code: 'cycle', path: ['FEAT-001-T02', 'FEAT-001-T03', 'FEAT-001-T02'] },
+      { code: 'cycle', path: ['FEAT-001-T01', 'FEAT-001-T03', 'FEAT-001-T01'] },
+      { code: 'cycle', path: ['FEAT-001-T03', 'FEAT-001-T03'] },
+    ]);
+  });
+
   it('detects a dependency on a task that does not exist', () => {
     const result = analyzeTaskDag(covered(task(1), task(2, [1, 7])), spec);
     expect(result.issues).toEqual([
@@ -222,7 +237,7 @@ describe('analyzeTaskDag', () => {
     ]);
   });
 
-  it('handles the largest DAG the key format allows (100 tasks in a chain)', () => {
+  it('handles every task key in one feature (100 tasks in a chain)', () => {
     const chain = Array.from({ length: 100 }, (_, i) => task(i, i ? [i - 1] : [], ['AC-001']));
     chain[99].acceptanceRefs.push('AC-002');
     const result = analyzeTaskDag(dag(...chain.reverse()), spec);
@@ -230,10 +245,31 @@ describe('analyzeTaskDag', () => {
     expect(result.levels).toHaveLength(100);
     expect(result.order![0]).toBe('FEAT-001-T00');
   });
+
+  it('reports foreign keys without overflowing on a schema-valid 10,000-task chain', () => {
+    const key = (i: number) =>
+      `FEAT-${String(Math.floor(i / 100)).padStart(3, '0')}-T${String(i % 100).padStart(2, '0')}`;
+    const chain = Array.from({ length: 10_000 }, (_, i) => ({
+      ...task(i % 100, [], ['AC-001', 'AC-002']),
+      key: key(i),
+      dependsOn: i < 9_999 ? [key(i + 1)] : [],
+    }));
+    const input = parseTaskDag({ ...dag(...chain), feature: 'FEAT-000' });
+    const result = analyzeTaskDag(input, { ...spec, key: 'FEAT-000' });
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      chain.slice(100).map(({ key }) => ({ code: 'foreign_key', key, feature: 'FEAT-000' })),
+    );
+    expect(result.order).toEqual(chain.map(({ key }) => key).reverse());
+    expect(result.levels).toHaveLength(10_000);
+  });
 });
 
 describe('core exports', () => {
   it('exposes the new types without runtime effects', () => {
+    expectTypeOf<DagTaskType>().toEqualTypeOf<DagTask['type']>();
+    expectTypeOf<TaskDagAnalysis>().toEqualTypeOf<ReturnType<typeof analyzeTaskDag>>();
+    expectTypeOf<TaskDagIssue>().toEqualTypeOf<TaskDagAnalysis['issues'][number]>();
     for (const file of ['core/src/taskDag.ts', 'core/src/technicalDesign.ts']) {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
       expect(source).not.toMatch(/^\s*(export\s+)?(const|let|var|function|class|enum)\b/m);

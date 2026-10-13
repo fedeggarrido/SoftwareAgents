@@ -108,24 +108,38 @@ function findCycles(
 ): string[][] {
   const state = new Map<string, 'active' | 'done'>();
   const stack: string[] = [];
+  const frames: { key: string; nextDep: number }[] = [];
   const cycles: string[][] = [];
 
-  const visit = (key: string): void => {
+  const enter = (key: string): void => {
     state.set(key, 'active');
     stack.push(key);
-    for (const dep of depsOf.get(key)!) {
+    frames.push({ key, nextDep: 0 });
+  };
+
+  for (const node of nodes) {
+    if (state.has(node.key)) continue;
+    enter(node.key);
+    while (frames.length) {
+      const frame = frames[frames.length - 1];
+      const deps = depsOf.get(frame.key)!;
+      if (frame.nextDep === deps.length) {
+        frames.pop();
+        stack.pop();
+        state.set(frame.key, 'done');
+        continue;
+      }
+
+      // Resume the parent at its next dependency after the child finishes.
+      const dep = deps[frame.nextDep++];
       const seen = state.get(dep);
       if (seen === 'active') {
         cycles.push(rotateToEarliest(stack.slice(stack.indexOf(dep)), index));
       } else if (seen === undefined) {
-        visit(dep);
+        enter(dep);
       }
     }
-    stack.pop();
-    state.set(key, 'done');
-  };
-
-  for (const node of nodes) if (!state.has(node.key)) visit(node.key);
+  }
   return cycles;
 }
 

@@ -9,7 +9,8 @@ Este archivo fija el flujo de colaboración del Development Project.
 - Una tarea de ClickUp = una rama `sa/SA-###-slug` en `.worktrees/SA-###`.
   Trabaja solo dentro de su worktree; nunca hagas commits directos a `main`.
 - Nunca tocar Fundtrinsic: sus archivos, datos y procesos quedan fuera del alcance.
-- Codex implementa por defecto: Fede lo prioriza porque le sale gratis.
+- Codex implementa por defecto: Fede paga una cuota en Codex y otra en Claude, y
+  así reparte el trabajo entre ambas en lugar de gastar las dos a la vez.
   Si Codex no está disponible (límite de uso o capacidad), Claude implementa en su
   lugar sin esperar; la revisión cruzada y la QA de Codex se hacen cuando vuelva.
   Claude revisa, hace commit en la rama de la tarea e integra. Cuando implementa

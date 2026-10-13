@@ -4,12 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 import type { ExecutorId } from '../../core/src/executorCatalog.js';
-import type { ExecutorToggleResult } from '../../core/src/messages.js';
+import type { ExecutorToggleResult, ModelTier } from '../../core/src/messages.js';
 import type { AutonomyLevel, ProjectOperatorConfig } from '../../core/src/project.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import {
-  canonicalJson,
   parseProjects,
   projectConfigError,
   readConfig,
@@ -20,7 +19,7 @@ import {
 import { LAYOUT_FILE_DIR } from './constants.js';
 import type { SelectionBlock } from './executorSelection.js';
 import { withMachineAdmission } from './executorSlots.js';
-import { operatorRevision } from './executorState.js';
+import { catalogLevelsFor, operatorRevision } from './executorState.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
@@ -34,16 +33,40 @@ import type { WorkStore } from './workstore/WorkStore.js';
  * while it exists every worker refuses to launch for the Project and the snapshot
  * reports recovery_required, until `pixel-agents executors recover <project>`
  * reconciles disk and audit. A failure never answers applied.
+ *
+ * SA-092 routes the per-Executor level restriction (`executorLevels`) through the
+ * same pipeline: one action, one marker, one recovery path.
  */
 
 const ACTION = 'change_executor_availability';
 
-export interface AvailabilityRequest {
+interface ChangeRequest {
   projectId: string;
   executorId: ExecutorId;
-  enabled: boolean;
   requestId: string;
   expectedRevision: string;
+}
+
+export interface AvailabilityRequest extends ChangeRequest {
+  enabled: boolean;
+}
+
+/** SA-092: `levels` is the complete allowed set, a subset of the Executor's catalog levels. */
+export interface LevelsRequest extends ChangeRequest {
+  levels: ModelTier[];
+}
+
+/**
+ * What one command changes. `next` returns the new policy, or an error code when the
+ * command does not fit the current policy; `before`/`after` are what the audit and
+ * the recovery marker record (null = no restriction).
+ */
+interface PolicyChange {
+  kind: 'availability' | 'levels';
+  /** Echo of the command for audit entries. */
+  input: Record<string, unknown>;
+  read: (policy: ProjectOperatorConfig) => unknown;
+  next: (current: ProjectOperatorConfig) => ProjectOperatorConfig | 'invalid_request';
 }
 
 export interface AvailabilityContext {
@@ -59,11 +82,12 @@ export interface AvailabilityOutcome {
 }
 
 interface PendingChange {
+  kind?: PolicyChange['kind'];
   requestId: string;
   projectId: string;
   executorId: string;
-  before: string[];
-  after: string[];
+  before: unknown;
+  after: unknown;
   revisionBefore: string;
   revisionAfter: string;
   startedAt: string;
@@ -96,8 +120,6 @@ function readPending(projectId: string): PendingChange | undefined {
       const p = value as Record<string, unknown>;
       if (
         typeof p.requestId === 'string' &&
-        Array.isArray(p.before) &&
-        Array.isArray(p.after) &&
         typeof p.revisionBefore === 'string' &&
         typeof p.revisionAfter === 'string'
       )
@@ -130,6 +152,28 @@ export function nextAllowlist(current: readonly string[], executorId: string, en
   return current.filter((id) => id !== executorId);
 }
 
+/**
+ * SA-092: the policy after allowing exactly `levels` for `executorId`. Levels must be
+ * offered by the Operator catalog (this narrows, never widens it); allowing every
+ * catalog level removes the restriction, so the stored policy has one spelling for
+ * "unrestricted". Every other key, including other Executors' entries, is kept.
+ */
+export function nextExecutorLevels(
+  current: ProjectOperatorConfig,
+  executorId: ExecutorId,
+  levels: readonly ModelTier[],
+): ProjectOperatorConfig | 'invalid_request' {
+  const catalog = catalogLevelsFor(executorId, current);
+  if (!current.modelTiers || levels.some((tier) => !catalog.includes(tier)))
+    return 'invalid_request';
+  const restriction = { ...current.executorLevels };
+  if (catalog.every((tier) => levels.includes(tier))) delete restriction[executorId];
+  else restriction[executorId] = catalog.filter((tier) => levels.includes(tier));
+  const next: ProjectOperatorConfig = { ...current, executorLevels: restriction };
+  if (!Object.keys(restriction).length) delete next.executorLevels;
+  return next;
+}
+
 function auditEntry(
   projectId: string | null,
   executorId: string,
@@ -157,7 +201,8 @@ function auditEntry(
 /** Rejections are audited best-effort; they change nothing, so a failed audit cannot hide a change. */
 function reject(
   errorCode: NonNullable<AvailabilityOutcome['errorCode']>,
-  request: AvailabilityRequest,
+  request: ChangeRequest,
+  change: PolicyChange,
   auditProjectId: string | null,
   actorType: 'human' | 'unknown',
   policyDecision: PolicyDecision | null = null,
@@ -167,7 +212,7 @@ function reject(
     auditProjectId,
     request.executorId,
     'rejected',
-    { requestId: request.requestId, enabled: request.enabled, errorCode },
+    { ...change.input, errorCode },
     policyDecision,
     actorType,
   );
@@ -179,15 +224,48 @@ export function setExecutorAvailability(
   request: AvailabilityRequest,
   context: AvailabilityContext,
 ): AvailabilityOutcome {
+  return applyChange(request, context, {
+    kind: 'availability',
+    input: { requestId: request.requestId, enabled: request.enabled },
+    read: (policy) => [...policy.allowedExecutors],
+    next: (current) => ({
+      ...current,
+      allowedExecutors: nextAllowlist(
+        current.allowedExecutors,
+        request.executorId,
+        request.enabled,
+      ),
+    }),
+  });
+}
+
+/** SA-092: same service for the tiers an Executor may run. */
+export function setExecutorLevels(
+  request: LevelsRequest,
+  context: AvailabilityContext,
+): AvailabilityOutcome {
+  return applyChange(request, context, {
+    kind: 'levels',
+    input: { requestId: request.requestId, levels: [...request.levels] },
+    read: (policy) => policy.executorLevels?.[request.executorId] ?? null,
+    next: (current) => nextExecutorLevels(current, request.executorId, request.levels),
+  });
+}
+
+function applyChange(
+  request: ChangeRequest,
+  context: AvailabilityContext,
+  change: PolicyChange,
+): AvailabilityOutcome {
   // Privilege before anything Project-specific, so unprivileged clients learn nothing.
-  if (!context.privileged) return reject('unauthorized', request, null, 'unknown');
+  if (!context.privileged) return reject('unauthorized', request, change, null, 'unknown');
   if (!context.boundProjectId || context.boundProjectId !== request.projectId)
-    return reject('unknown_project', request, null, 'human');
+    return reject('unknown_project', request, change, null, 'human');
   const { projectId } = request;
   let result: AvailabilityOutcome | undefined;
   try {
     result = withMachineAdmission(`executor-availability-${randomUUID()}`, () =>
-      withConfigLock(() => applyLocked(request, projectId)),
+      withConfigLock(() => applyLocked(request, change, projectId)),
     );
   } catch (error) {
     console.error('[Pixel Agents] Executor availability change failed:', (error as Error).message);
@@ -199,8 +277,13 @@ export function setExecutorAvailability(
   return result ?? { status: 'failed', errorCode: 'apply_failed' };
 }
 
-function applyLocked(request: AvailabilityRequest, projectId: string): AvailabilityOutcome {
-  if (hasPendingChange(projectId)) return reject('recovery_required', request, projectId, 'human');
+function applyLocked(
+  request: ChangeRequest,
+  change: PolicyChange,
+  projectId: string,
+): AvailabilityOutcome {
+  if (hasPendingChange(projectId))
+    return reject('recovery_required', request, change, projectId, 'human');
   // Strict re-read: an unreadable file is never treated as "no config".
   const raw = readRawConfig();
   const rawProjects = raw?.projects;
@@ -209,34 +292,41 @@ function applyLocked(request: AvailabilityRequest, projectId: string): Availabil
       ? (rawProjects as Record<string, unknown>)[projectId]
       : undefined;
   // A toggle never creates a Project or repairs an invalid policy.
-  if (rawPolicy === undefined) return reject('unknown_project', request, projectId, 'human');
+  if (rawPolicy === undefined)
+    return reject('unknown_project', request, change, projectId, 'human');
   const parsed = parseProjects({ [projectId]: rawPolicy });
   const current = parsed[projectId];
   if (!current || projectConfigError(parsed, projectId))
-    return reject('policy_denied', request, projectId, 'human');
+    return reject('policy_denied', request, change, projectId, 'human');
   const decision = evaluatePolicy(ACTION, 'human', current.autonomyLevel);
   if (decision.outcome !== 'allow')
-    return reject('policy_denied', request, projectId, 'human', decision);
+    return reject('policy_denied', request, change, projectId, 'human', decision);
   const revisionBefore = operatorRevision(current);
   if (request.expectedRevision !== revisionBefore)
-    return reject('revision_conflict', request, projectId, 'human', decision, revisionBefore);
-
-  const before = [...current.allowedExecutors];
-  const after = nextAllowlist(before, request.executorId, request.enabled);
-  if (canonicalJson(after) === canonicalJson(before)) {
-    const entry = auditEntry(
+    return reject(
+      'revision_conflict',
+      request,
+      change,
       projectId,
-      request.executorId,
-      'unchanged',
-      { requestId: request.requestId, enabled: request.enabled, before, after },
+      'human',
       decision,
+      revisionBefore,
     );
+
+  const nextPolicy = change.next(current);
+  if (nextPolicy === 'invalid_request')
+    return reject('invalid_request', request, change, projectId, 'human', decision, revisionBefore);
+  const before = change.read(current);
+  const after = change.read(nextPolicy);
+  const revisionAfter = operatorRevision(nextPolicy);
+  const detail = { ...change.input, kind: change.kind, before, after };
+  if (revisionAfter === revisionBefore) {
+    const entry = auditEntry(projectId, request.executorId, 'unchanged', detail, decision);
     recordAudit(entry.action, entry.resourceType, entry.resourceId, entry.outcome, entry);
     return { status: 'unchanged', revision: revisionBefore };
   }
-  const nextPolicy: ProjectOperatorConfig = { ...current, allowedExecutors: after };
-  const revisionAfter = operatorRevision(nextPolicy);
-  const change: PendingChange = {
+  const pending: PendingChange = {
+    kind: change.kind,
     requestId: request.requestId,
     projectId,
     executorId: request.executorId,
@@ -246,11 +336,10 @@ function applyLocked(request: AvailabilityRequest, projectId: string): Availabil
     revisionAfter,
     startedAt: new Date().toISOString(),
   };
-  const detail = { requestId: request.requestId, enabled: request.enabled, before, after };
 
   // 1. Durable intent: from here on, workers for this Project refuse to launch.
   try {
-    writePending(change);
+    writePending(pending);
   } catch {
     return { status: 'failed', errorCode: 'apply_failed', revision: revisionBefore };
   }
@@ -262,7 +351,7 @@ function applyLocked(request: AvailabilityRequest, projectId: string): Availabil
   } catch {
     return releaseOrRecover(projectId, 'audit_failed', revisionBefore);
   }
-  // 3. Persist (only allowedExecutors changes; every other key is kept verbatim) and verify.
+  // 3. Persist (only the changed key differs; every other key is kept verbatim) and verify.
   let persisted = false;
   try {
     writeRawConfigFile({
@@ -323,6 +412,7 @@ export interface RecoveryReport {
   /** Which side of the interrupted change is on disk now. */
   found?: 'before' | 'after' | 'other';
   allowedExecutors?: string[];
+  executorLevels?: ProjectOperatorConfig['executorLevels'];
 }
 
 /**
@@ -352,14 +442,21 @@ export function recoverExecutorAvailability(projectId: string): RecoveryReport {
         {
           requestId: pending?.requestId ?? null,
           found,
+          kind: pending?.kind ?? 'availability',
           allowedExecutors: current?.allowedExecutors ?? null,
+          executorLevels: current?.executorLevels ?? null,
           markerReadable: !!pending,
         },
         null,
       ),
     );
     clearPending(projectId);
-    return { status: 'recovered', found, allowedExecutors: current?.allowedExecutors };
+    return {
+      status: 'recovered',
+      found,
+      allowedExecutors: current?.allowedExecutors,
+      ...(current?.executorLevels ? { executorLevels: current.executorLevels } : {}),
+    };
   });
 }
 
@@ -400,7 +497,7 @@ export function runExecutorsCommand(argv: string[], out: (line: string) => void 
         ? 'the change was NOT persisted'
         : 'the config matches neither side of the change; review it';
   out(
-    `Recovered ${argv[1]}: ${state}. allowedExecutors = ${JSON.stringify(report.allowedExecutors ?? null)}. Launches are open again.`,
+    `Recovered ${argv[1]}: ${state}. allowedExecutors = ${JSON.stringify(report.allowedExecutors ?? null)}${report.executorLevels ? `, executorLevels = ${JSON.stringify(report.executorLevels)}` : ''}. Launches are open again.`,
   );
 }
 
@@ -420,7 +517,8 @@ export function availabilityDecisionKey(scope: string, code: string): string {
 
 const BLOCK_TEXT: Record<SelectionBlock['code'], string> = {
   no_enabled_executor: 'ningún executor que la política admite para ella está habilitado',
-  no_allowed_level: 'la política no ofrece ningún executor para su nivel',
+  no_allowed_level:
+    'ni la política ni los niveles que el operador permite ofrecen ningún executor para su nivel',
   not_installed: 'el CLI del executor habilitado no está instalado',
   unsupported_version: 'el CLI del executor habilitado no tiene la versión u opciones probadas',
   auth_required: 'el CLI del executor habilitado necesita que el operador inicie sesión',
@@ -455,7 +553,7 @@ export async function escalateUnavailable(
       key,
       `${taskKey} no puede lanzarse: ${BLOCK_TEXT[block.code]}.`,
       ...(excluded.length ? [`Descartados: ${excluded.join('; ')}.`] : []),
-      'Habilita un executor en la oficina, ajusta allowedExecutors/modelTiers en ~/.pixel-agents/config.json, o instala, actualiza o autentica su CLI.',
+      'Habilita un executor o sus niveles en la oficina, ajusta allowedExecutors/executorLevels/modelTiers en ~/.pixel-agents/config.json, o instala, actualiza o autentica su CLI.',
       'Se cierra sola cuando una ejecución con el mismo alcance vuelve a encontrar un executor admisible.',
     ].join('\n'),
     blocks: [taskKey],

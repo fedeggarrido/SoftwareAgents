@@ -8,16 +8,23 @@ import { AgentStateStore } from '../src/agentStateStore.js';
 import { AuditLog } from '../src/auditLog.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
 import { configureCompanyControl } from '../src/companyControl.js';
-import { readConfig, writeConfig } from '../src/configPersistence.js';
+import { parseProjects, readConfig, writeConfig } from '../src/configPersistence.js';
 import {
   type AvailabilityRequest,
   executorAuthorityBlock,
   hasPendingChange,
+  type LevelsRequest,
   nextAllowlist,
+  nextExecutorLevels,
   runExecutorsCommand,
   setExecutorAvailability,
+  setExecutorLevels,
 } from '../src/executorAvailability.js';
-import { operatorRevision } from '../src/executorState.js';
+import {
+  buildExecutorState,
+  operatorRevision,
+  parseSetExecutorLevels,
+} from '../src/executorState.js';
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
@@ -96,6 +103,7 @@ describe('setExecutorAvailability', () => {
     expect(JSON.parse(audit('test')[1].outcome.detail!)).toEqual({
       requestId: 'req-1',
       enabled: false,
+      kind: 'availability',
       before: ['claude', 'codex', 'legacy-x'],
       after: ['claude', 'legacy-x'],
     });
@@ -309,5 +317,179 @@ describe('over the wire', () => {
     expect(viewer.mock.calls.map(([m]) => m).find((m) => m.type === 'executorState')).toMatchObject(
       { canManage: false },
     );
+  });
+});
+
+describe('SA-092 executor levels', () => {
+  const tiered: ProjectOperatorConfig = {
+    ...operator,
+    modelTiers: {
+      maxTier: 'deep',
+      tiers: {
+        economy: { candidates: [{ executor: 'codex', model: 'test-economy-model' }] },
+        standard: {
+          candidates: [
+            { executor: 'claude', model: 'test-standard-model' },
+            { executor: 'codex', model: 'test-standard-alternative' },
+          ],
+          fallbackTo: 'economy',
+        },
+        deep: {
+          candidates: [{ executor: 'claude', model: 'test-deep-model' }],
+          fallbackTo: 'standard',
+        },
+      },
+    },
+  };
+  const levels = (over: Partial<LevelsRequest> = {}): LevelsRequest => ({
+    projectId: 'test',
+    executorId: 'codex',
+    levels: ['standard'],
+    requestId: 'lvl-1',
+    expectedRevision: operatorRevision(tiered),
+    ...over,
+  });
+  beforeEach(() => {
+    const raw = rawFile();
+    raw.projects.test = tiered;
+    fs.writeFileSync(configFile(), JSON.stringify(raw));
+  });
+
+  it('narrows one Executor through the same audited service, and all levels lift it', () => {
+    const outcome = setExecutorLevels(levels(), ok);
+    const narrowed: ProjectOperatorConfig = { ...tiered, executorLevels: { codex: ['standard'] } };
+    expect(outcome).toEqual({ status: 'applied', revision: operatorRevision(narrowed) });
+    expect(rawFile().projects.test).toEqual(narrowed);
+    expect(audit('test').map((e) => e.outcome.status)).toEqual(['intent', 'applied']);
+    expect(JSON.parse(audit('test')[1].outcome.detail!)).toEqual({
+      requestId: 'lvl-1',
+      levels: ['standard'],
+      kind: 'levels',
+      before: null,
+      after: ['standard'],
+    });
+    // A level change is an authority change: runs started under the old policy drop.
+    expect(executorAuthorityBlock('test', tiered)).toMatch(/changed since this run started/);
+    // Listing every catalog level is "unrestricted": the key disappears, the policy is back.
+    expect(
+      setExecutorLevels(
+        levels({ levels: ['economy', 'standard'], expectedRevision: outcome.revision }),
+        ok,
+      ),
+    ).toEqual({ status: 'applied', revision: operatorRevision(tiered) });
+    expect(rawFile().projects.test).toEqual(tiered);
+    expect(
+      setExecutorLevels(
+        levels({ levels: ['standard', 'economy'], expectedRevision: operatorRevision(tiered) }),
+        ok,
+      ),
+    ).toEqual({ status: 'unchanged', revision: operatorRevision(tiered) });
+  });
+
+  it('an empty list blocks the Executor at every level and the office says so', () => {
+    expect(setExecutorLevels(levels({ levels: [] }), ok).status).toBe('applied');
+    const current = readConfig().projects.test;
+    expect(current.executorLevels).toEqual({ codex: [] });
+    const state = buildExecutorState({
+      projectId: 'test',
+      operator: current,
+      snapshot: {
+        allowedExecutors: current.allowedExecutors,
+        machinePolicy: { quotaThresholds: {}, maxConcurrent: { claude: 1, codex: 1 } },
+        capacities: {},
+        active: { claude: 0, codex: 0 },
+        nowS: 100,
+      },
+      sequence: 0,
+      canManage: true,
+      nowS: 100,
+    });
+    const codex = state.executors.find((e) => e.executorId === 'codex')!;
+    expect(codex).toMatchObject({
+      enabled: true,
+      eligible: false,
+      levels: [],
+      catalogLevels: ['economy', 'standard'],
+    });
+    expect(codex.reasonCodes).toContain('no_allowed_level');
+    expect(state.executors.find((e) => e.executorId === 'claude')).toMatchObject({
+      levels: ['standard', 'deep'],
+      catalogLevels: ['standard', 'deep'],
+    });
+  });
+
+  it('never widens the catalog: a level it does not offer, or no catalog, is invalid', () => {
+    const before = fs.readFileSync(configFile(), 'utf8');
+    expect(setExecutorLevels(levels({ levels: ['deep'] }), ok)).toMatchObject({
+      status: 'rejected',
+      errorCode: 'invalid_request',
+    });
+    expect(fs.readFileSync(configFile(), 'utf8')).toBe(before);
+    expect(nextExecutorLevels(operator, 'claude', [])).toBe('invalid_request');
+    expect(setExecutorLevels(levels(), { privileged: false, boundProjectId: 'test' })).toEqual({
+      status: 'rejected',
+      errorCode: 'unauthorized',
+    });
+    // Other Executors' restrictions are kept verbatim.
+    const both = nextExecutorLevels({ ...tiered, executorLevels: { claude: ['deep'] } }, 'codex', [
+      'economy',
+    ]);
+    expect(both).toMatchObject({ executorLevels: { claude: ['deep'], codex: ['economy'] } });
+  });
+
+  it('the Operator schema accepts only known tiers per catalog Executor', () => {
+    const parse = (executorLevels: unknown) =>
+      parseProjects({ p: { ...tiered, executorLevels } }).p?.executorLevels;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(parse({ claude: ['deep'], codex: [] })).toEqual({ claude: ['deep'], codex: [] });
+    expect(parse({ claude: ['ultra'] })).toBeUndefined();
+    expect(parse({ local: ['deep'] })).toBeUndefined();
+    expect(parse({ claude: ['deep', 'deep'] })).toBeUndefined();
+  });
+
+  it('validates the wire message like setExecutorEnabled', () => {
+    const msg = {
+      type: 'setExecutorLevels',
+      projectId: 'test',
+      executorId: 'codex',
+      levels: ['standard'],
+      requestId: 'r',
+      expectedRevision: 'x',
+    };
+    expect(parseSetExecutorLevels(msg)).toMatchObject({ ok: true });
+    for (const bad of [
+      { ...msg, levels: ['standard', 'standard'] },
+      { ...msg, levels: ['ultra'] },
+      { ...msg, levels: 'standard' },
+      { ...msg, extra: 1 },
+    ])
+      expect(parseSetExecutorLevels(bad)).toMatchObject({
+        ok: false,
+        errorCode: 'invalid_request',
+      });
+    expect(parseSetExecutorLevels({ ...msg, executorId: 'local' })).toMatchObject({
+      ok: false,
+      errorCode: 'unknown_executor',
+      echo: { requestId: 'r' },
+    });
+  });
+
+  it('recovery reports the level restriction actually on disk', () => {
+    const append = AuditLog.prototype.append;
+    let calls = 0;
+    vi.spyOn(AuditLog.prototype, 'append').mockImplementation(function (this: AuditLog, input) {
+      if (++calls === 2) throw new Error('audit disk full');
+      return append.call(this, input);
+    });
+    expect(setExecutorLevels(levels(), ok)).toMatchObject({ errorCode: 'recovery_required' });
+    vi.mocked(AuditLog.prototype.append).mockRestore();
+    const lines: string[] = [];
+    runExecutorsCommand(['recover', 'test'], (line) => lines.push(line));
+    expect(lines[0]).toMatch(
+      /the change was persisted.*executorLevels = \{"codex":\["standard"\]\}/,
+    );
+    const recovered = audit('test').at(-1)!;
+    expect(recovered.outcome.status).toBe('recovered');
+    expect(JSON.parse(recovered.outcome.detail!)).toMatchObject({ kind: 'levels' });
   });
 });

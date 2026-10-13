@@ -15,7 +15,12 @@ import {
 } from './constants.js';
 import { retryFileOperation } from './fileContention.js';
 import { withLeaseLock } from './leaseLock.js';
-import { ModelTierConfigError, tierPolicySchema, validateModelTiers } from './modelTiers.js';
+import {
+  MODEL_TIERS,
+  ModelTierConfigError,
+  tierPolicySchema,
+  validateModelTiers,
+} from './modelTiers.js';
 import { compileSchema, SchemaValidationError } from './schemaValidation.js';
 
 export interface AdapterSettings {
@@ -101,6 +106,21 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
     allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
     modelTiers: tierPolicySchema,
+    executorLevels: {
+      type: 'object',
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        ['claude', 'codex'].map((id) => [
+          id,
+          {
+            type: 'array',
+            maxItems: MODEL_TIERS.length,
+            uniqueItems: true,
+            items: { enum: [...MODEL_TIERS] },
+          },
+        ]),
+      ),
+    },
     protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
     binaryPaths: numberMap(nonEmptyString),
     quotaThresholds: numberMap({ ...nonNegativeNumber, maximum: 100 }),

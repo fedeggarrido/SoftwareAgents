@@ -74,6 +74,7 @@ export type ClientMessage =
   | CompanyAutopilot
   | CompanyDecision
   | SetExecutorEnabled
+  | SetExecutorLevels
   | RequestExecutorState;
 
 export interface ProviderCapabilities {
@@ -558,6 +559,7 @@ export interface ExecutorAvailability {
   version: string | null;
   authentication: ExecutorAuthentication;
   levels: ModelTier[];
+  catalogLevels?: ModelTier[];
   quotaGate: ExecutorQuotaGate;
   activeExecutions: number | null;
   concurrencyLimit: number | null;
@@ -838,6 +840,15 @@ export interface SetExecutorEnabled {
   projectId: string;
   executorId: ExecutorId;
   enabled: boolean;
+  requestId: string;
+  expectedRevision: string;
+}
+
+export interface SetExecutorLevels {
+  type: 'setExecutorLevels';
+  projectId: string;
+  executorId: ExecutorId;
+  levels: ModelTier[];
   requestId: string;
   expectedRevision: string;
 }

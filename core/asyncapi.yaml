@@ -158,6 +158,7 @@ components:
         - $ref: '#/components/schemas/CompanyAutopilot'
         - $ref: '#/components/schemas/CompanyDecision'
         - $ref: '#/components/schemas/SetExecutorEnabled'
+        - $ref: '#/components/schemas/SetExecutorLevels'
         - $ref: '#/components/schemas/RequestExecutorState'
       discriminator: type
 
@@ -1144,6 +1145,45 @@ components:
           maxLength: 128
           description: Opaque revision from the last executorState; a stale one is a revision_conflict.
 
+    SetExecutorLevels:
+      description: |
+        Operator command (privileged clients only, SA-092): the model tiers an
+        Executor may run for NEW Executions of a Project. An absolute state: levels
+        is the complete allowed set, a subset of that Executor's catalogLevels;
+        listing every catalog level removes the restriction, an empty list blocks
+        the Executor at every level. It only narrows what the Operator catalog
+        already offers: it never adds a candidate, assigns a Task or picks a Model,
+        and a disallowed level never downgrades a Task to a lower one. Same service,
+        policy, audit and recovery as setExecutorEnabled; answered point-to-point
+        with executorToggleResult.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, executorId, levels, requestId, expectedRevision]
+      properties:
+        type:
+          const: setExecutorLevels
+        projectId:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 64
+        executorId:
+          $ref: '#/components/schemas/ExecutorId'
+        levels:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/ModelTier'
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        expectedRevision:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Opaque revision from the last executorState; a stale one is a revision_conflict.
+
     RequestExecutorState:
       description: Ask for a fresh executorState of the server's own Project (reconnect/resync). Read-only and cheap; never starts probes.
       type: object
@@ -1796,7 +1836,16 @@ components:
           maxItems: 3
           items:
             $ref: '#/components/schemas/ModelTier'
-          description: Tiers whose Operator catalog lists this Executor, capped by maxTier (SA-084). Empty without a catalog.
+          description: Tiers this Executor may run now — catalogLevels narrowed by the Operator's executorLevels (SA-092). Empty without a catalog.
+        catalogLevels:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/ModelTier'
+          description: |
+            Tiers whose Operator catalog lists this Executor, capped by maxTier
+            (SA-084): the levels setExecutorLevels may allow. Absent from servers
+            without per-level controls.
         quotaGate:
           $ref: '#/components/schemas/ExecutorQuotaGate'
         activeExecutions:
@@ -1846,7 +1895,7 @@ components:
             $ref: '#/components/schemas/ExecutorAvailability'
     ExecutorToggleResult:
       description: |
-        Point-to-point answer to setExecutorEnabled, correlated by requestId.
+        Point-to-point answer to setExecutorEnabled and setExecutorLevels, correlated by requestId.
         applied means applied AND persisted AND audited. A server that cannot
         change availability yet answers rejected with not_supported.
       type: object

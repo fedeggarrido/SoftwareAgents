@@ -39,6 +39,8 @@ export interface ExecutorPreference {
 export type ModelPolicy = Record<string, ExecutorPreference[]>;
 export interface SelectionSnapshot {
   allowedExecutors: readonly string[];
+  /** SA-092: Operator narrowing of the tiers each Executor may run (absent = all). */
+  executorLevels?: Partial<Record<ExecutorId, readonly ModelTier[]>>;
   machinePolicy: MachineQuotaPolicy | undefined;
   capacities: Partial<Record<ExecutorId, CapacitySnapshot>>;
   active: Partial<Record<ExecutorId, number>>;
@@ -72,6 +74,8 @@ export interface CandidateExclusion {
   tier?: ModelTier;
   code:
     | 'operator_disabled'
+    /** SA-092: the Operator does not allow this Executor at this tier. */
+    | 'level_disabled'
     | Extract<LaunchBlockCode, 'not_installed' | 'unsupported_version' | 'auth_required'>;
 }
 
@@ -100,8 +104,11 @@ export function availabilityVerdict(executor: ExecutorId, snapshot: SelectionSna
 export function excludeCandidate(
   executor: ExecutorId,
   snapshot: SelectionSnapshot,
+  tier?: ModelTier,
 ): CandidateExclusion['code'] | undefined {
   if (!snapshot.allowedExecutors.includes(executor)) return 'operator_disabled';
+  const levels = snapshot.executorLevels?.[executor];
+  if (tier && levels && !levels.includes(tier)) return 'level_disabled';
   const verdict = availabilityVerdict(executor, snapshot);
   return verdict?.needsOperator ? (verdict.code as CandidateExclusion['code']) : undefined;
 }
@@ -125,7 +132,8 @@ export function unprovenWait(
 /**
  * Deterministic: with no candidate at all the policy offers no level; when every
  * candidate was excluded, the first technical cause in preference order wins over
- * a plain Operator disable (enabling another Executor would not fix it).
+ * an Operator choice (enabling another Executor would not fix it), and a level the
+ * Operator disallowed (SA-092) is reported as no allowed level before a plain disable.
  */
 export function selectionBlock(
   candidates: number,
@@ -134,7 +142,10 @@ export function selectionBlock(
 ): SelectionBlock | undefined {
   if (waited) return undefined;
   if (!candidates) return { code: 'no_allowed_level', exclusions };
-  for (const { code } of exclusions) if (code !== 'operator_disabled') return { code, exclusions };
+  for (const { code } of exclusions)
+    if (code !== 'operator_disabled' && code !== 'level_disabled') return { code, exclusions };
+  if (exclusions.some((e) => e.code === 'level_disabled'))
+    return { code: 'no_allowed_level', exclusions };
   return { code: 'no_enabled_executor', exclusions };
 }
 

@@ -202,6 +202,29 @@ describe('SA-084 tiers with availability', () => {
       }).block,
     ).toMatchObject({ code: 'unsupported_version' });
   });
+  it('SA-092: a disallowed level skips that candidate in the same tier', () => {
+    const result = select({ executorLevels: { claude: ['economy'] } });
+    expect(result).toMatchObject({ tier: 'standard', choice: { executor: 'codex' } });
+    expect(result.exclusions).toEqual([
+      { executor: 'claude', tier: 'standard', code: 'level_disabled' },
+    ]);
+    expect(result.reason).toMatch(/standard\/claude: level disabled by operator/);
+  });
+  it('SA-092: no allowed candidate at the tier blocks and never downgrades it', () => {
+    // economy (fallbackTo of standard) still allows codex: quality is kept anyway.
+    const result = select({ executorLevels: { claude: [], codex: ['economy'] } });
+    expect(result.choice).toBeNull();
+    expect(result.tier).toBe('standard');
+    expect(result.downgrades).toEqual([]);
+    expect(result.block).toMatchObject({ code: 'no_allowed_level' });
+    // A technical cause still wins: allowing a level would not fix a missing CLI.
+    expect(
+      select({
+        executorLevels: { codex: [] },
+        availability: { claude: ready({ installation: 'missing' }), codex: ready() },
+      }).block,
+    ).toMatchObject({ code: 'not_installed' });
+  });
   it('quota and concurrency waits are never a block', () => {
     expect(select({ active: { claude: 1, codex: 1 } }).block).toBeUndefined();
     expect(selectionBlock(2, true, [{ executor: 'claude', code: 'operator_disabled' }])).toBe(

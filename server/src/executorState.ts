@@ -9,6 +9,7 @@ import type {
   ModelTier,
   RequestExecutorState,
   SetExecutorEnabled,
+  SetExecutorLevels,
 } from '../../core/src/messages.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { canonicalJson } from './configPersistence.js';
@@ -63,6 +64,38 @@ export function parseSetExecutorEnabled(msg: Record<string, unknown>): ParsedSet
   return { ok: true, msg: msg as unknown as SetExecutorEnabled };
 }
 
+export type ParsedSetExecutorLevels =
+  { ok: true; msg: SetExecutorLevels } | Extract<ParsedSetExecutorEnabled, { ok: false }>;
+
+/** SA-092: same rules as setExecutorEnabled; levels is a duplicate-free list of known tiers. */
+export function parseSetExecutorLevels(msg: Record<string, unknown>): ParsedSetExecutorLevels {
+  const keys = ['type', 'projectId', 'executorId', 'levels', 'requestId', 'expectedRevision'];
+  const echo =
+    boundedString(msg.requestId, MAX_TOKEN) &&
+    boundedString(msg.projectId, MAX_ID) &&
+    boundedString(msg.executorId, MAX_ID)
+      ? { projectId: msg.projectId, executorId: msg.executorId, requestId: msg.requestId }
+      : undefined;
+  const levels = msg.levels;
+  if (
+    msg.type !== 'setExecutorLevels' ||
+    !exactKeys(msg, keys) ||
+    !Array.isArray(levels) ||
+    levels.length > MODEL_TIERS.length ||
+    new Set(levels).size !== levels.length ||
+    !levels.every((tier) => (MODEL_TIERS as readonly unknown[]).includes(tier)) ||
+    !boundedString(msg.projectId, MAX_ID) ||
+    !PROJECT_ID.test(msg.projectId) ||
+    !boundedString(msg.requestId, MAX_TOKEN) ||
+    !boundedString(msg.expectedRevision, MAX_TOKEN) ||
+    typeof msg.executorId !== 'string'
+  )
+    return { ok: false, errorCode: 'invalid_request', ...(echo ? { echo } : {}) };
+  if (!isExecutorId(msg.executorId))
+    return { ok: false, errorCode: 'unknown_executor', ...(echo ? { echo } : {}) };
+  return { ok: true, msg: msg as unknown as SetExecutorLevels };
+}
+
 export function parseRequestExecutorState(
   msg: Record<string, unknown>,
 ): RequestExecutorState | undefined {
@@ -91,7 +124,11 @@ export function operatorRevision(operator: ProjectOperatorConfig | undefined): s
     .slice(0, 16);
 }
 
-function levelsFor(executor: ExecutorId, operator: ProjectOperatorConfig): ModelTier[] {
+/** Tiers the Operator catalog offers this Executor, capped by maxTier (SA-084). */
+export function catalogLevelsFor(
+  executor: ExecutorId,
+  operator: ProjectOperatorConfig,
+): ModelTier[] {
   const catalog = operator.modelTiers;
   if (!catalog) return [];
   const cap = MODEL_TIERS.indexOf(catalog.maxTier);
@@ -99,6 +136,16 @@ function levelsFor(executor: ExecutorId, operator: ProjectOperatorConfig): Model
     (tier, index) =>
       index <= cap && catalog.tiers[tier]?.candidates.some((c) => c.executor === executor),
   );
+}
+
+/** What the Executor may run now: the catalog narrowed by executorLevels (SA-092). */
+export function allowedLevelsFor(
+  executor: ExecutorId,
+  operator: ProjectOperatorConfig,
+): ModelTier[] {
+  const restriction = operator.executorLevels?.[executor];
+  const catalog = catalogLevelsFor(executor, operator);
+  return restriction ? catalog.filter((tier) => restriction.includes(tier)) : catalog;
 }
 
 export interface ExecutorStateInput {
@@ -171,7 +218,7 @@ export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
       return base;
     }
     const enabled = operator.allowedExecutors.includes(id);
-    const levels = levelsFor(id, operator);
+    const levels = allowedLevelsFor(id, operator);
     const active = snapshot.active[id] ?? null;
     const limit = snapshot.machinePolicy?.maxConcurrent?.[id] ?? null;
     const gate = quotaGate(
@@ -223,6 +270,7 @@ export function buildExecutorState(input: ExecutorStateInput): ExecutorState {
         gate.status !== 'wait' &&
         !(operator.modelTiers && !levels.length),
       levels,
+      catalogLevels: catalogLevelsFor(id, operator),
       quotaGate: quota,
       activeExecutions: active,
       concurrencyLimit: limit,

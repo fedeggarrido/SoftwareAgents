@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 
+import type { ModelTier } from '../../../core/src/messages.js';
 import { executorPanelView } from '../office/executorPanelView.js';
 import {
   expirePending,
   getExecutorStore,
   setExecutorStore,
+  startLevelToggle,
   startToggle,
   useExecutorStore,
 } from '../office/executorStore.js';
@@ -34,6 +36,10 @@ export function ExecutorPanel() {
 
   const toggle = (executorId: string, enabled: boolean) => {
     const message = startToggle(executorId, enabled);
+    if (message) transport.send(message);
+  };
+  const toggleLevel = (executorId: string, tier: ModelTier, allowed: boolean) => {
+    const message = startLevelToggle(executorId, tier, allowed);
     if (message) transport.send(message);
   };
 
@@ -74,6 +80,32 @@ export function ExecutorPanel() {
           <span className="min-w-0">
             <span className="text-text">{row.label}</span>{' '}
             <span style={{ color: row.color }}>● {row.status}</span>
+            {row.levelControls && (
+              <span
+                className="flex flex-wrap gap-4 mt-2"
+                role="group"
+                aria-label={`Niveles permitidos de ${row.label}`}
+              >
+                {row.levelControls.map((level) => (
+                  <button
+                    key={level.tier}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={level.allowed}
+                    aria-label={level.ariaLabel}
+                    disabled={row.pending}
+                    onClick={() => toggleLevel(row.executorId, level.tier, !level.allowed)}
+                    className={`border border-border px-4 py-1 leading-none ${
+                      level.allowed
+                        ? 'bg-active-bg text-text'
+                        : 'bg-bg-dark text-text-muted line-through'
+                    } ${row.pending ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-btn-hover'}`}
+                  >
+                    {level.label}
+                  </button>
+                ))}
+              </span>
+            )}
             {row.details.map((line, i) => (
               <span key={i} className="block text-text-muted mt-2">
                 {line}
@@ -89,7 +121,7 @@ export function ExecutorPanel() {
       ))}
       <div className="text-2xs text-text-muted">
         {view.readOnlyNotice ??
-          'Tú eliges qué puede usarse. El programa decide quién hace cada tarea. Desactivar deja terminar las ejecuciones en curso.'}
+          'Tú eliges qué executors y niveles pueden usarse. El programa decide quién hace cada tarea. Desactivar deja terminar las ejecuciones en curso.'}
       </div>
       <div className="sr-only" aria-live="polite">
         {view.live}

@@ -325,11 +325,13 @@ export function selectModelTier(
     let quotaBlocked = false;
     for (const choice of definition.candidates) {
       candidates++;
-      const excluded = excludeCandidate(choice.executor, snapshot);
+      // An Operator exclusion is not a quota wait: it never triggers fallback, so a
+      // disallowed level cannot push a Task down to a lower tier (SA-092).
+      const excluded = excludeCandidate(choice.executor, snapshot, current);
       if (excluded) {
         exclusions.push({ executor: choice.executor, tier: current, code: excluded });
         reasons.push(
-          `${current}/${choice.executor}: ${excluded === 'operator_disabled' ? 'operator disabled' : excluded}`,
+          `${current}/${choice.executor}: ${excluded === 'operator_disabled' ? 'operator disabled' : excluded === 'level_disabled' ? 'level disabled by operator' : excluded}`,
         );
         continue;
       }

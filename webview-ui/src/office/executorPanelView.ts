@@ -1,4 +1,4 @@
-import type { ExecutorAvailability } from '../../../core/src/messages.js';
+import type { ExecutorAvailability, ModelTier } from '../../../core/src/messages.js';
 import { EXECUTOR_STATUS_COLORS } from '../constants.js';
 import type { ExecutorStore } from './executorStore.js';
 
@@ -13,6 +13,15 @@ const LEVEL_TEXT: Record<string, string> = {
   deep: 'deep',
 };
 
+/** SA-092: one level the Operator may allow or disallow for this Executor. */
+export interface ExecutorLevelView {
+  tier: ModelTier;
+  label: string;
+  allowed: boolean;
+  /** Accessible name of the checkbox. */
+  ariaLabel: string;
+}
+
 export interface ExecutorRowView {
   executorId: string;
   label: string;
@@ -25,6 +34,11 @@ export interface ExecutorRowView {
   error: string | null;
   /** Accessible name of the switch. */
   ariaLabel: string;
+  /**
+   * Editable levels, only for a manager on a server that offers them (catalogLevels)
+   * and a Project with a level catalog. Read-only viewers see levels in `details`.
+   */
+  levelControls: ExecutorLevelView[] | null;
 }
 
 export interface ExecutorPanelView {
@@ -74,7 +88,16 @@ export function executorStatus(
 
 function details(e: ExecutorAvailability, nowS: number): string[] {
   const lines: string[] = [];
-  const levels = e.levels.map((l) => LEVEL_TEXT[l] ?? l).join(', ');
+  const disallowed = (e.catalogLevels ?? []).filter((l) => !e.levels.includes(l));
+  const levels = [
+    e.levels.map((l) => LEVEL_TEXT[l] ?? l).join(', ') ||
+      (e.catalogLevels?.length ? 'ningún nivel permitido' : ''),
+    disallowed.length
+      ? `(no permitido: ${disallowed.map((l) => LEVEL_TEXT[l] ?? l).join(', ')})`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const runs = e.activeExecutions === null ? '? ejecuciones' : `${e.activeExecutions} ejecuciones`;
   const limit = e.concurrencyLimit === null ? 'límite desconocido' : `límite ${e.concurrencyLimit}`;
   lines.push([levels || null, `${runs} / ${limit}`].filter(Boolean).join(' · '));
@@ -112,6 +135,8 @@ export function executorPanelView(store: ExecutorStore, nowMs: number): Executor
     const status = pending
       ? { text: 'Guardando…', color: EXECUTOR_STATUS_COLORS.unknown }
       : executorStatus(e, nowS);
+    const editable =
+      state.canManage && state.configurationStatus === 'ready' && !!e.catalogLevels?.length;
     return {
       executorId: e.executorId,
       label,
@@ -123,6 +148,18 @@ export function executorPanelView(store: ExecutorStore, nowMs: number): Executor
       details: details(e, nowS),
       error: store.errors[e.executorId] ?? null,
       ariaLabel: `${label} para nuevas tareas de ${state.projectId}: ${e.enabled ? 'activado' : 'desactivado'}, ${status.text}`,
+      levelControls: editable
+        ? e.catalogLevels!.map((tier) => {
+            const allowed = e.levels.includes(tier);
+            const text = LEVEL_TEXT[tier] ?? tier;
+            return {
+              tier,
+              label: text,
+              allowed,
+              ariaLabel: `Nivel ${text} de ${label} en ${state.projectId}: ${allowed ? 'permitido' : 'no permitido'}`,
+            };
+          })
+        : null,
     };
   });
   const allOff = state.executors.length > 0 && state.executors.every((e) => !e.enabled);

@@ -415,7 +415,8 @@ para SA-062). La coordinación entre procesos y los slots compartidos son los
 existentes (admisión Lamport + `executor-slots`); no hace falta el ledger de SA-037.
 
 **Sin executor elegible.** Si todos los candidatos quedan excluidos por causas que
-solo el operador corrige (`no_enabled_executor`, `no_allowed_level`,
+solo el operador corrige (`no_enabled_executor`, `no_allowed_level` —también cuando
+el operador no permite el nivel con `executorLevels`, SA-092—,
 `not_installed`, `unsupported_version`, `auth_required`), el worker abre una Human
 Decision (`requestedBy: system`) que pone la Task en `WAITING_HUMAN`, salvo que ya
 exista una abierta para el mismo Project, alcance y causa (primera línea del

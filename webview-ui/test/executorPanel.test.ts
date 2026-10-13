@@ -6,6 +6,7 @@ import { executorPanelView, executorStatus } from '../src/office/executorPanelVi
 import {
   applyExecutorState,
   applyToggleResult,
+  beginLevelToggle,
   beginToggle,
   emptyExecutorStore,
   type ExecutorStore,
@@ -193,6 +194,74 @@ describe('executor store: no optimistic update', () => {
     expect(applyExecutorState(s5, state({ sequence: 0, revision: 'r0' })).state!.revision).toBe(
       'r0',
     );
+  });
+});
+
+describe('SA-092 level controls', () => {
+  const tiered = () =>
+    withState(
+      state({
+        executors: [
+          row({ levels: ['deep'], catalogLevels: ['standard', 'deep'] }),
+          row({ executorId: 'codex', levels: [], catalogLevels: ['economy'] }),
+        ],
+      }),
+    );
+
+  it('sends the complete allowed set from the confirmed levels, in catalog order', () => {
+    const started = beginLevelToggle(tiered(), 'claude', 'standard', true, 0, 'lvl-1')!;
+    expect(started.message).toEqual({
+      type: 'setExecutorLevels',
+      projectId: 'softwareagents',
+      executorId: 'claude',
+      levels: ['standard', 'deep'],
+      requestId: 'lvl-1',
+      expectedRevision: 'r1',
+    });
+    // No optimism: the checkbox keeps what the server said while the row is pending.
+    const claude = executorPanelView(started.store, NOW_S * 1000)!.rows[0];
+    expect(claude.pending).toBe(true);
+    expect(claude.levelControls!.map((l) => l.allowed)).toEqual([false, true]);
+    expect(beginLevelToggle(started.store, 'claude', 'deep', false, 1, 'lvl-2')).toBeNull();
+    // Disallowing the last level is allowed: an empty list blocks the Executor.
+    expect(beginLevelToggle(tiered(), 'claude', 'deep', false, 0, 'x')!.message).toMatchObject({
+      levels: [],
+    });
+    // Never a level the catalog does not offer.
+    expect(beginLevelToggle(tiered(), 'codex', 'deep', true, 0, 'x')).toBeNull();
+  });
+
+  it('shows editable levels only to a manager of a server that offers them', () => {
+    const view = executorPanelView(tiered(), NOW_S * 1000)!;
+    expect(view.rows[0].levelControls).toEqual([
+      expect.objectContaining({ tier: 'standard', allowed: false }),
+      expect.objectContaining({ tier: 'deep', allowed: true }),
+    ]);
+    expect(view.rows[0].levelControls![0].ariaLabel).toBe(
+      'Nivel standard de Claude en softwareagents: no permitido',
+    );
+    expect(view.rows[0].details[0]).toMatch(/^deep \(no permitido: standard\) · /);
+    expect(view.rows[1].details[0]).toMatch(/^ningún nivel permitido \(no permitido: economy\)/);
+    const viewer = withState({ ...tiered().state!, canManage: false });
+    expect(executorPanelView(viewer, NOW_S * 1000)!.rows[0].levelControls).toBeNull();
+    expect(beginLevelToggle(viewer, 'claude', 'standard', true, 0, 'x')).toBeNull();
+    // A server without SA-092 sends no catalogLevels: no controls.
+    expect(executorPanelView(withState(state()), NOW_S * 1000)!.rows[0].levelControls).toBeNull();
+  });
+
+  it('a rejected level change keeps the levels and resyncs, like a toggle', () => {
+    const started = beginLevelToggle(tiered(), 'claude', 'standard', true, 0, 'lvl-1')!.store;
+    const failed = applyToggleResult(started, {
+      type: 'executorToggleResult',
+      projectId: 'softwareagents',
+      executorId: 'claude',
+      requestId: 'lvl-1',
+      status: 'rejected',
+      errorCode: 'invalid_request',
+    });
+    expect(failed.resync).toBe(true);
+    expect(failed.store.state!.executors[0].levels).toEqual(['deep']);
+    expect(executorPanelView(failed.store, NOW_S * 1000)!.rows[0].error).toMatch(/catálogo/);
   });
 });
 

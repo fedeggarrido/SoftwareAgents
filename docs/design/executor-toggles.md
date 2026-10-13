@@ -524,6 +524,27 @@ overlay con la razón registrada por el lanzamiento. Fuera de alcance: adapter V
 (standalone, como el resto de controles) y alternativas estructuradas en el overlay
 (viajan en `selectionReason` hasta que el contrato las proyecte).
 
+**SA-092 (T6, niveles por executor) — implementado.** Campo de operador
+`executorLevels` (por executor del catálogo, lista de `ModelTier`): ausente = todos los
+niveles del catálogo `modelTiers`; lista vacía = bloqueado en todos. Diferencias y
+decisiones:
+
+- Comando `setExecutorLevels` con el conjunto completo permitido (estado absoluto, como
+  el switch) y respuesta `executorToggleResult`. Mismo servicio y acción
+  (`change_executor_availability`): privilegio, binding, política humana, locks, CAS,
+  marcador, audit con `kind: levels` y recuperación por `executors recover`.
+- Solo estrecha el catálogo: un nivel que el catálogo no ofrece a ese executor, o un
+  Project sin `modelTiers`, es `invalid_request`; permitir todos borra la restricción.
+  No edita candidatos ni modelos, ni asigna Tasks.
+- Selección: el candidato excluido es `level_disabled`, exclusión del operador; no es
+  una espera de cuota, así que **nunca baja de nivel** una Task (la calidad se
+  mantiene) y un nivel sin candidato admisible bloquea como `no_allowed_level`
+  (WAITING_HUMAN deduplicado de SA-090). Una causa técnica sigue teniendo prioridad.
+- Snapshot: `levels` es el conjunto efectivo; `catalogLevels` (opcional) el editable.
+  Panel: casillas `role=checkbox` por nivel solo para quien gestiona y si el servidor
+  envía `catalogLevels`; sin optimismo, mismo pendiente/resync; lectura con
+  «(no permitido: …)».
+
 ## Validación y entrega a Claude
 
 La implementación debe probar: conexiones sin token/capacidad embebida, actor falso,

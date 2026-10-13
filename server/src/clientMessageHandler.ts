@@ -18,13 +18,18 @@ import {
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { currentWorkSnapshot } from './domainEventRelay.js';
-import { hasPendingChange, setExecutorAvailability } from './executorAvailability.js';
+import {
+  hasPendingChange,
+  setExecutorAvailability,
+  setExecutorLevels,
+} from './executorAvailability.js';
 import { executorMonitor } from './executorProbes.js';
 import {
   buildExecutorState,
   clientWantsExecutorControls,
   parseRequestExecutorState,
   parseSetExecutorEnabled,
+  parseSetExecutorLevels,
   toggleResult,
 } from './executorState.js';
 import { answerProjectDecision } from './humanDecisions.js';
@@ -139,6 +144,28 @@ export function handleClientMessage(
       });
       send({ ...toggleResult(echo, outcome.status, outcome.errorCode, outcome.revision) });
       // Every capable connection re-reads its own snapshot (canManage is per recipient).
+      if (outcome.status === 'applied' || outcome.errorCode === 'recovery_required')
+        ctx.store.notifyExecutorStateChanged(parsed.msg.projectId);
+      break;
+    }
+
+    case 'setExecutorLevels': {
+      // SA-092: same validation, service and broadcast as setExecutorEnabled.
+      const parsed = parseSetExecutorLevels(msg);
+      if (!parsed.ok) {
+        if (parsed.echo) send({ ...toggleResult(parsed.echo, 'rejected', parsed.errorCode) });
+        break;
+      }
+      const echo = {
+        projectId: parsed.msg.projectId,
+        executorId: parsed.msg.executorId,
+        requestId: parsed.msg.requestId,
+      };
+      const outcome = setExecutorLevels(parsed.msg, {
+        privileged: ctx.privileged === true,
+        boundProjectId: executorProject()?.id,
+      });
+      send({ ...toggleResult(echo, outcome.status, outcome.errorCode, outcome.revision) });
       if (outcome.status === 'applied' || outcome.errorCode === 'recovery_required')
         ctx.store.notifyExecutorStateChanged(parsed.msg.projectId);
       break;

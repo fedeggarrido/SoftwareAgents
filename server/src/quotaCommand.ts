@@ -215,6 +215,7 @@ export function readSelectionSnapshot(
   }
   return {
     allowedExecutors: operator.allowedExecutors,
+    ...(operator.executorLevels ? { executorLevels: operator.executorLevels } : {}),
     machinePolicy: {
       quotaThresholds: operator.quotaThresholds ?? {},
       maxConcurrent,

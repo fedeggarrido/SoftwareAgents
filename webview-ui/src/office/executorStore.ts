@@ -4,6 +4,7 @@ import type {
   ClientMessage,
   ExecutorState,
   ExecutorToggleResult,
+  ModelTier,
 } from '../../../core/src/messages.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
 
@@ -12,9 +13,9 @@ import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
 // optimistically: the row shows "Guardando…" until the confirmed result and the
 // fresh snapshot that follows it arrive. DOM-free so it can be unit-tested.
 
+/** One in-flight command per Executor: availability (SA-091) or levels (SA-092). */
 export interface PendingToggle {
   requestId: string;
-  enabled: boolean;
   sentAt: number;
 }
 
@@ -44,7 +45,7 @@ export function applyExecutorState(store: ExecutorStore, next: ExecutorState): E
 
 const ERROR_TEXT: Record<string, string> = {
   unauthorized: 'Solo el operador puede cambiar la disponibilidad.',
-  invalid_request: 'Petición inválida.',
+  invalid_request: 'Petición inválida (¿el catálogo de niveles cambió?).',
   unknown_project: 'Este servidor no gestiona ese proyecto.',
   unknown_executor: 'Executor desconocido.',
   policy_denied: 'La política del operador no permite este cambio.',
@@ -80,31 +81,65 @@ export function applyToggleResult(
   return { store: { ...store, pending: rest, errors }, resync: !ok };
 }
 
+type ExecutorCommand =
+  | { type: 'setExecutorEnabled'; enabled: boolean }
+  | { type: 'setExecutorLevels'; levels: ModelTier[] };
+
 /** Build the command and mark the row pending. Nothing is sent while one is in flight. */
+function beginCommand(
+  store: ExecutorStore,
+  executorId: string,
+  command: ExecutorCommand,
+  now: number,
+  requestId: string,
+): { store: ExecutorStore; message: ClientMessage } | null {
+  const state = store.state;
+  if (!state || !state.canManage || store.pending[executorId]) return null;
+  if (state.configurationStatus === 'recovery_required') return null;
+  const message = {
+    ...command,
+    projectId: state.projectId,
+    executorId: executorId as 'claude' | 'codex',
+    requestId,
+    expectedRevision: state.revision,
+  } as ClientMessage;
+  return {
+    store: {
+      ...store,
+      pending: { ...store.pending, [executorId]: { requestId, sentAt: now } },
+    },
+    message,
+  };
+}
+
 export function beginToggle(
   store: ExecutorStore,
   executorId: string,
   enabled: boolean,
   now: number,
   requestId: string,
-): { store: ExecutorStore; message: ClientMessage } | null {
-  const state = store.state;
-  if (!state || !state.canManage || store.pending[executorId]) return null;
-  const message: ClientMessage = {
-    type: 'setExecutorEnabled',
-    projectId: state.projectId,
-    executorId: executorId as 'claude' | 'codex',
-    enabled,
-    requestId,
-    expectedRevision: state.revision,
-  };
-  return {
-    store: {
-      ...store,
-      pending: { ...store.pending, [executorId]: { requestId, enabled, sentAt: now } },
-    },
-    message,
-  };
+) {
+  return beginCommand(store, executorId, { type: 'setExecutorEnabled', enabled }, now, requestId);
+}
+
+/**
+ * SA-092: allow or disallow one level. The command carries the complete allowed set,
+ * built from the levels the server last confirmed (never from a pending guess) and
+ * kept in catalog order; nothing is sent for a level the catalog does not offer.
+ */
+export function beginLevelToggle(
+  store: ExecutorStore,
+  executorId: string,
+  tier: ModelTier,
+  allowed: boolean,
+  now: number,
+  requestId: string,
+) {
+  const row = store.state?.executors.find((e) => e.executorId === executorId);
+  const catalog = row?.catalogLevels;
+  if (!row || !catalog?.includes(tier)) return null;
+  const levels = catalog.filter((t) => (t === tier ? allowed : row.levels.includes(t)));
+  return beginCommand(store, executorId, { type: 'setExecutorLevels', levels }, now, requestId);
 }
 
 /** Pending toggles with no answer in time (lost or disconnected): drop them and resync. */
@@ -154,10 +189,21 @@ function newRequestId(): string {
     : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-/** Event-handler entry point: marks the row pending and returns what to send. */
-export function startToggle(executorId: string, enabled: boolean): ClientMessage | null {
-  const started = beginToggle(current, executorId, enabled, Date.now(), newRequestId());
+function commit(started: { store: ExecutorStore; message: ClientMessage } | null) {
   if (!started) return null;
   setExecutorStore(started.store);
   return started.message;
+}
+
+/** Event-handler entry point: marks the row pending and returns what to send. */
+export function startToggle(executorId: string, enabled: boolean): ClientMessage | null {
+  return commit(beginToggle(current, executorId, enabled, Date.now(), newRequestId()));
+}
+
+export function startLevelToggle(
+  executorId: string,
+  tier: ModelTier,
+  allowed: boolean,
+): ClientMessage | null {
+  return commit(beginLevelToggle(current, executorId, tier, allowed, Date.now(), newRequestId()));
 }

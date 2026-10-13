@@ -1,4 +1,4 @@
-import type { ModelTierPolicy } from './modelTier.js';
+import type { ModelTier, ModelTierPolicy } from './modelTier.js';
 
 /** Repository-authored identity and paths. This document cannot grant authority. */
 export interface ProjectManifest {
@@ -24,6 +24,11 @@ export interface ProjectOperatorConfig {
   autonomyLevel: AutonomyLevel;
   allowedExecutors: string[];
   modelTiers?: ModelTierPolicy;
+  /**
+   * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
+   * (or no entry) = every catalog tier; an empty list blocks that Executor.
+   */
+  executorLevels?: Partial<Record<'claude' | 'codex', ModelTier[]>>;
   /** Additive protected paths/globs from Operator config only. */
   protectedPaths?: string[];
   binaryPaths?: Record<string, string>;

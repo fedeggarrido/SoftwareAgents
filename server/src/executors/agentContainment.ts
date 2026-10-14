@@ -54,10 +54,41 @@ const deny = (rule: ContainmentRule, reason: string): ContainmentVerdict => ({
 /** Conservative, not a shell parser: quotes and escapes are dropped so `"git" 'push'` still
  * matches, and a forbidden subcommand anywhere after `git` in the same simple command denies
  * (`git -C x push`, `env git push`, `bash -lc 'git push'`). Rare false positives such as
- * `git log --grep push` are accepted; obfuscation through variables or eval is not caught here
- * and stays covered by the pushurl, the sandbox and the protected-path guard. */
+ * `git log --grep push` are accepted. Dynamic subcommands and inline aliases fail closed;
+ * arbitrary shell evaluation still needs the sandbox and the protected-path guard. */
 export function commandContainment(command: string): ContainmentVerdict {
   const lower = command.toLowerCase().replace(/["']/g, '');
+  // Preserve backticks and the `$` prefix of substitutions when inspecting the verb.
+  for (const variant of [lower.replace(/\\/g, ''), lower.replace(/\\/g, '/')]) {
+    for (const segment of variant.split(/[;&|()\r\n]/)) {
+      const words = segment.split(/\s+/).filter(Boolean);
+      for (let index = 0; index < words.length; index++) {
+        if (path.posix.basename(words[index]).replace(/\.exe$/, '') !== 'git') continue;
+        const args = words.slice(index + 1);
+        for (let arg = 0; arg < args.length; arg++) {
+          const word = args[arg];
+          if (/^-c(?:alias\.|$)/.test(word) || /^--config-env(?:=|$)/.test(word)) {
+            const setting =
+              word === '-c' || word === '--config-env'
+                ? args[arg + 1]
+                : word.replace(/^(-c|--config-env=)/, '');
+            if (setting?.startsWith('alias.'))
+              return deny('git_config', 'Inline git aliases are reserved to the runtime.');
+          }
+          // Skip options and their values to inspect only the subcommand, not ordinary args
+          // such as `git diff -- "$file"` or `git log --format="$format"`.
+          if (['-c', '--config-env', '--git-dir', '--work-tree', '--namespace'].includes(word)) {
+            arg++;
+            continue;
+          }
+          if (word.startsWith('-')) continue;
+          if (/[$`]|%[^%]+%/.test(word))
+            return deny('unparseable', 'Dynamic git subcommands cannot be contained.');
+          break;
+        }
+      }
+    }
+  }
   // Backslash is a POSIX escape (`g\it`) and a Windows separator (`C:\Git\cmd\git.exe`): try both.
   const segments = [lower.replace(/\\/g, ''), lower.replace(/\\/g, '/')].flatMap((variant) =>
     variant.split(/[;&|()`\r\n]/),
@@ -76,6 +107,45 @@ export function commandContainment(command: string): ContainmentVerdict {
     }
   }
   return { allowed: true };
+}
+
+/** Best-effort detection of evident shell writes, not a shell/interpreter parser. A write
+ * primitive plus a literal protected target fails closed, even if that path is a source or
+ * appears in a script string. Computed paths and indirect scripts remain a residual risk. */
+function shellWriteContainment(command: string, worktreeRoot: string): ContainmentVerdict {
+  const write =
+    />/.test(command) ||
+    /(?:^|[\s;&|"'(/\\])(?:set-content|out-file|add-content|tee|cp|mv|copy|move|copy-item|move-item)(?:\.exe)?\s/i.test(
+      command,
+    ) ||
+    (/(?:^|[\s;&|"'(/\\])(?:node|python[\d.]*|py)(?:\.exe)?\s.*?(?:-e|--eval|-c)\b/i.test(
+      command,
+    ) &&
+      /writeFile|appendFile|write_text|write_bytes|\.write\s*\(|open\s*\([^\r\n]*["'][wax][^"']*["']|rename|unlink|mkdir|truncate|copyFile/i.test(
+        command,
+      ));
+  if (!write) return { allowed: true };
+  const targets = command
+    .replace(/["']/g, '')
+    .split(/[\s`(){};,|&<>=]+/)
+    .filter(Boolean);
+  for (const target of targets) {
+    // A literal protected path is forbidden even when it names a directory outside the
+    // worktree (pathContainment would classify that as outside_worktree first).
+    if (protectedRelative(target))
+      return deny(
+        'protected_write',
+        'Shell writes to protected paths are reserved to the runtime.',
+      );
+    const verdict = pathContainment(target, worktreeRoot);
+    if (!verdict.allowed && verdict.rule === 'protected_write') return verdict;
+  }
+  return { allowed: true };
+}
+
+function shellContainment(command: string, worktreeRoot: string): ContainmentVerdict {
+  const verdict = commandContainment(command);
+  return verdict.allowed ? shellWriteContainment(command, worktreeRoot) : verdict;
 }
 
 /** Windows ignores trailing dots/spaces and maps `name::$DATA` streams to `name`; folded on
@@ -163,7 +233,7 @@ export function claudeToolContainment(
   const fields = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
   if (CLAUDE_SHELL_TOOLS.includes(toolName))
     return typeof fields.command === 'string'
-      ? commandContainment(fields.command)
+      ? shellContainment(fields.command, worktreeRoot)
       : deny('unparseable', 'Missing shell command.');
   if (Object.hasOwn(CLAUDE_WRITE_TOOLS, toolName)) {
     for (const key of CLAUDE_WRITE_TOOLS[toolName]) {
@@ -182,9 +252,9 @@ export function codexItemContainment(item: unknown, worktreeRoot: string): Conta
   const fields = item as Record<string, unknown>;
   if (fields.type === 'command_execution')
     return typeof fields.command === 'string'
-      ? commandContainment(fields.command)
+      ? shellContainment(fields.command, worktreeRoot)
       : Array.isArray(fields.command)
-        ? commandContainment(fields.command.map(String).join(' '))
+        ? shellContainment(fields.command.map(String).join(' '), worktreeRoot)
         : deny('unparseable', 'Missing shell command.');
   if (fields.type === 'file_change') {
     const changes = Array.isArray(fields.changes) ? fields.changes : [];

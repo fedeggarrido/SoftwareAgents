@@ -31,6 +31,7 @@ vi.mock('os', async (original) => {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-executor-'));
   vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   vi.stubEnv('FAKE_CODEX_SESSIONS', path.join(root, 'sessions'));
   fs.mkdirSync(path.join(root, 'worktree'));
   req = {

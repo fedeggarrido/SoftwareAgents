@@ -33,6 +33,7 @@ let req: ExecutionRequest;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-executor-'));
   vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   fs.mkdirSync(path.dirname(getHookScriptPath()), { recursive: true });
   fs.writeFileSync(getHookScriptPath(), '');
   execFileSync('git', ['init'], { cwd: root });

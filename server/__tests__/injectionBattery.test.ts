@@ -59,6 +59,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'injection-battery-'));
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
   vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   fs.mkdirSync(path.join(root, 'worktree'));
 });
 afterEach(() => {

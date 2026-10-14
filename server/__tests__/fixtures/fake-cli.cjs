@@ -39,6 +39,38 @@ if (!valid) {
     );
     return;
   }
+  // Missing tool results at EOF cannot confirm hook enforcement, even on a success result.
+  if (args.includes('--containment-no-result') || args.includes('--containment-partial-results')) {
+    const emit = (record) => console.log(JSON.stringify(record));
+    emit({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'pending-push',
+            name: 'Bash',
+            input: { command: 'git push origin TEST_SECRET' },
+          },
+          {
+            type: 'tool_use',
+            id: 'pending-write',
+            name: 'Write',
+            input: { file_path: '.claude/settings.json', content: 'TEST_SECRET' },
+          },
+        ],
+      },
+    });
+    if (args.includes('--containment-partial-results'))
+      emit({
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'pending-push', is_error: true }],
+        },
+      });
+    emit({ type: 'result', result: 'Fake success', is_error: false });
+    return;
+  }
   // Emulates Claude Code's PreToolUse contract (SA-062): every registered hook command runs
   // through a shell with the tool call on stdin; exit 2 blocks the tool and returns an error
   // result. --containment-failopen reports the tool as run whatever the hooks said.

@@ -25,6 +25,19 @@ vi.mock('os', async (importOriginal) => {
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
 });
 
+// Match the executor suites: sandbox fixtures self-close when native taskkill is unavailable.
+// Failed termination and retries are tested with simulated processes in executorTermination.
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: (file: string, ...args: unknown[]) => {
+      if (file === 'taskkill' && process.env.SA_SKIP_TASKKILL_TEST === '1') return Buffer.alloc(0);
+      return Reflect.apply(actual.execFileSync, actual, [file, ...args]);
+    },
+  };
+});
+
 // Built by `npm run build:extension` (CI builds before server tests, like claude-hook.test.ts).
 const HOOK_SCRIPT = path.join(__dirname, '../../dist/hooks/containment-hook.js');
 
@@ -34,6 +47,7 @@ let req: ExecutionRequest;
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'containment-'));
   vi.stubEnv('HOME', path.join(root, 'home'));
+  vi.stubEnv('USERPROFILE', path.join(root, 'home'));
   worktree = path.join(root, 'worktree');
   fs.mkdirSync(worktree);
   req = {
@@ -73,6 +87,18 @@ describe('commandContainment', () => {
     ['echo $(git push)', 'git_push'],
     ['git config --worktree remote.origin.pushurl https://example.invalid', 'git_config'],
     ['git config --get user.name', 'git_config'],
+    ['p=push; git $p origin x', 'unparseable'],
+    ['git ${p} origin x', 'unparseable'],
+    ['git $(printf push) origin x', 'unparseable'],
+    ['git `printf push` origin x', 'unparseable'],
+    ['git %VERB% origin x', 'unparseable'],
+    ['(git $verb origin x)', 'unparseable'],
+    ['echo $(git $verb origin x)', 'unparseable'],
+    ['git -C "$repo" --no-pager $verb origin x', 'unparseable'],
+    ['git -c alias.ship=push ship origin', 'git_config'],
+    ['git -calias.ship=push ship origin', 'git_config'],
+    ['git -c core.quotePath=false -c alias.ship="!git push" ship origin', 'git_config'],
+    ['git --config-env=alias.ship=ALIAS ship origin', 'git_config'],
     ['git remote add evil https://example.invalid/r.git', 'git_remote'],
     ['gh pr create --fill', 'gh'],
     ['C:\\tools\\gh.exe auth token', 'gh'],
@@ -83,6 +109,11 @@ describe('commandContainment', () => {
     'git status',
     'git diff -- server/config.ts',
     'git log --grep=push',
+    'git -C "$repo" status',
+    'git -c core.quotePath=false diff',
+    'git --git-dir="$dir" status',
+    'git diff -- "$file"',
+    'git log --format="$format"',
     'npm test && echo push',
     'cat .github/remote.md',
   ])('allows %s', (command) => {
@@ -127,6 +158,67 @@ describe('pathContainment', () => {
 });
 
 describe('tool adapters', () => {
+  it.each([
+    'echo x > .claude/settings.json',
+    'echo x >> .claude/settings.json',
+    'Set-Content .CLAUDE\\settings.json x',
+    'Add-Content -LiteralPath .claude/settings.json x',
+    '"x" | Out-File -FilePath .claude/settings.json',
+    'echo x | tee .claude/settings.json',
+    'cp source .claude/settings.json',
+    'mv source .claude/settings.json',
+    'copy source .claude\\settings.json',
+    'move source .claude\\settings.json',
+    'Copy-Item source -Destination .claude/settings.json',
+    'Move-Item source -Destination .claude/settings.json',
+    `node -e "require('fs').writeFileSync('.claude/x', 'TEST_SECRET')"`,
+    `python -c "open('.claude/x', 'w').write('TEST_SECRET')"`,
+    `python3 -c "from pathlib import Path; Path('.claude/x').write_text('x')"`,
+    'echo x > .git/config',
+    'Set-Content .gitconfig x',
+    'echo x > .claude./settings.json',
+    'echo x > C:/outside/.claude/settings.json',
+    'Set-Content /outside/.CLAUDE/settings.json x',
+  ])('denies evident protected shell writes: %s', (command) => {
+    expect(codexItemContainment({ type: 'command_execution', command }, worktree)).toMatchObject({
+      allowed: false,
+      rule: 'protected_write',
+    });
+    expect(claudeToolContainment('Bash', { command }, worktree)).toMatchObject({
+      allowed: false,
+      rule: 'protected_write',
+    });
+  });
+  it.each([
+    'cat .claude/settings.json',
+    'Get-Content .CLAUDE\\settings.json',
+    'echo x > src/a.ts',
+    'Set-Content src/a.ts x',
+    'cp source src/a.ts',
+    `node -e "require('fs').readFileSync('.claude/x')"`,
+    `node -e "require('fs').writeFileSync('src/a.ts', 'x')"`,
+  ])('allows ordinary shell writes and protected reads: %s', (command) => {
+    expect(codexItemContainment({ type: 'command_execution', command }, worktree)).toEqual({
+      allowed: true,
+    });
+  });
+  it('checks argv commands and protected file_change paths', () => {
+    expect(
+      codexItemContainment(
+        {
+          type: 'command_execution',
+          command: ['powershell', '-Command', 'Set-Content .CLAUDE\\x x'],
+        },
+        worktree,
+      ),
+    ).toMatchObject({ rule: 'protected_write' });
+    expect(
+      codexItemContainment(
+        { type: 'file_change', changes: [{ path: 'src/a.ts' }, { path: '.CLAUDE/settings.json' }] },
+        worktree,
+      ),
+    ).toMatchObject({ rule: 'protected_write' });
+  });
   it('maps Claude shell and write tools, and denies malformed inputs', () => {
     expect(claudeToolContainment('Bash', { command: 'git push' }, worktree)).toMatchObject({
       rule: 'git_push',
@@ -204,7 +296,7 @@ describe('containment hook script', () => {
     spawnSync(process.execPath, [HOOK_SCRIPT, ...args], {
       input,
       encoding: 'utf8',
-      env: { ...process.env, HOME: path.join(root, 'home') },
+      env: { ...process.env, HOME: path.join(root, 'home'), USERPROFILE: path.join(root, 'home') },
     });
   const preToolUse = (tool_name: string, tool_input: unknown) =>
     JSON.stringify({ hook_event_name: 'PreToolUse', cwd: worktree, tool_name, tool_input });
@@ -240,6 +332,21 @@ describe('containment hook script', () => {
   ])('fails closed on %s', (_name, input, args) => {
     expect(run(input, args).status).toBe(2);
   });
+  it.each(['not json TEST_SECRET', 'null', '[]'])(
+    'audits malformed stdin with a readable context: %s',
+    (input) => {
+      const result = run(input);
+      expect(result.status).toBe(2);
+      expect(denials()).toEqual([
+        expect.objectContaining({
+          resourceId: 'unknown',
+          executionId: 'run-1',
+          outcome: expect.objectContaining({ detail: 'unparseable' }),
+        }),
+      ]);
+      expect(JSON.stringify(denials())).not.toContain('TEST_SECRET');
+    },
+  );
 });
 
 describe('executors', () => {
@@ -297,6 +404,22 @@ describe('executors', () => {
     // One entry from the hook (it did deny) and one from the executor tripwire.
     expect(denials()).toHaveLength(2);
   });
+  it.each(['--containment-no-result', '--containment-partial-results'])(
+    'Claude: %s fails and audits every unresolved attempt at EOF',
+    async (mode) => {
+      const events = await drain(claude(mode).executor.start(req).events);
+      expect(events.at(-1)).toMatchObject({
+        type: 'finished',
+        exitCode: 1,
+        resultSummary: expect.stringContaining('without a tool_result'),
+      });
+      expect(denials().map((entry) => entry.outcome.detail)).toEqual(
+        mode === '--containment-no-result' ? ['git_push', 'protected_write'] : ['protected_write'],
+      );
+      expect(JSON.stringify(denials())).not.toContain('TEST_SECRET');
+      expect(events.some((event) => event.type === 'toolUse')).toBe(false);
+    },
+  );
   it('Claude: refuses to launch without the built containment hook', async () => {
     const executor = new ClaudeCliExecutor({
       binary: process.execPath,
@@ -313,6 +436,9 @@ describe('executors', () => {
   it.each<[string, ContainmentRule]>([
     ['--git-push', 'git_push'],
     ['--claude-write', 'protected_write'],
+    ['--claude-shell-write', 'protected_write'],
+    ['--git-dynamic', 'unparseable'],
+    ['--git-alias', 'git_config'],
   ])('Codex: %s stops the run and is audited once', async (mode, rule) => {
     const executor = new CodexCliExecutor({
       operator: { binaryPaths: { codex: process.execPath } },

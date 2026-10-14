@@ -260,6 +260,23 @@ export class ClaudeCliExecutor implements Executor {
             string,
             { verdict: ContainmentVerdict; toolName: string; input: unknown }
           >();
+          const auditAttempt = (attempt: {
+            verdict: ContainmentVerdict;
+            toolName: string;
+            input: unknown;
+          }) => {
+            if (attempt.verdict.allowed) return;
+            try {
+              auditContainmentDenial(containment, attempt.verdict, attempt.toolName, attempt.input);
+            } catch {
+              // Audit failures must never turn a containment failure into success.
+              push({
+                type: 'output',
+                stream: 'stderr',
+                text: 'Containment audit persistence failed',
+              });
+            }
+          };
           let contained: ContainmentVerdict;
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: processChild[stream]! })) {
@@ -373,21 +390,7 @@ export class ClaudeCliExecutor implements Executor {
                     if (!attempt) continue;
                     pendingContained.delete(id);
                     if (isError === true || attempt.verdict.allowed) continue;
-                    try {
-                      auditContainmentDenial(
-                        containment,
-                        attempt.verdict,
-                        attempt.toolName,
-                        attempt.input,
-                      );
-                    } catch {
-                      // The violation below still fails the run.
-                      push({
-                        type: 'output',
-                        stream: 'stderr',
-                        text: 'Containment audit persistence failed',
-                      });
-                    }
+                    auditAttempt(attempt);
                     violate(
                       `Claude ran ${attempt.toolName} despite agent containment (${attempt.verdict.rule})`,
                     );
@@ -446,6 +449,16 @@ export class ClaudeCliExecutor implements Executor {
               failure = streamFailure.reason as Error;
               exitCode = 1;
             }
+            // A missing tool_result cannot confirm that the hook blocked the attempt. Audit
+            // every unresolved call after both streams drain, and fail even on CLI exit 0.
+            for (const attempt of pendingContained.values()) {
+              auditAttempt(attempt);
+              if (!attempt.verdict.allowed)
+                violate(
+                  `Claude ended without a tool_result for ${attempt.toolName} (${attempt.verdict.rule})`,
+                );
+            }
+            pendingContained.clear();
             closed = true;
             wake?.();
           });

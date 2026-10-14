@@ -270,6 +270,7 @@ describe('deduplicated WAITING_HUMAN (SA-090)', () => {
     repo = path.join(root, 'repo');
     fs.mkdirSync(repo);
     vi.stubEnv('HOME', root);
+    vi.stubEnv('USERPROFILE', root);
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   });
   afterEach(() => {

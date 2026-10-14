@@ -36,15 +36,37 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
   puede leer su contexto o su entrada, y el Executor no lanza Claude sin el
   script. Si una herramienta denegada vuelve sin error (hook caído, timeout,
   hooks deshabilitados por política gestionada), el Executor detiene y falla la
-  Execution. Codex no tiene hooks: lo impiden `workspace-write` (red desactivada,
+  Execution. Si el stream termina sin `tool_result` para un intento contenido,
+  el Executor audita cada intento pendiente y falla la Execution, incluso con
+  exit 0 del CLI. Codex no tiene hooks: lo impiden `workspace-write` (red desactivada,
   fijada con `sandbox_workspace_write.network_access=false`, y `.git` fuera de
   las raíces escribibles) y `--ignore-user-config`; un intento visible en el
   stream detiene y falla la Execution. Cada denegación queda en el audit log
   (`agent_containment`, decisión de `policy.ts`, solo el hash de la entrada).
-  Es una guardia sobre comandos y rutas, no un parser de shell ni un sandbox:
-  la ofuscación (variables, `eval`, alias de git del usuario) queda cubierta por
-  el pushurl neutralizado (SA-032), la guardia de rutas protegidas (SA-063) y,
-  en el futuro, SA-058.
+  **SA-QA-12:** Codex 0.160.0 instalado, comprobado con `codex exec --help` y
+  configuración temporal aislada con `--strict-config`, no permite restar
+  `.claude/` mediante `sandbox_workspace_write.*`: solo admite `writable_roots`
+  (raíces adicionales, no exclusiones), `network_access`, `exclude_tmpdir_env_var`
+  y `exclude_slash_tmp`. Rechaza `read_only_paths` y `read_only_subpaths` como
+  campos desconocidos; coincide con la [referencia oficial de configuración](https://developers.openai.com/codex/config-reference).
+  Por ello los adaptadores detectan escrituras evidentes por shell sobre rutas
+  protegidas: redirecciones, `Set-Content`/`Out-File`/`Add-Content`, `tee`,
+  `cp`/`mv`/`copy`/`move` (también `Copy-Item`/`Move-Item`) y escrituras inline de
+  Node/Python con rutas literales. Los `file_change` protegidos también deniegan;
+  Codex audita el intento como `agent_containment`, detiene y falla la Execution.
+  Git con subcomando dinámico (`$`, backticks, `%VAR%`, sustituciones) o
+  `-c alias.*` se deniega. Con contexto legible, el hook audita stdin inválido
+  como `unparseable` antes de salir con código 2.
+  **Límite residual:** es una guardia conservadora, no un parser de shell ni un
+  sandbox. Puede denegar una copia desde una ruta protegida o una ruta citada
+  en un script que también escribe. Rutas calculadas, escrituras desde scripts
+  indirectos, `eval` y alias Git heredados pueden eludir la detección. El stream
+  de Codex se observa después de iniciar la herramienta: detener y fallar el run
+  no garantiza evitar ni revertir una escritura ya ejecutada en `.claude/`.
+  El pushurl neutralizado (SA-032), la guardia antes del push (SA-063) y la red
+  desactivada siguen aportando defensa en profundidad; el aislamiento de SO
+  de SA-058 queda pendiente. No ejecutar contenido adversarial bajo la hipótesis
+  de que esta guardia confina todos sus efectos.
 - **Revisit when:** antes de procesar repos externos o contenido adversarial, o
   ampliar herramientas/autonomía; evaluar aislamiento mediante SA-058.
 

@@ -28,13 +28,36 @@ function readContext(file: string | undefined): ContainmentContext {
 
 function main(): void {
   let context: ContainmentContext;
-  let hook: Record<string, unknown>;
   try {
     context = readContext(process.argv[2]);
-    hook = JSON.parse(fs.readFileSync(0, 'utf8')) as Record<string, unknown>;
-    if (!hook || typeof hook !== 'object') throw new Error('invalid input');
   } catch {
-    block('containment hook could not read its context or input.');
+    block('containment hook could not read its context.');
+  }
+  let hook: Record<string, unknown>;
+  let input: string | undefined;
+  try {
+    input = fs.readFileSync(0, 'utf8');
+    hook = JSON.parse(input) as Record<string, unknown>;
+    if (!hook || typeof hook !== 'object' || Array.isArray(hook)) throw new Error('invalid input');
+  } catch {
+    let audited = true;
+    try {
+      auditContainmentDenial(
+        context,
+        {
+          allowed: false,
+          rule: 'unparseable',
+          reason: 'Containment hook could not read its input.',
+        },
+        'unknown',
+        input ?? null,
+      );
+    } catch {
+      audited = false;
+    }
+    block(
+      'containment hook could not read its input.' + (audited ? '' : ' (audit persistence failed)'),
+    );
   }
   if (hook.hook_event_name !== undefined && hook.hook_event_name !== 'PreToolUse') return;
   const verdict = claudeToolContainment(hook.tool_name, hook.tool_input, context.worktreeRoot);

@@ -52,6 +52,7 @@ beforeEach(() => {
   repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
   vi.stubEnv('GIT_AUTHOR_NAME', 'Test');
   vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.invalid');

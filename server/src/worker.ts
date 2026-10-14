@@ -354,6 +354,7 @@ export async function runWorker(
               tierRule,
               inputs,
               probed.filter((id) => !launchBlock(availability?.[id], nowSeconds())),
+              config.operator.executorLevels,
             );
             return admitModelTier(
               spec,

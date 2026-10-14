@@ -203,6 +203,11 @@ export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfi
         (policy.autopilot && !policy.autopilot.command[0])
       )
         throw new SchemaValidationError([`Invalid Operator project ${id}`]);
+      // Without a catalog the legacy selector has no tier to enforce these restrictions.
+      if (!policy.modelTiers && policy.executorLevels && Object.keys(policy.executorLevels).length)
+        throw new ModelTierConfigError(
+          'Invalid Operator executorLevels: modelTiers catalog is required',
+        );
       out[id] = structuredClone(policy);
     } catch (error) {
       const diagnostic = error as Error;

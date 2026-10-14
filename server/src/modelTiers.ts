@@ -230,6 +230,7 @@ export function validateModelTierSupport(
   rule?: TierRule,
   input: TierInputs = {},
   allowed: readonly string[] = ['claude', 'codex'],
+  executorLevels?: SelectionSnapshot['executorLevels'],
 ): void {
   const reachable = new Set<ModelTier>();
   if (agent && rule) {
@@ -247,6 +248,7 @@ export function validateModelTierSupport(
     for (const candidate of definition.candidates) {
       if (
         allowed.includes('claude') &&
+        (executorLevels?.claude?.includes(tier) ?? true) &&
         candidate.executor === 'claude' &&
         candidate.effort !== undefined
       )

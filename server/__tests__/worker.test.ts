@@ -144,6 +144,33 @@ describe('supervised worker', () => {
     expect(execFileSync).toHaveBeenCalledWith(binary, ['--help'], expect.any(Object));
     expect(spawn).not.toHaveBeenCalled();
   });
+  it('removing the catalog after saving blocked levels rejects worker and quota legacy paths', async () => {
+    const raw = tierOperator('claude');
+    raw.projects.test.executorLevels = { claude: [] };
+    const file = path.join(root, '.pixel-agents/config.json');
+    fs.writeFileSync(file, JSON.stringify(raw));
+    expect(loadProjectConfig(repo)?.operator.executorLevels).toEqual({ claude: [] });
+    delete raw.projects.test.modelTiers;
+    fs.writeFileSync(file, JSON.stringify(raw));
+    for (const selectExecutor of [false, true]) {
+      await expect(
+        runWorker({ task: 'SA-999', brief: 'brief.md', selectExecutor }, { cwd: repo }),
+      ).rejects.toThrow('executorLevels: modelTiers catalog is required');
+      expect(() =>
+        runQuotaCheck(
+          {
+            selectExecutor,
+            executor: selectExecutor ? undefined : 'claude',
+            role: 'developer',
+            json: true,
+          },
+          repo,
+        ),
+      ).toThrow('executorLevels: modelTiers catalog is required');
+    }
+    expect(spawn).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents'))).toBe(false);
+  });
   it('a missing capability weight is a configuration error for worker and quota', async () => {
     const file = path.join(root, '.pixel-agents/config.json');
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -1327,6 +1354,59 @@ describe('executor selection and drain (SA-090)', () => {
   afterEach(() => {
     process.exitCode = 0;
   });
+
+  it.each([false, true])(
+    'level-disabled unsupported Claude effort preserves normal selection (all excluded: %s)',
+    async (allExcluded) => {
+      const raw = tierOperator();
+      raw.projects.test.allowedExecutors = ['claude', 'codex'];
+      const binary = path.join(root, 'claude-with-disabled-effort.exe');
+      fs.writeFileSync(binary, 'synthetic binary; availability probes are injected');
+      raw.projects.test.binaryPaths.claude = binary;
+      raw.projects.test.executorLevels = { claude: [], ...(allExcluded ? { codex: [] } : {}) };
+      raw.projects.test.modelTiers.tiers.standard.candidates.unshift({
+        executor: 'claude',
+        model: 'test-claude',
+        effort: 'high',
+      });
+      fs.writeFileSync(configFile(), JSON.stringify(raw));
+
+      const log = vi.fn();
+      expect(
+        runQuotaCheck({ selectExecutor: true, role: 'developer', json: true }, repo, log),
+      ).toBe(allExcluded ? 3 : 0);
+      expect(JSON.parse(log.mock.calls.at(-1)![0])).toMatchObject({
+        executor: allExcluded ? null : 'codex',
+        tier: 'standard',
+        downgrades: [],
+      });
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {} },
+      );
+      expect(vi.mocked(execFileSync).mock.calls.some(([file]) => file === binary)).toBe(false);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        if (allExcluded) {
+          expect(result.availabilityBlock?.code).toBe('no_allowed_level');
+          expect(process.exitCode).toBe(3);
+          expect(store.getTask('SA-999')?.status).toBe('WAITING_HUMAN');
+          expect(store.listExecutions()).toEqual([]);
+          expect(spawn).not.toHaveBeenCalled();
+          expect(fs.existsSync(path.join(repo, '.worktrees'))).toBe(false);
+          expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(0);
+        } else {
+          expect(result.quotaDecision).toBeUndefined();
+          expect(store.listExecutions()).toMatchObject([
+            { executor: 'codex', model_id: 'test-model' },
+          ]);
+          expect(store.listDecisions()).toEqual([]);
+        }
+      } finally {
+        store.close();
+      }
+    },
+  );
 
   it('legacy worker with all executors OFF waits for a human with exit 3 and no probe', async () => {
     setAllowed([]);

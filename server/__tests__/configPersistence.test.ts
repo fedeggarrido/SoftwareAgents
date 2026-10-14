@@ -89,6 +89,44 @@ describe('configPersistence: areas', () => {
     expect(readConfig().projects.test).toBeUndefined();
   });
 
+  it.each([{ levels: [] }, { levels: ['standard'] as 'standard'[] }])(
+    'rejects only the restricted Project after its catalog is removed (levels $levels)',
+    ({ levels }) => {
+      const cfg = readConfig();
+      cfg.projects.test = {
+        autonomyLevel: 'A1',
+        allowedExecutors: ['codex'],
+        executorLevels: { codex: levels },
+        modelTiers: {
+          maxTier: 'standard',
+          tiers: { standard: { candidates: [{ executor: 'codex', model: 'test-model' }] } },
+        },
+      };
+      cfg.projects.other = { autonomyLevel: 'A1', allowedExecutors: ['claude'] };
+      writeConfig(cfg);
+      expect(readConfig().projects.test.executorLevels).toEqual({ codex: levels });
+      const file = path.join(tempHome, '.pixel-agents/config.json');
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      delete raw.projects.test.modelTiers;
+      fs.writeFileSync(file, JSON.stringify(raw));
+
+      const rejected = readConfig();
+      expect(rejected.projects.test).toBeUndefined();
+      expect(projectConfigError(rejected.projects, 'test')?.message).toBe(
+        'Invalid Operator executorLevels: modelTiers catalog is required',
+      );
+      expect(rejected.projects.other).toEqual(cfg.projects.other);
+      setHooksEnabled('claude', false);
+      expect(JSON.parse(fs.readFileSync(file, 'utf8')).projects.test).toEqual(raw.projects.test);
+      expect(readConfig().projects.test).toBeUndefined();
+    },
+  );
+
+  it('keeps legacy Projects valid with an empty executorLevels map', () => {
+    const project = { autonomyLevel: 'A1', allowedExecutors: ['codex'], executorLevels: {} };
+    expect(parseProjects({ test: project }).test).toEqual(project);
+  });
+
   describe('parseAreaMappings', () => {
     it('returns empty object for non-object input (null, undefined, primitives)', () => {
       expect(parseAreaMappings(null)).toEqual({});

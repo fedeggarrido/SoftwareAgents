@@ -458,3 +458,51 @@ it.each([0, 1])('total limit %s blocks all executors without quota downgrade', (
     gate: { status: 'wait', cause: 'concurrency' },
   });
 });
+
+it.each([{ levels: [] }, { levels: ['economy'] }] as const)(
+  'skips effort validation for Claude levels $levels but validates an allowed tier',
+  ({ levels }) => {
+    vi.mocked(execFileSync).mockReset();
+    vi.mocked(execFileSync).mockReturnValue('--model <model>');
+    const candidates: ModelTierPolicy = {
+      maxTier: 'standard',
+      tiers: {
+        standard: {
+          candidates: [
+            { executor: 'claude', model: 'test-claude', effort: 'high' },
+            { executor: 'codex', model: 'test-codex', effort: 'medium' },
+          ],
+        },
+      },
+    };
+    const state = snapshot();
+    state.executorLevels = { claude: levels };
+    const validate = () =>
+      validateModelTierSupport(
+        candidates,
+        'level-filtered-cli',
+        spec('standard_coding'),
+        rule,
+        {},
+        state.allowedExecutors,
+        state.executorLevels,
+      );
+    expect(validate).not.toThrow();
+    expect(execFileSync).not.toHaveBeenCalled();
+    expect(selectModelTier(spec('standard_coding'), rule, candidates, {}, state)).toMatchObject({
+      choice: { executor: 'codex' },
+      tier: 'standard',
+      downgrades: [],
+    });
+    state.executorLevels.codex = [];
+    expect(validate).not.toThrow();
+    expect(execFileSync).not.toHaveBeenCalled();
+    expect(selectModelTier(spec('standard_coding'), rule, candidates, {}, state)).toMatchObject({
+      choice: null,
+      block: { code: 'no_allowed_level' },
+      downgrades: [],
+    });
+    state.executorLevels.claude = ['standard'];
+    expect(validate).toThrow('unsupported claude effort');
+  },
+);

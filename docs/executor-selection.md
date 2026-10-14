@@ -312,8 +312,15 @@ proyecto fallan cerrados con el diagnóstico de ModelTierConfigError (exit 1),
 sin recurrir al argv legado. Errores de uso/configuración muestran solo el mensaje;
 los errores inesperados conservan la traza.
 
-Sin `modelTiers`, no se añade modelo ni esfuerzo: se conserva la ruta manual
-Claude y `--select-executor` conserva el selector SA-036. La política del repo
+Las restricciones `executorLevels` requieren un catálogo `modelTiers`. Si se retira
+el catálogo mientras queda alguna entrada por Executor (incluido `[]`), se rechaza
+solo ese Project con diagnóstico `Invalid Operator executorLevels: modelTiers
+catalog is required`; no se ejecuta la ruta legado. Otros Projects y settings
+siguen funcionando y los guardados de settings conservan la política rechazada.
+Un mapa `executorLevels: {}` no restringe y admite la ruta legado.
+
+Sin `modelTiers` ni restricciones `executorLevels`, no se añade modelo ni esfuerzo:
+se conserva la ruta manual Claude y `--select-executor` conserva el selector SA-036. La política del repo
 admite las preferencias antiguas por capabilityClass más `tierRule` opcional;
 rechaza `model` en preferencias, ya que no debe residir en el repo. Configs y
 clientes anteriores siguen funcionando; `agentRole` solo incorpora campos
@@ -399,8 +406,9 @@ La elegibilidad del snapshot sigue la misma regla sin frescura (el worker vuelve
 sondear): una instalación sin probar ya no es «eligible».
 
 El worker observa antes de validar soporte de esfuerzo Claude y solo lo valida
-para candidatos disponibles. Un CLI ausente, no soportado o sin autenticación no
-impide elegir otro executor; una sonda desconocida conserva la espera automática.
+para candidatos disponibles y cuyo nivel permite `executorLevels`. Un CLI ausente,
+no soportado o sin autenticación no impide elegir otro executor; una sonda
+desconocida conserva la espera automática.
 Si no queda ningún candidato, se aplica el escalado normal de disponibilidad.
 
 **Revalidación en la frontera real.** La preparación del worktree es lenta, así

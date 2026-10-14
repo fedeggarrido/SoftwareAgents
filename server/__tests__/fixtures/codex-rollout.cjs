@@ -20,5 +20,27 @@ module.exports = function writeRollout(sessionId) {
     file,
     JSON.stringify({ type: 'session_meta', payload: { id: sessionId } }) + '\n',
   );
+  if (process.env.SA_TEST_TELEMETRY === '1')
+    fs.appendFileSync(
+      file,
+      [
+        {
+          type: 'turn_context',
+          payload: { model: 'gpt-test', cwd: process.cwd(), instructions: 'ROLLOUT_SECRET_MARKER' },
+        },
+        {
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              total_token_usage: { input_tokens: 10, output_tokens: 5, cached_input_tokens: 4 },
+              last_token_usage: { input_tokens: 10, output_tokens: 5, cached_input_tokens: 4 },
+            },
+          },
+        },
+      ]
+        .map((r) => JSON.stringify(r) + '\n')
+        .join(''),
+    );
   return file;
 };

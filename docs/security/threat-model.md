@@ -142,6 +142,12 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 
 ### 5. Token del servidor en la URL
 
+- **SA-095 (telemetría):** OTLP/HTTP está desactivado por defecto y solo lo habilita
+  Operator config. Activado, salen al collector elegido IDs de traza/Execution/Task,
+  proveedor/modelos, rol/nivel/esfuerzo, nombres de herramienta, contadores, tiempos
+  y estados; nunca prompts, salidas, argumentos/resultados, rutas de usuario ni
+  token del servidor. Sin opt-in de contenido. Véase [execution-telemetry.md](../execution-telemetry.md).
+
 - **Descripción:** el CLI imprime `?token=` y la SPA lo transmite al WebSocket.
   Es una capacidad bearer reutilizable que puede quedar en historial, terminal y
   logs de Fastify; quien la obtenga puede enviar mensajes privilegiados.

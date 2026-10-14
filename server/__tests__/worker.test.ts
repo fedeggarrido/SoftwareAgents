@@ -22,6 +22,7 @@ import { HumanDecisions } from '../src/humanDecisions.js';
 import { MachineCapacityPublisher } from '../src/machineCapacity.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { runQuotaCheck } from '../src/quotaCommand.js';
+import { runTelemetryCommand, telemetrySummary } from '../src/telemetryCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
@@ -97,6 +98,33 @@ afterEach(async () => {
 });
 
 describe('supervised worker', () => {
+  it('records all worker phases and summary is read-only even with an enabled, unreachable exporter', async () => {
+    const file = path.join(root, '.pixel-agents/config.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    raw.projects.test.telemetry = {
+      otlp: { enabled: true, endpoint: 'http://127.0.0.1:1/v1/traces' },
+    };
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'claude', '--write-doc'],
+        log: () => {},
+      },
+    );
+    expect(result.commit).toMatch(/^[a-f0-9]{40}$/);
+    const summary = await telemetrySummary(path.join(repo, '.git'), 'test');
+    expect(summary.total.executions).toBe(1);
+    expect(summary.total.phasesMs.preparation).toBeGreaterThan(0);
+    expect(summary.total.phasesMs.execution).toBeGreaterThan(0);
+    expect(summary.total.phasesMs.commit_guards).toBeGreaterThan(0);
+    vi.mocked(spawn).mockClear();
+    const log = vi.fn();
+    await runTelemetryCommand(['summary', '--task', 'SA-999', '--json'], repo, log);
+    expect(JSON.parse(log.mock.calls[0][0]).total.executions).toBe(1);
+    expect(spawn).not.toHaveBeenCalled();
+  });
   it('invalid catalogue rejects worker and quota before locks, storage or legacy argv', async () => {
     const file = path.join(root, '.pixel-agents/config.json');
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));

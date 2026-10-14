@@ -15,6 +15,7 @@ import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from 
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
 import { parseClaudeRateLimit } from '../quotaReader.js';
+import { CliTelemetryProjection } from '../telemetryObservations.js';
 import {
   auditContainmentDenial,
   claudeToolContainment,
@@ -240,6 +241,7 @@ export class ClaudeCliExecutor implements Executor {
             }
           }, req.timeoutMin * 60_000);
           const queue: ExecutionEvent[] = [];
+          const telemetry = new CliTelemetryProjection();
           let wake: (() => void) | undefined;
           const push = (event: ExecutionEvent) => {
             queue.push(event);
@@ -286,6 +288,8 @@ export class ClaudeCliExecutor implements Executor {
               }
               try {
                 const record = JSON.parse(line);
+                for (const observation of telemetry.claude(record))
+                  push({ type: 'telemetry', observation });
                 if (!record?.type) {
                   push({ type: 'output', text: line, stream });
                   continue;

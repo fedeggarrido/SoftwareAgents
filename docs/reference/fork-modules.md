@@ -17,6 +17,12 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `telemetry.ts`, `telemetryObservations.ts`, `telemetryCommand.ts` (SA-095): spans
+  GenAI por Execution/herramienta, JSONL acotado en Git common dir y OTLP opcional
+  exclusivo del Operator, sin contenido. `pixel-agents telemetry summary --json`
+  resume tokens, caché, fases y precios declarados sin lanzar. Véase
+  [execution-telemetry.md](../execution-telemetry.md).
+
 - `boardWatcher.ts`: lectura del espejo `docs/backlog/board.json`, claims y
   progreso SQLite del Git common dir; publica `BoardState` con tareas, propiedad,
   eventos, cuotas, decisiones y reuniones. Las fuentes ausentes quedan explícitas;

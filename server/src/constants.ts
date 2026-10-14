@@ -212,3 +212,15 @@ export const EXECUTOR_TASKKILL_TIMEOUT_MS = 2000;
 
 /** Dead office publications are retained for quota diagnostics for one day. */
 export const MACHINE_CAPACITY_RETENTION_S = 24 * 60 * 60;
+// SA-095: bounded, content-free Execution telemetry (local + optional OTLP).
+export const TELEMETRY_FILE_BYTES = 8 * 1024 * 1024;
+export const TELEMETRY_SPAN_BYTES = 16 * 1024;
+export const TELEMETRY_TOOL_LIMIT = 2048;
+export const TELEMETRY_MESSAGE_LIMIT = 2048;
+export const TELEMETRY_IDENTIFIER_LENGTH = 100;
+export const TELEMETRY_ROLLOUT_BYTES = 8 * 1024 * 1024;
+export const TELEMETRY_EXPORT_CONCURRENCY = 4;
+export const TELEMETRY_EXPORT_TIMEOUT_MS = 1000;
+export const TELEMETRY_LOCK_TIMEOUT_MS = 100;
+export const TELEMETRY_LOCK_LEASE_MS = 30_000;
+export const TELEMETRY_PRICE_TOKENS = 1_000_000;

@@ -2,6 +2,7 @@ import type { AgentSpec } from '../../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../../core/src/capacity.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { AgentCompilerTask } from '../agentCompiler.js';
+import type { TelemetryObservation } from '../telemetryObservations.js';
 export type { ExecutorId } from '../../../core/src/executorCatalog.js';
 import type { ExecutorId } from '../../../core/src/executorCatalog.js';
 
@@ -27,6 +28,7 @@ export interface ExecutionRequest {
 }
 
 export type ExecutionEvent =
+  | { type: 'telemetry'; observation: TelemetryObservation }
   | { type: 'started'; sessionId: string; pid: number; startedAt: string }
   | { type: 'toolUse'; toolId: string; toolName: string; input: unknown }
   | { type: 'usage'; inputTokens: number; outputTokens: number }

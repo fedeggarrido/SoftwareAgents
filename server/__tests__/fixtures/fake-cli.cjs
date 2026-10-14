@@ -218,6 +218,7 @@ if (!valid) {
           {
             type: 'assistant',
             message: {
+              id: 'message-1',
               content: [
                 { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'README.md' } },
               ],
@@ -273,7 +274,46 @@ if (!valid) {
           },
         ];
   for (const record of records) {
+    if (process.env.SA_TEST_TELEMETRY === '1') {
+      if (record.type === 'assistant') {
+        record.message.id = 'message-telemetry';
+        record.message.model = 'claude-test';
+        record.message.content[0].input = { file_path: 'ARGUMENT_SECRET_MARKER' };
+        record.message.content.push({ type: 'text', text: 'OUTPUT_SECRET_MARKER' });
+        record.message.usage = {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 20,
+          cache_creation_input_tokens: 3,
+        };
+      }
+      if (record.type === 'result') {
+        record.usage = {
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_read_input_tokens: 20,
+          cache_creation_input_tokens: 3,
+        };
+        record.result = 'OUTPUT_SECRET_MARKER';
+      }
+      if (record.item?.type === 'command_execution') {
+        record.item.command = 'echo ARGUMENT_SECRET_MARKER';
+        record.item.aggregated_output = 'OUTPUT_SECRET_MARKER';
+      }
+      if (record.type === 'turn.completed') record.usage.cached_input_tokens = 4;
+    }
     process.stdout.write(`${JSON.stringify(record)}\n`);
+    if (process.env.SA_TEST_TELEMETRY === '1' && record.type === 'assistant')
+      process.stdout.write(
+        JSON.stringify({
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', tool_use_id: 'tool-1', content: 'TOOL_RESULT_SECRET_MARKER' },
+            ],
+          },
+        }) + '\n',
+      );
   }
   if (args.includes('--slot-hold')) {
     const fs = require('fs');

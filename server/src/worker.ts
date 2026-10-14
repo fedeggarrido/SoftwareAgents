@@ -47,6 +47,7 @@ import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 import { taskModelInputs } from './taskModelInputs.js';
+import { ExecutionTelemetry, TelemetrySink } from './telemetry.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface WorkerArgs {
@@ -155,6 +156,7 @@ export async function runWorker(
   args: WorkerArgs,
   options: WorkerOptions = {},
 ): Promise<WorkerResult> {
+  const telemetryStart = Date.now();
   const cwd = options.cwd ?? process.cwd();
   const log = options.log ?? console.log;
   const config = loadProjectConfig(cwd, true);
@@ -296,6 +298,8 @@ export async function runWorker(
   let slotFailure: unknown;
   let slot: ReturnType<typeof acquireExecutorSlot>;
   let workStore: WorkStore | undefined;
+  let telemetry: ExecutionTelemetry | undefined;
+  let telemetryStatus: 'ok' | 'error' | 'require_human' = 'error';
   const cancel = () => {
     interrupted = true;
     try {
@@ -502,6 +506,20 @@ export async function runWorker(
     } catch (error) {
       log(`Availability decisions for ${scope} not closed: ${(error as Error).message}`);
     }
+    telemetry = new ExecutionTelemetry(
+      new TelemetrySink(common, config.project.id, config.operator.telemetry),
+      {
+        executionId,
+        taskKey: args.task,
+        executor: selectedExecutor,
+        agent: spec.metadata.id,
+        role: 'developer',
+        model: tierSelection?.choice?.model ?? selection?.choice?.model,
+        tier: tierSelection?.tier ?? undefined,
+        effort: tierSelection?.choice?.effort,
+      },
+      telemetryStart,
+    );
     if (workStore && tierSelection?.choice) {
       if (!workStore.getTask(args.task))
         workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
@@ -617,6 +635,7 @@ export async function runWorker(
     }
     if (invalidated) return invalidatedResult(invalidated);
     slot.markLaunching('registered_wrapper');
+    telemetry.phase('execution');
     handle = executor.start({
       executionId,
       projectId: config.project.id,
@@ -646,6 +665,7 @@ export async function runWorker(
     let exitCode: number | undefined;
     eventsStarted = true;
     for await (const event of handle.events) {
+      if (event.type === 'telemetry') telemetry.observe(event.observation);
       if (event.type === 'started') {
         try {
           slot.setSession(event.sessionId);
@@ -664,6 +684,7 @@ export async function runWorker(
         executionFinished = true;
       }
     }
+    telemetry.phase('commit_guards');
     if (slotFailure) throw slotFailure;
     if (interrupted || exitCode !== 0)
       throw new Error('Execution failed or was interrupted; changes retained for review');
@@ -673,6 +694,7 @@ export async function runWorker(
     )
       throw new Error('Execution changed Git HEAD; refusing runtime commit');
     if (!git(tree.path, ['status', '--porcelain', '--untracked-files=all'])) {
+      telemetryStatus = 'ok';
       audit('no_changes');
       log(`sin cambios\nRama: ${tree.branch}`);
       return { branch: tree.branch, commit: null, stat: '' };
@@ -688,6 +710,7 @@ export async function runWorker(
       executionId,
     });
     if (gate.decision.outcome !== 'allow') {
+      telemetryStatus = gate.decision.outcome === 'require_human' ? 'require_human' : 'error';
       if (gate.decision.outcome === 'require_human') {
         const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
         const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
@@ -729,12 +752,15 @@ export async function runWorker(
     const commit = git(tree.path, ['rev-parse', 'HEAD']);
     const stat = git(tree.path, ['diff', '--stat', base, commit]);
     audit('ready_for_review');
+    telemetryStatus = 'ok';
     log(`rama lista para revisión\nRama: ${tree.branch}\nCommit: ${commit}\n${stat}`);
     return { branch: tree.branch, commit, stat };
   } catch (error) {
+    telemetryStatus = 'error';
     audit(interrupted ? 'interrupted' : 'failed');
     throw error;
   } finally {
+    await telemetry?.finish(telemetryStatus);
     workStore?.close();
     process.removeListener('SIGINT', cancel);
     process.removeListener('SIGTERM', cancel);

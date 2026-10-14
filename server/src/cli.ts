@@ -46,6 +46,7 @@ import { MachineCapacityPublisher } from './machineCapacity.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
+import { runTelemetryCommand } from './telemetryCommand.js';
 import { parseWorkerArgs, runWorker } from './worker.js';
 
 // ── Argument parsing ──────────────────────────────────────────
@@ -159,6 +160,8 @@ export async function dispatchCli(
     runExecutorsCommand(argv.slice(1));
   } else if (argv[0] === 'worker') {
     await handlers.worker(parseWorkerArgs(argv.slice(1)));
+  } else if (argv[0] === 'telemetry') {
+    await runTelemetryCommand(argv.slice(1));
   } else {
     await handlers.server(argv);
   }

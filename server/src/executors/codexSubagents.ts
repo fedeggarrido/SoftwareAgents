@@ -49,6 +49,7 @@ export function findSubagentRollout(
   seen: Set<string>,
   nowMs = Date.now(),
   final = false,
+  onOwnRollout?: (file: string) => void,
 ): SubagentRolloutStatus {
   let reason: string | undefined;
   let ownRolloutFound = false;
@@ -92,6 +93,7 @@ export function findSubagentRollout(
           continue;
         }
         const payload = meta.payload;
+        if (ownRollout && payload.id === parentThreadId) onOwnRollout?.(file);
         if (
           payload.parent_thread_id === parentThreadId ||
           payload.source?.subagent?.thread_spawn?.parent_thread_id === parentThreadId

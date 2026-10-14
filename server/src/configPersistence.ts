@@ -106,6 +106,42 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
     allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
     modelTiers: tierPolicySchema,
+    telemetry: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        otlp: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['enabled', 'endpoint'],
+          properties: {
+            enabled: { type: 'boolean' },
+            endpoint: { type: 'string', maxLength: 2048, pattern: '^https?://[^\\s]+$' },
+            headers: {
+              type: 'object',
+              maxProperties: 16,
+              propertyNames: { pattern: '^[A-Za-z0-9-]{1,64}$' },
+              additionalProperties: { type: 'string', maxLength: 4096, pattern: '^[^\\r\\n]*$' },
+            },
+          },
+        },
+        prices: {
+          type: 'object',
+          maxProperties: 256,
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['input', 'output'],
+            properties: {
+              input: nonNegativeNumber,
+              output: nonNegativeNumber,
+              cacheRead: nonNegativeNumber,
+              cacheCreate: nonNegativeNumber,
+            },
+          },
+        },
+      },
+    },
     executorLevels: {
       type: 'object',
       additionalProperties: false,

@@ -7,7 +7,7 @@
 - **Try-catch with graceful degradation** — errors logged but never crash the extension.
 - **Malformed JSONL lines** silently ignored (catch block in `processTranscriptLine`).
 - **Missing assets** logged with warning, operation continues with null/fallback.
-- No centralized error reporting or telemetry.
+- Worker Execution telemetry is metadata-only (SA-095); see [execution-telemetry.md](../execution-telemetry.md).
 
 ## Logging
 

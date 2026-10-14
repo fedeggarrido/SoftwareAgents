@@ -19,11 +19,25 @@ export interface ProjectAutopilotConfig {
   stateFile?: string;
 }
 
+/** Explicit Operator prices in USD per million tokens; no inferred tariffs. */
+export interface TelemetryModelPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheCreate?: number;
+}
+
+export interface TelemetryConfig {
+  otlp?: { enabled: boolean; endpoint: string; headers?: Record<string, string> };
+  prices?: Record<string, TelemetryModelPrice>;
+}
+
 /** Operator-owned policy in ~/.pixel-agents/config.json, never in Project Brain. */
 export interface ProjectOperatorConfig {
   autonomyLevel: AutonomyLevel;
   allowedExecutors: string[];
   modelTiers?: ModelTierPolicy;
+  telemetry?: TelemetryConfig;
   /**
    * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
    * (or no entry) = every catalog tier; an empty list blocks that Executor.

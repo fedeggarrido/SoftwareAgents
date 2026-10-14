@@ -18,9 +18,11 @@ import {
   CODEX_SUBAGENT_FINAL_TIMEOUT_MS,
   CODEX_SUBAGENT_POLL_MS,
   CODEX_WINDOWS_SANDBOX,
+  TELEMETRY_ROLLOUT_BYTES,
 } from '../constants.js';
 import { validateModelChoice } from '../modelTiers.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
+import { CliTelemetryProjection } from '../telemetryObservations.js';
 import { auditContainmentDenial, codexItemContainment } from './agentContainment.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
@@ -194,6 +196,8 @@ export class CodexCliExecutor implements Executor {
             }
           }, req.timeoutMin * 60000);
           const queue: ExecutionEvent[] = [];
+          const telemetry = new CliTelemetryProjection();
+          let ownRollout: string | undefined;
           let wake: (() => void) | undefined;
           const push = (event: ExecutionEvent) => {
             queue.push(event);
@@ -230,6 +234,9 @@ export class CodexCliExecutor implements Executor {
               seenRollouts,
               Date.now(),
               final,
+              (file) => {
+                ownRollout = file;
+              },
             );
             if (rollout.status === 'found')
               violate(
@@ -250,6 +257,8 @@ export class CodexCliExecutor implements Executor {
                 push({ type: 'output', text: line, stream });
                 continue;
               }
+              for (const observation of telemetry.codex(record))
+                push({ type: 'telemetry', observation });
               if (!record?.type) {
                 push({ type: 'output', text: line, stream });
                 continue;
@@ -422,6 +431,27 @@ export class CodexCliExecutor implements Executor {
             }
             if (rollout?.status === 'inconclusive')
               violate(`could not verify that no sub-agent was spawned: ${rollout.reason}`);
+            // Bounded, best-effort read of this thread only. Totals replace stream totals,
+            // never add to them; rollout content and paths are not emitted.
+            if (ownRollout) {
+              try {
+                const size = fs.statSync(ownRollout).size;
+                const input = fs.createReadStream(ownRollout, {
+                  start: Math.max(0, size - TELEMETRY_ROLLOUT_BYTES),
+                  end: Math.max(0, size - 1),
+                });
+                for await (const line of createInterface({ input })) {
+                  try {
+                    for (const observation of telemetry.codex(JSON.parse(line), true))
+                      push({ type: 'telemetry', observation });
+                  } catch {
+                    /* incomplete or unsupported rollout record */
+                  }
+                }
+              } catch {
+                /* telemetry must not affect execution */
+              }
+            }
             closed = true;
             wake?.();
           });

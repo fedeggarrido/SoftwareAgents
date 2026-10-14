@@ -171,6 +171,13 @@ El flujo de trabajo Claude ↔ Codex está en [AGENTS.md](AGENTS.md). Estos mód
 proyectan Sessions y trabajo observado en Pixel Office; no constituyen por sí
 solos las entidades Agent / AgentSpec de SoftwareAgents ni conceden permisos.
 
+**ClickUp (backlog humano):** para escribir en ClickUp usa la API REST
+(`https://api.clickup.com/api/v2`) con el token personal del operador SOLO en la
+variable de entorno `CLICKUP_TOKEN`: nunca en ficheros, commits, logs, memoria ni
+prompts de Codex. El conector MCP de ClickUp tiene un tope de 100 llamadas/día y se
+agota en una jornada de QA; la REST solo limita ~100 peticiones/minuto. El MCP sirve
+para lecturas puntuales.
+
 ### Runtime (`server/src/`)
 
 - `boardWatcher.ts`: lectura del espejo `docs/backlog/board.json`, claims y

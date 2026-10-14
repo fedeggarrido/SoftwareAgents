@@ -9,6 +9,7 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
+import { readConfig } from './configPersistence.js';
 import {
   closeAvailabilityDecisions,
   escalateUnavailable,
@@ -191,14 +192,9 @@ export async function runWorker(
         input: args,
       },
     );
-  if (
-    decision.outcome !== 'allow' ||
-    (!config.operator.modelTiers &&
-      !args.selectExecutor &&
-      !config.operator.allowedExecutors.includes('claude'))
-  ) {
+  if (decision.outcome !== 'allow' || !readConfig().projects[config.project.id]) {
     audit('denied');
-    throw new CliUsageError('Operator config must allow the claude executor for this Project');
+    throw new CliUsageError('Operator config must authorize execution for this Project');
   }
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief = fs.readFileSync(path.resolve(cwd, args.brief), 'utf8');
@@ -317,10 +313,12 @@ export async function runWorker(
   const probed: ('claude' | 'codex')[] =
     tierPolicy || modelPolicy
       ? (['claude', 'codex'] as const).filter((id) => config.operator.allowedExecutors.includes(id))
-      : ['claude'];
+      : config.operator.allowedExecutors.includes('claude')
+        ? ['claude']
+        : [];
   let scope = modelPolicy ? `capability:${spec.modelPolicy.capabilityClass}` : 'executor:claude';
   let invalidated: string | undefined;
-  /** Never launched: the slot is released and a new run selects again (no reuse). */
+  /** Never launched: release the slot; retry reselects and reuses the clean task worktree. */
   const invalidatedResult = (reason: string) => {
     log(`Selection invalidated before spawn: ${reason}`);
     audit('selection_invalidated');
@@ -348,15 +346,15 @@ export async function runWorker(
             const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
             workStore = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
             const inputs = taskModelInputs(config, workStore.getTask(args.task), args.task);
+            availability = await observeExecutors(probed, config.operator, probe);
             validateModelTierSupport(
               tierPolicy,
               config.operator.binaryPaths?.claude,
               spec,
               tierRule,
               inputs,
-              config.operator.allowedExecutors,
+              probed.filter((id) => !launchBlock(availability?.[id], nowSeconds())),
             );
-            availability = await observeExecutors(probed, config.operator, probe);
             return admitModelTier(
               spec,
               tierRule,

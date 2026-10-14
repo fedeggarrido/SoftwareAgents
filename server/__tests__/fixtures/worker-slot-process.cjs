@@ -7,6 +7,7 @@ const runtime = require(process.argv[2]);
 // Launch-time availability probes (SA-090) answer as a supported, logged-in CLI;
 // mirrors __tests__/helpers/readyProbe.ts without spawning anything.
 const help = [
+  '--print --verbose --allowedTools --disallowedTools --no-chrome --model --effort',
   '--output-format stream-json --strict-mcp-config --mcp-config --setting-sources',
   '--settings --session-id --permission-mode --append-system-prompt',
   '--disable-slash-commands --tools --json --sandbox --ignore-user-config',

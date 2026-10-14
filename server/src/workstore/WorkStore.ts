@@ -148,6 +148,11 @@ export interface WorkStore {
   getHumanDecision(key: string): HumanDecisionRecord | undefined;
   listHumanDecisions(): HumanDecisionRecord[];
   openDecision(decision: NewHumanDecision): Promise<HumanDecision>;
+  /** Atomically open/join by the first context line, suspend unleased Tasks, and
+   * create missing DRAFT/unknown references. Reject active work; never stop a process. */
+  openOrJoinIdleDecision(
+    decision: NewHumanDecision,
+  ): Promise<{ decision: HumanDecision; created: boolean; added: boolean }>;
   resolveDecision(
     id: string,
     answer: string | null,

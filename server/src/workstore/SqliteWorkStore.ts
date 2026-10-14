@@ -775,7 +775,7 @@ class SqliteWorkStore implements WorkStore {
         now,
       );
   }
-  async openDecision(input: NewHumanDecision): Promise<HumanDecision> {
+  private validateDecision(input: NewHumanDecision): HumanDecision {
     const decision = validateSchema(compileSchema<HumanDecision>(decisionSchema), {
       // Snapshot nested input before asynchronous process cleanup.
       ...structuredClone(input),
@@ -788,6 +788,84 @@ class SqliteWorkStore implements WorkStore {
       decision.options.some((o) => !o.id.trim())
     )
       throw new Error('Option IDs must be nonempty and unique');
+    return decision;
+  }
+  openOrJoinIdleDecision(
+    input: NewHumanDecision,
+  ): Promise<{ decision: HumanDecision; created: boolean; added: boolean }> {
+    const proposed = this.validateDecision(input);
+    const key = proposed.context.split('\n', 1)[0];
+    if (!key.trim()) throw new Error('Decision requires a context key');
+    // BEGIN IMMEDIATE serializes the key lookup and all Task/decision changes
+    // across connections and processes, including resolution of the same decision.
+    return this.write(() => {
+      const existing = this.listDecisions().find(
+        (d) => d.status === 'open' && d.context.split('\n', 1)[0] === key,
+      );
+      const decision = existing ?? proposed;
+      const row = existing
+        ? this.db
+            .prepare('SELECT previous_states FROM human_decisions WHERE project_id = ? AND key = ?')
+            .get(this.projectId, existing.id)
+        : undefined;
+      const states: Record<string, TaskStatus> = row
+        ? JSON.parse(row.previous_states as string)
+        : Object.create(null);
+      let added = false;
+      for (const taskKey of new Set(proposed.blocks)) {
+        this.assertNotRecovering(taskKey);
+        if (!this.getTask(taskKey))
+          this.createTask({ key: taskKey, type: 'unknown', status: 'DRAFT' });
+        const task = this.getTask(taskKey)!;
+        if (existing?.blocks.includes(taskKey)) {
+          if (task.status !== 'WAITING_HUMAN') throw new Error('Blocked task state changed');
+          continue;
+        }
+        if (
+          task.lease_owner !== null ||
+          ['LEASED', 'RUNNING', 'DONE', 'FAILED_FINAL', 'CANCELLED', 'WAITING_HUMAN'].includes(
+            task.status,
+          ) ||
+          this.db
+            .prepare(
+              'SELECT 1 FROM executions WHERE project_id = ? AND task_key = ? AND pid IS NOT NULL AND tree_closed_at IS NULL LIMIT 1',
+            )
+            .get(this.projectId, taskKey)
+        )
+          throw new Error('Task cannot wait for a human while active or blocked: ' + taskKey);
+        this.assertNoDecisionGate(taskKey);
+        states[taskKey] = task.status;
+        this.decisionTask(task, 'WAITING_HUMAN', decision.requestedBy, decision.id);
+        if (existing) decision.blocks.push(taskKey);
+        added = true;
+      }
+      if (existing) {
+        this.db
+          .prepare(
+            'UPDATE human_decisions SET escalation = ?, previous_states = ? WHERE project_id = ? AND key = ?',
+          )
+          .run(JSON.stringify(decision), JSON.stringify(states), this.projectId, decision.id);
+      } else {
+        this.db
+          .prepare(
+            'INSERT INTO human_decisions (project_id,key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?)',
+          )
+          .run(
+            this.projectId,
+            decision.id,
+            decision.context,
+            '',
+            decision.requestedBy,
+            '',
+            JSON.stringify(decision),
+            JSON.stringify(states),
+          );
+      }
+      return { decision, created: !existing, added };
+    });
+  }
+  async openDecision(input: NewHumanDecision): Promise<HumanDecision> {
+    const decision = this.validateDecision(input);
     // Reserve every block atomically before touching the OS. No partial decision or suspension
     // is visible, and neither a sweeper nor a worker may change these Task generations.
     const reservations = await this.write(() => {

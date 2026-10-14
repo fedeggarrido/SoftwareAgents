@@ -398,6 +398,11 @@ verificado en este repo, y un CLI sin sesión falla por sí solo sin generar.
 La elegibilidad del snapshot sigue la misma regla sin frescura (el worker vuelve a
 sondear): una instalación sin probar ya no es «eligible».
 
+El worker observa antes de validar soporte de esfuerzo Claude y solo lo valida
+para candidatos disponibles. Un CLI ausente, no soportado o sin autenticación no
+impide elegir otro executor; una sonda desconocida conserva la espera automática.
+Si no queda ningún candidato, se aplica el escalado normal de disponibilidad.
+
 **Revalidación en la frontera real.** La preparación del worktree es lenta, así
 que la selección se revalida después de ella, inmediatamente antes de arrancar el
 executor, bajo la admisión de máquina (la misma que toma un toggle, SA-088):
@@ -415,15 +420,27 @@ esperando un `close` que nunca llegaba; corregido en `registeredProcess.ts`: ant
 ACK se mata el supervisor en lugar de desconectarlo.) La coordinación entre procesos y los slots compartidos son los
 existentes (admisión Lamport + `executor-slots`); no hace falta el ledger de SA-037.
 
+El worktree limpio `.worktrees/<Task>` y su rama `sa/<Task>-worker` se conservan
+al invalidar antes del spawn. El siguiente run de la misma Task los reutiliza
+mediante WorktreeManager, comprueba que siguen limpios y hace una selección nueva
+con un nuevo intento de Execution. Un worktree sucio requiere revisión antes de
+reintentar; no se eliminan cambios ni se reinicia la rama automáticamente.
+
 **Sin executor elegible.** Si todos los candidatos quedan excluidos por causas que
 solo el operador corrige (`no_enabled_executor`, `no_allowed_level` —también cuando
 el operador no permite el nivel con `executorLevels`, SA-092—,
 `not_installed`, `unsupported_version`, `auth_required`), el worker abre una Human
-Decision (`requestedBy: system`) que pone la Task en `WAITING_HUMAN`, salvo que ya
-exista una abierta para el mismo Project, alcance y causa (primera línea del
+Decision (`requestedBy: system`) que pone la Task en `WAITING_HUMAN`. Si ya
+existe una abierta para el mismo Project, alcance y causa, añade la Task a sus
+`blocks`, conserva su estado anterior y la pone en `WAITING_HUMAN` en la misma
+transacción. La búsqueda por clave y la apertura también son atómicas entre
+procesos en WorkStore (primera línea del
 contexto `executor-availability/<alcance>/<causa>`; alcance `tier:<nivel pedido>`,
 `capability:<clase>` o `executor:claude`). Ese intento sale con 3 sin worktree ni
 slot. Cuota, concurrencia y sondas sin probar nunca generan decisiones: esperan.
+La ruta legado sin catálogo ni `--select-executor` también escala con
+`no_enabled_executor` y exit 3 cuando todos están OFF; la autonomía sigue siendo
+obligatoria y se valida antes de escalar.
 Cuando una ejecución del mismo alcance vuelve a ser admitida, sus decisiones de
 disponibilidad abiertas se cierran solas (respuesta `reevaluate`, auditada como
 `system`), devolviendo las Tasks a su estado anterior; otras Human Decisions no se
@@ -432,5 +449,4 @@ tocan. El operador también puede responder «Reevaluar». No registrar la decis
 
 Pendiente (contrato AsyncAPI, fuera de esta tarea): proyectar códigos y alternativas
 descartadas estructurados en `AgentRole`/overlay; hoy viajan en `selection_reason`
-y en el audit. Residual: dos workers que bloquean a la vez por la misma causa
-pueden abrir dos decisiones (comprobación y apertura no comparten transacción).
+y en el audit.

@@ -113,7 +113,8 @@ describe('supervised worker', () => {
   it('runtime support uses the configured Claude binary and fails closed before launch', async () => {
     const file = path.join(root, '.pixel-agents/config.json');
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const binary = path.join(root, 'missing-claude.exe');
+    const binary = path.join(root, 'claude-without-effort.exe');
+    fs.writeFileSync(binary, 'synthetic binary; availability probes are injected');
     raw.projects.test.binaryPaths.claude = binary;
     raw.projects.test.modelTiers = {
       rule: parse(
@@ -1327,6 +1328,119 @@ describe('executor selection and drain (SA-090)', () => {
     process.exitCode = 0;
   });
 
+  it('legacy worker with all executors OFF waits for a human with exit 3 and no probe', async () => {
+    setAllowed([]);
+    const probe = vi.fn(readyProbe);
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, log: () => {}, probe },
+    );
+    expect(result).toMatchObject({
+      availabilityBlock: { code: 'no_enabled_executor', decisionId: expect.any(String) },
+      quotaDecision: { status: 'wait', cause: 'disabled' },
+    });
+    expect(process.exitCode).toBe(3);
+    expect(probe).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, '.worktrees'))).toBe(false);
+    expect(readExecutorSlots('claude').count + readExecutorSlots('codex').count).toBe(0);
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')?.status).toBe('WAITING_HUMAN');
+      expect(store.listDecisions()).toHaveLength(1);
+      expect(store.listExecutions()).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('legacy worker still respects policy denial before escalating with all executors OFF', async () => {
+    setAllowed([]);
+    const policy = await import('../src/policy.js');
+    vi.spyOn(policy, 'evaluatePolicy').mockReturnValue({
+      outcome: 'deny',
+      reason: 'synthetic autonomy denial',
+    });
+    const probe = vi.fn(readyProbe);
+    await expect(
+      runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo, log: () => {}, probe }),
+    ).rejects.toThrow('Operator config');
+    expect(probe).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+    expect(statuses()).toEqual(['denied']);
+  });
+
+  it.each(['missing', 'unsupported', 'unknown'] as const)(
+    'observes Claude %s before effort validation and admits eligible Codex',
+    async (installation) => {
+      const raw = tierOperator();
+      raw.projects.test.allowedExecutors = ['claude', 'codex'];
+      const binary = path.join(root, 'claude-with-unverified-effort.exe');
+      // resolveExecutable verifies existence before the injected probe.
+      fs.writeFileSync(binary, 'synthetic binary; availability probes are injected');
+      raw.projects.test.binaryPaths.claude = binary;
+      raw.projects.test.modelTiers.tiers.standard.candidates.unshift({
+        executor: 'claude',
+        model: 'test-claude',
+        effort: 'high',
+      });
+      fs.writeFileSync(configFile(), JSON.stringify(raw));
+      const probe = async (file: string, args: readonly string[]) =>
+        file === fs.realpathSync(binary)
+          ? installation === 'missing'
+            ? { code: 'missing' as const, output: '' }
+            : installation === 'unknown'
+              ? { code: null, output: '' }
+              : { code: 0, output: args.includes('--version') ? '0.0.1' : '' }
+          : readyProbe(file, args);
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {}, probe },
+      );
+      expect(vi.mocked(execFileSync).mock.calls.some(([file]) => file === binary)).toBe(false);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(result.quotaDecision).toBeUndefined();
+        expect(store.listExecutions()).toMatchObject([
+          { executor: 'codex', model_id: 'test-model' },
+        ]);
+        expect(store.listDecisions()).toEqual([]);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it.each(['missing', 'unsupported'] as const)(
+    'only unavailable Claude with effort follows WAITING_HUMAN (%s)',
+    async (installation) => {
+      const raw = tierOperator('claude');
+      raw.projects.test.modelTiers.tiers.standard.candidates[0].effort = 'high';
+      fs.writeFileSync(configFile(), JSON.stringify(raw));
+      const result = await runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        {
+          cwd: repo,
+          log: () => {},
+          probe: async () =>
+            installation === 'missing'
+              ? { code: 'missing', output: '' }
+              : { code: 0, output: '0.0.1' },
+        },
+      );
+      expect(result.availabilityBlock?.code).toBe(
+        installation === 'missing' ? 'not_installed' : 'unsupported_version',
+      );
+      expect(process.exitCode).toBe(3);
+      expect(fs.existsSync(path.join(repo, '.worktrees'))).toBe(false);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.getTask('SA-999')?.status).toBe('WAITING_HUMAN');
+      } finally {
+        store.close();
+      }
+    },
+  );
+
   it('all executors disabled waits for a human once, deduplicated, and reopens when enabled', async () => {
     tierOperator('claude');
     setAllowed([]);
@@ -1510,6 +1624,43 @@ describe('executor selection and drain (SA-090)', () => {
       store.close();
     }
     expect(statuses()).toEqual(['model_selected', 'selection_invalidated']);
+    // Preparation is retained for retry, but the choice and Execution are fresh.
+    const tree = path.join(repo, '.worktrees/SA-999');
+    const base = git(tree, 'rev-parse', 'HEAD');
+    expect(git(tree, 'symbolic-ref', '--short', 'HEAD')).toBe('sa/SA-999-worker');
+    expect(git(tree, 'status', '--porcelain')).toBe('');
+    const raw = tierOperator();
+    raw.projects.test.modelTiers.tiers.standard.candidates[0].model = 'test-reselected-model';
+    fs.writeFileSync(configFile(), JSON.stringify(raw));
+    vi.mocked(WorktreeManager.prototype.create).mockImplementation(function (
+      this: import('../src/executors/worktreeManager.js').WorktreeManager,
+      ...args
+    ) {
+      return create.apply(this, args).then((result) => {
+        expect(result.reused).toBe(true);
+        return result;
+      });
+    });
+    process.exitCode = 0;
+    const retry = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {}, probe: readyProbe },
+    );
+    expect(retry).toMatchObject({ branch: 'sa/SA-999-worker', commit: null });
+    expect(git(tree, 'rev-parse', 'HEAD')).toBe(base);
+    expect(process.exitCode).toBe(0);
+    const retried = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      const attempts = retried.listExecutions();
+      expect(attempts).toHaveLength(2);
+      expect(attempts.map((e) => e.model_id).sort()).toEqual([
+        'test-model',
+        'test-reselected-model',
+      ]);
+      expect(attempts.find((e) => e.model_id === 'test-model')?.session_id).toBeNull();
+    } finally {
+      retried.close();
+    }
   });
 
   it('a toggle after the spawn frontier never cancels the running execution', async () => {

@@ -288,8 +288,7 @@ describe('deduplicated WAITING_HUMAN (SA-090)', () => {
       expect(first.created).toBe(true);
       expect(again).toEqual({ decisionId: first.decisionId, created: false });
       expect(store.getTask('SA-100')?.status).toBe('WAITING_HUMAN');
-      // The second Task is not invented as blocked: it keeps waiting through its run.
-      expect(store.getTask('SA-101')).toBeUndefined();
+      expect(store.getTask('SA-101')).toMatchObject({ status: 'WAITING_HUMAN', type: 'unknown' });
       const other = await escalateUnavailable(store, 'A1', 'SA-102', 'tier:deep', block, 'e3');
       expect(other.created).toBe(true);
       expect(store.getTask('SA-102')).toMatchObject({ status: 'WAITING_HUMAN', type: 'unknown' });
@@ -297,12 +296,13 @@ describe('deduplicated WAITING_HUMAN (SA-090)', () => {
       expect(decision.context.split('\n')[0]).toBe(
         availabilityDecisionKey('tier:standard', 'no_enabled_executor'),
       );
-      expect(decision).toMatchObject({ requestedBy: 'system', blocks: ['SA-100'] });
+      expect(decision).toMatchObject({ requestedBy: 'system', blocks: ['SA-100', 'SA-101'] });
 
       expect(await closeAvailabilityDecisions(store, 'tier:standard', 'e4')).toEqual([
         first.decisionId,
       ]);
       expect(store.getTask('SA-100')?.status).toBe('READY');
+      expect(store.getTask('SA-101')?.status).toBe('DRAFT');
       expect(store.getTask('SA-102')?.status).toBe('WAITING_HUMAN');
       expect(await closeAvailabilityDecisions(store, 'tier:standard', 'e5')).toEqual([]);
       const statuses = new AuditLog()
@@ -311,9 +311,78 @@ describe('deduplicated WAITING_HUMAN (SA-090)', () => {
       expect(statuses).toEqual([
         'system:availability_blocked',
         'system:availability_blocked',
+        'system:availability_blocked',
         'system:availability_restored_pending',
         'system:availability_restored',
       ]);
+    } finally {
+      store.close();
+    }
+  });
+  it('two simultaneous escalations on separate connections share one decision and restore both Tasks', async () => {
+    const first = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    const second = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      first.createTask({ key: 'SA-100', type: 'implementation', status: 'READY' });
+      second.createTask({ key: 'SA-101', type: 'qa', status: 'QA' });
+      const results = await Promise.all([
+        escalateUnavailable(first, 'A1', 'SA-100', 'tier:standard', block, 'e1'),
+        escalateUnavailable(second, 'A1', 'SA-101', 'tier:standard', block, 'e2'),
+      ]);
+      expect(new Set(results.map((r) => r.decisionId)).size).toBe(1);
+      expect(results.filter((r) => r.created)).toHaveLength(1);
+      expect(second.listDecisions()).toHaveLength(1);
+      expect(second.listDecisions()[0].blocks.sort()).toEqual(['SA-100', 'SA-101']);
+      expect(first.listTasks().map((t) => t.status)).toEqual(['WAITING_HUMAN', 'WAITING_HUMAN']);
+      const version = second.getTask('SA-101')!.version;
+      await escalateUnavailable(second, 'A1', 'SA-101', 'tier:standard', block, 'e3');
+      expect(second.getTask('SA-101')!.version).toBe(version);
+      expect(second.listDecisions()[0].blocks).toHaveLength(2);
+      await closeAvailabilityDecisions(second, 'tier:standard', 'e4');
+      expect(first.getTask('SA-100')?.status).toBe('READY');
+      expect(first.getTask('SA-101')?.status).toBe('QA');
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+  it.each([false, true])(
+    'rejects leased work without changing its Task or decision (reuse=%s)',
+    async (reuse) => {
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        if (reuse) await escalateUnavailable(store, 'A1', 'SA-100', 'tier:standard', block, 'e1');
+        store.createTask({ key: 'SA-101', type: 'implementation', status: 'READY' });
+        const task = await store.claim('SA-101', 'another-worker');
+        const decisions = store.listDecisions();
+        await expect(
+          escalateUnavailable(store, 'A1', 'SA-101', 'tier:standard', block, 'e2'),
+        ).rejects.toThrow('Task cannot wait');
+        expect(store.getTask('SA-101')).toEqual(task);
+        expect(store.listDecisions()).toEqual(decisions);
+        expect(store.listLeaseRecoveries()).toEqual([]);
+      } finally {
+        store.close();
+      }
+    },
+  );
+  it('rolls back a join and missing Task creation when any block is active', async () => {
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      await escalateUnavailable(store, 'A1', 'SA-100', 'tier:standard', block, 'e1');
+      store.createTask({ key: 'SA-101', type: 'implementation', status: 'READY' });
+      await store.claim('SA-101', 'another-worker');
+      const decisions = store.listDecisions();
+      const events = store.listDomainEvents();
+      await expect(
+        store.openOrJoinIdleDecision({
+          ...decisions[0],
+          blocks: ['SA-102', 'SA-101'],
+        }),
+      ).rejects.toThrow('Task cannot wait');
+      expect(store.getTask('SA-102')).toBeUndefined();
+      expect(store.listDecisions()).toEqual(decisions);
+      expect(store.listDomainEvents()).toEqual(events);
     } finally {
       store.close();
     }

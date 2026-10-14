@@ -537,17 +537,12 @@ export async function escalateUnavailable(
   executionId: string,
 ): Promise<{ decisionId: string; created: boolean }> {
   const key = availabilityDecisionKey(scope, block.code);
-  const open = store
-    .listDecisions()
-    .find((d) => d.status === 'open' && decisionKey(d.context) === key);
-  if (open) return { decisionId: open.id, created: false };
   // The system cannot change availability: this records that a human must.
   const policy = evaluatePolicy(ACTION, 'system', level);
-  if (!store.getTask(taskKey)) store.createTask({ key: taskKey, type: 'unknown', status: 'DRAFT' });
   const excluded = block.exclusions.map(
     (e) => `${e.tier ? `${e.tier}/` : ''}${e.executor}: ${e.code}`,
   );
-  const decision = await store.openDecision({
+  const { decision, created, added } = await store.openOrJoinIdleDecision({
     id: randomUUID(),
     context: [
       key,
@@ -573,21 +568,22 @@ export async function escalateUnavailable(
     impact: policy.reason,
     urgency: 'high',
   });
-  new AuditLog().append({
-    projectId: store.projectId,
-    actorType: 'system',
-    actorId: null,
-    action: 'launch_execution',
-    resourceType: 'human_decision',
-    resourceId: decision.id,
-    policyDecision: policy,
-    riskLevel: 'medium',
-    taskKey,
-    executionId,
-    input: { scope, code: block.code },
-    outcome: { status: 'availability_blocked', detail: JSON.stringify({ key, excluded }) },
-  });
-  return { decisionId: decision.id, created: true };
+  if (created || added)
+    new AuditLog().append({
+      projectId: store.projectId,
+      actorType: 'system',
+      actorId: null,
+      action: 'launch_execution',
+      resourceType: 'human_decision',
+      resourceId: decision.id,
+      policyDecision: policy,
+      riskLevel: 'medium',
+      taskKey,
+      executionId,
+      input: { scope, code: block.code },
+      outcome: { status: 'availability_blocked', detail: JSON.stringify({ key, excluded }) },
+    });
+  return { decisionId: decision.id, created };
 }
 
 /**

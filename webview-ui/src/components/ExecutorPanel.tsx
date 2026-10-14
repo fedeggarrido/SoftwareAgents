@@ -3,9 +3,7 @@ import { useEffect, useState } from 'react';
 import type { ModelTier } from '../../../core/src/messages.js';
 import { executorPanelView } from '../office/executorPanelView.js';
 import {
-  expirePending,
-  getExecutorStore,
-  setExecutorStore,
+  sendExecutorCommand,
   startLevelToggle,
   startToggle,
   useExecutorStore,
@@ -18,29 +16,28 @@ import { transport } from '../transport/index.js';
  */
 export function ExecutorPanel() {
   const store = useExecutorStore();
+  const [connection, setConnection] = useState(transport.state);
+  useEffect(() => {
+    setConnection(transport.state);
+    return transport.onStateChange(setConnection);
+  }, []);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => {
-      const at = Date.now();
-      setNow(at);
-      const expired = expirePending(getExecutorStore(), at);
-      if (!expired.resync) return;
-      setExecutorStore(expired.store);
-      const projectId = expired.store.state?.projectId;
-      if (projectId) transport.send({ type: 'requestExecutorState', projectId });
+      setNow(Date.now());
     }, 1000);
     return () => clearInterval(t);
   }, []);
-  const view = executorPanelView(store, now);
+  const view = executorPanelView(store, now, connection);
   if (!view) return null;
 
   const toggle = (executorId: string, enabled: boolean) => {
     const message = startToggle(executorId, enabled);
-    if (message) transport.send(message);
+    if (message) sendExecutorCommand(message, transport);
   };
   const toggleLevel = (executorId: string, tier: ModelTier, allowed: boolean) => {
     const message = startLevelToggle(executorId, tier, allowed);
-    if (message) transport.send(message);
+    if (message) sendExecutorCommand(message, transport);
   };
 
   return (
@@ -93,13 +90,13 @@ export function ExecutorPanel() {
                     role="checkbox"
                     aria-checked={level.allowed}
                     aria-label={level.ariaLabel}
-                    disabled={row.pending}
+                    disabled={row.disabled}
                     onClick={() => toggleLevel(row.executorId, level.tier, !level.allowed)}
                     className={`border border-border px-4 py-1 leading-none ${
                       level.allowed
                         ? 'bg-active-bg text-text'
                         : 'bg-bg-dark text-text-muted line-through'
-                    } ${row.pending ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-btn-hover'}`}
+                    } ${row.disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-btn-hover'}`}
                   >
                     {level.label}
                   </button>

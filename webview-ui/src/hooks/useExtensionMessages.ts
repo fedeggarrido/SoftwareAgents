@@ -34,6 +34,7 @@ import type { OfficeLayout, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
 import { isBrowserRuntime, isE2E } from '../runtime.js';
 import { transport } from '../transport/index.js';
+import { bindExtensionTransportLifecycle } from './extensionTransportLifecycle.js';
 
 /**
  * A Headless agent is one the office adopted from outside (`claude -p`, a session
@@ -359,7 +360,7 @@ export function useExtensionMessages(
       } else if (msg.type === 'executorToggleResult') {
         const settled = applyToggleResult(getExecutorStore(), msg);
         setExecutorStore(settled.store);
-        // Any non-applied answer may mean our view is stale: ask, never guess.
+        // Wait for the resulting revision (or recover a failed request): ask, never guess.
         if (settled.resync && settled.store.state)
           transport.send({
             type: 'requestExecutorState',
@@ -836,9 +837,11 @@ export function useExtensionMessages(
       }
     };
     const unsubscribe = transport.onMessage(handler);
-    // Announcing executorControls opts in to executorState (servers never send it otherwise).
-    transport.send({ type: 'webviewReady', capabilities: ['executorControls'] });
-    return unsubscribe;
+    const stopLifecycle = bindExtensionTransportLifecycle(transport);
+    return () => {
+      stopLifecycle();
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
 

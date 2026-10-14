@@ -1,4 +1,5 @@
 import type { ExecutorAvailability, ModelTier } from '../../../core/src/messages.js';
+import type { TransportState } from '../../../core/src/transport.js';
 import { EXECUTOR_STATUS_COLORS } from '../constants.js';
 import type { ExecutorStore } from './executorStore.js';
 
@@ -81,7 +82,13 @@ export function executorStatus(
     return { text: 'Límite de concurrencia', color: EXECUTOR_STATUS_COLORS.warning };
   if (!e.eligible) return { text: 'No admisible ahora', color: EXECUTOR_STATUS_COLORS.warning };
   const stale = e.staleAfter !== null && nowS > e.staleAfter;
-  if (e.installation === 'unknown' || e.checkedAt === null || stale)
+  if (
+    e.installation === 'unknown' ||
+    e.authentication === 'unknown' ||
+    has('probe_unknown') ||
+    e.checkedAt === null ||
+    stale
+  )
     return { text: 'Desconocido · comprobando', color: EXECUTOR_STATUS_COLORS.unknown };
   return { text: 'Disponible', color: EXECUTOR_STATUS_COLORS.available };
 }
@@ -125,7 +132,11 @@ function details(e: ExecutorAvailability, nowS: number): string[] {
   return lines;
 }
 
-export function executorPanelView(store: ExecutorStore, nowMs: number): ExecutorPanelView | null {
+export function executorPanelView(
+  store: ExecutorStore,
+  nowMs: number,
+  transportState: TransportState = 'connected',
+): ExecutorPanelView | null {
   const state = store.state;
   if (!state) return null;
   const nowS = nowMs / 1000;
@@ -141,7 +152,12 @@ export function executorPanelView(store: ExecutorStore, nowMs: number): Executor
       executorId: e.executorId,
       label,
       checked: e.enabled,
-      disabled: !state.canManage || !!pending || state.configurationStatus === 'recovery_required',
+      disabled:
+        transportState !== 'connected' ||
+        store.needsSnapshot ||
+        !state.canManage ||
+        Object.keys(store.pending).length > 0 ||
+        state.configurationStatus === 'recovery_required',
       pending: !!pending,
       status: status.text,
       color: status.color,

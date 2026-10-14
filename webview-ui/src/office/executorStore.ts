@@ -6,6 +6,7 @@ import type {
   ExecutorToggleResult,
   ModelTier,
 } from '../../../core/src/messages.js';
+import type { MessageTransport } from '../../../core/src/transport.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
 
 // ── Executor availability (server `executorState`, SA-087/088/089/091) ──────
@@ -13,22 +14,29 @@ import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
 // optimistically: the row shows "Guardando…" until the confirmed result and the
 // fresh snapshot that follows it arrive. DOM-free so it can be unit-tested.
 
-/** One in-flight command per Executor: availability (SA-091) or levels (SA-092). */
+/** Availability (SA-091) or levels (SA-092); all rows share one Project revision. */
 export interface PendingToggle {
   requestId: string;
   sentAt: number;
+  awaitingSnapshot?: boolean;
+  revision?: string;
 }
 
 export interface ExecutorStore {
   state: ExecutorState | null;
   pending: Record<string, PendingToggle>;
-  /** Last failed toggle per executor, cleared by the next snapshot that settles it. */
+  /** Last failure per Executor; fresh snapshots clear transient transport errors. */
   errors: Record<string, string>;
+  /** Block new commands until recovery or reconnection has delivered fresh state. */
+  needsSnapshot: boolean;
 }
 
 export function emptyExecutorStore(): ExecutorStore {
-  return { state: null, pending: {}, errors: {} };
+  return { state: null, pending: {}, errors: {}, needsSnapshot: false };
 }
+
+const TIMEOUT_ERROR = 'Sin respuesta del servidor; esperando estado actualizado.';
+const OFFLINE_ERROR = 'Sin conexión con el servidor; esperando estado actualizado.';
 
 /** Snapshots arrive in order per connection; a reconnect restarts the sequence at 0. */
 export function applyExecutorState(store: ExecutorStore, next: ExecutorState): ExecutorStore {
@@ -40,7 +48,15 @@ export function applyExecutorState(store: ExecutorStore, next: ExecutorState): E
     next.sequence <= prev.sequence
   )
     return store;
-  return { ...store, state: next };
+  const pending = { ...store.pending };
+  const errors = { ...store.errors };
+  for (const [id, p] of Object.entries(pending)) {
+    if (p.awaitingSnapshot && (!p.revision || p.revision === next.revision)) delete pending[id];
+  }
+  for (const [id, error] of Object.entries(errors)) {
+    if (error === TIMEOUT_ERROR || error === OFFLINE_ERROR) delete errors[id];
+  }
+  return { ...store, state: next, pending, errors, needsSnapshot: false };
 }
 
 const ERROR_TEXT: Record<string, string> = {
@@ -64,28 +80,39 @@ export function toggleErrorText(result: Pick<ExecutorToggleResult, 'status' | 'e
 
 /**
  * Settle a pending toggle by its requestId. Returns whether the client must ask for
- * a fresh snapshot: any non-applied answer means our view may be stale.
+ * a fresh snapshot. A successful result stays pending until its revision is observed.
  */
 export function applyToggleResult(
   store: ExecutorStore,
   result: ExecutorToggleResult,
 ): { store: ExecutorStore; resync: boolean } {
   const pending = store.pending[result.executorId];
-  if (!pending || pending.requestId !== result.requestId) return { store, resync: false };
+  if (
+    !pending ||
+    pending.requestId !== result.requestId ||
+    store.state?.projectId !== result.projectId
+  )
+    return { store, resync: false };
   const rest = { ...store.pending };
-  delete rest[result.executorId];
   const ok = result.status === 'applied' || result.status === 'unchanged';
+  const confirmed = ok && !!result.revision && store.state.revision === result.revision;
+  if (ok && !confirmed)
+    rest[result.executorId] = { ...pending, awaitingSnapshot: true, revision: result.revision };
+  else delete rest[result.executorId];
   const errors = { ...store.errors };
   if (ok) delete errors[result.executorId];
   else errors[result.executorId] = toggleErrorText(result);
-  return { store: { ...store, pending: rest, errors }, resync: !ok };
+  return {
+    store: { ...store, pending: rest, errors, needsSnapshot: !ok || store.needsSnapshot },
+    resync: !confirmed,
+  };
 }
 
 type ExecutorCommand =
   | { type: 'setExecutorEnabled'; enabled: boolean }
   | { type: 'setExecutorLevels'; levels: ModelTier[] };
 
-/** Build the command and mark the row pending. Nothing is sent while one is in flight. */
+/** Serialize Project mutations so another row cannot send with an obsolete revision. */
 function beginCommand(
   store: ExecutorStore,
   executorId: string,
@@ -94,7 +121,8 @@ function beginCommand(
   requestId: string,
 ): { store: ExecutorStore; message: ClientMessage } | null {
   const state = store.state;
-  if (!state || !state.canManage || store.pending[executorId]) return null;
+  if (!state || !state.canManage || store.needsSnapshot || Object.keys(store.pending).length)
+    return null;
   if (state.configurationStatus === 'recovery_required') return null;
   const message = {
     ...command,
@@ -155,9 +183,9 @@ export function expirePending(
   const errors = { ...store.errors };
   for (const [id] of expired) {
     delete pending[id];
-    errors[id] = 'Sin respuesta del servidor; estado actualizado.';
+    errors[id] = TIMEOUT_ERROR;
   }
-  return { store: { ...store, pending, errors }, resync: true };
+  return { store: { ...store, pending, errors, needsSnapshot: true }, resync: true };
 }
 
 // ── React binding (module singleton, like boardStore) ──
@@ -206,4 +234,23 @@ export function startLevelToggle(
   allowed: boolean,
 ): ClientMessage | null {
   return commit(beginLevelToggle(current, executorId, tier, allowed, Date.now(), newRequestId()));
+}
+
+/** Handle a socket closing between the click and send without replaying the mutation. */
+export function sendExecutorCommand(message: ClientMessage, transport: MessageTransport): void {
+  try {
+    if (transport.state !== 'connected') throw new Error('Offline');
+    transport.send(message);
+  } catch {
+    if (message.type !== 'setExecutorEnabled' && message.type !== 'setExecutorLevels') return;
+    const pending = { ...current.pending };
+    delete pending[message.executorId];
+    setExecutorStore({
+      ...current,
+      pending,
+      errors: { ...current.errors, [message.executorId]: OFFLINE_ERROR },
+      needsSnapshot: true,
+    });
+    transport.send({ type: 'requestExecutorState', projectId: message.projectId });
+  }
 }

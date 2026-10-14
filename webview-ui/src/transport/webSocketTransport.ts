@@ -7,13 +7,25 @@ import {
 import type { ClientMessage, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport, TransportState } from './types.js';
 
+// Structural socket contract keeps transport regressions runnable without DOM types.
+interface TransportSocket {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+  onopen: (() => void) | null;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: (() => void) | null;
+}
+const SOCKET_OPEN = 1;
+
 /**
  * WebSocket transport for standalone browser mode.
  * Connects to the Pixel Agents server via WebSocket for bidirectional messaging.
  * Includes automatic reconnection with exponential backoff and message queuing.
  */
 export class WebSocketTransport implements MessageTransport {
-  private ws: WebSocket | null = null;
+  private ws: TransportSocket | null = null;
   private handlers: Array<(msg: ServerMessage) => void> = [];
   private stateHandlers: Array<(state: TransportState) => void> = [];
   private url: string;
@@ -54,7 +66,9 @@ export class WebSocketTransport implements MessageTransport {
       this.reconnectAttempts > 0 ? TRANSPORT_STATE_RECONNECTING : TRANSPORT_STATE_CONNECTING,
     );
 
-    this.ws = new WebSocket(this.url);
+    const Socket = (globalThis as unknown as { WebSocket: new (url: string) => TransportSocket })
+      .WebSocket;
+    this.ws = new Socket(this.url);
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
@@ -68,7 +82,7 @@ export class WebSocketTransport implements MessageTransport {
       this.pendingMessages = [];
     };
 
-    this.ws.onmessage = (e: MessageEvent) => {
+    this.ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data as string) as ServerMessage;
         for (const handler of this.handlers) handler(msg);
@@ -90,9 +104,12 @@ export class WebSocketTransport implements MessageTransport {
   }
 
   send(message: ClientMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === SOCKET_OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
+      // Mutations are only valid for the live connection and its confirmed revision.
+      if (message.type === 'setExecutorEnabled' || message.type === 'setExecutorLevels')
+        throw new Error('Executor controls require a connected transport');
       // Queue messages while connecting (flushed in onopen)
       this.pendingMessages.push(message);
     }

@@ -52,6 +52,8 @@ describe('executor status text', () => {
     });
     for (const over of [
       { installation: 'unknown' as const },
+      { authentication: 'unknown' as const },
+      { reasonCodes: ['probe_unknown'] as ExecutorAvailability['reasonCodes'] },
       { checkedAt: null },
       { staleAfter: NOW_S - 1 },
     ])
@@ -81,6 +83,18 @@ describe('executor status text', () => {
 });
 
 describe('executor panel view', () => {
+  it('disables switches and level controls until connected and resynchronized', () => {
+    const store = withState(state({ executors: [row({ catalogLevels: ['standard', 'deep'] })] }));
+    for (const connection of ['connecting', 'reconnecting', 'disconnected'] as const) {
+      const view = executorPanelView(store, NOW_S * 1000, connection)!;
+      expect(view.rows[0].disabled).toBe(true);
+      expect(view.rows[0].levelControls).toHaveLength(2);
+    }
+    expect(
+      executorPanelView({ ...store, needsSnapshot: true }, NOW_S * 1000)!.rows[0].disabled,
+    ).toBe(true);
+    expect(executorPanelView(store, NOW_S * 1000)!.rows[0].disabled).toBe(false);
+  });
   it('shows limits, levels and probe age; unknown limits are never infinite', () => {
     const view = executorPanelView(
       withState(state({ executors: [row({ concurrencyLimit: null, activeExecutions: null })] })),
@@ -116,6 +130,82 @@ describe('executor panel view', () => {
 });
 
 describe('executor store: no optimistic update', () => {
+  it.each(['availability', 'levels'])(
+    'holds an applied %s command until the resulting revision',
+    (kind) => {
+      const initial = withState(
+        state({ executors: [row({ catalogLevels: ['standard', 'deep'] })] }),
+      );
+      const started =
+        kind === 'levels'
+          ? beginLevelToggle(initial, 'claude', 'deep', false, 1000, 'req')!
+          : beginToggle(initial, 'claude', false, 1000, 'req')!;
+      const result = applyToggleResult(started.store, {
+        type: 'executorToggleResult',
+        projectId: 'softwareagents',
+        executorId: 'claude',
+        requestId: 'req',
+        status: 'applied',
+        revision: 'r2',
+      });
+      expect(result.resync).toBe(true);
+      const old = applyExecutorState(result.store, state({ sequence: 1 }));
+      expect(old.pending.claude).toBeDefined();
+      expect(beginToggle(old, 'codex', false, 1001, 'next')).toBeNull();
+      expect(beginLevelToggle(old, 'claude', 'deep', true, 1001, 'next')).toBeNull();
+      const fresh = applyExecutorState(old, state({ sequence: 2, revision: 'r2' }));
+      expect(fresh.pending.claude).toBeUndefined();
+      expect(beginToggle(fresh, 'codex', false, 1002, 'next')!.message).toMatchObject({
+        expectedRevision: 'r2',
+      });
+      const timeout = expirePending(result.store, 1000 + EXECUTOR_TOGGLE_TIMEOUT_MS);
+      expect(timeout.resync).toBe(true);
+      expect(timeout.store.pending.claude).toBeUndefined();
+      expect(beginToggle(timeout.store, 'codex', false, 50000, 'next')).toBeNull();
+    },
+  );
+
+  it('handles snapshots before results and successful results without a revision', () => {
+    const started = beginToggle(withState(state()), 'claude', false, 0, 'req')!.store;
+    const result = {
+      type: 'executorToggleResult' as const,
+      projectId: 'softwareagents',
+      executorId: 'claude' as const,
+      requestId: 'req',
+      status: 'applied' as const,
+    };
+    const before = applyExecutorState(started, state({ sequence: 1, revision: 'r2' }));
+    expect(
+      applyToggleResult(before, { ...result, revision: 'r2' }).store.pending.claude,
+    ).toBeUndefined();
+    const withoutRevision = applyToggleResult(started, result);
+    expect(withoutRevision.store.pending.claude).toBeDefined();
+    expect(
+      applyExecutorState(withoutRevision.store, state({ sequence: 1 })).pending.claude,
+    ).toBeUndefined();
+  });
+
+  it('only a fresh snapshot clears timeout errors; policy errors remain visible', () => {
+    const started = beginToggle(
+      withState(state({ sequence: 5 })),
+      'claude',
+      false,
+      0,
+      'req',
+    )!.store;
+    const expired = expirePending(started, EXECUTOR_TOGGLE_TIMEOUT_MS).store;
+    expect(applyExecutorState(expired, state({ sequence: 4 }))).toBe(expired);
+    const fresh = applyExecutorState(
+      {
+        ...expired,
+        errors: { ...expired.errors, codex: 'La política del operador no permite este cambio.' },
+      },
+      state({ sequence: 6 }),
+    );
+    expect(fresh.errors.claude).toBeUndefined();
+    expect(fresh.errors.codex).toContain('política');
+    expect(fresh.needsSnapshot).toBe(false);
+  });
   it('a toggle marks the row pending and leaves the switch as the server last said', () => {
     const started = beginToggle(withState(state()), 'codex', false, 0, 'req-1')!;
     expect(started.message).toEqual({
@@ -164,7 +254,9 @@ describe('executor store: no optimistic update', () => {
     expect(executorPanelView(failed.store, NOW_S * 1000)!.rows[1].error).toMatch(
       /cambió en otro sitio/,
     );
-    const ok = applyToggleResult(beginToggle(failed.store, 'codex', false, 0, 'req-3')!.store, {
+    expect(beginToggle(failed.store, 'codex', false, 0, 'req-3')).toBeNull();
+    const fresh = applyExecutorState(failed.store, state({ sequence: 1 }));
+    const ok = applyToggleResult(beginToggle(fresh, 'codex', false, 0, 'req-3')!.store, {
       type: 'executorToggleResult',
       projectId: 'softwareagents',
       executorId: 'codex',
@@ -172,7 +264,8 @@ describe('executor store: no optimistic update', () => {
       status: 'applied',
       revision: 'r2',
     });
-    expect(ok.resync).toBe(false);
+    expect(ok.resync).toBe(true);
+    expect(ok.store.pending.codex?.awaitingSnapshot).toBe(true);
     expect(ok.store.errors.codex).toBeUndefined();
   });
 

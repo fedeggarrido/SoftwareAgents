@@ -1,20 +1,59 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
-import { EXECUTOR_PROBE_MAX_BACKOFF_MS, EXECUTOR_PROBE_REFRESH_MS } from '../src/constants.js';
 import {
-  EXECUTOR_PROBE_CATALOG,
+  EXECUTOR_PROBE_MAX_BACKOFF_MS,
+  EXECUTOR_PROBE_REFRESH_MS,
+  EXECUTOR_PROBE_TIMEOUT_MS,
+  EXECUTOR_PROBE_TTL_MS,
+  EXECUTOR_TERMINATION_TIMEOUT_MS,
+} from '../src/constants.js';
+import {
   ExecutorMonitor,
+  parseVersion,
   probeExecutor,
   type ProbeRun,
+  resolveExecutorBinary,
   runProbe,
   startExecutorMonitoring,
   versionAtLeast,
 } from '../src/executorProbes.js';
 import { buildExecutorState } from '../src/executorState.js';
 
-const claudeHelp = `Usage: claude [options]\n${EXECUTOR_PROBE_CATALOG.claude.requiredFlags.join('\n')}\nCommands:\n  auth   Manage authentication\n`;
-const codexExecHelp = EXECUTOR_PROBE_CATALOG.codex.requiredFlags.join('\n');
+// Fixed CLI help fixtures: independent of the catalog being checked.
+const claudeHelp = `Usage: claude [options]
+Options:
+  -p, --print
+  --output-format <format> (choices: text, json, stream-json)
+  --verbose
+  --strict-mcp-config
+  --mcp-config <configs...>
+  --setting-sources <sources>
+  --settings <file-or-json>
+  --session-id <uuid>
+  --permission-mode <mode>
+  --append-system-prompt <prompt>
+  --disable-slash-commands
+  --tools <tools...>
+  --allowedTools <tools...>
+  --disallowedTools <tools...>
+  --no-chrome
+  --model <model>
+  --effort <level>
+Commands:
+  auth   Manage authentication
+`;
+const codexExecHelp = `Usage: codex exec [OPTIONS] [PROMPT]
+Options:
+  --json
+  --sandbox <SANDBOX_MODE>
+  --ignore-user-config
+  --ignore-rules
+  --output-schema <FILE>
+`;
 
 /** Scripted CLI: every call is recorded, unknown commands fail the test loudly. */
 function fakeCli(script: Record<string, ProbeRun | (() => Promise<ProbeRun>)>) {
@@ -47,10 +86,10 @@ describe('probeExecutor', () => {
   });
 
   it('Claude auth: logged out is required, anything else unknown', async () => {
-    for (const [output, authentication] of [
-      ['{"loggedIn":false}', 'required'],
-      ['{"loggedIn":"yes"}', 'unknown'],
-      ['not json', 'unknown'],
+    for (const [output, authentication, failed] of [
+      ['{"loggedIn":false}', 'required', false],
+      ['{"loggedIn":"yes"}', 'unknown', true],
+      ['not json', 'unknown', true],
     ] as const) {
       const cli = fakeCli({
         '--version': ok('2.1.220 (Claude Code)'),
@@ -60,6 +99,7 @@ describe('probeExecutor', () => {
       expect(await probeExecutor('claude', '/bin/claude', cli.run)).toMatchObject({
         installation: 'ready',
         authentication,
+        failed,
       });
     }
   });
@@ -72,6 +112,27 @@ describe('probeExecutor', () => {
     expect(await probeExecutor('claude', '/bin/claude', cli.run)).toMatchObject({
       installation: 'ready',
       authentication: 'unknown',
+      failed: false,
+    });
+    expect(cli.calls).toEqual(['--version', '--help']);
+  });
+
+  it.each([
+    '--print',
+    '--verbose',
+    '--allowedTools',
+    '--disallowedTools',
+    '--no-chrome',
+    '--model',
+    '--effort',
+  ])('Claude rejects help missing executor flag %s', async (flag) => {
+    const cli = fakeCli({
+      '--version': ok('2.1.296'),
+      '--help': ok(claudeHelp.replace(flag, '')),
+    });
+    expect(await probeExecutor('claude', '/bin/claude', cli.run)).toMatchObject({
+      installation: 'unsupported',
+      failed: false,
     });
     expect(cli.calls).toEqual(['--version', '--help']);
   });
@@ -133,16 +194,57 @@ describe('probeExecutor', () => {
     });
     expect(await probeExecutor('codex', '/bin/codex', loggedOut.run)).toMatchObject({
       authentication: 'required',
+      failed: false,
     });
     const noStatus = fakeCli({ ...base, 'login --help': ok('Usage: codex login [options]') });
     expect(await probeExecutor('codex', '/bin/codex', noStatus.run)).toMatchObject({
       authentication: 'unknown',
+      failed: false,
     });
     expect(noStatus.calls).not.toContain('login status');
     // A prerelease of the tested version is older than it.
-    const alpha = fakeCli({ '--version': ok('codex-cli 0.159.0-alpha.12.1') });
+    const alpha = fakeCli({ '--version': ok('codex-cli 0.160.0-alpha.1') });
     expect(await probeExecutor('codex', '/bin/codex', alpha.run)).toMatchObject({
       installation: 'unsupported',
+      version: '0.160.0-alpha.1',
+    });
+    expect(alpha.calls).toEqual(['--version']);
+  });
+
+  it.each(['claude', 'codex'] as const)('%s retries unexpected auth results', async (executor) => {
+    for (const status of [
+      { code: 1, output: 'credential service unavailable' },
+      { code: 0, output: 'unrecognized status' },
+      { code: 0, output: '{"loggedIn":"yes"}' },
+      { code: 1, output: '{"loggedIn":true}' },
+      { code: null, output: '' },
+      { code: 'missing', output: '' },
+    ] satisfies ProbeRun[]) {
+      const cli = fakeCli({
+        '--version': ok(executor === 'claude' ? '2.1.296' : '0.160.0'),
+        '--help': ok(claudeHelp),
+        'exec --help': ok(codexExecHelp),
+        'login --help': ok('Commands:\n  status  Show login status\n'),
+        'auth status --json': status,
+        'login status': status,
+      });
+      expect(await probeExecutor(executor, '/bin/executor', cli.run)).toMatchObject({
+        installation: 'ready',
+        authentication: 'unknown',
+        failed: true,
+      });
+    }
+  });
+
+  it('backs off if Codex login help fails unexpectedly', async () => {
+    const cli = fakeCli({
+      '--version': ok('0.160.0'),
+      'exec --help': ok(codexExecHelp),
+      'login --help': { code: 1, output: 'internal error' },
+    });
+    expect(await probeExecutor('codex', '/bin/codex', cli.run)).toMatchObject({
+      authentication: 'unknown',
+      failed: true,
     });
   });
 
@@ -151,6 +253,27 @@ describe('probeExecutor', () => {
     expect(versionAtLeast('2.10.0', '2.9.9')).toBe(true);
     expect(versionAtLeast('0.159.9', '0.160.0')).toBe(false);
     expect(versionAtLeast('0.160.0', '0.160.0')).toBe(true);
+  });
+
+  it('preserves prerelease and build identifiers when parsing CLI versions', () => {
+    expect(parseVersion('codex-cli 0.160.0-alpha.1+build.123')).toBe('0.160.0-alpha.1+build.123');
+  });
+
+  it.each([
+    ['0.160.0-alpha.1', '0.160.0', false],
+    ['2.1.220-rc.1', '2.1.220', false],
+    ['0.160.0', '0.160.0-rc.1', true],
+    ['0.160.0-alpha.2', '0.160.0-alpha.10', false],
+    ['0.160.0-alpha', '0.160.0-alpha.1', false],
+    ['0.160.0-alpha.1', '0.160.0-alpha', true],
+    ['0.160.0-alpha.10', '0.160.0-alpha.2', true],
+    ['0.160.0-alpha.1', '0.160.0-alpha.beta', false],
+    ['0.160.0-beta', '0.160.0-alpha', true],
+    ['0.160.0-alpha.1', '0.160.0-alpha.1', true],
+    ['0.160.0+local', '0.160.0+release', true],
+    ['0.161.0-alpha.1', '0.160.0', true],
+  ])('compares SemVer %s >= %s as %s', (version, minimum, expected) => {
+    expect(versionAtLeast(version, minimum)).toBe(expected);
   });
 });
 
@@ -172,10 +295,65 @@ describe('runProbe (real processes)', () => {
     const shell = await runProbe(process.execPath, ['-e', 'console.log(process.argv[1])', '$HOME']);
     expect(shell.output.trim()).toBe('$HOME');
   });
+
+  it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
+    'timeout kills the real process tree, including child and grandchild, within a deadline',
+    async () => {
+      // Self-expiry also bounds leftovers if an OS sandbox refuses tree cancellation.
+      const leaf = 'setTimeout(() => process.exit(), 15000)';
+      const branch = `
+        const { spawn } = require('child_process');
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}], {
+          stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true
+        });
+        console.log(child.pid);
+        ${leaf};
+      `;
+      const root = `
+        console.log(process.pid);
+        const { spawn } = require('child_process');
+        const child = spawn(process.execPath, ['-e', ${JSON.stringify(branch)}], {
+          stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true
+        });
+        console.log(child.pid);
+        ${leaf};
+      `;
+      const started = Date.now();
+      const result = await runProbe(process.execPath, ['-e', root]);
+      const pids = result.output.trim().split(/\s+/).map(Number);
+      try {
+        expect(result.code).toBeNull();
+        expect(pids).toHaveLength(3);
+        expect(pids.every((pid) => Number.isInteger(pid) && pid > 0)).toBe(true);
+        await vi.waitFor(
+          () => {
+            for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+          },
+          { timeout: 2000 },
+        );
+        expect(Date.now() - started).toBeLessThan(
+          EXECUTOR_PROBE_TIMEOUT_MS + EXECUTOR_TERMINATION_TIMEOUT_MS,
+        );
+      } finally {
+        for (const pid of pids.reverse()) {
+          if (!Number.isInteger(pid) || pid <= 0) continue;
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            /* already terminated */
+          }
+        }
+      }
+    },
+    12_000,
+  );
 });
 
 describe('ExecutorMonitor', () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
   const operator = {
     binaryPaths: { claude: process.execPath, codex: process.execPath },
   } satisfies Pick<ProjectOperatorConfig, 'binaryPaths'>;
@@ -226,7 +404,126 @@ describe('ExecutorMonitor', () => {
     expect(monitor.observation('claude', bad)?.installation).toBe('missing');
   });
 
-  it('monitoring probes only enabled Executors and pushes a snapshot when a fact changes', async () => {
+  it('rejects relative, bare, shim and non-executable Claude overrides even with a PATH match', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-binary-'));
+    const binary = path.join(directory, process.platform === 'win32' ? 'claude.exe' : 'claude');
+    const shim = path.join(directory, process.platform === 'win32' ? 'claude.cmd' : 'shim');
+    try {
+      fs.writeFileSync(binary, 'synthetic executable', { mode: 0o700 });
+      fs.writeFileSync(shim, 'non-executable shim', { mode: 0o600 });
+      vi.stubEnv('PATH', directory);
+      // The default really finds this binary; configured values must never search.
+      expect(resolveExecutorBinary('claude', {})).toBe(fs.realpathSync.native(binary));
+      expect(resolveExecutorBinary('claude', { binaryPaths: { claude: binary } })).toBe(binary);
+      const run = vi.fn();
+      const monitor = new ExecutorMonitor(run);
+      for (const override of [
+        'claude',
+        'claude.exe',
+        // Relative regardless of the drive: path.relative across Windows drives is absolute.
+        path.join(path.basename(directory), path.basename(binary)),
+        directory,
+        shim,
+        '',
+        path.join(directory, 'missing.exe'),
+      ]) {
+        const bad = { binaryPaths: { claude: override } };
+        await monitor.refresh('claude', bad);
+        expect(monitor.observation('claude', bad)?.installation).toBe('missing');
+      }
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['claude', 'codex'] as const)(
+    '%s auth failures back off, recognized logout resets the interval',
+    async (executor) => {
+      let now = 1_000_000;
+      let status: ProbeRun = { code: 1, output: 'credential service unavailable' };
+      const cli = fakeCli({
+        '--version': ok(executor === 'claude' ? '2.1.296' : '0.160.0'),
+        '--help': ok(claudeHelp),
+        'exec --help': ok(codexExecHelp),
+        'login --help': ok('Commands:\n  status  Show login status\n'),
+        'auth status --json': async () => status,
+        'login status': async () => status,
+      });
+      const monitor = new ExecutorMonitor(cli.run, () => now);
+      await monitor.refresh(executor, operator);
+      now += EXECUTOR_PROBE_REFRESH_MS;
+      expect(monitor.isDue(executor, operator)).toBe(false);
+      now += EXECUTOR_PROBE_REFRESH_MS;
+      expect(monitor.isDue(executor, operator)).toBe(true);
+      await monitor.refresh(executor, operator);
+      now += 2 * EXECUTOR_PROBE_REFRESH_MS;
+      expect(monitor.isDue(executor, operator)).toBe(false);
+      now += 2 * EXECUTOR_PROBE_REFRESH_MS;
+      expect(monitor.isDue(executor, operator)).toBe(true);
+      status = { code: 1, output: executor === 'claude' ? '{"loggedIn":false}' : 'Not logged in' };
+      await monitor.refresh(executor, operator);
+      expect(monitor.observation(executor, operator)?.authentication).toBe('required');
+      now += EXECUTOR_PROBE_REFRESH_MS;
+      expect(monitor.isDue(executor, operator)).toBe(true);
+    },
+  );
+
+  it('broadcasts one snapshot per healthy refresh batch, renewing dates beyond the initial TTL', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const cli = fakeCli({
+      '--version': ok('2.1.296'),
+      '--help': ok(claudeHelp),
+      'auth status --json': ok('{"loggedIn":true}'),
+      'exec --help': ok(codexExecHelp),
+      'login --help': ok('Commands:\n  status  Show login status\n'),
+      'login status': ok('Logged in using ChatGPT'),
+    });
+    const monitor = new ExecutorMonitor(cli.run);
+    const project = {
+      id: 'test',
+      operator: { autonomyLevel: 'A2', allowedExecutors: ['claude', 'codex'], ...operator },
+    } satisfies { id: string; operator: ProjectOperatorConfig };
+    let listener: (id: string) => void = () => {};
+    let snapshot: ReturnType<typeof monitor.observation>;
+    const notify = vi.fn(() => {
+      snapshot = monitor.observation('claude', project.operator);
+      listener(project.id); // The real store emits the same event synchronously.
+    });
+    const store = {
+      on: (_: 'executorStateChanged', callback: (id: string) => void) => {
+        listener = callback;
+      },
+      off: vi.fn(),
+      notifyExecutorStateChanged: notify,
+    };
+    const stop = startExecutorMonitoring(store, () => project, monitor);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(notify).toHaveBeenCalledTimes(1);
+      const original = snapshot!;
+      expect(original.checkedAt).toBe(1000);
+      for (let refresh = 1; refresh <= 3; refresh++) {
+        await vi.advanceTimersByTimeAsync(EXECUTOR_PROBE_REFRESH_MS);
+        expect(notify).toHaveBeenCalledTimes(refresh + 1);
+        expect(snapshot).toEqual({
+          ...original,
+          checkedAt: 1000 + (refresh * EXECUTOR_PROBE_REFRESH_MS) / 1000,
+          staleAfter: 1000 + (refresh * EXECUTOR_PROBE_REFRESH_MS + EXECUTOR_PROBE_TTL_MS) / 1000,
+        });
+        expect(snapshot!.staleAfter).toBeGreaterThan(Date.now() / 1000);
+      }
+      expect(Date.now() / 1000).toBeGreaterThan(original.staleAfter);
+      expect(cli.run).toHaveBeenCalledTimes(4 * 7); // both Executors, once per batch
+    } finally {
+      stop();
+    }
+    await vi.advanceTimersByTimeAsync(EXECUTOR_PROBE_REFRESH_MS);
+    expect(notify).toHaveBeenCalledTimes(4);
+  });
+
+  it('monitoring probes only enabled Executors and pushes a fresh snapshot', async () => {
     const cli = fakeCli({
       '--version': ok('2.1.296'),
       '--help': ok(claudeHelp),

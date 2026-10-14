@@ -13,6 +13,7 @@ import {
   EXECUTOR_PROBE_TTL_MS,
 } from './constants.js';
 import { resolveCodexBinary } from './executors/codexCliExecutor.js';
+import { processCancellation } from './executors/processCancellation.js';
 import { resolveClaudeBinary } from './modelTiers.js';
 
 /**
@@ -52,8 +53,10 @@ export const EXECUTOR_PROBE_CATALOG: Record<
     minimumTestedVersion: '2.1.220',
     helpArgs: ['--help'],
     requiredFlags: [
+      '--print',
       '--output-format',
       'stream-json',
+      '--verbose',
       '--strict-mcp-config',
       '--mcp-config',
       '--setting-sources',
@@ -63,6 +66,11 @@ export const EXECUTOR_PROBE_CATALOG: Record<
       '--append-system-prompt',
       '--disable-slash-commands',
       '--tools',
+      '--allowedTools',
+      '--disallowedTools',
+      '--no-chrome',
+      '--model',
+      '--effort',
     ],
   },
   codex: {
@@ -83,6 +91,7 @@ export const runProbe: ProbeRunner = (file, args) =>
   new Promise((resolve) => {
     let output = '';
     let settled = false;
+    let timedOut = false;
     const done = (run: ProbeRun) => {
       if (settled) return;
       settled = true;
@@ -95,6 +104,7 @@ export const runProbe: ProbeRunner = (file, args) =>
         cwd: os.tmpdir(),
         shell: false,
         windowsHide: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch {
@@ -107,9 +117,18 @@ export const runProbe: ProbeRunner = (file, args) =>
     };
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
+    const cancellation = processCancellation(() => child);
     const timer = setTimeout(() => {
-      child.kill();
-      done({ code: null, output });
+      timedOut = true;
+      try {
+        cancellation.cancel();
+      } catch {
+        // The cancellation helper retries within its bounded termination window.
+      } finally {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        done({ code: null, output });
+      }
     }, EXECUTOR_PROBE_TIMEOUT_MS);
     child.on('error', (error: NodeJS.ErrnoException) =>
       done({
@@ -117,18 +136,45 @@ export const runProbe: ProbeRunner = (file, args) =>
         output,
       }),
     );
-    child.on('close', (code) => done({ code, output }));
+    child.on('close', (code) => {
+      cancellation.confirmClose();
+      done({ code: timedOut ? null : code, output });
+    });
   });
 
 export function parseVersion(text: string): string | null {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text);
-  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
+  const match =
+    /\d+\.\d+\.\d+(?:-[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?/.exec(
+      text,
+    );
+  return match?.[0] ?? null;
 }
 
 export function versionAtLeast(version: string, minimum: string): boolean {
-  const a = version.split('.').map(Number);
-  const b = minimum.split('.').map(Number);
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  const semver =
+    /^(\d+)\.(\d+)\.(\d+)(?:-([\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/;
+  const a = semver.exec(version);
+  const b = semver.exec(minimum);
+  if (!a || !b) return false;
+  const compareNumeric = (x: string, y: string) =>
+    x.length - y.length || (x > y ? 1 : x < y ? -1 : 0);
+  for (let i = 1; i <= 3; i++) {
+    const difference = compareNumeric(a[i], b[i]);
+    if (difference) return difference > 0;
+  }
+  if (a[4] === undefined || b[4] === undefined) return b[4] !== undefined || a[4] === undefined;
+  const preA = a[4].split('.');
+  const preB = b[4].split('.');
+  for (let i = 0; i < Math.max(preA.length, preB.length); i++) {
+    if (preA[i] === undefined || preB[i] === undefined) return preA[i] !== undefined;
+    const x = preA[i];
+    const y = preB[i];
+    if (x === y) continue;
+    const numericX = /^\d+$/.test(x);
+    const numericY = /^\d+$/.test(y);
+    if (numericX !== numericY) return !numericX;
+    return numericX ? compareNumeric(x, y) > 0 : x > y;
+  }
   return true;
 }
 
@@ -145,33 +191,36 @@ function listsSubcommand(help: string, name: string): boolean {
 async function probeAuthClaude(binary: string, help: string, run: ProbeRunner) {
   if (!listsSubcommand(help, 'auth')) return { authentication: 'unknown' as const, failed: false };
   const status = await run(binary, ['auth', 'status', '--json']);
-  if (status.code === null) return { authentication: 'unknown' as const, failed: true };
+  if (status.code === null || status.code === 'missing')
+    return { authentication: 'unknown' as const, failed: true };
   try {
     const loggedIn = (JSON.parse(status.output) as { loggedIn?: unknown }).loggedIn;
-    if (loggedIn === true) return { authentication: 'ready' as const, failed: false };
+    if (loggedIn === true && status.code === 0)
+      return { authentication: 'ready' as const, failed: false };
     if (loggedIn === false) return { authentication: 'required' as const, failed: false };
   } catch {
     /* Not the documented JSON: unknown. */
   }
-  return { authentication: 'unknown' as const, failed: false };
+  return { authentication: 'unknown' as const, failed: true };
 }
 
 async function probeAuthCodex(binary: string, run: ProbeRunner) {
   const help = await run(binary, ['login', '--help']);
-  if (help.code === null) return { authentication: 'unknown' as const, failed: true };
-  if (help.code !== 0 || !listsSubcommand(help.output, 'status'))
+  if (help.code !== 0) return { authentication: 'unknown' as const, failed: true };
+  if (!listsSubcommand(help.output, 'status'))
     return { authentication: 'unknown' as const, failed: false };
   const status = await run(binary, ['login', 'status']);
-  if (status.code === null) return { authentication: 'unknown' as const, failed: true };
+  if (status.code === null || status.code === 'missing')
+    return { authentication: 'unknown' as const, failed: true };
   if (
     status.code === 0 &&
     /logged in/i.test(status.output) &&
     !/not logged in/i.test(status.output)
   )
     return { authentication: 'ready' as const, failed: false };
-  if (status.code !== 0 && /not logged in/i.test(status.output))
+  if (/not logged in/i.test(status.output))
     return { authentication: 'required' as const, failed: false };
-  return { authentication: 'unknown' as const, failed: false };
+  return { authentication: 'unknown' as const, failed: true };
 }
 
 export async function probeExecutor(
@@ -233,7 +282,15 @@ export function resolveExecutorBinary(
 ): string | undefined {
   try {
     if (executor === 'codex') return resolveCodexBinary(operator);
-    const resolved = resolveClaudeBinary(operator.binaryPaths?.claude ?? 'claude');
+    const configured = operator.binaryPaths?.claude;
+    if (configured !== undefined) {
+      if (!path.isAbsolute(configured) || !fs.statSync(configured).isFile()) return undefined;
+      if (process.platform === 'win32') {
+        if (!configured.toLowerCase().endsWith('.exe')) return undefined;
+      } else fs.accessSync(configured, fs.constants.X_OK);
+      return configured;
+    }
+    const resolved = resolveClaudeBinary();
     // resolveClaudeBinary echoes its input when nothing executable was found.
     return path.isAbsolute(resolved) && fs.statSync(resolved).isFile() ? resolved : undefined;
   } catch {
@@ -316,7 +373,9 @@ export class ExecutorMonitor {
         !previous ||
         previous.installation !== facts.installation ||
         previous.version !== facts.version ||
-        previous.authentication !== facts.authentication
+        previous.authentication !== facts.authentication ||
+        previous.checkedAt !== entry.observation.checkedAt ||
+        previous.staleAfter !== entry.observation.staleAfter
       );
     })().finally(() => {
       entry.inflight = undefined;
@@ -333,8 +392,8 @@ const MONITOR_TICK_MS = 10_000;
 
 /**
  * Standalone CLI: probe the bound Project's ENABLED Executors at start, when due,
- * and right after an availability change; push a fresh snapshot when a fact
- * changes. Disabled Executors are never probed in the background.
+ * and right after an availability change; push one fresh snapshot per refresh
+ * batch, including renewed timestamps. Disabled Executors are never probed in the background.
  */
 export function startExecutorMonitoring(
   store: {
@@ -350,12 +409,14 @@ export function startExecutorMonitoring(
     const project = bound();
     if (stopped || !project?.operator) return;
     const operator = project.operator;
+    const refreshes: Promise<boolean>[] = [];
     for (const id of Object.keys(EXECUTOR_PROBE_CATALOG) as ExecutorId[]) {
       if (!operator.allowedExecutors.includes(id) || !monitor.isDue(id, operator)) continue;
-      void monitor.refresh(id, operator).then((changed) => {
-        if (changed && !stopped) store.notifyExecutorStateChanged(project.id);
-      });
+      refreshes.push(monitor.refresh(id, operator));
     }
+    void Promise.all(refreshes).then((changed) => {
+      if (changed.some(Boolean) && !stopped) store.notifyExecutorStateChanged(project.id);
+    });
   };
   const onChange = () => tick();
   store.on('executorStateChanged', onChange);

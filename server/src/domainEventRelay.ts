@@ -94,13 +94,37 @@ export function eventsFromTransition(
 /** Decision a WAITING_HUMAN transition names: its reason is the decision id (or the reconcile form). */
 function decisionIdFor(db: ReadOnlyDb, projectId: string, row: DomainEventRow): string | null {
   if (row.from_status !== 'WAITING_HUMAN' && row.to_status !== 'WAITING_HUMAN') return null;
-  const key = row.reason.startsWith(WORKSTORE_RECONCILE_REASON_PREFIX)
-    ? row.reason.slice(WORKSTORE_RECONCILE_REASON_PREFIX.length)
-    : row.reason;
-  const found = db
-    .prepare('SELECT key FROM human_decisions WHERE project_id = ? AND key = ?')
-    .get(projectId, key) as { key: string } | undefined;
-  return found?.key ?? null;
+  const query = db.prepare('SELECT * FROM human_decisions WHERE project_id = ? AND key = ?');
+  type DecisionRow = {
+    key: string;
+    task_key: string | null;
+    answer: string;
+    escalation?: string | null;
+  };
+  // A decision id may itself start with the reconcile prefix.
+  const found = (query.get(projectId, row.reason) ??
+    (row.reason.startsWith(WORKSTORE_RECONCILE_REASON_PREFIX)
+      ? query.get(projectId, row.reason.slice(WORKSTORE_RECONCILE_REASON_PREFIX.length))
+      : undefined)) as DecisionRow | undefined;
+  if (!found) return null;
+  if (found.escalation) {
+    let decision: HumanDecision;
+    try {
+      decision = JSON.parse(found.escalation) as HumanDecision;
+    } catch {
+      // A malformed row loses its attribution; it must not wedge the cursor on retries.
+      return null;
+    }
+    if (!Array.isArray(decision?.blocks) || !decision.blocks.includes(row.task_key)) return null;
+    // A delayed poll may read the required transition after the answer was committed.
+    if (row.to_status === 'WAITING_HUMAN')
+      return ['open', 'expired', 'answered'].includes(decision.status) ? found.key : null;
+    return decision.status === 'answered' ? found.key : null;
+  }
+  return found.task_key === row.task_key &&
+    (row.to_status === 'WAITING_HUMAN' || found.answer.trim() !== '')
+    ? found.key
+    : null;
 }
 
 /**
@@ -125,7 +149,12 @@ function executionIdFor(db: ReadOnlyDb, projectId: string, row: DomainEventRow):
        WHERE project_id = ? AND task_key = ? AND task_version BETWEEN ? AND ?
        ORDER BY task_version DESC, started_at DESC, key DESC LIMIT 1`,
     )
-    .get(projectId, row.task_key, start.version, row.task_version) as { key: string } | undefined;
+    .get(
+      projectId,
+      row.task_key,
+      start.version,
+      ACTIVE.includes(row.to_status) ? row.task_version : row.task_version - 1,
+    ) as { key: string } | undefined;
   return execution?.key ?? null;
 }
 
@@ -283,10 +312,14 @@ export class DomainEventRelay {
       };
     }
     try {
+      const snapshot = readSnapshot(db, this.options.projectId);
+      // The first successful snapshot is the history boundary if polling has not
+      // established one yet. Later snapshots must not skip undelivered notices.
+      this.cursor ??= snapshot.lastEventId ?? 0;
       return {
         ...base,
         source: 'ok',
-        ...readSnapshot(db, this.options.projectId),
+        ...snapshot,
         generatedAt: this.now(),
       };
     } catch (error) {

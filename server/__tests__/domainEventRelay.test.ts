@@ -8,6 +8,7 @@ import { WebSocket } from 'ws';
 
 import type { DomainEvent } from '../../core/src/domainEvents.js';
 import type { DomainEventMessage, WorkSnapshot } from '../../core/src/messages.js';
+import { WORKSTORE_RECONCILE_REASON_PREFIX } from '../src/constants.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
 // Isolated HOME: the server writes discovery records under ~/.pixel-agents.
@@ -310,6 +311,195 @@ describe('DomainEventRelay (real WorkStore)', () => {
     started.tick();
     expect(events.map((e) => [e.kind, e.taskKey])).toEqual([['task.state_changed', 'T']]);
   });
+
+  it.each(['RUNNING', 'LEASED'] as const)(
+    'excludes an Execution registered at the version leaving %s',
+    async (status) => {
+      const tasks = await openStore();
+      tasks.createTask({ key: 'T', type: 'implementation', status: 'QUEUED' });
+      const store = new AgentStateStore();
+      const events = captured(store);
+      const started = relay(store);
+      started.start();
+      const leased = await tasks.claim('T', 'worker');
+      const execution = {
+        task_key: 'T',
+        agent_template_version: 'developer@v1',
+        executor: 'codex',
+        model_id: 'model',
+        session_id: null,
+        pid: null,
+        started_at: new Date().toISOString(),
+        system_prompt_hash: 'hash',
+        project_brain_sha: 'sha',
+        tool_policy_version: 'v1',
+      };
+      await tasks.createExecution({ ...execution, key: 'old-run', task_version: leased.version });
+      const active =
+        status === 'RUNNING'
+          ? await tasks.transition('T', leased.version, 'RUNNING', 'start', 'worker')
+          : leased;
+      const finished = await tasks.transition(
+        'T',
+        active.version,
+        status === 'RUNNING' ? 'REVIEW' : 'CANCELLED',
+        'finish',
+        'worker',
+      );
+      await tasks.createExecution({
+        ...execution,
+        key: 'later-run',
+        task_version: finished.version,
+      });
+      started.tick();
+      const exitEvents = events.filter(
+        (e) => 'taskVersion' in e && e.taskVersion === finished.version,
+      );
+      expect(exitEvents.length).toBeGreaterThan(0);
+      expect(exitEvents.every((e) => e.executionId === 'old-run')).toBe(true);
+      if (status === 'RUNNING')
+        expect(exitEvents.map((e) => e.kind)).toEqual([
+          'task.state_changed',
+          'execution.finished',
+          'review.requested',
+        ]);
+    },
+  );
+
+  it.each(['legacy', 'structured'] as const)(
+    "does not attribute another task's %s decision to a matching reason",
+    async (kind) => {
+      const tasks = await openStore();
+      tasks.createTask({ key: 'blocked', type: 'implementation', status: 'READY' });
+      tasks.createTask({ key: 'T', type: 'implementation', status: 'READY' });
+      if (kind === 'structured') {
+        await tasks.openDecision(decision);
+        await tasks.resolveDecision(decision.id, 'review', 'fede', () => {});
+      } else {
+        tasks.recordHumanDecision({
+          key: decision.id,
+          task_key: 'blocked',
+          execution_key: null,
+          question: 'Question',
+          answer: 'yes',
+          actor: 'fede',
+          decided_at: new Date().toISOString(),
+        });
+      }
+      const store = new AgentStateStore();
+      const events = captured(store);
+      const started = relay(store);
+      started.start();
+      const waiting = await tasks.transition('T', 1, 'WAITING_HUMAN', decision.id, 'manager');
+      await tasks.transition('T', waiting.version, 'READY', decision.id, 'manager');
+      started.tick();
+      expect(events.filter((e) => e.kind === 'human.decision.answered')).toEqual([]);
+      expect(events.find((e) => e.kind === 'human.decision.required')).toMatchObject({
+        decisionId: null,
+      });
+    },
+  );
+
+  it('does not call an unresolved associated decision answered on cancellation', async () => {
+    const tasks = await openStore();
+    tasks.createTask({ key: 'blocked', type: 'implementation', status: 'READY' });
+    const store = new AgentStateStore();
+    const events = captured(store);
+    const started = relay(store);
+    started.start();
+    tasks.recordHumanDecision({
+      key: decision.id,
+      task_key: 'blocked',
+      execution_key: null,
+      question: 'Question',
+      answer: '',
+      actor: 'manager',
+      decided_at: '',
+    });
+    const waiting = await tasks.transition('blocked', 1, 'WAITING_HUMAN', decision.id, 'manager');
+    await tasks.transition('blocked', waiting.version, 'CANCELLED', decision.id, 'manager');
+    started.tick();
+    expect(events.filter((e) => e.kind === 'human.decision.answered')).toEqual([]);
+    expect(events.find((e) => e.kind === 'human.decision.required')).toMatchObject({
+      decisionId: decision.id,
+    });
+  });
+
+  it('prefers a complete decision id over its reconcile-prefixed interpretation', async () => {
+    const tasks = await openStore();
+    tasks.createTask({ key: 'blocked', type: 'implementation', status: 'READY' });
+    tasks.createTask({ key: 'other', type: 'implementation', status: 'READY' });
+    await tasks.openDecision({ ...decision, blocks: ['other'] });
+    const prefixed = { ...decision, id: `${WORKSTORE_RECONCILE_REASON_PREFIX}${decision.id}` };
+    const store = new AgentStateStore();
+    const events = captured(store);
+    const started = relay(store);
+    started.start();
+    await tasks.openDecision(prefixed);
+    await tasks.resolveDecision(prefixed.id, 'review', 'fede', () => {});
+    started.tick();
+    expect(
+      events
+        .filter((e) => e.kind === 'human.decision.required' || e.kind === 'human.decision.answered')
+        .map((e) => ('decisionId' in e ? e.decisionId : null)),
+    ).toEqual([prefixed.id, prefixed.id]);
+    await tasks.resolveDecision(decision.id, null, 'expiry', () => {});
+    await tasks.reconcileDecision(decision.id, 'review', 'fede', () => {});
+    started.tick();
+    // The full key still exists, so a colliding reconcile reason must not fall back.
+    expect(events.filter((e) => e.kind === 'human.decision.answered')).toHaveLength(1);
+  });
+
+  it('recognizes reconciliation when no decision has the complete reason as its key', async () => {
+    const tasks = await openStore();
+    tasks.createTask({ key: 'blocked', type: 'implementation', status: 'READY' });
+    const store = new AgentStateStore();
+    const events = captured(store);
+    const started = relay(store);
+    started.start();
+    await tasks.openDecision(decision);
+    await tasks.resolveDecision(decision.id, null, 'expiry', () => {});
+    started.tick();
+    await tasks.reconcileDecision(decision.id, 'review', 'fede', () => {});
+    started.tick();
+    expect(events.filter((e) => e.kind === 'human.decision.answered')).toEqual([
+      expect.objectContaining({ decisionId: decision.id }),
+    ]);
+  });
+
+  it.each([false, true])(
+    'keeps transitions after the first successful snapshot (history: %s)',
+    async (history) => {
+      const tasks = await openStore();
+      tasks.createTask({ key: 'T', type: 'implementation' });
+      if (history) await tasks.transition('T', 1, 'READY', 'history', 'manager');
+      const store = new AgentStateStore();
+      const events = captured(store);
+      let located = false;
+      const started = new DomainEventRelay(store, {
+        projectId: 'test',
+        workStoreFile: () => (located ? dbFile : undefined),
+        pollMs: 3_600_000,
+      });
+      relays.push(started);
+      started.start();
+      expect(started.snapshot().source).toBe('unreadable');
+      located = true;
+      const first = started.snapshot();
+      expect(first).toMatchObject({
+        source: 'ok',
+        lastEventId: history ? expect.any(Number) : null,
+      });
+      await tasks.transition('T', history ? 2 : 1, history ? 'QUEUED' : 'READY', 'new', 'manager');
+      // A second client snapshot must not move the existing cursor past this transition.
+      started.snapshot();
+      started.tick();
+      expect(events).toEqual([expect.objectContaining({ toStatus: history ? 'QUEUED' : 'READY' })]);
+      expect(events[0].eventId).toBeGreaterThan(first.lastEventId ?? 0);
+      started.tick();
+      expect(events).toHaveLength(1);
+    },
+  );
 
   it('neither replays history nor reports empty work while the WorkStore cannot be located', async () => {
     const tasks = await openStore();

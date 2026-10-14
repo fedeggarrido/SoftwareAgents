@@ -11,8 +11,12 @@ import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
 import { parseProjects } from '../src/configPersistence.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
+import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
+import type { ExecutionEvent, Executor } from '../src/executors/executor.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
+import * as executorSlots from '../src/executorSlots.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { MachineCapacityPublisher } from '../src/machineCapacity.js';
@@ -370,6 +374,81 @@ describe('supervised worker', () => {
     expect(readExecutorSlots('claude').count).toBe(0);
     expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
   });
+
+  it.each(['claude', 'codex'] as const)(
+    '%s registration failure finishes once, releases worker locks and admits an immediate retry',
+    async (selected) => {
+      const config = tierOperator(selected, 1);
+      config.projects.test.concurrency.perExecutor = { [selected]: 1 };
+      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(config));
+      const marker = path.join(root, 'cli-launched.json');
+      vi.stubEnv('SA_TEST_ARGV', marker);
+
+      // Keep admission and the real slot; fail only the registration callback invoked
+      // by the spawned supervisor, before it can ACK and launch the fake CLI.
+      const acquire = executorSlots.acquireExecutorSlot;
+      const register = vi.fn((_pid: number) => {
+        throw new Error('Cannot verify launch process');
+      });
+      const admission = vi
+        .spyOn(executorSlots, 'acquireExecutorSlot')
+        .mockImplementationOnce((...args) => {
+          const slot = acquire(...args);
+          expect(slot).toBeDefined();
+          vi.spyOn(slot!, 'setExecutionProcess').mockImplementation(register);
+          return slot;
+        });
+      const prototype: Executor =
+        selected === 'claude' ? ClaudeCliExecutor.prototype : CodexCliExecutor.prototype;
+      const start = prototype.start;
+      const events: ExecutionEvent[] = [];
+      vi.spyOn(prototype, 'start').mockImplementation(function (this: Executor, request) {
+        const handle = start.call(this, request);
+        return {
+          ...handle,
+          events: (async function* () {
+            for await (const event of handle.events) {
+              events.push(event);
+              yield event;
+            }
+          })(),
+        };
+      });
+      const run = () =>
+        runWorker(
+          { task: 'SA-999', brief: 'brief.md' },
+          { cwd: repo, binaryArgs: [fake, selected], log: () => {} },
+        );
+      const lock = path.join(repo, '.git/softwareagents/locks/SA-999.lock');
+
+      await expect(run()).rejects.toThrow(
+        'Execution failed or was interrupted; changes retained for review',
+      );
+      expect(register).toHaveBeenCalledExactlyOnceWith(expect.any(Number));
+      expect(register.mock.calls[0][0]).toBeGreaterThan(0);
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(events.filter((event) => event.type === 'finished')).toEqual([
+        { type: 'finished', exitCode: 1, resultSummary: 'Cannot verify launch process' },
+      ]);
+      expect(readExecutorSlots(selected).count).toBe(0);
+      expect(fs.existsSync(lock)).toBe(false);
+
+      // The one-shot fault is gone: this same task must acquire fresh locks and
+      // reach the real CLI, proving the marker and admission checks are meaningful.
+      events.length = 0;
+      await expect(run()).resolves.toMatchObject({ branch: 'sa/SA-999-worker', commit: null });
+      expect(admission).toHaveBeenCalledTimes(2);
+      expect(register).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(fs.readFileSync(marker, 'utf8'))).toContain(
+        selected === 'claude' ? '-p' : 'exec',
+      );
+      expect(events.filter((event) => event.type === 'finished')).toMatchObject([
+        { type: 'finished', exitCode: 0 },
+      ]);
+      expect(readExecutorSlots(selected).count).toBe(0);
+      expect(fs.existsSync(lock)).toBe(false);
+    },
+  );
 
   it.each([false, true])(
     'P1: no-flag worker launches with interactive office session and legacy config=%s',

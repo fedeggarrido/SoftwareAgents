@@ -80,6 +80,24 @@ describe('WorkStore leases and durable idempotency', () => {
       actor: 'lease-sweeper',
     });
   });
+  it.each(['identity', null, 'reused'])(
+    'reconciles a persisted close before the supervisor ACK (current identity=%s)',
+    async (identity) => {
+      const store = await open();
+      queued(store);
+      clock();
+      await store.claim('task', 'worker-1', 1000);
+      await execution(store);
+      await store.closeExecution('run', 'worker-1');
+      vi.mocked(processStartIdentity).mockResolvedValue(identity);
+      advance(1000);
+      expect(await store.recoverExpiredLeases()).toMatchObject([{ status: 'FAILED_RETRYABLE' }]);
+      if (identity === 'identity')
+        expect(terminateExecutionTree).toHaveBeenCalledExactlyOnceWith(12345, 'identity');
+      else expect(terminateExecutionTree).not.toHaveBeenCalled();
+      expect(store.getExecution('run')!.tree_closed_at).toBeTruthy();
+    },
+  );
   it('heartbeats RUNNING without invalidating the execution version and rejects stale owners', async () => {
     const store = await open();
     queued(store);
@@ -157,8 +175,9 @@ describe('WorkStore leases and durable idempotency', () => {
       attempt: 1,
     });
     expect(terminateExecutionTree).toHaveBeenCalled();
+    vi.mocked(processStartIdentity).mockResolvedValue(null); // Terminated root has exited.
     const lease = await store.claim('task', 'next');
-    expect(terminateExecutionTree).toHaveBeenCalledTimes(1); // Durable closure proof skips the old PID.
+    expect(terminateExecutionTree).toHaveBeenCalledTimes(1); // Recorded close + absent root.
     const running = await store.transition('task', lease.version, 'RUNNING', 'start', 'next');
     expect(await store.transition('task', running.version, 'REVIEW', 'done', 'next')).toMatchObject(
       { lease_owner: null, lease_expires_at: null },

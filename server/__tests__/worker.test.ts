@@ -3,7 +3,7 @@ import { buildSync } from 'esbuild';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it as test, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
@@ -26,6 +26,7 @@ import { runQuotaCheck } from '../src/quotaCommand.js';
 import { runTelemetryCommand, telemetrySummary } from '../src/telemetryCommand.js';
 import { telemetryAttributes } from '../src/telemetryCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
+import { processStartIdentity } from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
@@ -48,6 +49,9 @@ vi.mock('../src/executorProbes.js', async (original) => {
 });
 
 const readyProbe = readyProbeFor(EXECUTOR_PROBE_CATALOG);
+// Normal runs require Windows recovery. Keep the POSIX refusal regression below
+// active everywhere; the remaining integration cases exercise Windows launches.
+const it = test.skipIf(process.platform !== 'win32');
 let root: string;
 let repo: string;
 const fake = path.join(__dirname, 'fixtures/fake-cli.cjs');
@@ -112,6 +116,104 @@ beforeEach(() => {
 });
 
 describe('worker lifecycle SA-039', () => {
+  test.each(['linux', 'darwin'])(
+    'refuses %s before claiming work, preparing a worktree or spawning',
+    async (platform) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      try {
+        Object.defineProperty(process, 'platform', { ...descriptor, value: platform });
+        await expect(runWorker({ task: 'SA-999' }, { cwd: repo })).rejects.toThrow(
+          'worker run requires Windows: POSIX process-tree recovery is not supported',
+        );
+        expect(spawn).not.toHaveBeenCalled();
+        expect(fs.existsSync(path.join(repo, '.git/softwareagents'))).toBe(false);
+        expect(fs.existsSync(path.join(repo, '.worktrees'))).toBe(false);
+        expect(fs.existsSync(path.join(root, '.pixel-agents/executor-slots'))).toBe(false);
+      } finally {
+        Object.defineProperty(process, 'platform', descriptor);
+      }
+    },
+  );
+
+  it.each(['capacity', 'retryAfter'])(
+    'keeps the latest known future reset across a subsequent rejection without a reset (%s)',
+    async (source) => {
+      const reset = Math.floor(Date.now() / 1000) + 3600;
+      vi.spyOn(ClaudeCliExecutor.prototype, 'start').mockReturnValue({
+        cancel: vi.fn(),
+        events: (async function* (): AsyncGenerator<ExecutionEvent> {
+          yield source === 'capacity'
+            ? {
+                type: 'rateLimit',
+                message: 'rejected',
+                retryAfterSec: 0,
+                capacity: {
+                  provider: 'claude',
+                  status: 'rejected',
+                  source: 'claude_stream_json',
+                  confidence: 'exact',
+                  observedAt: reset - 3600,
+                  windows: [{ kind: 'five_hour', usedRatio: 1, resetsAt: reset }],
+                },
+              }
+            : { type: 'rateLimit', message: 'rejected', retryAfterSec: 3600 };
+          yield { type: 'rateLimit', message: 'rejected', retryAfterSec: 0 };
+          yield { type: 'finished', exitCode: 1, resultSummary: 'quota' };
+        })(),
+      });
+      const result = await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
+      expect(
+        result.quotaDecision?.status === 'wait' && result.quotaDecision.resetsAt,
+      ).toBeGreaterThanOrEqual(reset);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(JSON.parse(store.getTask('SA-999')!.blocked_reason!).resetsAt).toBe(
+          result.quotaDecision?.status === 'wait' ? result.quotaDecision.resetsAt : null,
+        );
+      } finally {
+        store.close();
+        process.exitCode = 0;
+      }
+    },
+  );
+
+  it.each([
+    ['auth', 'Authentication failed'],
+    ['spawn', 'spawn ENOENT'],
+    ['containment', 'Policy violation: containment'],
+    ['timeout', 'Timed out'],
+  ])(
+    'persists a bounded %s diagnostic without model output, paths or prompts',
+    async (category, detail) => {
+      const secret = `C:/private/prompt/MODEL_SECRET_${'x'.repeat(10000)}`;
+      vi.spyOn(ClaudeCliExecutor.prototype, 'start').mockReturnValue({
+        cancel: vi.fn(),
+        events: (async function* (): AsyncGenerator<ExecutionEvent> {
+          yield { type: 'finished', exitCode: 1, resultSummary: `${detail}: ${secret}` };
+        })(),
+      });
+      await expect(runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} })).rejects.toThrow(
+        `category=${category}; exit_code=1`,
+      );
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        const task = store.getTask('SA-999')!;
+        expect(task.status).toBe('FAILED_RETRYABLE');
+        expect(task.blocked_reason).toContain(`category=${category}; exit_code=1`);
+        expect(task.blocked_reason!.length).toBeLessThan(200);
+        const persisted = JSON.stringify([
+          task,
+          store.listDomainEvents('SA-999'),
+          new AuditLog().read('test'),
+        ]);
+        expect(persisted).not.toContain('MODEL_SECRET');
+        expect(persisted).not.toContain('C:/private');
+      } finally {
+        store.close();
+      }
+    },
+  );
+
   it.each([false, true])(
     'pins explicit Codex selection without bypassing Operator configuration (tiers=%s)',
     async (tiers) => {
@@ -310,7 +412,7 @@ describe('worker lifecycle SA-039', () => {
     expect(fs.readFileSync(legacy, 'utf8')).toBe(content);
   });
 
-  it.skipIf(process.platform !== 'win32').for(['before_launch', 'running'] as const)(
+  test.skipIf(process.platform !== 'win32').for(['before_launch', 'running'] as const)(
     'heartbeats and recovers a killed worker through SA-026 (%s)',
     { timeout: 30000 },
     async (phase, context) => {
@@ -351,12 +453,18 @@ describe('worker lifecycle SA-039', () => {
       );
       const exited = new Promise((resolve) => child.once('exit', resolve));
       const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      let rootProcess: { pid: number; identity: string } | undefined;
+      let recovered = false;
       try {
         await new Promise((resolve) => child.once('message', resolve));
         const preparing = new Promise((resolve) => child.once('message', resolve));
         child.send({ task: 'SA-999', repo, fake, holdBeforeLaunch: phase === 'before_launch' });
         if (phase === 'before_launch') await preparing;
         else await vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 });
+        if (phase === 'running') {
+          const execution = store.listExecutions()[0];
+          rootProcess = { pid: execution.pid!, identity: execution.pid_started_at! };
+        }
         const initial = store.getTask('SA-999')!.lease_expires_at!;
         expect(store.getTask('SA-999')?.status).toBe(phase === 'running' ? 'RUNNING' : 'LEASED');
         await vi.waitFor(
@@ -365,6 +473,8 @@ describe('worker lifecycle SA-039', () => {
         );
         child.kill('SIGKILL');
         await exited;
+        if (rootProcess)
+          expect(await processStartIdentity(rootProcess.pid)).toBe(rootProcess.identity);
         // Advance only the expired lease in the isolated DB, avoiding a minute-long test.
         const { DatabaseSync } = await import('node:sqlite');
         const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
@@ -379,6 +489,8 @@ describe('worker lifecycle SA-039', () => {
         expect(await store.recoverExpiredLeases()).toMatchObject([
           { status: 'FAILED_RETRYABLE', lease_owner: null },
         ]);
+        recovered = true;
+        if (rootProcess) expect(await processStartIdentity(rootProcess.pid)).toBeNull();
         if (phase === 'running') expect(store.listExecutions()[0].tree_closed_at).toBeTruthy();
         else expect(store.listExecutions()).toEqual([]);
         expect(store.listDomainEvents('SA-999').at(-1)).toMatchObject({ reason: 'Lease expired' });
@@ -387,6 +499,14 @@ describe('worker lifecycle SA-039', () => {
         fs.writeFileSync(release, 'release');
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
         await exited;
+        // Failed assertions/recovery must not strand the detached fixture. Only
+        // touch its recorded PID when its creation identity still matches.
+        if (
+          !recovered &&
+          rootProcess &&
+          (await processStartIdentity(rootProcess.pid)) === rootProcess.identity
+        )
+          process.kill(rootProcess.pid, 'SIGKILL');
         store.close();
       }
     },
@@ -682,7 +802,7 @@ describe('Operator verifier cascade SA-103', () => {
     ).rejects.toThrow('Cascade failed');
     expect(attempts().map((r) => r.result)).toEqual(['executor_error']);
   });
-  it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
+  test.skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === '1')(
     'times out a verifier, kills its tree and escalates',
     async () => {
       const raw = configure();

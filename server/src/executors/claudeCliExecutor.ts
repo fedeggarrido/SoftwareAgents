@@ -114,6 +114,7 @@ export class ClaudeCliExecutor implements Executor {
     let child: ChildProcess | undefined;
     let done = false;
     let violation: string | undefined;
+    let timedOut = false;
     const cancellation = processCancellation(() => child);
     const cancel = () => {
       if (!done) cancellation.cancel();
@@ -217,6 +218,7 @@ export class ClaudeCliExecutor implements Executor {
             args,
             req.worktreePath,
             req.registerProcess,
+            req.persistProcessClose,
           );
           const processChild = child;
           let failure: Error | undefined;
@@ -234,6 +236,7 @@ export class ClaudeCliExecutor implements Executor {
           });
           processChild.stdin!.end(compiled.context);
           timer = setTimeout(() => {
+            timedOut = !cancellation.requested;
             try {
               cancel();
             } catch {
@@ -499,7 +502,11 @@ export class ClaudeCliExecutor implements Executor {
                     : exitCode,
             resultSummary:
               [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
-              (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
+              (cancellation.requested
+                ? timedOut
+                  ? 'Timed out'
+                  : 'Cancelled'
+                : (failure?.message ?? summary)),
           };
         } catch (error) {
           // Setup and synchronous spawn failures leave no process to confirm or cancel.

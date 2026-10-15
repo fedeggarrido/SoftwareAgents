@@ -174,7 +174,13 @@ export class CodexCliExecutor implements Executor {
             '-',
           ];
           const launchedMs = Date.now();
-          child = spawnRegisteredProcess(binary, args, req.worktreePath, req.registerProcess);
+          child = spawnRegisteredProcess(
+            binary,
+            args,
+            req.worktreePath,
+            req.registerProcess,
+            req.persistProcessClose,
+          );
           const proc = child;
           let failure: Error | undefined;
           const completion = new Promise<number>((resolve) => {
@@ -188,7 +194,9 @@ export class CodexCliExecutor implements Executor {
           });
           proc.stdin!.on('error', () => {});
           proc.stdin!.end(compiled.codex.instructions);
+          let timedOut = false;
           timer = setTimeout(() => {
+            timedOut = !cancellation.requested;
             try {
               cancel();
             } catch {
@@ -488,7 +496,11 @@ export class CodexCliExecutor implements Executor {
                     : exitCode,
             resultSummary:
               [violation, cancellation.failure?.message].filter(Boolean).join('; ') ||
-              (cancellation.requested ? 'Cancelled' : (failure?.message ?? summary)),
+              (cancellation.requested
+                ? timedOut
+                  ? 'Timed out'
+                  : 'Cancelled'
+                : (failure?.message ?? summary)),
           };
         } catch (error) {
           // No process exists when setup or spawn throws synchronously. Report completion

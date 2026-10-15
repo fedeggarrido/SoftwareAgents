@@ -222,10 +222,19 @@ class SqliteWorkStore implements WorkStore {
     // Never terminate Executions registered under that newer incarnation.
     const executions = this.db
       .prepare(
-        'SELECT * FROM executions WHERE project_id = ? AND task_key = ? AND task_version <= ? AND pid IS NOT NULL AND tree_closed_at IS NULL',
+        'SELECT * FROM executions WHERE project_id = ? AND task_key = ? AND task_version <= ? AND pid IS NOT NULL',
       )
       .all(this.projectId, task.key, task.version) as unknown as ExecutionRecord[];
     for (const execution of executions) {
+      // The worker can die between persisting CLI closure and ACKing its retained
+      // supervisor. Reap that root too, but never touch a reused PID. Absence is
+      // acceptable here ONLY because closure was already durably recorded.
+      if (
+        execution.tree_closed_at &&
+        (!execution.pid_started_at ||
+          (await processStartIdentity(execution.pid!)) !== execution.pid_started_at)
+      )
+        continue;
       await terminateExecutionTree(execution.pid!, execution.pid_started_at);
       await this.write(() => {
         this.reservedTask(task.key, token);

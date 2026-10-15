@@ -145,7 +145,8 @@ export interface WorkStore {
   setExecutionSession(key: string, sessionId: string): Promise<void>;
   /** Fence supervisor registration before ACK; capture the OS creation identity. */
   setExecutionProcess(key: string, owner: string, pid: number): Promise<void>;
-  /** Only after the executor event stream confirms supervisor termination. */
+  /** CLI closure with the supervisor retained until this write commits, or
+   * confirmed cancellation/termination from the executor event stream. */
   closeExecution(key: string, owner: string): Promise<void>;
   getExecution(key: string): ExecutionRecord | undefined;
   listExecutions(): ExecutionRecord[];

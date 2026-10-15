@@ -125,6 +125,40 @@ it.each(['claude', 'codex'].flatMap((id) => [false, true].map((signal) => [id, s
 );
 
 it.each(['claude', 'codex'])(
+  '%s reports a timeout category while waiting for process closure',
+  async (id) => {
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    vi.mocked(childProcess.execFileSync).mockReturnValue(Buffer.alloc(0));
+    const handle = start(id, 0.001);
+    const events: ExecutionEvent[] = [];
+    const collecting = (async () => {
+      for await (const event of handle.events) events.push(event);
+    })();
+    await vi.advanceTimersByTimeAsync(60);
+    expect(childProcess.execFileSync).toHaveBeenCalledWith(
+      'taskkill',
+      ['/PID', '123', '/T', '/F'],
+      expect.objectContaining({ windowsHide: true }),
+    );
+    expect(events.some((e) => e.type === 'finished')).toBe(false);
+    if (id === 'codex') ownRollout();
+    proc.stdout.end(
+      id === 'codex'
+        ? '{"type":"thread.started","thread_id":"parent"}\n{"type":"turn.completed"}\n'
+        : '',
+    );
+    proc.stderr.end();
+    proc.emit('close', 1);
+    await collecting;
+    expect(events.at(-1)).toMatchObject({
+      type: 'finished',
+      exitCode: 130,
+      resultSummary: 'Timed out',
+    });
+  },
+);
+
+it.each(['claude', 'codex'])(
   '%s reports Cancelled after a transient kill failure recovers',
   async (id) => {
     Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
@@ -190,11 +224,8 @@ it.each(
 )(
   '%s/%s retries failed termination, keeps the policy reason, and waits for close',
   async (platform, id) => {
-    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: platform });
     const kill =
-      process.platform === 'win32'
-        ? vi.mocked(childProcess.execFileSync)
-        : vi.spyOn(process, 'kill');
+      platform === 'win32' ? vi.mocked(childProcess.execFileSync) : vi.spyOn(process, 'kill');
     kill.mockImplementation(() => {
       throw new Error('termination failed');
     });
@@ -226,6 +257,9 @@ it.each(
     const collecting = (async () => {
       for await (const event of handle.events) events.push(event);
     })();
+    // Prepare paths using the real host; only the cancellation algorithm is
+    // platform-mocked (Windows paths cannot pass POSIX hook-command quoting).
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: platform });
     proc.stdout.write(
       JSON.stringify(
         id === 'claude'

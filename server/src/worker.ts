@@ -230,11 +230,39 @@ export interface WorkerResult {
   evaluationVerifierFailed?: boolean;
 }
 
+/** Only fixed categories and a numeric exit code cross into Task/audit storage. */
+function failureDiagnostic(detail: string, exitCode?: number): string {
+  const category = /policy violation|containment/i.test(detail)
+    ? 'containment'
+    : /timed? ?out|timeout/i.test(detail)
+      ? 'timeout'
+      : /auth|not logged in|invalid_api_key/i.test(detail)
+        ? 'auth'
+        : /spawn|ENOENT|EACCES|launch process/i.test(detail)
+          ? 'spawn'
+          : /cancel|interrupt/i.test(detail)
+            ? 'cancelled'
+            : /lease/i.test(detail)
+              ? 'lease'
+              : /worktree|git/i.test(detail)
+                ? 'workspace'
+                : 'executor';
+  return `category=${category}; exit_code=${Number.isSafeInteger(exitCode) ? exitCode : 'unknown'}`;
+}
+
+class WorkerExecutionError extends Error {}
+
 export async function runWorker(
   args: WorkerArgs,
   options: WorkerOptions = {},
 ): Promise<WorkerResult> {
   if (options.evaluation) return runWorkerExecution(args, options);
+  // SA-026 currently verifies Windows creation identities/trees only. Refuse
+  // before creating state, claiming a lease, probing or preparing any work.
+  if (process.platform !== 'win32')
+    throw new CliUsageError(
+      'worker run requires Windows: POSIX process-tree recovery is not supported',
+    );
   const cwd = options.cwd ?? process.cwd();
   const config = loadProjectConfig(cwd, true);
   if (!config)
@@ -265,7 +293,9 @@ export async function runWorker(
   } catch (error) {
     await lifecycle.finish(
       'FAILED_RETRYABLE',
-      error instanceof Error ? error.message : String(error),
+      error instanceof WorkerExecutionError
+        ? error.message
+        : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`,
     );
     throw error;
   } finally {
@@ -491,6 +521,7 @@ async function runWorkerExecution(
   let base: string;
   let attemptRecorded = false;
   let exitCode: number | undefined;
+  let executionDiagnostic: string | undefined;
   let runtimeQuota: QuotaDecision | undefined;
   const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
     if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
@@ -959,12 +990,21 @@ async function runWorkerExecution(
           if (lifecycle) await workStore!.setExecutionProcess(executionId, lifecycle.owner, pid);
           audit('executor_started');
         },
+        ...(lifecycle
+          ? {
+              persistProcessClose: async () => {
+                lifecycle.assertOwned();
+                await workStore!.closeExecution(executionId, lifecycle.owner);
+              },
+            }
+          : {}),
       });
       if (handle.sessionId) {
         slot.setSession(handle.sessionId);
         await workStore?.setExecutionSession(executionId, handle.sessionId);
       }
       exitCode = undefined;
+      executionDiagnostic = undefined;
       eventsStarted = true;
       for await (const event of handle.events) {
         if (event.type === 'telemetry') telemetry.observe(event.observation);
@@ -977,15 +1017,18 @@ async function runWorkerExecution(
             event.capacity?.windows.flatMap((window) =>
               window.resetsAt !== null && window.resetsAt > nowSeconds() ? [window.resetsAt] : [],
             ) ?? [];
+          if (
+            runtimeQuota?.status === 'wait' &&
+            runtimeQuota.resetsAt !== null &&
+            runtimeQuota.resetsAt > nowSeconds()
+          )
+            resets.push(runtimeQuota.resetsAt);
+          if (event.retryAfterSec > 0) resets.push(nowSeconds() + event.retryAfterSec);
           runtimeQuota = {
             status: 'wait',
             cause: 'quota',
             reason: event.message,
-            resetsAt: resets.length
-              ? Math.max(...resets)
-              : event.retryAfterSec > 0
-                ? nowSeconds() + event.retryAfterSec
-                : null,
+            resetsAt: resets.length ? Math.max(...resets) : null,
           };
           audit('quota_exhausted', { detail: JSON.stringify(runtimeQuota) });
         }
@@ -1004,6 +1047,8 @@ async function runWorkerExecution(
         }
         if (event.type === 'finished') {
           exitCode = event.exitCode;
+          if (exitCode !== 0)
+            executionDiagnostic = failureDiagnostic(event.resultSummary, exitCode);
           executionFinished = true;
         }
       }
@@ -1086,7 +1131,9 @@ async function runWorkerExecution(
     lifecycle?.assertOwned();
     audit('commits_checked');
     if (interrupted || exitCode !== 0)
-      throw new Error('Execution failed or was interrupted; changes retained for review');
+      throw new WorkerExecutionError(
+        `Execution failed or was interrupted; changes retained for review (${executionDiagnostic ?? failureDiagnostic(interrupted ? 'interrupted' : '', exitCode)})`,
+      );
     if (
       git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch ||
       git(tree.path, ['rev-parse', 'HEAD']) !== base

@@ -25,6 +25,8 @@ export interface ExecutionRequest {
   timeoutMin: number;
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void | Promise<void>;
+  /** Persist CLI closure before releasing the registered supervisor root. */
+  persistProcessClose?: () => void | Promise<void>;
 }
 
 export type ExecutionEvent =

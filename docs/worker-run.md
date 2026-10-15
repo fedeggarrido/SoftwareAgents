@@ -6,6 +6,12 @@ Desde el checkout principal del Managed Project, con el paquete construido:
 pixel-agents worker run --task SA-### --brief ruta/al/brief.md
 ```
 
+Los runs normales requieren Windows. En Linux y macOS, `worker run` rechaza
+la plataforma antes de abrir WorkStore, reclamar una lease, sondear Executors o
+preparar el worktree: SA-026 todavía no verifica la identidad y el cierre de
+grupos POSIX. No basta con que un PID desaparezca. Los evals desechables conservan
+su recorrido independiente, sin lease de Task.
+
 El Operator debe autorizar `claude` en `projects.<project.id>.allowedExecutors`
 de su configuración existente. `binaryPaths.claude` permite seleccionar el
 ejecutable; el brief y `project.yaml` no conceden autoridad. La decisión de
@@ -54,6 +60,28 @@ sobre node_modules compartidos. El worker conserva su rama para revisión y no
 llama a cleanup automáticamente.
 
 ## Lock y recuperación
+
+Los runs normales usan la lease de WorkStore y la recuperación SA-026. El runtime
+lanza un supervisor `detached: true` y `windowsHide: true`: en Windows queda fuera
+del Job Object de libuv del worker con `KILL_ON_JOB_CLOSE`, sin ventana de consola.
+El supervisor espera el registro duradero de su PID y hora de creación antes de
+lanzar el CLI. Después del `close` del CLI, conserva su raíz hasta que el worker
+persiste `tree_closed_at` bajo la lease y envía un segundo ACK. Si el worker muere
+antes de ese ACK, la raíz permanece viva incluso tras cerrar el CLI, para que el
+sweeper verifique su identidad y termine el árbol. Una raíz ausente o reutilizada
+sigue bloqueando la recuperación; nunca se interpreta como cierre demostrado.
+Si el worker muere después de persistir el cierre y antes del ACK, el sweeper
+también recoge la raíz retenida si su identidad sigue coincidiendo; el cierre
+ya persistido permite omitir un PID que haya desaparecido o se haya reutilizado.
+La cancelación y el timeout del worker vivo siguen terminando el árbol mediante
+`taskkill /T /F` y esperando `close` antes de liberar los recursos.
+
+Los rechazos sucesivos de cuota conservan el reset futuro más tardío conocido,
+aunque un evento posterior omita el reset. Los fallos retryable guardan categoría
+fija (auth, spawn, containment, timeout, cancelled, lease, workspace o executor)
+y código de salida, sin copiar rutas, prompts ni texto del modelo al motivo de Task.
+
+El siguiente lock corresponde al recorrido de eval y a workers legacy:
 
 El lock exclusivo `<git-common-dir>/softwareagents/locks/SA-###.lock` contiene
 el PID del worker. Se libera al terminar normalmente. SIGINT/SIGTERM solicitan

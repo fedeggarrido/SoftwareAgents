@@ -83,6 +83,30 @@ const spec = (capabilityClass: string, fallbackAllowed = true): AgentSpec =>
     },
     modelPolicy: { capabilityClass, fallbackAllowed },
   }) as AgentSpec;
+it('validates strict Operator default verifiers and safe related commands', () => {
+  const cascade = {
+    enabled: true,
+    startTier: 'economy',
+    maxEscalations: 1,
+    verifiers: {},
+    defaultVerifier: { commands: [{ vitestRelated: true, timeoutMs: 60000 }] },
+  };
+  expect(validateModelTiers({ ...policy, cascade }).cascade).toEqual(cascade);
+  for (const defaultVerifier of [
+    { ...cascade.defaultVerifier, allowedPaths: ['server/src/example.ts'] },
+    { commands: [] },
+    { commands: [{ vitestRelated: false, timeoutMs: 1000 }] },
+    { commands: [{ vitestRelated: true, argv: ['node'], timeoutMs: 1000 }] },
+    { commands: [{ vitestRelated: true, files: ['from-board.ts'], timeoutMs: 1000 }] },
+    { commands: [{ vitestRelated: true, timeoutMs: 60001 }] },
+    { commands: [{ argv: ['node'], timeoutMs: 0 }] },
+    { commands: [{ argv: ['node'] }] },
+    { commands: [{ argv: ['node', 'bad\nargument'], timeoutMs: 1000 }] },
+  ])
+    expect(() =>
+      validateModelTiers({ ...policy, cascade: { ...cascade, defaultVerifier } }),
+    ).toThrow();
+});
 it('cascade attempts wait at the exact tier under quota, never downgrade or exceed maxTier', () => {
   expect(
     selectModelTier(spec('standard_coding'), rule, policy, { cascadeTier: 'deep' }, snapshot(true)),

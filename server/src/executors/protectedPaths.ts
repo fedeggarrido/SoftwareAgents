@@ -28,10 +28,10 @@ export const DEFAULT_PROTECTED_PATHS = Object.freeze([
   'scripts/**',
 ]);
 
-function matches(file: string, pattern: string): boolean {
+export function matchesProtectedPath(file: string, pattern: string): boolean {
   // **/ includes the root, and directory entries themselves may be replaced with symlinks.
-  if (pattern.startsWith('**/') && matches(file, pattern.slice(3))) return true;
-  if (pattern.endsWith('/**') && matches(file, pattern.slice(0, -3))) return true;
+  if (pattern.startsWith('**/') && matchesProtectedPath(file, pattern.slice(3))) return true;
+  if (pattern.endsWith('/**') && matchesProtectedPath(file, pattern.slice(0, -3))) return true;
   const expression = pattern
     .split(/(\*\*|\*)/)
     .map((part) =>
@@ -81,7 +81,7 @@ export function guardProtectedPaths(options: ProtectedPathsOptions): {
     .filter(Boolean);
   const patterns = [...DEFAULT_PROTECTED_PATHS, ...(options.operator.protectedPaths ?? [])];
   const paths = files.filter((file) => {
-    if (patterns.some((pattern) => matches(file, pattern))) return true;
+    if (patterns.some((pattern) => matchesProtectedPath(file, pattern))) return true;
     if (!/(^|\/)package\.json$/i.test(file)) return false;
     const readScripts = (revision: string) => {
       // A missing side (addition/deletion) has no scripts. Other errors fail closed.

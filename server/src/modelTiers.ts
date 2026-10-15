@@ -70,6 +70,43 @@ export const tierRuleSchema = {
   },
 };
 const validateRule = compileSchema<TierRule>(tierRuleSchema);
+const verifierCommandsSchema = {
+  type: 'array',
+  minItems: 1,
+  maxItems: 5,
+  items: {
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['argv', 'timeoutMs'],
+        properties: {
+          argv: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 4096,
+              pattern: '^[^\\u0000\\r\\n]+$',
+            },
+          },
+          timeoutMs: { type: 'integer', minimum: 1, maximum: EVAL_CRITERION_TIMEOUT_MS },
+        },
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['vitestRelated', 'timeoutMs'],
+        properties: {
+          vitestRelated: { const: true },
+          timeoutMs: { type: 'integer', minimum: 1, maximum: EVAL_CRITERION_TIMEOUT_MS },
+        },
+      },
+    ],
+  },
+};
 export const tierPolicySchema = {
   type: 'object',
   additionalProperties: false,
@@ -85,6 +122,12 @@ export const tierPolicySchema = {
         enabled: { type: 'boolean' },
         startTier: { enum: MODEL_TIERS },
         maxEscalations: { type: 'integer', minimum: 0, maximum: 2 },
+        defaultVerifier: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['commands'],
+          properties: { commands: verifierCommandsSchema },
+        },
         verifiers: {
           type: 'object',
           additionalProperties: {
@@ -93,30 +136,7 @@ export const tierPolicySchema = {
             required: ['allowedPaths', 'commands'],
             properties: {
               allowedPaths: evalTaskSchema.properties.allowedPaths,
-              commands: {
-                type: 'array',
-                minItems: 1,
-                maxItems: 5,
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['argv', 'timeoutMs'],
-                  properties: {
-                    argv: {
-                      type: 'array',
-                      minItems: 1,
-                      maxItems: 100,
-                      items: {
-                        type: 'string',
-                        minLength: 1,
-                        maxLength: 4096,
-                        pattern: '^[^\\u0000\\r\\n]+$',
-                      },
-                    },
-                    timeoutMs: { type: 'integer', minimum: 1, maximum: EVAL_CRITERION_TIMEOUT_MS },
-                  },
-                },
-              },
+              commands: verifierCommandsSchema,
             },
           },
           propertyNames: { pattern: '^(?:SA-[0-9]{3,}|[a-z][a-z0-9-]{0,63})$' },

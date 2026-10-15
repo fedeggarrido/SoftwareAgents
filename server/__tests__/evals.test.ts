@@ -18,6 +18,7 @@ import {
 import { evalGit, type EvalTask, loadEvalTasks, parseEvalTask } from '../src/evalTasks.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
+import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadWorkerAgentSpec } from '../src/worker.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
@@ -161,6 +162,117 @@ afterEach(() => {
 });
 const readRecords = () => readEvalRecords(evalResultsDirectory(path.join(repo, '.git'), 'test'));
 
+function detachCascadeMetadata() {
+  fs.unlinkSync(path.join(repo, '.softwareagents/evals/answer.json'));
+  const metadata = path.join(root, 'metadata');
+  fs.renameSync(path.join(repo, '.git'), metadata);
+  fs.writeFileSync(path.join(repo, '.git'), `gitdir: ${metadata.replace(/\\/g, '/')}\n`);
+}
+
+describe('default cascade integrity and related tests', () => {
+  it.each([
+    'server/__tests__/answer.test.ts',
+    'server/foo.spec.ts',
+    'tests/helper.ts',
+    'vitest.config.ts',
+    'server/tsconfig.json',
+    '.eslintrc.json',
+    'eslint.config.js',
+    'server/package.json',
+    'package-lock.json',
+    'yarn.lock',
+    'pnpm-lock.yaml',
+    'bun.lockb',
+    '.softwareagents/brain/task.md',
+    '.github/workflows/ci.yml',
+    '.codex/config.toml',
+    'nested/AGENTS.md',
+    'scripts/check.js',
+    'operator-private/file.ts',
+  ])('rejects %s before the default command can execute', async (file) => {
+    detachCascadeMetadata();
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo, file), 'changed');
+    const marker = path.join(root, 'executed');
+    await expect(
+      checkCascadeCriteria(
+        {
+          commands: [
+            {
+              argv: [
+                process.execPath,
+                '-e',
+                `require('fs').writeFileSync(${JSON.stringify(marker)}, '')`,
+              ],
+              timeoutMs: 5000,
+            },
+          ],
+        },
+        task.fixCommit,
+        repo,
+        root,
+        new AbortController().signal,
+        ['operator-private/**'],
+      ),
+    ).rejects.toThrow('criteria_tampered');
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+  });
+
+  it('allows ordinary source files but rejects links without an allowedPaths ceiling', () => {
+    detachCascadeMetadata();
+    fs.writeFileSync(path.join(repo, 'server/clock.ts'), 'export {};');
+    expect(() => assertEvalIntegrity({ baseCommit: task.fixCommit }, repo)).not.toThrow();
+    const link = path.join(repo, 'linked');
+    fs.symlinkSync(
+      path.join(repo, 'server'),
+      link,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    try {
+      expect(() => assertEvalIntegrity({ baseCommit: task.fixCommit }, repo)).toThrow(
+        'criteria_tampered',
+      );
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it('runs only tests related to changed TS/JS files with an isolated home', async () => {
+    const marker = path.join(root, 'related-ran');
+    fs.appendFileSync(
+      path.join(repo, 'server/__tests__/answer.test.ts'),
+      `
+import os from 'os'; import { writeFileSync } from 'fs';
+it('isolates related tests', () => {
+  expect(os.homedir()).toBe(process.env.HOME);
+  writeFileSync(${JSON.stringify(marker)}, 'ran');
+});\n`,
+    );
+    fs.writeFileSync(
+      path.join(repo, 'server/__tests__/unrelated.test.ts'),
+      "import { it } from 'vitest'; it('must not run', () => { throw new Error('unrelated'); });",
+    );
+    evalGit(repo, ['add', 'server/__tests__']);
+    evalGit(repo, ['commit', '-m', 'related test fixtures']);
+    const base = evalGit(repo, ['rev-parse', 'HEAD']);
+    detachCascadeMetadata();
+    fs.writeFileSync(path.join(repo, 'server/poison.ts'), 'export const changed = true;');
+    fs.writeFileSync(path.join(repo, 'unrelated.md'), 'also changed');
+    expect(
+      await checkCascadeCriteria(
+        { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+        base,
+        repo,
+        root,
+        new AbortController().signal,
+      ),
+    ).toEqual(['pass']);
+    expect(fs.readFileSync(marker, 'utf8')).toBe('ran');
+    expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+  }, 20000);
+});
+
 it('audits and retains the cause when standard requires auth after economy fails', async () => {
   const raw = JSON.parse(initialConfig);
   const policy = raw.projects.test.modelTiers;
@@ -225,66 +337,74 @@ it('audits and retains the cause when standard requires auth after economy fails
   expect(process.exitCode).toBe(3);
 });
 
-it('evaluates cascades as one configuration and sums all attempts at captured prices', async () => {
-  const raw = JSON.parse(initialConfig);
-  const policy = raw.projects.test.modelTiers;
-  policy.tiers.economy.candidates = [{ executor: 'claude', model: 'test-economy' }];
-  policy.tiers.standard.candidates = [{ executor: 'claude', model: 'test-standard' }];
-  policy.cascade = {
-    enabled: true,
-    startTier: 'economy',
-    maxEscalations: 2,
-    verifiers: {
-      answer: {
-        allowedPaths: ['answer.txt'],
-        commands: [
-          {
-            argv: [
-              process.execPath,
-              '-e',
-              "process.exitCode = require('fs').readFileSync('answer.txt','utf8') === 'fixed' ? 0 : 1",
-            ],
-            timeoutMs: 5000,
-          },
-        ],
+it.each(['task', 'default'])(
+  'evaluates %s cascades as one configuration and sums all attempts at captured prices',
+  async (binding) => {
+    const raw = JSON.parse(initialConfig);
+    const policy = raw.projects.test.modelTiers;
+    policy.tiers.economy.candidates = [{ executor: 'claude', model: 'test-economy' }];
+    policy.tiers.standard.candidates = [{ executor: 'claude', model: 'test-standard' }];
+    policy.cascade = {
+      enabled: true,
+      startTier: 'economy',
+      maxEscalations: 2,
+      verifiers: {
+        answer: {
+          allowedPaths: ['answer.txt'],
+          commands: [
+            {
+              argv: [
+                process.execPath,
+                '-e',
+                "process.exitCode = require('fs').readFileSync('answer.txt','utf8') === 'fixed' ? 0 : 1",
+              ],
+              timeoutMs: 5000,
+            },
+          ],
+        },
       },
-    },
-  };
-  fs.writeFileSync(configFile, JSON.stringify(raw));
-  vi.stubEnv('SA_EVAL_FAKE_MODE', 'cascade');
-  const log = vi.fn();
-  await runEvalCommand(
-    ['run', '--task', 'answer', '--cascade', '--repeat', '1', '--yes', '--json'],
-    {
-      cwd: repo,
-      log,
-      worker: { binaryArgs: [fake, 'claude'], probe: ready },
-    },
-  );
-  const result = JSON.parse(log.mock.calls[0][0]);
-  expect(result.results[0].status).toBe('success');
-  expect(result.results[0].cascade.attempts).toHaveLength(2);
-  expect(result.configurations).toHaveLength(1);
-  const configuration = result.configurations[0];
-  expect(configuration.tier).toBe('cascade');
-  expect(configuration.totals.executions).toBe(2);
-  expect(configuration.totals.inputTokens).toBe(32);
-  expect(configuration.costPerSolvedTaskUsd).toBeGreaterThan(0);
-  expect(JSON.stringify(result)).not.toContain('PROMPT_SECRET_MARKER');
-  const records = (await readRecords()).records;
-  // A later admission block still spent the quota of both earlier attempts.
-  const blocked = parseEvalRecord({ ...records[0], status: 'blocked', repetition: 2 });
-  const report = buildEvalReport([...records, blocked]);
-  expect(report.configurations[0].totals.executions).toBe(4);
-  expect(report.configurations[0].costPerSolvedTaskUsd).toBeCloseTo(
-    configuration.costPerSolvedTaskUsd * 2,
-  );
-  const fixed = parseEvalRecord({ ...records[0], cascade: undefined, repetition: 3 });
-  expect(buildEvalReport([...records, fixed]).configurations).toHaveLength(2);
-  expect(() =>
-    parseEvalArgs(['run', '--task', 'answer', '--cascade', '--tier', 'economy', '--repeat', '1']),
-  ).toThrow();
-}, 20000);
+    };
+    if (binding === 'default') {
+      policy.cascade.defaultVerifier = { commands: policy.cascade.verifiers.answer.commands };
+      policy.cascade.verifiers = {};
+    }
+    fs.writeFileSync(configFile, JSON.stringify(raw));
+    vi.stubEnv('SA_EVAL_FAKE_MODE', 'cascade');
+    const log = vi.fn();
+    await runEvalCommand(
+      ['run', '--task', 'answer', '--cascade', '--repeat', '1', '--yes', '--json'],
+      {
+        cwd: repo,
+        log,
+        worker: { binaryArgs: [fake, 'claude'], probe: ready },
+      },
+    );
+    const result = JSON.parse(log.mock.calls[0][0]);
+    expect(result.results[0].status).toBe('success');
+    expect(result.results[0].cascade.attempts).toHaveLength(2);
+    expect(result.configurations).toHaveLength(1);
+    const configuration = result.configurations[0];
+    expect(configuration.tier).toBe('cascade');
+    expect(configuration.totals.executions).toBe(2);
+    expect(configuration.totals.inputTokens).toBe(32);
+    expect(configuration.costPerSolvedTaskUsd).toBeGreaterThan(0);
+    expect(JSON.stringify(result)).not.toContain('PROMPT_SECRET_MARKER');
+    const records = (await readRecords()).records;
+    // A later admission block still spent the quota of both earlier attempts.
+    const blocked = parseEvalRecord({ ...records[0], status: 'blocked', repetition: 2 });
+    const report = buildEvalReport([...records, blocked]);
+    expect(report.configurations[0].totals.executions).toBe(4);
+    expect(report.configurations[0].costPerSolvedTaskUsd).toBeCloseTo(
+      configuration.costPerSolvedTaskUsd * 2,
+    );
+    const fixed = parseEvalRecord({ ...records[0], cascade: undefined, repetition: 3 });
+    expect(buildEvalReport([...records, fixed]).configurations).toHaveLength(2);
+    expect(() =>
+      parseEvalArgs(['run', '--task', 'answer', '--cascade', '--tier', 'economy', '--repeat', '1']),
+    ).toThrow();
+  },
+  20000,
+);
 
 // Exercise only pinned local verifiers; no Executor is launched by this helper.
 async function verifyFixture(code: string, names = ['isolates criterion']) {

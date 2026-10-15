@@ -577,6 +577,54 @@ describe('Operator verifier cascade SA-103', () => {
       .map((line) => JSON.parse(line).resourceSpans[0].scopeSpans[0].spans[0])
       .filter((s) => s.name === 'invoke_agent');
   }
+  it('uses the default for an unbound Task and resets between attempts', async () => {
+    const raw = configure();
+    const cascade = raw.projects.test.modelTiers.cascade;
+    cascade.defaultVerifier = { commands: cascade.verifiers['SA-999'].commands };
+    cascade.verifiers = {};
+    save(raw);
+    await run('standard');
+    expect(attempts().map((r) => [r.tier, r.verifiers])).toEqual([
+      ['economy', ['fail']],
+      ['standard', ['pass']],
+    ]);
+  });
+  it('prefers the Task verifier over a failing default', async () => {
+    const raw = configure();
+    raw.projects.test.modelTiers.cascade.defaultVerifier = {
+      commands: [{ argv: [process.execPath, '-e', 'process.exit(1)'], timeoutMs: 5000 }],
+    };
+    save(raw);
+    await run();
+    expect(attempts().map((r) => r.verifiers)).toEqual([['pass']]);
+  });
+  it('skips vitestRelated without TS/JS changes and accepts the attempt', async () => {
+    const raw = configure();
+    raw.projects.test.modelTiers.cascade.verifiers = {};
+    raw.projects.test.modelTiers.cascade.defaultVerifier = {
+      commands: [{ vitestRelated: true, timeoutMs: 5000 }],
+    };
+    save(raw);
+    await run();
+    expect(attempts().map((r) => r.verifiers)).toEqual([['pass']]);
+    expect(vi.mocked(spawn).mock.calls.some((call) => call[1]?.includes('related'))).toBe(false);
+  });
+  it('rejects protected changes with the default before running commands or escalating', async () => {
+    const raw = configure();
+    raw.projects.test.modelTiers.cascade.defaultVerifier = {
+      commands: raw.projects.test.modelTiers.cascade.verifiers['SA-999'].commands,
+    };
+    raw.projects.test.modelTiers.cascade.verifiers = {};
+    save(raw);
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fixture, 'claude', '--write-protected'], log: () => {} },
+      ),
+    ).rejects.toThrow('criteria_tampered');
+    expect(attempts().map((r) => [r.result, r.verifiers])).toEqual([['criteria_tampered', []]]);
+    expect(vi.mocked(spawn).mock.calls.some((call) => call[1]?.includes('verify'))).toBe(false);
+  });
   it.each(['verifier_result', 'finally_fallback'])(
     'releases slots, task lock and listeners when the attempt registry is locked (%s)',
     async (mode) => {
@@ -745,6 +793,7 @@ describe('Operator verifier cascade SA-103', () => {
           enabled: true,
           startTier: 'economy',
           verifiers: { 'SA-999': { commands: [{ argv: ['untrusted-program'] }] } },
+          defaultVerifier: { commands: [{ vitestRelated: true, timeoutMs: 1000 }] },
         };
         if (mode === 'repo-board') delete raw.projects.test.modelTiers.cascade;
         fs.appendFileSync(

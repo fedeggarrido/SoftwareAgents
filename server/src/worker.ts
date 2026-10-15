@@ -6,7 +6,7 @@ import { parse } from 'yaml';
 
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
-import type { ModelTier } from '../../core/src/modelTier.js';
+import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
@@ -14,6 +14,7 @@ import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
+import { EvalIntegrityError } from './evalIntegrity.js';
 import {
   closeAvailabilityDecisions,
   escalateUnavailable,
@@ -515,7 +516,8 @@ async function runWorkerExecution(
   let attempt = 0;
   let escalatedFrom: ModelTier | undefined;
   let cascade: NonNullable<typeof tierPolicy>['cascade'];
-  let verifier: NonNullable<typeof cascade>['verifiers'][string] | undefined;
+  let verifier: CascadeVerifier | undefined;
+  let usingDefaultVerifier = false;
   let levels: ModelTier[] = [];
   let tree: { path: string; branch: string };
   let base: string;
@@ -625,11 +627,14 @@ async function runWorkerExecution(
         MODEL_TIERS.indexOf(cascade.startTier)
     ) {
       const key = options.evaluation?.cascadeTask ?? args.task;
-      verifier = Object.hasOwn(cascade.verifiers, key) ? cascade.verifiers[key] : undefined;
+      usingDefaultVerifier = !Object.hasOwn(cascade.verifiers, key) && !!cascade.defaultVerifier;
+      verifier = Object.hasOwn(cascade.verifiers, key)
+        ? cascade.verifiers[key]
+        : cascade.defaultVerifier;
       if (verifier && options.evaluation)
         verifier = {
           ...verifier,
-          allowedPaths: verifier.allowedPaths.filter((file) =>
+          allowedPaths: (verifier.allowedPaths ?? options.evaluation.allowedPaths).filter((file) =>
             options.evaluation!.allowedPaths.includes(file),
           ),
         };
@@ -1072,8 +1077,10 @@ async function runWorkerExecution(
               tree.path,
               scratch,
               verifierAbort.signal,
+              usingDefaultVerifier ? config.operator.protectedPaths : undefined,
             );
           } catch (error) {
+            if (error instanceof EvalIntegrityError) await recordAttempt([], 'criteria_tampered');
             if (error instanceof EvalCriterionTerminationError) {
               verifierClosed = false;
               await recordAttempt([error.result], 'fail');
@@ -1097,7 +1104,12 @@ async function runWorkerExecution(
             options.evaluation?.settled(telemetry.rootSpan, true);
             slot.release();
             slot = undefined;
-            resetCascadeWorktree(verifier, tree.path, base);
+            resetCascadeWorktree(
+              verifier,
+              tree.path,
+              base,
+              usingDefaultVerifier ? config.operator.protectedPaths : undefined,
+            );
             escalatedFrom = tierSelection!.tier!;
             attempt++;
             executionId = randomUUID();

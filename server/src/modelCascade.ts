@@ -8,7 +8,7 @@ import {
   EvalCriterionTerminationError,
   runVerifierCommand,
 } from './evalCriteria.js';
-import { assertEvalIntegrity } from './evalIntegrity.js';
+import { assertEvalIntegrity, evalChangedFiles, EvalIntegrityError } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
@@ -21,7 +21,7 @@ export interface CascadeAttempt {
   executor: string;
   model: string;
   verifiers: CriterionResult[];
-  result: 'pass' | 'fail' | 'executor_error';
+  result: 'pass' | 'fail' | 'executor_error' | 'criteria_tampered';
   usage: {
     input: number | 'unknown';
     output: number | 'unknown';
@@ -75,9 +75,13 @@ export async function checkCascadeCriteria(
   tree: string,
   scratch: string,
   signal: AbortSignal,
+  protectedPaths?: readonly string[],
 ): Promise<CriterionResult[]> {
-  const integrity = { baseCommit: base, allowedPaths: verifier.allowedPaths };
+  const integrity = { baseCommit: base, allowedPaths: verifier.allowedPaths, protectedPaths };
   assertEvalIntegrity(integrity, tree);
+  const related = evalChangedFiles(tree, base)
+    .filter((file) => /\.[cm]?[jt]sx?$/i.test(file))
+    .map((file) => path.resolve(tree, file).replace(/\\/g, '/'));
   const link = resolveInside(tree, 'node_modules');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
@@ -87,8 +91,54 @@ export async function checkCascadeCriteria(
     const results: CriterionResult[] = [];
     for (const command of verifier.commands) {
       if (signal.aborted) throw new Error('Cascade interrupted');
+      if ('vitestRelated' in command && !related.length) {
+        results.push('pass');
+        continue;
+      }
       const home = fs.mkdtempSync(path.join(temporary, 'home-'));
-      results.push(await runVerifierCommand(command.argv, tree, home, command.timeoutMs, signal));
+      let argv: string[];
+      if ('argv' in command) argv = command.argv;
+      else {
+        // Neutral external config avoids repo plugins/reporters/caches. os.homedir on
+        // Windows ignores HOME, so isolate it inside the test workers as evals do.
+        const setup = path.join(home, 'isolated-home.mjs');
+        fs.writeFileSync(
+          setup,
+          `import { vi } from 'vitest';
+vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
+`,
+        );
+        const config = path.join(home, 'vitest.config.mjs');
+        fs.writeFileSync(
+          config,
+          `export default ${JSON.stringify({
+            cacheDir: path.join(home, 'cache'),
+            test: {
+              globals: true,
+              setupFiles: [setup],
+              pool: 'threads',
+              maxWorkers: 1,
+              testTimeout: command.timeoutMs / 2,
+            },
+          })};`,
+        );
+        argv = [
+          process.execPath,
+          path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
+          'related',
+          '--run',
+          '--passWithNoTests',
+          '--no-cache',
+          '--root',
+          tree,
+          '--config',
+          config,
+          '--configLoader',
+          'native',
+          ...related,
+        ];
+      }
+      results.push(await runVerifierCommand(argv, tree, home, command.timeoutMs, signal));
     }
     return results;
   } catch (error) {
@@ -102,7 +152,7 @@ export async function checkCascadeCriteria(
         !stat?.isSymbolicLink() ||
         fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
       )
-        throw new Error('Cascade dependency link changed');
+        throw new EvalIntegrityError('Cascade dependency link changed');
       fs.unlinkSync(link);
       fs.rmSync(temporary, { recursive: true, force: true });
       assertEvalIntegrity(integrity, tree);
@@ -112,8 +162,16 @@ export async function checkCascadeCriteria(
 
 /** Caller holds the Task lock and has confirmed the executor and verifiers closed.
  * Integrity rejects junctions/special files before Git is allowed to discard anything. */
-export function resetCascadeWorktree(verifier: CascadeVerifier, tree: string, base: string): void {
-  assertEvalIntegrity({ baseCommit: base, allowedPaths: verifier.allowedPaths }, tree);
+export function resetCascadeWorktree(
+  verifier: CascadeVerifier,
+  tree: string,
+  base: string,
+  protectedPaths?: readonly string[],
+): void {
+  assertEvalIntegrity(
+    { baseCommit: base, allowedPaths: verifier.allowedPaths, protectedPaths },
+    tree,
+  );
   evalGit(tree, ['reset', '--hard', base]);
   evalGit(tree, ['clean', '-fdx']);
   if (evalGit(tree, ['status', '--porcelain', '--untracked-files=all']))

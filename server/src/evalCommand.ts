@@ -11,7 +11,7 @@ import { CliUsageError } from './cliErrors.js';
 import { EVAL_MAX_REPETITIONS } from './constants.js';
 import { checkEvalCriteria, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
-import { assertEvalIntegrity } from './evalIntegrity.js';
+import { assertEvalIntegrity, EvalIntegrityError } from './evalIntegrity.js';
 import {
   buildEvalReport,
   EVAL_METRIC_FIELDS,
@@ -152,7 +152,9 @@ export async function runEvalCommand(
   if (
     args.cascade &&
     (!policy?.cascade?.enabled ||
-      tasks.some((t) => !Object.hasOwn(policy.cascade!.verifiers, t.id)))
+      tasks.some(
+        (t) => !Object.hasOwn(policy.cascade!.verifiers, t.id) && !policy.cascade!.defaultVerifier,
+      ))
   )
     throw new CliUsageError(
       'Cascade eval requires enabled Operator verifiers for every selected task',
@@ -303,7 +305,7 @@ export async function runEvalCommand(
         } catch (error) {
           if (error instanceof EvalCriterionTerminationError) safeToCleanup = false;
           // Exception messages can contain CLI output or user paths. Persist a fixed category only.
-          row.status = 'executor_error';
+          row.status = error instanceof EvalIntegrityError ? 'criteria_tampered' : 'executor_error';
         } finally {
           row.durationMs = Math.max(0, Date.now() - start);
           const model = row.metrics['gen_ai.response.model'];

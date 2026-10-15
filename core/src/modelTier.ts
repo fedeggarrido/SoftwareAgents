@@ -21,16 +21,18 @@ export interface ModelTierPolicy {
   tiers: Partial<Record<ModelTier, { candidates: TierCandidate[]; fallbackTo?: ModelTier }>>;
   /** Overrides the repository's rule, without granting execution authority. */
   rule?: TierRule;
-  /** Trusted Operator commands, bound to exact Task keys (or eval bank ids). */
+  /** Trusted Operator commands; exact Task bindings override the optional default. */
   cascade?: {
     enabled: boolean;
     startTier: ModelTier;
     maxEscalations: number;
-    verifiers: Record<string, CascadeVerifier>;
+    verifiers: Record<string, CascadeVerifier & { allowedPaths: string[] }>;
+    defaultVerifier?: Omit<CascadeVerifier, 'allowedPaths'>;
   };
 }
 
 export interface CascadeVerifier {
-  allowedPaths: string[];
-  commands: { argv: string[]; timeoutMs: number }[];
+  /** Absent only for the Operator default: allow any unprotected path. */
+  allowedPaths?: string[];
+  commands: ({ argv: string[]; timeoutMs: number } | { vitestRelated: true; timeoutMs: number })[];
 }

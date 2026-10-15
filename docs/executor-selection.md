@@ -231,7 +231,7 @@ El ledger de cuota y la recuperación de Executions agotadas de SA-038 siguen fu
 ### Cascada con verificador (SA-103, opt-in)
 
 Solo el Operator puede añadir `projects.<id>.modelTiers.cascade` en su config
-externa. Ausente, desactivada o sin verificador para la Task, conserva la selección
+externa. Ausente, desactivada o sin verificador propio ni por defecto, conserva la selección
 normal. El esquema es estricto; ni `project.yaml`, ni la política del repo, ni el
 board pueden habilitarla o aportar comandos. Ejemplo dentro de `modelTiers`:
 
@@ -263,15 +263,63 @@ board pueden habilitarla o aportar comandos. Ejemplo dentro de `modelTiers`:
 ```
 
 La clave del verificador es la Task exacta (`SA-###`), o el ID del banco en evals.
-Cada binding exige rutas de ficheros exactas y 1–5 comandos argv, sin shell, con
+El propio prevalece sobre `defaultVerifier`; sus comandos no se combinan.
+Cada binding propio exige rutas de ficheros exactas y 1–5 comandos, sin shell, con
 timeout de 1–60000 ms. `allowedPaths` usa las restricciones de las evals: sin
 traversal, globs, tests ni configuración. Los verificadores permanecen en la base;
 modificarlos, cambiar HEAD, ocultar cambios en el índice o introducir enlaces
 falla cerrado antes de ejecutar código. Los comandos deben evitar escritura de
 cachés/buildinfo dentro del árbol (usar no-emit o temporales externos).
 
+**Verificador por defecto (SA-103b).** Para activar la cascada en Tasks sin binding
+propio, el Operator puede añadir `defaultVerifier`, sin `allowedPaths`. Ejemplo
+recomendado dentro de `modelTiers` (typecheck global y tests relacionados):
+
+```json
+{
+  "cascade": {
+    "enabled": true,
+    "startTier": "economy",
+    "maxEscalations": 2,
+    "verifiers": {},
+    "defaultVerifier": {
+      "commands": [
+        {
+          "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"],
+          "timeoutMs": 60000
+        },
+        { "vitestRelated": true, "timeoutMs": 60000 }
+      ]
+    }
+  }
+}
+```
+
+El default permite cambios en cualquier fichero salvo los protegidos: tests y
+mocks, configuración Vitest/TypeScript/ESLint, `package*.json`, lockfiles,
+`node_modules`, `.softwareagents/` y rutas SA-063 (incluidas las adicionales del
+Operator). Mantiene las comprobaciones SA-QA-20 de HEAD, índice, enlaces y ficheros
+especiales antes y después de verificar y antes de descartar un intento. Una
+alteración produce `criteria_tampered` y termina sin ejecutar más verificadores
+ni escalar. **Riesgo residual:** un agente puede sabotear un test desde un fichero
+de código que sí puede modificar; el default amplía esos ficheros respecto a un
+binding exacto. Esto sigue requiriendo agentes cooperativos y revisión humana.
+
+`vitestRelated` también se admite en bindings propios. Es una alternativa estricta
+a `argv`: solo acepta `vitestRelated: true` y `timeoutMs` (1–60000 ms), sin rutas,
+flags ni comandos del repo/board. El runtime calcula la lista desde el diff contra
+la base del intento, incluidos staged, eliminados, untracked e ignorados, y filtra
+TS/JS (`ts`, `tsx`, `js`, `jsx` y variantes `m`/`c`). Lanza el Vitest instalado con
+`related --run`, argumentos de rutas absolutas y sin shell. Usa una configuración
+neutral externa, sin plugins ni configuración Vitest del repo, con globals, un
+worker, HOME aislado y caché desactivada. Busca los tests estándar `.test`/`.spec`
+desde la raíz del worktree; proyectos que necesitan aliases/setup específicos
+deben usar un `argv` explícito del Operator. Sin ficheros TS/JS cambiados no lanza
+Vitest y registra pass; sin tests relacionados también pasa. Las rutas se calculan
+de nuevo en cada intento y nunca se aceptan desde Tasks, repo ni board.
+
 Son elegibles las Tasks cuyo nivel normal SA-084, acotado por `maxTier`, sea al
-menos `startTier` y tengan binding del Operator. Se empieza por `startTier` y se
+menos `startTier` y tengan verificador propio o por defecto del Operator. Se empieza por `startTier` y se
 sube por economy → standard → deep, sin sobrepasar `maxTier` ni `maxEscalations`
 (0–2, número de intentos adicionales). Los niveles ausentes o excluidos por
 `executorLevels` se omiten. Cada intento obtiene su propia admisión, slot, probes
@@ -303,7 +351,9 @@ comandos ni salidas del verificador.
 
 `eval run --task <id|all> --cascade --repeat N` sustituye la pareja
 `--executor/--tier`; no activa una cascada deshabilitada ni toma comandos del banco.
-Exige bindings del Operator para las tareas elegidas. El informe la agrupa por
+Exige verificador propio o por defecto del Operator para las tareas elegidas;
+el techo `allowedPaths` del banco sigue aplicándose también con el default.
+El informe la agrupa por
 hash de configuración como otra configuración y suma coste/tokens de **todos**
 sus intentos, también si una admisión posterior bloquea. Los runs fijos conservan
 su selección exacta y sirven de comparación; véase [evals.md](evals.md).

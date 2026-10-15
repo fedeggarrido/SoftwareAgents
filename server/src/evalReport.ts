@@ -36,7 +36,7 @@ export interface EvalRecord {
   agentSpecHash: string;
   baseline: boolean;
   repetition: number;
-  status: 'success' | 'criterion_failed' | 'executor_error' | 'blocked';
+  status: 'success' | 'criterion_failed' | 'criteria_tampered' | 'executor_error' | 'blocked';
   criteria: boolean[];
   durationMs: number;
   metrics: Record<string, string | number>;
@@ -81,7 +81,9 @@ const recordSchema = {
     agentSpecHash: hash,
     baseline: { type: 'boolean' },
     repetition: { type: 'integer', minimum: 1 },
-    status: { enum: ['success', 'criterion_failed', 'executor_error', 'blocked'] },
+    status: {
+      enum: ['success', 'criterion_failed', 'criteria_tampered', 'executor_error', 'blocked'],
+    },
     criteria: { type: 'array', maxItems: 5, items: { type: 'boolean' } },
     durationMs: count,
     metrics: {

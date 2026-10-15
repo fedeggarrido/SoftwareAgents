@@ -227,3 +227,4 @@ export const TELEMETRY_PRICE_TOKENS = 1_000_000;
 // SA-094: bounded, explicit operator evaluations; no background model calls.
 export const EVAL_MAX_REPETITIONS = 20;
 export const EVAL_CRITERION_TIMEOUT_MS = 60_000;
+export const EVAL_CRITERION_MAX_OUTPUT_BYTES = 1024 * 1024;

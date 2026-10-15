@@ -10,5 +10,6 @@
       "file": "server/__tests__/domainEventRelay.test.ts",
       "testName": "keeps transitions after the first successful snapshot"
     }
-  ]
+  ],
+  "allowedPaths": ["server/src/domainEventRelay.ts"]
 }

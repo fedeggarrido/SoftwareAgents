@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { parseEvalArgs, runEvalCommand } from '../src/evalCommand.js';
+import { checkEvalCriteria } from '../src/evalCriteria.js';
 import { assertEvalRunAllowed } from '../src/evalGuard.js';
+import { assertEvalIntegrity } from '../src/evalIntegrity.js';
 import {
   buildEvalReport,
   evalResultsDirectory,
@@ -22,6 +24,10 @@ vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };
 });
+vi.mock('../src/constants.js', async (original) => ({
+  ...(await original<typeof import('../src/constants.js')>()),
+  EVAL_CRITERION_TIMEOUT_MS: 5_000,
+}));
 
 const sourceRoot = path.resolve(__dirname, '../..');
 const fake = path.join(__dirname, 'fixtures/fake-eval-cli.cjs');
@@ -74,6 +80,7 @@ beforeEach(() => {
     path.join(repo, 'scripts/remove-worktree.ps1'),
   );
   fs.mkdirSync(path.join(repo, 'server/__tests__'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'server/poison.ts'), 'export {};');
   fs.writeFileSync(path.join(repo, 'answer.txt'), 'broken');
   evalGit(repo, ['add', '.']);
   evalGit(repo, ['commit', '-m', 'base']);
@@ -81,7 +88,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(repo, 'answer.txt'), 'fixed');
   fs.writeFileSync(
     path.join(repo, 'server/__tests__/answer.test.ts'),
-    "import { it, expect } from 'vitest'; import { readFileSync } from 'fs'; import { resolve } from 'path';\nit('repairs answer', () => expect(readFileSync(resolve(import.meta.dirname, '../../answer.txt'), 'utf8')).toBe('fixed'));\n",
+    "import '../poison.js'; import { it, expect } from 'vitest'; import { readFileSync } from 'fs'; import { resolve } from 'path';\nit('repairs answer', () => expect(readFileSync(resolve(import.meta.dirname, '../../answer.txt'), 'utf8')).toBe('fixed'));\n",
   );
   evalGit(repo, ['add', '.']);
   evalGit(repo, ['commit', '-m', 'fix']);
@@ -92,6 +99,7 @@ beforeEach(() => {
     fixCommit: evalGit(repo, ['rev-parse', 'HEAD']),
     brief: 'PROMPT_SECRET_MARKER: repair answer.txt',
     timeoutMin: 1,
+    allowedPaths: ['answer.txt'],
     criteria: [{ file: 'server/__tests__/answer.test.ts', testName: 'repairs answer' }],
   };
   fs.writeFileSync(path.join(repo, '.softwareagents/evals/answer.json'), JSON.stringify(task));
@@ -151,6 +159,154 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 const readRecords = () => readEvalRecords(evalResultsDirectory(path.join(repo, '.git'), 'test'));
+
+// Exercise only pinned local verifiers; no Executor is launched by this helper.
+async function verifyFixture(code: string, names = ['isolates criterion']) {
+  fs.writeFileSync(path.join(repo, task.criteria[0].file), code);
+  evalGit(repo, ['add', '.']);
+  evalGit(repo, ['commit', '-m', 'verifier fixture']);
+  const verifier = {
+    ...task,
+    fixCommit: evalGit(repo, ['rev-parse', 'HEAD']),
+    criteria: names.map((testName) => ({ file: task.criteria[0].file, testName })),
+  };
+  const scratch = path.join(root, 'verify');
+  fs.mkdirSync(scratch);
+  try {
+    return await checkEvalCriteria(verifier, repo, repo, scratch);
+  } finally {
+    const link = path.join(repo, 'node_modules');
+    if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(link);
+  }
+}
+
+describe('verifier isolation and integrity', () => {
+  it('excludes seeded credentials, CI and Node flags and uses a fresh home for every criterion', async () => {
+    const secrets = [
+      'CLICKUP_TOKEN',
+      'PIXEL_AGENTS_TOKEN',
+      'GH_TOKEN',
+      'CUSTOM_API_KEY',
+      'OPENAI_API_KEY',
+      'ANTHROPIC_API_KEY',
+      'UNLISTED_SECRET',
+      'CI',
+    ];
+    for (const key of secrets) vi.stubEnv(key, 'seeded-parent-secret');
+    // Would prevent the child from starting if inherited.
+    vi.stubEnv('NODE_OPTIONS', '--invalid-parent-node-option');
+    const code = `import { it, expect } from 'vitest';
+import * as fs from 'fs'; import * as os from 'os'; import * as path from 'path';
+for (const name of ['isolates criterion', 'isolates second criterion']) it(name, () => {
+  for (const key of ${JSON.stringify(secrets)}) expect(process.env[key]).toBeUndefined();
+  expect(process.env.NODE_OPTIONS).toBe('');
+  expect(process.env.HOME).not.toBe(${JSON.stringify(root)});
+  expect(os.homedir()).toBe(process.env.HOME);
+  for (const key of ['USERPROFILE', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA'])
+    expect(process.env[key]).toBe(process.env.HOME);
+  const marker = path.join(os.homedir(), 'marker');
+  expect(fs.existsSync(marker)).toBe(false); fs.writeFileSync(marker, 'owned');
+});`;
+    expect(await verifyFixture(code, ['isolates criterion', 'isolates second criterion'])).toEqual([
+      true,
+      true,
+    ]);
+    expect(fs.readdirSync(path.join(root, 'verify'))).toEqual([]);
+    expect(fs.existsSync(path.join(root, 'marker'))).toBe(false);
+  }, 20_000);
+
+  it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
+    'kills a hung criterion and its child process',
+    async () => {
+      const pids = path.join(root, 'pids.json');
+      const code = `import { spawn } from 'child_process'; import { writeFileSync } from 'fs';
+const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: 'ignore'});
+writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, child.pid]));
+while (true) { /* Deliberately blocks Vitest's own timers. */ }`;
+      let verified = false;
+      try {
+        expect(await verifyFixture(code)).toEqual([false]);
+        const children: number[] = JSON.parse(fs.readFileSync(pids, 'utf8'));
+        for (const pid of children)
+          await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 2000 });
+        expect(fs.readdirSync(path.join(root, 'verify'))).toEqual([]);
+        verified = true;
+      } finally {
+        // Test-only fallback: never leave a fixture alive if the platform denies taskkill.
+        if (!verified && fs.existsSync(pids)) {
+          const children: number[] = JSON.parse(fs.readFileSync(pids, 'utf8'));
+          for (const pid of children) {
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              /* Already closed. */
+            }
+          }
+        }
+      }
+    },
+    20_000,
+  );
+
+  it('bounds criterion output and cleans its temporary home', async () => {
+    expect(await verifyFixture(`process.stdout.write('x'.repeat(2 * 1024 * 1024));`)).toEqual([
+      false,
+    ]);
+    expect(fs.readdirSync(path.join(root, 'verify'))).toEqual([]);
+  }, 20_000);
+
+  it.each([
+    'untracked',
+    'ignored',
+    'staged',
+    'tracked',
+    'head',
+    'link',
+    'config',
+    'assume-unchanged',
+    'skip-worktree',
+  ])('fails closed for %s changes outside the allowlist', (kind) => {
+    // Integrity requires a detached base checkout, just as the real eval runner does.
+    evalGit(repo, ['checkout', '--detach', task.baseCommit]);
+    fs.unlinkSync(path.join(repo, '.softwareagents/evals/answer.json'));
+    expect(() => assertEvalIntegrity(task, repo)).toThrow('Git directory');
+    // A test-only copy of the Git directory outside the tree models worktree metadata.
+    const metadata = path.join(root, 'metadata');
+    fs.renameSync(path.join(repo, '.git'), metadata);
+    fs.writeFileSync(path.join(repo, '.git'), `gitdir: ${metadata.replace(/\\/g, '/')}\n`);
+    expect(() => assertEvalIntegrity(task, repo)).not.toThrow();
+    if (kind === 'head') evalGit(repo, ['checkout', '--detach', task.fixCommit]);
+    else if (kind === 'link')
+      fs.symlinkSync(
+        path.join(repo, 'server'),
+        path.join(repo, 'linked'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    else {
+      const file = ['tracked', 'assume-unchanged', 'skip-worktree'].includes(kind)
+        ? 'server/poison.ts'
+        : kind === 'config'
+          ? 'package.json'
+          : 'forbidden.ts';
+      if (kind === 'assume-unchanged' || kind === 'skip-worktree')
+        evalGit(repo, ['update-index', `--${kind}`, file]);
+      fs.writeFileSync(path.join(repo, file), 'changed');
+      if (kind === 'ignored')
+        fs.writeFileSync(path.join(metadata, 'info/exclude'), 'forbidden.ts\n');
+      if (kind === 'staged') {
+        evalGit(repo, ['add', file]);
+        fs.unlinkSync(path.join(repo, file));
+      }
+    }
+    try {
+      expect(() => assertEvalIntegrity(task, repo)).toThrow();
+    } finally {
+      const link = path.join(repo, 'linked');
+      if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.unlinkSync(link);
+    }
+  });
+});
+
 async function run(executor: 'claude' | 'codex', extra: string[] = []) {
   const output: string[] = [];
   await runEvalCommand(
@@ -201,6 +357,22 @@ describe('eval task declarations and no-launch commands', () => {
       { criteria: [{ ...task.criteria[0], command: 'anything' }] },
       { criteria: [{ file: '../../escape.test.ts', testName: '.' }] },
       { criteria: [{ ...task.criteria[0], testName: '[' }] },
+      { allowedPaths: undefined },
+      { allowedPaths: [] },
+      { allowedPaths: ['answer.txt', 'answer.txt'] },
+      ...[
+        '../answer.txt',
+        '/answer.txt',
+        'server/**',
+        'server\\answer.ts',
+        './answer.txt',
+        'server/__tests__/answer.test.ts',
+        'server/unit.spec.ts',
+        'server/tests/helper.ts',
+        'vitest.config.ts',
+        'server/package-lock.json',
+        'server/node_modules/evil.ts',
+      ].map((file) => ({ allowedPaths: [file] })),
     ])
       expect(() => parseEvalTask({ ...task, ...change })).toThrow();
     fs.writeFileSync(
@@ -433,9 +605,19 @@ describe('worker-backed evals with fake CLIs', () => {
     },
     30_000,
   );
-  it('restores a verifier corrupted by the executor', async () => {
+  it('fails integrity before restoring a verifier corrupted by the executor', async () => {
     vi.stubEnv('SA_EVAL_FAKE_MODE', 'tamper');
-    expect((await run('codex')).results[0].status).toBe('success');
+    expect((await run('codex')).results[0]).toMatchObject({
+      status: 'criteria_tampered',
+      criteria: [],
+    });
+  }, 30_000);
+  it('rejects expect.extend poisoning from an unallowed imported file', async () => {
+    vi.stubEnv('SA_EVAL_FAKE_MODE', 'poison');
+    expect((await run('codex')).results[0]).toMatchObject({
+      status: 'criteria_tampered',
+      criteria: [],
+    });
   }, 30_000);
   it('never counts an unmatched test name as success', async () => {
     task.criteria[0].testName = 'no matching tests';

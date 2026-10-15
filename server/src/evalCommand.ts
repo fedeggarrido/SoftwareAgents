@@ -9,8 +9,9 @@ import { compileAgent } from './agentCompiler.js';
 import { gitCommonDir } from './boardWatcher.js';
 import { CliUsageError } from './cliErrors.js';
 import { EVAL_MAX_REPETITIONS } from './constants.js';
-import { checkEvalCriteria } from './evalCriteria.js';
+import { checkEvalCriteria, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
+import { assertEvalIntegrity } from './evalIntegrity.js';
 import {
   buildEvalReport,
   EVAL_METRIC_FIELDS,
@@ -241,10 +242,18 @@ export async function runEvalCommand(
           );
           if (result.evaluationSuccess === undefined) row.status = 'blocked';
           else if (result.evaluationSuccess && !interrupted) {
-            row.criteria = await checkEvalCriteria(task, cwd, tree.path, scratch);
-            row.status = row.criteria.every(Boolean) ? 'success' : 'criterion_failed';
+            try {
+              assertEvalIntegrity(task, tree.path);
+            } catch {
+              row.status = 'criteria_tampered';
+            }
+            if (row.status !== 'criteria_tampered') {
+              row.criteria = await checkEvalCriteria(task, cwd, tree.path, scratch);
+              row.status = row.criteria.every(Boolean) ? 'success' : 'criterion_failed';
+            }
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof EvalCriterionTerminationError) safeToCleanup = false;
           // Exception messages can contain CLI output or user paths. Persist a fixed category only.
           row.status = 'executor_error';
         } finally {
@@ -268,7 +277,7 @@ export async function runEvalCommand(
           } finally {
             process.removeListener('SIGINT', stop);
             process.removeListener('SIGTERM', stop);
-            fs.rmSync(scratch, { recursive: true, force: true });
+            if (safeToCleanup) fs.rmSync(scratch, { recursive: true, force: true });
           }
         }
         if (interrupted)

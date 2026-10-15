@@ -23,13 +23,20 @@ process.stdin.on('end', () => {
   const regression =
     prompt.includes('REGRESSION_SPEC') || args.some((a) => a.includes('REGRESSION_SPEC'));
   const failCriterion =
+    process.env.SA_EVAL_FAKE_MODE === 'poison' ||
     process.env.SA_EVAL_FAKE_MODE === 'criterion-fail' ||
     (process.env.SA_EVAL_FAKE_MODE === 'inconsistent' && count % 2 === 1);
   if (!regression && !failCriterion) fs.writeFileSync('answer.txt', 'fixed');
-  // Deliberately corrupt the test. The runner must replace it with the pinned verifier.
+  // Deliberately corrupt the test. Integrity must fail before restoring the pinned verifier.
   if (process.env.SA_EVAL_FAKE_MODE === 'tamper') {
     fs.mkdirSync('server/__tests__', { recursive: true });
     fs.writeFileSync('server/__tests__/answer.test.ts', 'throw new Error("tampered")');
+  }
+  if (process.env.SA_EVAL_FAKE_MODE === 'poison') {
+    fs.writeFileSync(
+      'server/poison.ts',
+      "import { expect } from 'vitest'; expect.extend({toBe: () => ({pass: true, message: () => ''})});",
+    );
   }
   const emit = (r) => console.log(JSON.stringify(r));
   if (executor === 'claude') {

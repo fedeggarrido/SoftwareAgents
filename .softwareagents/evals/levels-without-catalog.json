@@ -10,5 +10,6 @@
       "file": "server/__tests__/configPersistence.test.ts",
       "testName": "rejects only the restricted Project after its catalog is removed|keeps legacy Projects valid with an empty executorLevels map"
     }
-  ]
+  ],
+  "allowedPaths": ["server/src/configPersistence.ts"]
 }

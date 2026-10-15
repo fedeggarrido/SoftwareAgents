@@ -162,6 +162,8 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 
 ### 6. Sin sandbox de SO para Claude en Windows
 
+- **SA-QA-20 (evals):** el verificador ejecuta código del agente como el operador fuera del sandbox del Executor; allowlist de entorno/rutas, temporales y timeout no confinan el host ni impiden manipular Vitest desde un fichero permitido. Solo tareas propias y agentes cooperativos; véase [Límites de seguridad](../evals.md#límites-de-seguridad).
+
 - **Descripción:** el único aislamiento de trabajo es el worktree; Claude puede
   acceder al host con los permisos efectivos del usuario. No limita filesystem,
   red, recursos ni otros proyectos. Las guardias de rutas del runtime no confinan

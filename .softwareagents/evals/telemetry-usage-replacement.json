@@ -10,5 +10,6 @@
       "file": "server/__tests__/telemetry.test.ts",
       "testName": "Claude usage replacements still apply after the message limit is reached"
     }
-  ]
+  ],
+  "allowedPaths": ["server/src/telemetryObservations.ts"]
 }

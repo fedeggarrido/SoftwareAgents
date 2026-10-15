@@ -13,11 +13,16 @@ export interface EvalTask {
   fixCommit: string;
   brief: string;
   timeoutMin: number;
+  allowedPaths: string[];
   criteria: { file: string; testName: string }[];
 }
 const validate = compileSchema<EvalTask>(schema);
 export function parseEvalTask(raw: unknown): EvalTask {
   const task = validateSchema(validate, raw);
+  for (const file of task.allowedPaths) {
+    if (isProtectedEvalPath(file))
+      throw new CliUsageError(`${task.id}: allowedPaths cannot include tests or configuration`);
+  }
   for (const criterion of task.criteria) {
     try {
       new RegExp(criterion.testName);
@@ -26,6 +31,12 @@ export function parseEvalTask(raw: unknown): EvalTask {
     }
   }
   return task;
+}
+
+export function isProtectedEvalPath(file: string): boolean {
+  return /(^|\/)(__tests__|__mocks__|tests?|node_modules)(\/|$)|(^|\/)[^/]*\.(test|spec)\.[^/]+$|(^|\/)vitest[^/]*|(^|\/)package[^/]*\.json$/i.test(
+    file,
+  );
 }
 
 export function evalGit(cwd: string, args: string[]): string {

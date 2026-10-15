@@ -36,7 +36,11 @@ it.each(loadEvalTasks(source))(
         cwd: source,
         windowsHide: true,
       });
-      execFileSync('tar', ['-xf', archive, '-C', tree], { windowsHide: true });
+      // A relative archive avoids GNU tar treating the Windows drive as a remote host.
+      execFileSync('tar', ['-xf', path.basename(archive), '-C', path.basename(tree)], {
+        cwd: root,
+        windowsHide: true,
+      });
       try {
         expect(await checkEvalCriteria(task, source, tree, scratch)).toEqual(
           task.criteria.map(() => expected),

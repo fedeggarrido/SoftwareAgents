@@ -10,5 +10,6 @@
       "file": "server/__tests__/telemetry.test.ts",
       "testName": "a saturated OTLP exporter keeps a slot for the root and counts what it skips"
     }
-  ]
+  ],
+  "allowedPaths": ["server/src/telemetry.ts"]
 }

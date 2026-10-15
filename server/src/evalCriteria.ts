@@ -1,16 +1,89 @@
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
 
-import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
+import {
+  EVAL_CRITERION_MAX_OUTPUT_BYTES,
+  EVAL_CRITERION_TIMEOUT_MS,
+  EXECUTOR_TERMINATION_TIMEOUT_MS,
+} from './constants.js';
 import { MANAGED_EXECUTION_ENV } from './evalGuard.js';
 import { evalGit, type EvalTask } from './evalTasks.js';
+import { processCancellation } from './executors/processCancellation.js';
 import { resolveInside } from './pathGuard.js';
 
-const execute = promisify(execFile);
+export class EvalCriterionTerminationError extends Error {}
 
-/** Restore pinned tests AFTER the model stops. Never trust a repository test config.
+/** Deliberately copy only launch essentials, never credentials, CI or Node injection flags. */
+function criterionEnvironment(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  const allowed =
+    process.platform === 'win32' ? ['PATH', 'SystemRoot', 'ComSpec', 'PATHEXT'] : ['PATH'];
+  for (const name of allowed) {
+    const key = Object.keys(process.env).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (key !== undefined) env[name] = process.env[key];
+  }
+  return {
+    ...env,
+    NODE_OPTIONS: '',
+    HOME: home,
+    USERPROFILE: home,
+    TMP: home,
+    TEMP: home,
+    APPDATA: home,
+    LOCALAPPDATA: home,
+    CODEX_HOME: path.join(home, '.codex'),
+    [MANAGED_EXECUTION_ENV]: 'eval-criteria',
+  };
+}
+
+/** Drain a bounded output stream and wait for close after killing the entire process tree. */
+async function runCriterion(args: string[], tree: string, home: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: tree,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: criterionEnvironment(home),
+    });
+    const cancellation = processCancellation(() => child);
+    let stopped = false;
+    let bytes = 0;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        cancellation.cancel();
+      } catch {
+        // The shared cancellation helper retries. No cleanup until close confirms termination.
+      }
+      grace = setTimeout(() => {
+        reject(new EvalCriterionTerminationError('Criterion termination unconfirmed'));
+      }, EXECUTOR_TERMINATION_TIMEOUT_MS);
+    };
+    const timer = setTimeout(stop, EVAL_CRITERION_TIMEOUT_MS);
+    const drain = (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > EVAL_CRITERION_MAX_OUTPUT_BYTES) stop();
+    };
+    child.stdout.on('data', drain);
+    child.stderr.on('data', drain);
+    child.once('error', () => {
+      // A failed spawn also emits close; only that event permits cleanup.
+      stopped = true;
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (grace) clearTimeout(grace);
+      cancellation.confirmClose();
+      resolve(!stopped && code === 0);
+    });
+  });
+}
+
+/** Restore pinned tests AFTER integrity validation and after the model stops.
  * Existing dependency trees are linked read-only by convention, never installed or cleaned. */
 export async function checkEvalCriteria(
   task: EvalTask,
@@ -20,36 +93,10 @@ export async function checkEvalCriteria(
 ): Promise<boolean[]> {
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
   const link = resolveInside(tree, 'node_modules');
-  if (fs.existsSync(link)) throw new Error('Evaluation created node_modules; refusing to reuse it');
+  if (fs.lstatSync(link, { throwIfNoEntry: false }))
+    throw new Error('Evaluation created node_modules; refusing to reuse it');
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
-  const home = resolveInside(scratch, 'home');
-  fs.mkdirSync(home, { recursive: true });
-  const setup = resolveInside(scratch, 'isolated-home.mjs');
-  fs.writeFileSync(
-    setup,
-    `import { vi } from 'vitest';
-vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
-`,
-  );
-  const config = resolveInside(scratch, 'vitest.config.mjs');
-  const report = resolveInside(scratch, 'criteria.json');
-  fs.writeFileSync(
-    config,
-    `export default ${JSON.stringify({
-      cacheDir: resolveInside(scratch, 'cache'),
-      test: {
-        include: ['__tests__/**/*.test.ts'],
-        setupFiles: [setup],
-        globals: true,
-        reporters: ['json'],
-        outputFile: report,
-        pool: 'threads',
-        maxWorkers: 1,
-        testTimeout: EVAL_CRITERION_TIMEOUT_MS / 2,
-      },
-    })};`,
-  );
-  // Restore every verifier before running any of them. An edited test cannot pass itself.
+  // Restore every verifier before running any of them.
   for (const criterion of task.criteria) {
     const target = resolveInside(tree, criterion.file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -57,10 +104,37 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
   }
   const results: boolean[] = [];
   for (const criterion of task.criteria) {
-    fs.rmSync(report, { force: true });
+    const temporary = fs.mkdtempSync(path.join(scratch, 'criterion-'));
+    const home = resolveInside(temporary, 'home');
+    fs.mkdirSync(home);
+    const setup = resolveInside(temporary, 'isolated-home.mjs');
+    fs.writeFileSync(
+      setup,
+      `import { vi } from 'vitest';
+vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
+`,
+    );
+    const config = resolveInside(temporary, 'vitest.config.mjs');
+    const report = resolveInside(temporary, 'criteria.json');
+    fs.writeFileSync(
+      config,
+      `export default ${JSON.stringify({
+        cacheDir: resolveInside(temporary, 'cache'),
+        test: {
+          include: ['__tests__/**/*.test.ts'],
+          setupFiles: [setup],
+          globals: true,
+          reporters: ['json'],
+          outputFile: report,
+          pool: 'threads',
+          maxWorkers: 1,
+          testTimeout: EVAL_CRITERION_TIMEOUT_MS / 2,
+        },
+      })};`,
+    );
+    let safeToCleanup = true;
     try {
-      await execute(
-        process.execPath,
+      const passed = await runCriterion(
         [
           path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
           'run',
@@ -75,28 +149,25 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
           '--testNamePattern',
           criterion.testName,
         ],
-        {
-          cwd: tree,
-          windowsHide: true,
-          timeout: EVAL_CRITERION_TIMEOUT_MS,
-          maxBuffer: 1024 * 1024,
-          env: {
-            ...process.env,
-            HOME: home,
-            USERPROFILE: home,
-            CODEX_HOME: path.join(home, '.codex'),
-            TEMP: scratch,
-            TMP: scratch,
-            [MANAGED_EXECUTION_ENV]: 'eval-criteria',
-          },
-        },
+        tree,
+        home,
       );
+      if (!passed || fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES) {
+        results.push(false);
+        continue;
+      }
       const result = JSON.parse(fs.readFileSync(report, 'utf8'));
       results.push(
         result.success === true && result.numPassedTests > 0 && result.numFailedTests === 0,
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof EvalCriterionTerminationError) {
+        safeToCleanup = false;
+        throw error;
+      }
       results.push(false);
+    } finally {
+      if (safeToCleanup) fs.rmSync(temporary, { recursive: true, force: true });
     }
   }
   return results;

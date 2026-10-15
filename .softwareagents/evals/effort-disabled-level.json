@@ -10,5 +10,6 @@
       "file": "server/__tests__/modelTiers.test.ts",
       "testName": "skips effort validation for Claude levels"
     }
-  ]
+  ],
+  "allowedPaths": ["server/src/modelTiers.ts"]
 }

@@ -24,8 +24,10 @@ de admisión. Los rechazos de uso/configuración también devuelven 1.
 
 `.softwareagents/evals/*.json` está versionado. El esquema estricto está en
 `core/schemas/eval-task.schema.json`: versión 1, `id`, `baseCommit`, `fixCommit`,
-`brief`, `timeoutMin` (1–10), y `criteria: [{file, testName}]`. Todos los campos
+`brief`, `timeoutMin` (1–10), `allowedPaths` y `criteria: [{file, testName}]`. Todos los campos
 son obligatorios; rechaza campos desconocidos también dentro de cada criterio.
+`allowedPaths` contiene rutas relativas exactas de ficheros, sin globs, duplicados,
+traversal, tests, configuración Vitest ni `package*.json`.
 No admite binarios, comandos de shell, modelos ni autoridad. `file` solo puede
 nombrar un test de `server/__tests__`; `testName` es la expresión regular de
 `vitest --testNamePattern`. La validación comprueba hashes completos, que la base
@@ -41,8 +43,11 @@ historia Git local, sin fetch implícito.
 | `telemetry-root-slot`         | SA-QA-19, slot OTLP reservado al raíz           | `telemetry.test.ts`: saturated OTLP exporter                                      |
 
 Son cambios de uno o pocos ficheros. El modelo recibe el brief, sin el patch ni
-los hashes del fix. Al terminar el Executor, se restauran los tests fijados desde
-`fixCommit`; modificar un test durante la Execution no altera el verificador.
+los hashes del fix. Al terminar el Executor, se comprueba la integridad contra la
+base antes de restaurar los tests fijados desde `fixCommit`. Cambiar HEAD, un fichero
+fuera de `allowedPaths`, tests/configuración o introducir enlaces falla el intento
+con `criteria_tampered`, sin ejecutar los criterios. Se incluyen cambios staged,
+no rastreados e ignorados.
 Se usa Vitest ya instalado, con configuración propia, un worker de threads,
 sin caché y con timeout de 60 s por criterio. Un filtro sin tests ejecutados falla.
 Las pruebas `evalBank.test.ts` comprueban rojo en la base y verde en el fix,
@@ -78,7 +83,7 @@ debe conservarla o establecer `SA_AUTOPILOT=1`. `--yes` no elude estas guardas.
 Son guardas contra invocaciones automáticas accidentales, no un sandbox frente
 a un proceso que quite deliberadamente sus variables de entorno.
 
-Los verificadores tienen HOME, USERPROFILE, CODEX_HOME, TEMP y TMP temporales;
+Los verificadores tienen HOME, USERPROFILE, CODEX_HOME, APPDATA, LOCALAPPDATA, TEMP y TMP temporales;
 un setup de Vitest redirige `os.homedir()` a HOME también en Windows. La Execution
 de modelo usa el perfil del operador como el worker habitual para autenticarse.
 Las pruebas con CLIs falsas aíslan todos los perfiles. Solo tras cerrar el modelo
@@ -90,6 +95,29 @@ retira junctions antes de pedir a Git que descarte el árbol. En POSIX se retira
 los enlaces antes del borrado de Git. Si no se confirma el cierre del Executor,
 se conservan worktree y locks para inspección del operador; no se borra un árbol
 con un modelo posiblemente vivo. Un fallo de limpieza se comunica como error.
+
+## Límites de seguridad
+
+Las evals miden agentes cooperativos: usar solo tareas propias y código de confianza.
+El verificador ejecuta código del agente con el usuario del operador, fuera del
+sandbox del Executor. No hay sandbox completo de SO: conserva acceso al filesystem,
+la red y los procesos que permita ese usuario, incluidos perfiles por rutas absolutas.
+
+Las mitigaciones acotadas de SA-QA-20 son la comprobación de integridad anterior,
+tests fijados y configuración Vitest propia, un proceso y temporal nuevos por
+criterio, y entorno por allowlist: solo PATH y, en Windows, SystemRoot, ComSpec y
+PATHEXT. NODE_OPTIONS se vacía; CI, tokens y el resto del entorno del padre no se
+heredan. Las rutas de perfil/caché apuntan al temporal, que se elimina después del
+cierre confirmado. Cada criterio tiene timeout de 60 s con terminación del árbol
+de procesos y un límite combinado de salida de 1 MiB; el informe JSON también se
+limita a 1 MiB. Si no se confirma el cierre se falla y se retienen árbol y temporales.
+
+Riesgo residual aceptado: el código dentro de un fichero permitido todavía puede
+manipular Vitest (por ejemplo con `expect.extend`), falsear resultados, acceder al
+host o iniciar procesos. La comprobación detecta el caso en un fichero no permitido,
+pero no analiza semánticamente el permitido ni confina sus efectos. Los enlaces a
+dependencias son de solo lectura por convención; no los protege el SO. Estas
+mitigaciones no hacen seguro ejecutar agentes adversariales ni repos externos.
 
 ## Resultados e informe
 

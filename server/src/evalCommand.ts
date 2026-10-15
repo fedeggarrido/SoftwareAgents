@@ -285,8 +285,10 @@ export async function runEvalCommand(
               },
             },
           );
-          if (result.evaluationSuccess === undefined) row.status = 'blocked';
-          else if (result.evaluationVerifierFailed) row.status = 'criterion_failed';
+          if (result.evaluationSuccess === undefined) {
+            row.status = 'blocked';
+            if (result.blockedCause) row.blockedCause = result.blockedCause;
+          } else if (result.evaluationVerifierFailed) row.status = 'criterion_failed';
           else if (result.evaluationSuccess && !interrupted) {
             try {
               assertEvalIntegrity(task, tree.path);
@@ -365,6 +367,10 @@ function formatReport(report: ReturnType<typeof buildEvalReport>): string {
       [
         `${c.cascadeConfigHash ? `cascade=${c.cascadeConfigHash.slice(0, 12)}` : `${c.executor}/${c.tier}/${c.model}`} spec=${c.agentSpecHash.slice(0, 12)}${c.baseline ? ' base' : ''}`,
         `success=${c.successes}/${c.attempts} rate=${c.successRate} blocked=${c.blocked}`,
+        ...c.blockedCauses.map(
+          (b) =>
+            `BLOCKED ${b.task}: ${b.tier ?? 'unknown'}/${b.executor ?? 'unknown'} ${b.code}: ${b.reason}`,
+        ),
         `cost/solved USD=${c.costPerSolvedTaskUsd} tokens(in/out/cache)=${c.totals.inputTokens}/${c.totals.outputTokens}/${c.totals.cacheReadTokens}`,
         `time=${c.durationMs}ms consistency=${c.consistency} pareto=${c.pareto}`,
         ...c.regressions.map((r) => `REGRESSION ${r.task}: ${r.baselineRate} -> ${r.rate}`),

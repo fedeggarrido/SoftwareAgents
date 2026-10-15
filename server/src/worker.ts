@@ -8,7 +8,7 @@ import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { ModelTier } from '../../core/src/modelTier.js';
 import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
-import { AuditLog, recordAudit } from './auditLog.js';
+import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
@@ -27,6 +27,7 @@ import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { WorktreeManager } from './executors/worktreeManager.js';
 import {
   excludeCandidate,
+  type ExecutionBlock,
   launchBlock,
   selectExecutor,
   type SelectionBlock,
@@ -190,6 +191,7 @@ export interface WorkerResult {
   policyDecision?: PolicyDecision;
   /** SA-090: waiting needs the Operator; the deduplicated Human Decision, if recorded. */
   availabilityBlock?: { code: SelectionBlock['code']; decisionId: string | null };
+  blockedCause?: ExecutionBlock;
   evaluationSuccess?: boolean;
   evaluationVerifierFailed?: boolean;
 }
@@ -210,13 +212,14 @@ export async function runWorker(
   const decision = evaluatePolicy('launch_execution', 'human', config.operator.autonomyLevel);
   let executionId = randomUUID();
   let tierSelection: TierSelection | undefined;
-  const audit = (status: string) =>
+  const audit = (status: string, details: Omit<AuditEntry['outcome'], 'status'> = {}) =>
     recordAudit(
       'launch_execution',
       'execution',
       executionId,
       {
         status,
+        ...details,
         ...(tierSelection
           ? {
               tier: tierSelection.tier,
@@ -260,6 +263,25 @@ export async function runWorker(
   let selection = modelPolicy
     ? selectExecutor(spec, modelPolicy, readSelectionSnapshot(config.operator))
     : undefined;
+  let admissionTier: ModelTier | null = null;
+  const blockedCause = (gate: QuotaDecision, found?: SelectionBlock): ExecutionBlock => {
+    const tier = tierSelection?.requestedTier ?? admissionTier;
+    const exclusions = found?.exclusions ?? tierSelection?.exclusions ?? [];
+    const candidates = tier ? tierPolicy?.tiers[tier]?.candidates : undefined;
+    return {
+      code: found?.code ?? gate.cause ?? 'admission_busy',
+      tier,
+      executor:
+        tierSelection?.choice?.executor ??
+        found?.exclusions.find((e) => e.code === found.code)?.executor ??
+        found?.exclusions[0]?.executor ??
+        (candidates?.length === 1 ? candidates[0].executor : undefined) ??
+        selection?.choice?.executor ??
+        null,
+      reason: gate.reason,
+      exclusions,
+    };
+  };
   /**
    * SA-090: waiting cannot fix this (disabled, no level, CLI missing/unsupported/
    * logged out). One deduplicated Human Decision per Project, scope and cause
@@ -272,6 +294,8 @@ export async function runWorker(
     open?: WorkStore,
   ) => {
     let decisionId: string | null = null;
+    const cause = blockedCause(gate, found);
+    audit('availability_blocked', { blockedCause: cause });
     if (options.evaluation) {
       return {
         branch: '',
@@ -279,6 +303,7 @@ export async function runWorker(
         stat: '',
         quotaDecision: gate,
         availabilityBlock: { code: found.code, decisionId },
+        blockedCause: cause,
       };
     }
     try {
@@ -305,7 +330,6 @@ export async function runWorker(
       log(`${found.code}: Human Decision not recorded: ${(error as Error).message}`);
     }
     log(gate.reason);
-    audit('availability_blocked');
     process.exitCode = 3;
     return {
       branch: '',
@@ -313,6 +337,7 @@ export async function runWorker(
       stat: '',
       quotaDecision: { ...gate, cause: 'disabled' } as QuotaDecision,
       availabilityBlock: { code: found.code, decisionId },
+      blockedCause: cause,
     };
   };
   if (selection && !selection.choice) {
@@ -366,7 +391,6 @@ export async function runWorker(
   let exitCode: number | undefined;
   const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
     if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
-    await telemetry.finish(result === 'pass' ? 'ok' : 'error');
     const outcome: CascadeAttempt = {
       attempt: attempt + 1,
       escalatedFrom,
@@ -375,9 +399,18 @@ export async function runWorker(
       model: tierSelection.choice.model,
       verifiers: results,
       result,
-      usage: cascadeUsage(telemetry.rootSpan, config.operator),
+      usage: cascadeUsage(telemetry.usageAttributes, config.operator),
     };
-    new ExecutionRegistry(tree.path).cascadeAttempt(executionId, args.task, outcome);
+    // A failed append must not be retried by the fallback in finally.
+    attemptRecorded = true;
+    try {
+      new ExecutionRegistry(tree.path).cascadeAttempt(executionId, args.task, outcome);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
+      log(`Cascade attempt persistence failed: ${code}`);
+      audit('cascade_attempt_persistence_error', { code, attempt: attempt + 1 });
+      throw error;
+    }
     recordAudit(
       'launch_execution',
       'execution',
@@ -392,7 +425,6 @@ export async function runWorker(
         policyDecision: decision,
       },
     );
-    attemptRecorded = true;
   };
   const cancel = () => {
     interrupted = true;
@@ -477,6 +509,11 @@ export async function runWorker(
       );
     for (;;) {
       const inputs: TierInputs = verifier ? { cascadeTier: levels[attempt] } : normalInputs;
+      tierSelection = undefined;
+      admissionTier =
+        tierPolicy && tierRule
+          ? initialModelTier(spec, tierRule, tierPolicy, inputs).requested
+          : null;
       let selectedExecutor = selection?.choice?.executor ?? 'claude';
       let availability: SelectionSnapshot['availability'];
       // Both locks are held during the fresh gate decision and exclusive slot creation.
@@ -619,9 +656,16 @@ export async function runWorker(
       if (block && !slot) return await escalate(block, admissionGate, scope, workStore);
       if (admissionGate.status === 'wait' || !slot) {
         log(admissionGate.reason);
-        audit('quota_wait');
+        const cause = blockedCause(admissionGate);
+        audit('quota_wait', { blockedCause: cause });
         process.exitCode = 3;
-        return { branch: '', commit: null, stat: '', quotaDecision: admissionGate };
+        return {
+          branch: '',
+          commit: null,
+          stat: '',
+          quotaDecision: admissionGate,
+          blockedCause: cause,
+        };
       }
       // Admitted: any availability block for this scope no longer holds (SA-090).
       try {
@@ -859,6 +903,7 @@ export async function runWorker(
         if (!passed) {
           // Only deterministic verifier failures permit another admitted attempt.
           if (!interrupted && exitCode === 0 && attempt + 1 < levels.length) {
+            await telemetry.finish('error');
             options.evaluation?.settled(telemetry.rootSpan, true);
             slot.release();
             slot = undefined;
@@ -967,21 +1012,35 @@ export async function runWorker(
     audit(interrupted ? 'interrupted' : 'failed');
     throw error;
   } finally {
-    await telemetry?.finish(telemetryStatus);
-    await recordAttempt([], 'executor_error');
-    workStore?.close();
-    process.removeListener('SIGINT', cancel);
-    process.removeListener('SIGTERM', cancel);
-    if (verifierClosed && (!handle || !eventsStarted || executionFinished)) {
+    try {
       try {
-        slot?.release();
+        await recordAttempt([], 'executor_error');
+      } catch (error) {
+        telemetryStatus = 'error';
+        throw error;
       } finally {
-        release();
+        await telemetry?.finish(telemetryStatus);
       }
-    } else log('Task lock and executor slot retained: executor termination was not confirmed.');
-    options.evaluation?.settled(
-      telemetry?.rootSpan,
-      verifierClosed && (!handle || !eventsStarted || executionFinished),
-    );
+    } finally {
+      try {
+        workStore?.close();
+      } finally {
+        process.removeListener('SIGINT', cancel);
+        process.removeListener('SIGTERM', cancel);
+        const confirmed = verifierClosed && (!handle || !eventsStarted || executionFinished);
+        try {
+          if (confirmed) {
+            try {
+              slot?.release();
+            } finally {
+              release();
+            }
+          } else
+            log('Task lock and executor slot retained: executor termination was not confirmed.');
+        } finally {
+          options.evaluation?.settled(telemetry?.rootSpan, confirmed);
+        }
+      }
+    }
   }
 }

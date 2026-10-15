@@ -3,7 +3,12 @@ import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import type { ModelTier } from '../../core/src/modelTier.js';
 import type { ExecutorObservation } from './executorProbes.js';
 import type { ExecutorId } from './executors/executor.js';
-import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
+import {
+  type MachineQuotaPolicy,
+  type QuotaCause,
+  type QuotaDecision,
+  quotaGate,
+} from './quotaGate.js';
 
 export type LaunchBlockCode =
   'not_installed' | 'unsupported_version' | 'auth_required' | 'probe_unknown' | 'probe_stale';
@@ -90,6 +95,15 @@ export interface SelectionBlock {
     | 'not_installed'
     | 'unsupported_version'
     | 'auth_required';
+  exclusions: CandidateExclusion[];
+}
+
+/** Content-free explanation of a worker admission refusal, also retained by evals. */
+export interface ExecutionBlock {
+  code: SelectionBlock['code'] | QuotaCause | 'admission_busy';
+  tier: ModelTier | null;
+  executor: ExecutorId | null;
+  reason: string;
   exclusions: CandidateExclusion[];
 }
 

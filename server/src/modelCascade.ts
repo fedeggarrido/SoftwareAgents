@@ -12,12 +12,7 @@ import { assertEvalIntegrity } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
-import type { TelemetrySpan } from './telemetry.js';
-import {
-  addTelemetryTotals,
-  emptyTelemetryTotals,
-  telemetryAttributes,
-} from './telemetryCommand.js';
+import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
 
 export interface CascadeAttempt {
   attempt: number;
@@ -58,11 +53,11 @@ export function cascadeLevels(
 }
 
 export function cascadeUsage(
-  span: TelemetrySpan | undefined,
+  attributes: Parameters<typeof addTelemetryTotals>[1],
   operator: ProjectOperatorConfig,
 ): CascadeAttempt['usage'] {
   const totals = emptyTelemetryTotals();
-  addTelemetryTotals(totals, span ? telemetryAttributes(span) : {}, operator.telemetry?.prices);
+  addTelemetryTotals(totals, attributes, operator.telemetry?.prices);
   return {
     input: totals.inputTokens,
     output: totals.outputTokens,

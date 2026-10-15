@@ -3,6 +3,7 @@ import { createInterface } from 'readline';
 
 import type { ModelTier } from '../../core/src/modelTier.js';
 import type { TelemetryConfig } from '../../core/src/project.js';
+import type { ExecutionBlock } from './executorSelection.js';
 import { resolveInside } from './pathGuard.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
@@ -40,6 +41,7 @@ export interface EvalRecord {
   criteria: boolean[];
   durationMs: number;
   metrics: Record<string, string | number>;
+  blockedCause?: ExecutionBlock;
   /** Snapshot ONLY from Operator telemetry.prices, making historical reports reproducible. */
   price?: Price;
   cascade?: {
@@ -90,6 +92,54 @@ const recordSchema = {
     },
     criteria: { type: 'array', maxItems: 5, items: { type: 'boolean' } },
     durationMs: count,
+    blockedCause: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['code', 'tier', 'executor', 'reason', 'exclusions'],
+      properties: {
+        code: {
+          enum: [
+            'no_enabled_executor',
+            'no_allowed_level',
+            'not_installed',
+            'unsupported_version',
+            'auth_required',
+            'quota',
+            'concurrency',
+            'configuration',
+            'capacity',
+            'disabled',
+            'selection',
+            'availability',
+            'admission_busy',
+          ],
+        },
+        tier: { enum: ['economy', 'standard', 'deep', null] },
+        executor: { enum: ['claude', 'codex', null] },
+        reason: { type: 'string' },
+        exclusions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['executor', 'code'],
+            properties: {
+              executor: { enum: ['claude', 'codex'] },
+              tier: { enum: ['economy', 'standard', 'deep'] },
+              code: {
+                enum: [
+                  'operator_disabled',
+                  'level_disabled',
+                  'not_installed',
+                  'unsupported_version',
+                  'auth_required',
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
     metrics: {
       type: 'object',
       additionalProperties: false,
@@ -230,6 +280,12 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
         baseline: first.baseline,
         attempts: attempted.length,
         blocked: rows.length - attempted.length,
+        blockedCauses: rows
+          .filter((r) => r.blockedCause)
+          .map((r) => ({
+            task: r.task,
+            ...r.blockedCause!,
+          })),
         successes,
         successRate: attempted.length ? successes / attempted.length : ('unknown' as const),
         costPerSolvedTaskUsd:

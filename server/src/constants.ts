@@ -3,6 +3,8 @@ export const JSONL_POLL_INTERVAL_MS = 1000;
 /** Bounded inter-process audit lock contention, including Windows pending unlink. */
 export const AUDIT_LOCK_TIMEOUT_MS = 5_000;
 export const AUDIT_LOCK_POLL_MS = 10;
+/** Bounded contention for the execution ledger; never steal another writer's lock. */
+export const EXECUTION_REGISTRY_LOCK_TIMEOUT_MS = 1_000;
 export const FILE_WATCHER_POLL_INTERVAL_MS = 500;
 export const PROJECT_SCAN_INTERVAL_MS = 1000;
 

@@ -147,6 +147,104 @@ describe('Operator verifier cascade SA-103', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
   }
+  function rootSpans() {
+    return fs
+      .readFileSync(path.join(repo, '.git/softwareagents/telemetry/test/spans.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line).resourceSpans[0].scopeSpans[0].spans[0])
+      .filter((s) => s.name === 'invoke_agent');
+  }
+  it.each(['verifier_result', 'finally_fallback'])(
+    'releases slots, task lock and listeners when the attempt registry is locked (%s)',
+    async (mode) => {
+      save(configure());
+      const lock = path.join(repo, '.git/softwareagents/cascade-attempts.jsonl.lock');
+      fs.mkdirSync(path.dirname(lock), { recursive: true });
+      fs.writeFileSync(lock, 'another writer');
+      const listeners = ['SIGINT', 'SIGTERM'].map((s) => process.listeners(s));
+      const log = vi.fn();
+      await expect(
+        runWorker(
+          { task: 'SA-999', brief: 'brief.md' },
+          {
+            cwd: repo,
+            binaryArgs: [
+              fixture,
+              'claude',
+              '--solve-at=economy',
+              ...(mode === 'finally_fallback' ? ['--write-protected'] : []),
+            ],
+            log,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'EEXIST' });
+      expect(readExecutorSlots('claude').count).toBe(0);
+      expect(() => acquireTaskLock(path.join(repo, '.git'), 'SA-999')()).not.toThrow();
+      expect(['SIGINT', 'SIGTERM'].map((s) => process.listeners(s))).toEqual(listeners);
+      expect(fs.readFileSync(lock, 'utf8')).toBe('another writer');
+      expect(log).toHaveBeenCalledWith('Cascade attempt persistence failed: EEXIST');
+      expect(
+        new AuditLog()
+          .read('test')
+          .some(
+            (r) =>
+              !r.corrupt &&
+              r.entry.outcome.status === 'cascade_attempt_persistence_error' &&
+              r.entry.outcome.code === 'EEXIST',
+          ),
+      ).toBe(true);
+      expect(rootSpans().map((s) => s.status.code)).toEqual([2]);
+    },
+  );
+  it('retries transient contention on the attempt registry', async () => {
+    save(configure());
+    const open = fs.openSync;
+    let collisions = 0;
+    vi.spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      if (String(args[0]).endsWith('cascade-attempts.jsonl.lock') && collisions++ < 2)
+        throw Object.assign(new Error('busy'), { code: 'EEXIST' });
+      return open(...args);
+    });
+    await run();
+    expect(collisions).toBe(3);
+    expect(attempts().map((r) => r.result)).toEqual(['pass']);
+  });
+  it.each(['require_human', 'commit_error'])(
+    'closes a verified attempt with its final %s outcome',
+    async (mode) => {
+      const raw = configure();
+      if (mode === 'require_human') raw.projects.test.protectedPaths = ['worker-result.md'];
+      save(raw);
+      if (mode === 'commit_error') {
+        const actual = await vi.importActual<typeof import('child_process')>('child_process');
+        vi.mocked(execFileSync).mockImplementation((...args: Parameters<typeof execFileSync>) => {
+          if (args[0] === 'git' && (args[1] as string[]).includes('commit'))
+            throw new Error('synthetic commit failure');
+          return actual.execFileSync(...args);
+        });
+      }
+      const pending = runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        {
+          cwd: repo,
+          binaryArgs: [fixture, 'claude', '--solve-at=economy'],
+          log: () => {},
+        },
+      );
+      if (mode === 'commit_error')
+        await expect(pending).rejects.toThrow('Runtime Git commit failed');
+      else expect((await pending).policyDecision?.outcome).toBe('require_human');
+      expect(attempts().map((r) => r.result)).toEqual(['pass']);
+      const spans = rootSpans();
+      expect(spans).toHaveLength(1);
+      expect(spans[0].status.code).toBe(2);
+      expect(telemetryAttributes(spans[0])['softwareagents.execution.status']).toBe(
+        mode === 'require_human' ? mode : 'error',
+      );
+      expect(telemetryAttributes(spans[0])['gen_ai.usage.input_tokens']).toBe(33);
+    },
+  );
   it.each(['economy', 'standard', 'deep'])(
     'solves at %s with isolated attempts, audit, registry and spans',
     async (solve) => {

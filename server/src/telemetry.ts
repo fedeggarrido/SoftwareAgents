@@ -152,6 +152,10 @@ export class ExecutionTelemetry {
   get rootSpan(): TelemetrySpan | undefined {
     return this.completedRoot;
   }
+  /** Usage snapshot without ending the execution before commit guards settle. */
+  get usageAttributes(): Readonly<Attributes> {
+    return { ...this.attrs };
+  }
   constructor(
     private sink: TelemetrySink,
     input: {
@@ -286,7 +290,7 @@ export class ExecutionTelemetry {
       'invoke_agent',
       this.start,
       time,
-      status === 'error' ? 2 : 1,
+      status === 'ok' ? 1 : 2,
       {
         ...this.attrs,
         ...this.phases,

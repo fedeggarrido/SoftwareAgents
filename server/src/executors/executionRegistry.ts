@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { ModelTier } from '../../../core/src/modelTier.js';
+import { EXECUTION_REGISTRY_LOCK_TIMEOUT_MS } from '../constants.js';
+import { contentionNow, contentionPause, isFileContention } from '../fileContention.js';
 import type { CascadeAttempt } from '../modelCascade.js';
 import { resolveInside } from '../pathGuard.js';
 import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './executor.js';
@@ -49,7 +51,21 @@ export class ExecutionRegistry {
     const destination = resolveInside(this.root, relative);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const lock = resolveInside(this.root, `${relative}.lock`);
-    const lockFd = fs.openSync(lock, 'wx', 0o600);
+    const deadline = contentionNow() + EXECUTION_REGISTRY_LOCK_TIMEOUT_MS;
+    let lockFd: number;
+    for (;;) {
+      try {
+        lockFd = fs.openSync(lock, 'wx', 0o600);
+        break;
+      } catch (error) {
+        if (
+          ((error as NodeJS.ErrnoException).code !== 'EEXIST' && !isFileContention(error)) ||
+          contentionNow() >= deadline
+        )
+          throw error;
+        contentionPause();
+      }
+    }
     try {
       const fd = fs.openSync(resolveInside(this.root, relative), 'a', 0o600);
       try {

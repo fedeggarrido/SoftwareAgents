@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
+import { AuditLog } from '../src/auditLog.js';
 import { parseEvalArgs, runEvalCommand } from '../src/evalCommand.js';
 import { checkEvalCriteria } from '../src/evalCriteria.js';
 import { assertEvalRunAllowed } from '../src/evalGuard.js';
@@ -159,6 +160,70 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 const readRecords = () => readEvalRecords(evalResultsDirectory(path.join(repo, '.git'), 'test'));
+
+it('audits and retains the cause when standard requires auth after economy fails', async () => {
+  const raw = JSON.parse(initialConfig);
+  const policy = raw.projects.test.modelTiers;
+  policy.tiers.economy.candidates = [{ executor: 'claude', model: 'test-economy' }];
+  policy.tiers.standard.candidates = [{ executor: 'codex', model: 'test-standard' }];
+  policy.cascade = {
+    enabled: true,
+    startTier: 'economy',
+    maxEscalations: 1,
+    verifiers: {
+      answer: {
+        allowedPaths: ['answer.txt'],
+        commands: [
+          {
+            argv: [process.execPath, '-e', 'process.exitCode = 1'],
+            timeoutMs: 5000,
+          },
+        ],
+      },
+    },
+  };
+  fs.writeFileSync(configFile, JSON.stringify(raw));
+  vi.stubEnv('SA_EVAL_FAKE_MODE', 'cascade');
+  const log = vi.fn();
+  await runEvalCommand(
+    ['run', '--task', 'answer', '--cascade', '--repeat', '1', '--yes', '--json'],
+    {
+      cwd: repo,
+      log,
+      worker: {
+        binaryArgs: [fake, 'claude'],
+        probe: (file, args) =>
+          args[0] === 'login' && args[1] === 'status'
+            ? Promise.resolve({ code: 1, output: 'Not logged in' })
+            : ready(file, args),
+      },
+    },
+  );
+  const cause = {
+    code: 'auth_required',
+    tier: 'standard',
+    executor: 'codex',
+    reason: expect.stringContaining('auth_required'),
+    exclusions: [{ executor: 'codex', tier: 'standard', code: 'auth_required' }],
+  };
+  const result = JSON.parse(log.mock.calls[0][0]);
+  expect(result.results[0]).toMatchObject({ status: 'blocked', blockedCause: cause });
+  expect(result.results[0].cascade.attempts).toHaveLength(1);
+  expect((await readRecords()).records[0].blockedCause).toEqual(cause);
+  expect(result.configurations[0].blockedCauses).toEqual([{ task: 'answer', ...cause }]);
+  const audit = new AuditLog()
+    .read('test')
+    .filter((r) => !r.corrupt && r.entry.outcome.status === 'availability_blocked');
+  expect(audit).toHaveLength(1);
+  expect(audit[0]).toMatchObject({ entry: { outcome: { blockedCause: cause } } });
+  const report = vi.fn();
+  await runEvalCommand(['report'], { cwd: repo, log: report });
+  expect(report.mock.calls[0][0]).toContain('standard/codex auth_required');
+  expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+  expect(readExecutorSlots('claude').count).toBe(0);
+  expect(readExecutorSlots('codex').count).toBe(0);
+  expect(process.exitCode).toBe(3);
+});
 
 it('evaluates cascades as one configuration and sums all attempts at captured prices', async () => {
   const raw = JSON.parse(initialConfig);

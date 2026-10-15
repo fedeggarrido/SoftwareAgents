@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { AUDIT_LOCK_POLL_MS, AUDIT_LOCK_TIMEOUT_MS } from './constants.js';
+import type { ExecutionBlock } from './executorSelection.js';
 import type { CascadeAttempt } from './modelCascade.js';
 import type { PolicyDecision } from './policy.js';
 
@@ -30,6 +31,9 @@ export interface AuditEntry {
     effort?: string | null;
     reason?: string;
     cascade?: CascadeAttempt;
+    blockedCause?: ExecutionBlock;
+    code?: string;
+    attempt?: number;
   };
   taskKey: string | null;
   executionId: string | null;

@@ -19,6 +19,16 @@ import {
 import { telemetrySummary } from '../src/telemetryCommand.js';
 import { CliTelemetryProjection } from '../src/telemetryObservations.js';
 
+const readHook = vi.hoisted(() => ({ redirect: undefined as string | undefined }));
+vi.mock('fs', async (original) => {
+  const actual = await original<typeof import('fs')>();
+  const createReadStream = ((file: import('fs').PathLike, opts?: object) =>
+    actual.createReadStream(
+      readHook.redirect && String(file).endsWith('spans.jsonl') ? readHook.redirect : file,
+      opts as never,
+    )) as typeof actual.createReadStream;
+  return { ...actual, default: { ...actual, createReadStream }, createReadStream };
+});
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };
@@ -35,6 +45,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(root, 'worktree'));
 });
 afterEach(() => {
+  readHook.redirect = undefined;
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   fs.rmSync(root, { recursive: true, force: true });
@@ -380,4 +391,44 @@ it('unsupported usage never becomes fabricated zero tokens or zero cost', async 
   });
   expect(summary.total.inputTokens).toBe('unknown');
   expect(summary.total.costUsd).toBe('unknown');
+});
+
+it('a saturated OTLP exporter keeps a slot for the root and counts what it skips', async () => {
+  await trace('claude').finish('ok');
+  const root0 = spans()[0];
+  fs.rmSync(telemetryDirectory(root, 'test'), { recursive: true, force: true });
+  const send = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {}));
+  const sink = new TelemetrySink(root, 'test', {
+    otlp: { enabled: true, endpoint: 'https://collector.invalid/v1/traces' },
+  });
+  for (let i = 0; i < 5; i++)
+    sink.write({ ...root0, parentSpanId: root0.spanId, name: 'execute_tool' });
+  sink.write(root0);
+  const sent = send.mock.calls.map(
+    (call) => JSON.parse(String(call[1]?.body)).resourceSpans[0].scopeSpans[0].spans[0].name,
+  );
+  expect(sent).toEqual(['execute_tool', 'execute_tool', 'execute_tool', 'invoke_agent']);
+  expect(sink.exportDropped).toBe(2);
+  expect(spans()).toHaveLength(6);
+});
+
+it('summary survives a rotation that removes a file between the check and the read', async () => {
+  await trace('claude').finish('ok');
+  readHook.redirect = path.join(root, 'missing.jsonl');
+  fs.writeFileSync(path.join(telemetryDirectory(root, 'test'), 'spans.1.jsonl'), '');
+  const summary = await telemetrySummary(root, 'test');
+  readHook.redirect = undefined;
+  expect(summary.total.executions).toBe(0);
+});
+
+it('Claude usage replacements still apply after the message limit is reached', () => {
+  const p = new CliTelemetryProjection();
+  const msg = (id: string, input: number) => ({
+    type: 'assistant',
+    message: { id, model: 'claude-test', usage: { input_tokens: input, output_tokens: 0 } },
+  });
+  for (let i = 0; i < 2048; i++) p.claude(msg(`m${i}`, 1));
+  const usage = p.claude(msg('m0', 100)).find((o) => o.kind === 'usage');
+  expect(usage).toMatchObject({ input: 2147 });
+  expect(p.claude(msg('new', 1)).find((o) => o.kind === 'usage')).toBeUndefined();
 });

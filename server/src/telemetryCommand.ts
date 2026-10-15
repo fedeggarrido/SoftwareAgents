@@ -116,7 +116,15 @@ export async function telemetrySummary(
     const file = resolveInside(dir, name);
     if (!fs.existsSync(file)) continue;
     const input = fs.createReadStream(file, { end: TELEMETRY_FILE_BYTES - 1 });
-    for await (const line of createInterface({ input })) {
+    // A concurrent rotation may remove the file between the check and the read: partial view.
+    const lines = (async function* () {
+      try {
+        yield* createInterface({ input });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    })();
+    for await (const line of lines) {
       try {
         const record = JSON.parse(line);
         const span = record.resourceSpans[0].scopeSpans[0].spans[0] as TelemetrySpan;

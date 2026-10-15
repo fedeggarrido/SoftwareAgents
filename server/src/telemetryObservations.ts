@@ -74,7 +74,7 @@ export class CliTelemetryProjection {
       if (
         hasUsage(message.usage) &&
         typeof message.id === 'string' &&
-        this.messages.size < TELEMETRY_MESSAGE_LIMIT
+        (this.messages.has(message.id) || this.messages.size < TELEMETRY_MESSAGE_LIMIT)
       ) {
         // A streamed message may be repeated with more blocks: replace, never sum duplicates.
         this.messages.set(message.id, this.claudeUsage(message.usage));

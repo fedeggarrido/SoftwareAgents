@@ -49,6 +49,8 @@ export function telemetryDirectory(common: string, project: string): string {
  * Telemetry is best effort; neither disk nor network failures change an Execution. */
 export class TelemetrySink {
   dropped = 0;
+  /** Spans the optional OTLP exporter skipped because it was saturated. */
+  exportDropped = 0;
   private pending = new Set<Promise<void>>();
   constructor(
     private common: string,
@@ -95,7 +97,15 @@ export class TelemetrySink {
       this.dropped++;
     }
     const exporter = this.config?.otlp;
-    if (!exporter?.enabled || this.pending.size >= TELEMETRY_EXPORT_CONCURRENCY) return;
+    if (!exporter?.enabled) return;
+    // One slot stays reserved for the root, so a saturated exporter never ships orphan children.
+    const limit = span.parentSpanId
+      ? TELEMETRY_EXPORT_CONCURRENCY - 1
+      : TELEMETRY_EXPORT_CONCURRENCY;
+    if (this.pending.size >= limit) {
+      this.exportDropped++;
+      return;
+    }
     // No env-based OTEL config, retries, redirects, response logging or unbounded queue.
     const send = (async () => {
       try {

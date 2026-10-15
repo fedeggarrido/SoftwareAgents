@@ -42,6 +42,10 @@ export interface EvalRecord {
   metrics: Record<string, string | number>;
   /** Snapshot ONLY from Operator telemetry.prices, making historical reports reproducible. */
   price?: Price;
+  cascade?: {
+    configHash: string;
+    attempts: { metrics: EvalRecord['metrics']; price?: Price }[];
+  };
 }
 const count = { type: 'integer', minimum: 0 };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
@@ -114,7 +118,19 @@ const recordSchema = {
         ]),
       ),
     },
+    cascade: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['configHash', 'attempts'],
+      properties: { configHash: hash, attempts: { type: 'array', maxItems: 3, items: {} } },
+    },
   },
+};
+recordSchema.properties.cascade.properties.attempts.items = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['metrics'],
+  properties: { metrics: recordSchema.properties.metrics, price: recordSchema.properties.price },
 };
 const validate = compileSchema<EvalRecord>(recordSchema);
 export const parseEvalRecord = (raw: unknown) => validateSchema(validate, raw);
@@ -158,10 +174,11 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
   for (const r of records) {
     const key = JSON.stringify([
       r.bankHash,
-      r.executor,
-      r.tier,
-      r.metrics['gen_ai.request.model'] ?? 'unknown',
-      r.metrics['softwareagents.model.effort'] ?? 'unknown',
+      r.cascade?.configHash ?? 'fixed',
+      r.cascade ? 'cascade' : r.executor,
+      r.cascade ? 'cascade' : r.tier,
+      r.cascade ? 'cascade' : (r.metrics['gen_ai.request.model'] ?? 'unknown'),
+      r.cascade ? 'cascade' : (r.metrics['softwareagents.model.effort'] ?? 'unknown'),
       r.agentSpecHash,
       r.baseline,
     ]);
@@ -176,10 +193,13 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
       const attempted = rows.filter((r) => r.status !== 'blocked');
       const successes = attempted.filter((r) => r.status === 'success').length;
       const totals = emptyTelemetryTotals();
-      for (const r of attempted) {
-        const model = r.metrics['gen_ai.response.model'];
-        const prices = typeof model === 'string' && r.price ? { [model]: r.price } : undefined;
-        addTelemetryTotals(totals, r.metrics, prices);
+      for (const r of rows) {
+        // Include every launched cascade attempt, even if admission blocked a later tier.
+        for (const a of r.cascade?.attempts ?? (r.status === 'blocked' ? [] : [r])) {
+          const model = a.metrics['gen_ai.response.model'];
+          const prices = typeof model === 'string' && a.price ? { [model]: a.price } : undefined;
+          addTelemetryTotals(totals, a.metrics, prices);
+        }
       }
       const byTask = [...new Set(attempted.map((r) => r.taskHash))].sort().map((hash) => {
         const taskRows = attempted.filter((r) => r.taskHash === hash);
@@ -199,10 +219,13 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
       return {
         id,
         bankHash: first.bankHash,
-        executor: first.executor,
-        tier: first.tier,
-        model: first.metrics['gen_ai.request.model'] ?? 'unknown',
-        effort: first.metrics['softwareagents.model.effort'] ?? 'unknown',
+        executor: first.cascade ? 'cascade' : first.executor,
+        tier: first.cascade ? 'cascade' : first.tier,
+        cascadeConfigHash: first.cascade?.configHash,
+        model: first.cascade ? 'cascade' : (first.metrics['gen_ai.request.model'] ?? 'unknown'),
+        effort: first.cascade
+          ? 'cascade'
+          : (first.metrics['softwareagents.model.effort'] ?? 'unknown'),
         agentSpecHash: first.agentSpecHash,
         baseline: first.baseline,
         attempts: attempted.length,
@@ -214,7 +237,7 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
             ? totals.costUsd / successes
             : ('unknown' as const),
         totals,
-        durationMs: attempted.reduce((sum, r) => sum + r.durationMs, 0),
+        durationMs: rows.reduce((sum, r) => sum + r.durationMs, 0),
         consistency: repeated.length
           ? repeated.filter((t) => t.consistent === true).length / repeated.length
           : ('unknown' as const),
@@ -251,6 +274,7 @@ export function buildEvalReport(records: readonly EvalRecord[]) {
           b.bankHash === c.bankHash &&
           b.executor === c.executor &&
           b.tier === c.tier &&
+          b.cascadeConfigHash === c.cascadeConfigHash &&
           b.model === c.model &&
           b.effort === c.effort,
       )) {

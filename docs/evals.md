@@ -8,6 +8,7 @@ pixel-agents eval validate --json
 pixel-agents eval report --json
 pixel-agents eval run --task telemetry-usage-replacement --executor codex --tier economy --repeat 1 --yes --json
 pixel-agents eval run --task all --executor claude --tier standard --repeat 2
+pixel-agents eval run --task telemetry-usage-replacement --cascade --repeat 1 --yes --json
 pixel-agents eval run --task telemetry-usage-replacement --executor codex --tier economy --repeat 1 --agent-spec ./developer-experiment.yaml --yes
 ```
 
@@ -16,6 +17,17 @@ Solo `run` consume cuota. Exige `--task`, `--executor`, `--tier` y `--repeat`
 máximo de Executions: tareas seleccionadas × repeticiones. En un pipe se niega
 sin `--yes`. Una cancelación no crea worktrees ni lanza sondas. `list`, `validate`
 y `report` nunca lanzan CLI, sondas ni worker; también se pueden usar en CI.
+
+SA-103: `--cascade` sustituye `--executor/--tier` y exige cascada habilitada y
+verificadores del Operator vinculados a cada ID del banco. La confirmación cuenta
+el máximo de intentos adicionales. Se reutiliza el worker con sus admisiones por
+intento; después del éxito se ejecutan también los criterios históricos fijados
+del banco. Una configuración de cascada se identifica por hash (catálogo,
+bindings, executors y niveles permitidos). Sus filas guardan métricas y precios
+por intento sin contenido; el informe suma todos sus costes, incluidos los
+intentos anteriores a un bloqueo posterior, para comparar coste por resuelta
+con los niveles fijos. Sin `--cascade`, el run sigue siendo exacto aunque el
+Operator tenga una cascada habilitada. Véase [configuración y reinicio](executor-selection.md#cascada-con-verificador-sa-103-opt-in).
 
 `run` devuelve exit 0 si pasan todos los intentos, 1 ante fallo y 3 ante bloqueo
 de admisión. Los rechazos de uso/configuración también devuelven 1.

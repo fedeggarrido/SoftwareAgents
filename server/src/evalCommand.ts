@@ -37,6 +37,7 @@ export interface EvalArgs {
   tier?: ModelTier;
   repeat?: number;
   agentSpec?: string;
+  cascade?: boolean;
 }
 export function parseEvalArgs(argv: string[]): EvalArgs {
   const [command] = argv;
@@ -50,6 +51,7 @@ export function parseEvalArgs(argv: string[]): EvalArgs {
     if (seen.has(flag)) throw new CliUsageError('Duplicate eval option');
     seen.add(flag);
     if (flag === '--json') result.json = true;
+    else if (flag === '--cascade' && command === 'run') result.cascade = true;
     else if (flag === '--yes' && command === 'run') result.yes = true;
     else if (
       command === 'run' &&
@@ -63,13 +65,15 @@ export function parseEvalArgs(argv: string[]): EvalArgs {
   if (command === 'run') {
     if (
       !/^(all|[a-z][a-z0-9-]{0,63})$/.test(values['--task'] ?? '') ||
-      !['claude', 'codex'].includes(values['--executor']) ||
-      !MODEL_TIERS.includes(values['--tier'] as ModelTier) ||
+      (result.cascade
+        ? !!(values['--executor'] || values['--tier'])
+        : !['claude', 'codex'].includes(values['--executor']) ||
+          !MODEL_TIERS.includes(values['--tier'] as ModelTier)) ||
       !/^[1-9]\d*$/.test(values['--repeat'] ?? '') ||
       Number(values['--repeat']) > EVAL_MAX_REPETITIONS
     )
       throw new CliUsageError(
-        `eval run requires --task <id|all> --executor claude|codex --tier economy|standard|deep --repeat 1..${EVAL_MAX_REPETITIONS}`,
+        `eval run requires --task <id|all> (--cascade OR --executor claude|codex --tier economy|standard|deep) --repeat 1..${EVAL_MAX_REPETITIONS}`,
       );
     Object.assign(result, {
       task: values['--task'],
@@ -144,22 +148,36 @@ export async function runEvalCommand(
   const bank = loadEvalTasks(cwd);
   const tasks = args.task === 'all' ? bank : bank.filter((t) => t.id === args.task);
   if (!tasks.length) throw new CliUsageError(`Unknown eval task: ${args.task}`);
-  const executor = args.executor!;
-  const tier = args.tier!;
   const policy = config.operator.modelTiers;
   if (
-    !config.operator.allowedExecutors.includes(executor) ||
-    !policy ||
-    MODEL_TIERS.indexOf(tier) > MODEL_TIERS.indexOf(policy.maxTier) ||
-    !policy.tiers[tier]?.candidates.some((c) => c.executor === executor) ||
-    !(config.operator.executorLevels?.[executor]?.includes(tier) ?? true)
+    args.cascade &&
+    (!policy?.cascade?.enabled ||
+      tasks.some((t) => !Object.hasOwn(policy.cascade!.verifiers, t.id)))
+  )
+    throw new CliUsageError(
+      'Cascade eval requires enabled Operator verifiers for every selected task',
+    );
+  const tier = args.cascade ? policy!.cascade!.startTier : args.tier!;
+  const executor = args.cascade ? policy!.tiers[tier]!.candidates[0].executor : args.executor!;
+  if (
+    !args.cascade &&
+    (!config.operator.allowedExecutors.includes(executor) ||
+      !policy ||
+      MODEL_TIERS.indexOf(tier) > MODEL_TIERS.indexOf(policy.maxTier) ||
+      !policy.tiers[tier]?.candidates.some((c) => c.executor === executor) ||
+      !(config.operator.executorLevels?.[executor]?.includes(tier) ?? true))
   )
     throw new CliUsageError('Requested eval executor/tier is not allowed by Operator config');
   const spec = loadWorkerAgentSpec(args.agentSpec ? path.resolve(cwd, args.agentSpec) : undefined);
   // Validate the Developer role/profile before confirmation or worktree creation.
   compileAgent(spec, 'developer', { task: {} });
   const count = tasks.length * args.repeat!;
-  if (!args.yes && !(await (options.confirm ?? confirmRun)(count)))
+  if (
+    !args.yes &&
+    !(await (options.confirm ?? confirmRun)(
+      count * (args.cascade ? policy!.cascade!.maxEscalations + 1 : 1),
+    ))
+  )
     throw new CliUsageError('Evaluation cancelled; no executions launched');
   assertEvalRunAllowed();
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -201,7 +219,20 @@ export async function runEvalCommand(
           criteria: [],
           durationMs: 0,
           metrics: {},
+          ...(args.cascade
+            ? {
+                cascade: {
+                  configHash: hash({
+                    modelTiers: policy,
+                    allowedExecutors: config.operator.allowedExecutors,
+                    executorLevels: config.operator.executorLevels,
+                  }),
+                  attempts: [],
+                },
+              }
+            : {}),
         };
+        const observedSpans = new Set<string>();
         try {
           tree = await createEvalWorktree(cwd, common, task.baseCommit);
           if (interrupted) throw new Error('Evaluation interrupted');
@@ -220,12 +251,15 @@ export async function runEvalCommand(
                 worktreePath: tree.path,
                 executor,
                 tier,
+                allowedPaths: task.allowedPaths,
+                ...(args.cascade ? { cascadeTask: task.id } : {}),
                 agentSpec: spec,
                 brief: task.brief,
                 timeoutMin: task.timeoutMin,
                 settled: (span, confirmed) => {
                   safeToCleanup = confirmed;
-                  if (span) {
+                  if (span && !observedSpans.has(span.spanId)) {
+                    observedSpans.add(span.spanId);
                     const attrs = telemetryAttributes(span);
                     const executionId = attrs['softwareagents.execution.id'];
                     if (typeof executionId === 'string') row.executionId = executionId;
@@ -235,12 +269,24 @@ export async function runEvalCommand(
                         attrs[key],
                       ]),
                     );
+                    if (row.cascade) {
+                      const model = row.metrics['gen_ai.response.model'];
+                      const price =
+                        typeof model === 'string'
+                          ? config.operator.telemetry?.prices?.[model]
+                          : undefined;
+                      row.cascade.attempts.push({
+                        metrics: row.metrics,
+                        ...(price ? { price } : {}),
+                      });
+                    }
                   }
                 },
               },
             },
           );
           if (result.evaluationSuccess === undefined) row.status = 'blocked';
+          else if (result.evaluationVerifierFailed) row.status = 'criterion_failed';
           else if (result.evaluationSuccess && !interrupted) {
             try {
               assertEvalIntegrity(task, tree.path);
@@ -317,7 +363,7 @@ function formatReport(report: ReturnType<typeof buildEvalReport>): string {
   return report.configurations
     .map((c) =>
       [
-        `${c.executor}/${c.tier}/${c.model} spec=${c.agentSpecHash.slice(0, 12)}${c.baseline ? ' base' : ''}`,
+        `${c.cascadeConfigHash ? `cascade=${c.cascadeConfigHash.slice(0, 12)}` : `${c.executor}/${c.tier}/${c.model}`} spec=${c.agentSpecHash.slice(0, 12)}${c.baseline ? ' base' : ''}`,
         `success=${c.successes}/${c.attempts} rate=${c.successRate} blocked=${c.blocked}`,
         `cost/solved USD=${c.costPerSolvedTaskUsd} tokens(in/out/cache)=${c.totals.inputTokens}/${c.totals.outputTokens}/${c.totals.cacheReadTokens}`,
         `time=${c.durationMs}ms consistency=${c.consistency} pareto=${c.pareto}`,

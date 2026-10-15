@@ -165,6 +165,86 @@ El ledger de cuota y la recuperación de Executions agotadas de SA-038 siguen fu
 
 ## Niveles de modelo (SA-084)
 
+### Cascada con verificador (SA-103, opt-in)
+
+Solo el Operator puede añadir `projects.<id>.modelTiers.cascade` en su config
+externa. Ausente, desactivada o sin verificador para la Task, conserva la selección
+normal. El esquema es estricto; ni `project.yaml`, ni la política del repo, ni el
+board pueden habilitarla o aportar comandos. Ejemplo dentro de `modelTiers`:
+
+```json
+{
+  "cascade": {
+    "enabled": true,
+    "startTier": "economy",
+    "maxEscalations": 2,
+    "verifiers": {
+      "SA-123": {
+        "allowedPaths": ["server/src/example.ts"],
+        "commands": [
+          {
+            "argv": [
+              "node",
+              "node_modules/typescript/bin/tsc",
+              "--noEmit",
+              "--incremental",
+              "false"
+            ],
+            "timeoutMs": 60000
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+La clave del verificador es la Task exacta (`SA-###`), o el ID del banco en evals.
+Cada binding exige rutas de ficheros exactas y 1–5 comandos argv, sin shell, con
+timeout de 1–60000 ms. `allowedPaths` usa las restricciones de las evals: sin
+traversal, globs, tests ni configuración. Los verificadores permanecen en la base;
+modificarlos, cambiar HEAD, ocultar cambios en el índice o introducir enlaces
+falla cerrado antes de ejecutar código. Los comandos deben evitar escritura de
+cachés/buildinfo dentro del árbol (usar no-emit o temporales externos).
+
+Son elegibles las Tasks cuyo nivel normal SA-084, acotado por `maxTier`, sea al
+menos `startTier` y tengan binding del Operator. Se empieza por `startTier` y se
+sube por economy → standard → deep, sin sobrepasar `maxTier` ni `maxEscalations`
+(0–2, número de intentos adicionales). Los niveles ausentes o excluidos por
+`executorLevels` se omiten. Cada intento obtiene su propia admisión, slot, probes
+y revalidación de autoridad SA-089/090/092. Un CLI ausente, desactivado, sin login
+o sin cuota conserva las reglas de espera/WAITING_HUMAN; no provoca una subida
+ni una bajada implícita por cuota.
+
+Solo `fail` o `timeout` de los comandos permiten subir. Todos deben pasar para
+aceptar el intento; un error del Executor, integridad o interrupción termina el
+run. Antes de otro intento se descartan los cambios tracked, staged, untracked
+e ignorados mediante reset a la base capturada al abrir el worktree y clean,
+después de verificar integridad y cierre. No se continúa desde el patch fallido.
+El último fallo queda sin commit para revisión. Nunca decide un LLM si escalar.
+
+Se reutiliza `evalCriteria.ts` (SA-QA-20): entorno por allowlist, perfiles y HOME
+temporales, salida limitada y kill del árbol. Solo tras cierre confirmado se
+retiran los temporales y la junction de dependencias existentes, sin instalación.
+Si no se confirma, se conservan árbol, temporales y locks; no hay otro intento.
+Rigen los [límites de seguridad de evals](evals.md#límites-de-seguridad): estas
+guardas no son un sandbox de SO y solo sirven para código propio de confianza.
+
+Cada intento tiene Execution y sesión propias en WorkStore/registry, audit
+`cascade_attempt` y registro sin salida en
+`<Git common dir>/softwareagents/cascade-attempts.jsonl`: nivel, executor, modelo,
+verificadores pass/fail/timeout y uso/coste SA-095 (`unknown` si falta evidencia).
+Su raíz `invoke_agent` lleva `softwareagents.cascade.attempt` (desde 1) y, desde
+el segundo, `softwareagents.cascade.escalated_from`. La auditoría no contiene
+comandos ni salidas del verificador.
+
+`eval run --task <id|all> --cascade --repeat N` sustituye la pareja
+`--executor/--tier`; no activa una cascada deshabilitada ni toma comandos del banco.
+Exige bindings del Operator para las tareas elegidas. El informe la agrupa por
+hash de configuración como otra configuración y suma coste/tokens de **todos**
+sus intentos, también si una admisión posterior bloquea. Los runs fijos conservan
+su selección exacta y sirven de comparación; véase [evals.md](evals.md).
+
 El operador define `projects.<id>.modelTiers` exclusivamente en
 `~/.pixel-agents/config.json`. Los nombres estables son **economy, standard, deep**;
 un nivel ausente no existe. No se adoptó Executor local (ADR-0004 Rejected).

@@ -12,7 +12,11 @@ import { evalGit, type EvalTask } from './evalTasks.js';
 import { processCancellation } from './executors/processCancellation.js';
 import { resolveInside } from './pathGuard.js';
 
-export class EvalCriterionTerminationError extends Error {}
+export class EvalCriterionTerminationError extends Error {
+  constructor(readonly result: CriterionResult = 'timeout') {
+    super('Criterion termination unconfirmed');
+  }
+}
 
 /** Deliberately copy only launch essentials, never credentials, CI or Node injection flags. */
 function criterionEnvironment(home: string): NodeJS.ProcessEnv {
@@ -38,9 +42,16 @@ function criterionEnvironment(home: string): NodeJS.ProcessEnv {
 }
 
 /** Drain a bounded output stream and wait for close after killing the entire process tree. */
-async function runCriterion(args: string[], tree: string, home: string): Promise<boolean> {
+export type CriterionResult = 'pass' | 'fail' | 'timeout';
+export async function runVerifierCommand(
+  argv: readonly string[],
+  tree: string,
+  home: string,
+  timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<CriterionResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
+    const child = spawn(argv[0], argv.slice(1), {
       cwd: tree,
       windowsHide: true,
       detached: process.platform !== 'win32',
@@ -49,6 +60,7 @@ async function runCriterion(args: string[], tree: string, home: string): Promise
     });
     const cancellation = processCancellation(() => child);
     let stopped = false;
+    let timedOut = false;
     let bytes = 0;
     let grace: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
@@ -60,10 +72,16 @@ async function runCriterion(args: string[], tree: string, home: string): Promise
         // The shared cancellation helper retries. No cleanup until close confirms termination.
       }
       grace = setTimeout(() => {
-        reject(new EvalCriterionTerminationError('Criterion termination unconfirmed'));
+        signal?.removeEventListener('abort', stop);
+        reject(new EvalCriterionTerminationError(timedOut ? 'timeout' : 'fail'));
       }, EXECUTOR_TERMINATION_TIMEOUT_MS);
     };
-    const timer = setTimeout(stop, EVAL_CRITERION_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeoutMs);
+    signal?.addEventListener('abort', stop, { once: true });
+    if (signal?.aborted) stop();
     const drain = (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes > EVAL_CRITERION_MAX_OUTPUT_BYTES) stop();
@@ -78,7 +96,8 @@ async function runCriterion(args: string[], tree: string, home: string): Promise
       clearTimeout(timer);
       if (grace) clearTimeout(grace);
       cancellation.confirmClose();
-      resolve(!stopped && code === 0);
+      signal?.removeEventListener('abort', stop);
+      resolve(timedOut ? 'timeout' : !stopped && code === 0 ? 'pass' : 'fail');
     });
   });
 }
@@ -134,8 +153,9 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
     );
     let safeToCleanup = true;
     try {
-      const passed = await runCriterion(
+      const passed = await runVerifierCommand(
         [
+          process.execPath,
           path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
           'run',
           '--root',
@@ -152,7 +172,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
         tree,
         home,
       );
-      if (!passed || fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES) {
+      if (passed !== 'pass' || fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES) {
         results.push(false);
         continue;
       }

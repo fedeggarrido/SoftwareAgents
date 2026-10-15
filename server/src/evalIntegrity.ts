@@ -5,7 +5,10 @@ import { evalGit, type EvalTask, isProtectedEvalPath } from './evalTasks.js';
 
 /** Fail before restoring verifiers or linking dependencies, including ignored/untracked files.
  * This is a cooperative-agent integrity check, not confinement against concurrent writers. */
-export function assertEvalIntegrity(task: EvalTask, tree: string): void {
+export function assertEvalIntegrity(
+  task: Pick<EvalTask, 'baseCommit' | 'allowedPaths'>,
+  tree: string,
+): void {
   if (fs.lstatSync(tree).isSymbolicLink()) throw new Error('Linked eval root');
   if (evalGit(tree, ['rev-parse', 'HEAD']) !== task.baseCommit)
     throw new Error('Eval HEAD changed');

@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import * as evalTaskSchema from '../../core/schemas/eval-task.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type {
   ModelTier,
@@ -12,6 +13,8 @@ import type {
   WorkSize,
   WorkType,
 } from '../../core/src/modelTier.js';
+import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
+import { isProtectedEvalPath } from './evalTasks.js';
 import {
   type CandidateExclusion,
   excludeCandidate,
@@ -74,6 +77,52 @@ export const tierPolicySchema = {
   properties: {
     maxTier: { enum: MODEL_TIERS },
     rule: tierRuleSchema,
+    cascade: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['enabled', 'startTier', 'maxEscalations', 'verifiers'],
+      properties: {
+        enabled: { type: 'boolean' },
+        startTier: { enum: MODEL_TIERS },
+        maxEscalations: { type: 'integer', minimum: 0, maximum: 2 },
+        verifiers: {
+          type: 'object',
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['allowedPaths', 'commands'],
+            properties: {
+              allowedPaths: evalTaskSchema.properties.allowedPaths,
+              commands: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 5,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['argv', 'timeoutMs'],
+                  properties: {
+                    argv: {
+                      type: 'array',
+                      minItems: 1,
+                      maxItems: 100,
+                      items: {
+                        type: 'string',
+                        minLength: 1,
+                        maxLength: 4096,
+                        pattern: '^[^\\u0000\\r\\n]+$',
+                      },
+                    },
+                    timeoutMs: { type: 'integer', minimum: 1, maximum: EVAL_CRITERION_TIMEOUT_MS },
+                  },
+                },
+              },
+            },
+          },
+          propertyNames: { pattern: '^(?:SA-[0-9]{3,}|[a-z][a-z0-9-]{0,63})$' },
+        },
+      },
+    },
     tiers: {
       type: 'object',
       minProperties: 1,
@@ -207,6 +256,16 @@ export function validateModelTiers(raw: unknown): ModelTierPolicy {
     const policy = validateSchema(validatePolicy, raw);
     if (!policy.tiers[policy.maxTier]) throw new Error('maxTier references an undefined tier');
     if (policy.rule) validateTierRule(policy.rule);
+    if (policy.cascade) {
+      if (
+        !policy.tiers[policy.cascade.startTier] ||
+        MODEL_TIERS.indexOf(policy.cascade.startTier) > MODEL_TIERS.indexOf(policy.maxTier)
+      )
+        throw new Error('cascade startTier must exist within maxTier');
+      for (const verifier of Object.values(policy.cascade.verifiers))
+        if (verifier.allowedPaths.some((file) => isProtectedEvalPath(file)))
+          throw new Error('cascade allowedPaths cannot include tests or configuration');
+    }
     for (const [tier, definition] of Object.entries(policy.tiers)) {
       if (
         definition.fallbackTo &&
@@ -238,7 +297,7 @@ export function validateModelTierSupport(
     while (tier) {
       reachable.add(tier);
       tier =
-        !input.evaluation && agent.modelPolicy.fallbackAllowed
+        !input.evaluation && !input.cascadeTier && agent.modelPolicy.fallbackAllowed
           ? policy.tiers[tier]?.fallbackTo
           : undefined;
     }
@@ -271,6 +330,8 @@ export interface TierInputs {
   size?: WorkSize;
   /** Explicit operator evaluation: exact configuration, never a quota fallback. */
   evaluation?: { tier: ModelTier; executor: 'claude' | 'codex' };
+  /** Internal cascade attempt: exact tier, no quota downgrade or executor fallback. */
+  cascadeTier?: ModelTier;
 }
 export interface TierSelection {
   tier: ModelTier | null;
@@ -283,12 +344,18 @@ export interface TierSelection {
   exclusions?: CandidateExclusion[];
   block?: SelectionBlock;
 }
-function initialModelTier(
+export function initialModelTier(
   agent: AgentSpec,
   rule: TierRule,
   policy: ModelTierPolicy,
   input: TierInputs,
 ) {
+  if (input.cascadeTier) {
+    const tier = input.cascadeTier;
+    if (!policy.tiers[tier] || MODEL_TIERS.indexOf(tier) > MODEL_TIERS.indexOf(policy.maxTier))
+      throw new ModelTierConfigError('Cascade tier is undefined or exceeds Operator maxTier');
+    return { tier, requested: tier, prefix: `operator cascade: ${tier}` };
+  }
   if (input.evaluation) {
     const { tier, executor } = input.evaluation;
     if (!policy.tiers[tier] || MODEL_TIERS.indexOf(tier) > MODEL_TIERS.indexOf(policy.maxTier))
@@ -376,6 +443,7 @@ export function selectModelTier(
     }
     if (
       input.evaluation ||
+      input.cascadeTier ||
       !quotaBlocked ||
       !agent.modelPolicy.fallbackAllowed ||
       !definition.fallbackTo

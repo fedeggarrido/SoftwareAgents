@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { ModelTier } from '../../../core/src/modelTier.js';
+import type { CascadeAttempt } from '../modelCascade.js';
 import { resolveInside } from '../pathGuard.js';
 import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './executor.js';
 
@@ -38,6 +39,10 @@ export class ExecutionRegistry {
 
   constructor(worktreePath: string) {
     this.root = path.resolve(worktreePath, git(worktreePath, ['rev-parse', '--git-common-dir']));
+  }
+
+  cascadeAttempt(executionId: string, taskKey: string, outcome: CascadeAttempt): void {
+    this.append('softwareagents/cascade-attempts.jsonl', { executionId, taskKey, ...outcome });
   }
 
   private append(relative: string, value: unknown): void {

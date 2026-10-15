@@ -11,6 +11,7 @@ import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
+import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
 import {
   closeAvailabilityDecisions,
@@ -39,9 +40,22 @@ import {
   withMachineAdmission,
 } from './executorSlots.js';
 import { HumanDecisions } from './humanDecisions.js';
+import {
+  type CascadeAttempt,
+  cascadeLevels,
+  cascadeUsage,
+  checkCascadeCriteria,
+  resetCascadeWorktree,
+} from './modelCascade.js';
 import { loadModelPolicy, loadTierRule } from './modelPolicy.js';
 import { admitModelTier } from './modelTierAdmission.js';
-import { type TierSelection, validateModelTierSupport } from './modelTiers.js';
+import {
+  initialModelTier,
+  MODEL_TIERS,
+  type TierInputs,
+  type TierSelection,
+  validateModelTierSupport,
+} from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -137,6 +151,10 @@ export interface WorkerOptions {
     worktreePath: string;
     executor: 'claude' | 'codex';
     tier: ModelTier;
+    /** Exact Operator verifier binding for an explicitly requested cascade eval. */
+    cascadeTask?: string;
+    /** Eval bank integrity ceiling applies before every cascade verifier as well. */
+    allowedPaths: string[];
     agentSpec?: AgentSpec;
     /** Kept in memory; eval result storage must never contain a brief/prompt file. */
     brief: string;
@@ -173,6 +191,7 @@ export interface WorkerResult {
   /** SA-090: waiting needs the Operator; the deduplicated Human Decision, if recorded. */
   availabilityBlock?: { code: SelectionBlock['code']; decisionId: string | null };
   evaluationSuccess?: boolean;
+  evaluationVerifierFailed?: boolean;
 }
 
 export async function runWorker(
@@ -189,7 +208,7 @@ export async function runWorker(
       'worker run requires .softwareagents/project.yaml in the main checkout',
     );
   const decision = evaluatePolicy('launch_execution', 'human', config.operator.autonomyLevel);
-  const executionId = randomUUID();
+  let executionId = randomUUID();
   let tierSelection: TierSelection | undefined;
   const audit = (status: string) =>
     recordAudit(
@@ -334,8 +353,50 @@ export async function runWorker(
   let workStore: WorkStore | undefined;
   let telemetry: ExecutionTelemetry | undefined;
   let telemetryStatus: 'ok' | 'error' | 'require_human' = 'error';
+  const verifierAbort = new AbortController();
+  let verifierClosed = true;
+  let attempt = 0;
+  let escalatedFrom: ModelTier | undefined;
+  let cascade: NonNullable<typeof tierPolicy>['cascade'];
+  let verifier: NonNullable<typeof cascade>['verifiers'][string] | undefined;
+  let levels: ModelTier[] = [];
+  let tree: { path: string; branch: string };
+  let base: string;
+  let attemptRecorded = false;
+  let exitCode: number | undefined;
+  const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
+    if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
+    await telemetry.finish(result === 'pass' ? 'ok' : 'error');
+    const outcome: CascadeAttempt = {
+      attempt: attempt + 1,
+      escalatedFrom,
+      tier: tierSelection.tier!,
+      executor: tierSelection.choice.executor,
+      model: tierSelection.choice.model,
+      verifiers: results,
+      result,
+      usage: cascadeUsage(telemetry.rootSpan, config.operator),
+    };
+    new ExecutionRegistry(tree.path).cascadeAttempt(executionId, args.task, outcome);
+    recordAudit(
+      'launch_execution',
+      'execution',
+      executionId,
+      { status: 'cascade_attempt', cascade: outcome },
+      {
+        projectId: config.project.id,
+        actorType: 'system',
+        actorId: 'worker',
+        taskKey: args.task,
+        executionId,
+        policyDecision: decision,
+      },
+    );
+    attemptRecorded = true;
+  };
   const cancel = () => {
     interrupted = true;
+    verifierAbort.abort();
     try {
       handle?.cancel();
     } catch {
@@ -348,13 +409,16 @@ export async function runWorker(
   const authorityBlock = () => executorAuthorityBlock(config.project.id, config.operator);
   const probe = options.probe ?? runProbe;
   // SA-090: the server's probe cache lives in another process; probe what may launch.
-  const probed: ('claude' | 'codex')[] = options.evaluation
-    ? [options.evaluation.executor]
-    : tierPolicy || modelPolicy
-      ? (['claude', 'codex'] as const).filter((id) => config.operator.allowedExecutors.includes(id))
-      : config.operator.allowedExecutors.includes('claude')
-        ? ['claude']
-        : [];
+  const probed: ('claude' | 'codex')[] =
+    options.evaluation && !options.evaluation.cascadeTask
+      ? [options.evaluation.executor]
+      : tierPolicy || modelPolicy
+        ? (['claude', 'codex'] as const).filter((id) =>
+            config.operator.allowedExecutors.includes(id),
+          )
+        : config.operator.allowedExecutors.includes('claude')
+          ? ['claude']
+          : [];
   let scope = modelPolicy ? `capability:${spec.modelPolicy.capabilityClass}` : 'executor:claude';
   let invalidated: string | undefined;
   /** Never launched: release the slot; retry reselects and reuses the clean task worktree. */
@@ -375,375 +439,459 @@ export async function runWorker(
     };
   };
   try {
-    let selectedExecutor = selection?.choice?.executor ?? 'claude';
-    let availability: SelectionSnapshot['availability'];
-    // Both locks are held during the fresh gate decision and exclusive slot creation.
-    // The admission lock spans projects/tasks; the slot spans the entire Execution.
-    const tierAdmission =
-      tierPolicy && tierRule
-        ? await (async () => {
-            if (!options.evaluation) {
-              const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
-              workStore = await openWorkStore({
-                repositoryPath: cwd,
-                projectId: config.project.id,
-              });
-            }
-            const inputs = options.evaluation
-              ? {
-                  evaluation: {
-                    tier: options.evaluation.tier,
-                    executor: options.evaluation.executor,
-                  },
-                }
-              : taskModelInputs(config, workStore!.getTask(args.task), args.task);
-            availability = await observeExecutors(probed, config.operator, probe);
-            validateModelTierSupport(
-              tierPolicy,
-              config.operator.binaryPaths?.claude,
-              spec,
-              tierRule,
-              inputs,
-              probed.filter((id) => !launchBlock(availability?.[id], nowSeconds())),
-              config.operator.executorLevels,
-            );
-            return admitModelTier(
-              spec,
-              tierRule,
-              tierPolicy,
-              inputs,
-              config.operator,
-              executionId,
-              authorityBlock,
-              availability,
-            );
-          })()
-        : undefined;
-    if (!tierPolicy) availability = await observeExecutors(probed, config.operator, probe);
-    let legacyBlock: SelectionBlock | undefined;
-    if (tierAdmission) {
-      tierSelection = tierAdmission.selection;
-      scope = `tier:${tierSelection.requestedTier ?? 'none'}`;
-      selectedExecutor = tierSelection.choice?.executor ?? 'claude';
-      log(
-        JSON.stringify({
-          ...tierSelection,
-          coverage: tierAdmission.snapshot.coverage,
-          active: tierAdmission.snapshot.active,
-          maxExecutions: tierAdmission.snapshot.machinePolicy?.maxExecutions ?? null,
-          activeTotal:
-            (tierAdmission.snapshot.active.claude ?? 0) +
-            (tierAdmission.snapshot.active.codex ?? 0),
-        }),
-      );
+    if (tierPolicy && !options.evaluation) {
+      const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
+      workStore = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
     }
-    const admission = tierPolicy
-      ? tierAdmission
-        ? { gate: tierAdmission.selection.gate, slot: tierAdmission.slot }
-        : undefined
-      : withMachineAdmission(executionId, (owners) => {
-          const blocked = authorityBlock();
-          if (blocked)
-            return {
-              gate: {
-                status: 'wait',
-                resetsAt: null,
-                reason: blocked,
-                cause: 'configuration',
-              } as QuotaDecision,
-              slot: undefined,
-            };
-          const snapshot = readSelectionSnapshot(config.operator);
-          snapshot.availability = availability;
-          if (modelPolicy) {
-            selection = selectExecutor(spec, modelPolicy, snapshot);
-            // The fresh decision, not the pre-admission preview, owns the slot.
-            if (selection.choice) selectedExecutor = selection.choice.executor;
-            legacyBlock = selection.block;
-          }
-          // Legacy manual runs retain conservative defaults for pre-quota configs.
-          if (!modelPolicy) {
-            legacyMachinePolicy(snapshot, selectedExecutor);
-            const excluded = excludeCandidate(selectedExecutor, snapshot);
-            if (excluded) {
-              legacyBlock = selectionBlock(1, false, [
-                { executor: selectedExecutor, code: excluded },
-              ]);
+    const normalInputs: TierInputs =
+      options.evaluation && !options.evaluation.cascadeTask
+        ? { evaluation: { tier: options.evaluation.tier, executor: options.evaluation.executor } }
+        : options.evaluation
+          ? {}
+          : tierPolicy
+            ? taskModelInputs(config, workStore?.getTask(args.task), args.task)
+            : {};
+    cascade = tierPolicy?.cascade;
+    if (
+      cascade?.enabled &&
+      tierPolicy &&
+      tierRule &&
+      (!options.evaluation || options.evaluation.cascadeTask) &&
+      MODEL_TIERS.indexOf(initialModelTier(spec, tierRule, tierPolicy, normalInputs).tier) >=
+        MODEL_TIERS.indexOf(cascade.startTier)
+    ) {
+      const key = options.evaluation?.cascadeTask ?? args.task;
+      verifier = Object.hasOwn(cascade.verifiers, key) ? cascade.verifiers[key] : undefined;
+      if (verifier && options.evaluation)
+        verifier = {
+          ...verifier,
+          allowedPaths: verifier.allowedPaths.filter((file) =>
+            options.evaluation!.allowedPaths.includes(file),
+          ),
+        };
+      if (verifier) levels = cascadeLevels(tierPolicy, config.operator);
+    }
+    if (options.evaluation?.cascadeTask && !verifier)
+      throw new CliUsageError(
+        'Cascade eval requires an enabled, eligible Operator verifier binding',
+      );
+    for (;;) {
+      const inputs: TierInputs = verifier ? { cascadeTier: levels[attempt] } : normalInputs;
+      let selectedExecutor = selection?.choice?.executor ?? 'claude';
+      let availability: SelectionSnapshot['availability'];
+      // Both locks are held during the fresh gate decision and exclusive slot creation.
+      // The admission lock spans projects/tasks; the slot spans the entire Execution.
+      const tierAdmission =
+        tierPolicy && tierRule
+          ? await (async () => {
+              availability = await observeExecutors(probed, config.operator, probe);
+              validateModelTierSupport(
+                tierPolicy,
+                config.operator.binaryPaths?.claude,
+                spec,
+                tierRule,
+                inputs,
+                probed.filter((id) => !launchBlock(availability?.[id], nowSeconds())),
+                config.operator.executorLevels,
+              );
+              return admitModelTier(
+                spec,
+                tierRule,
+                tierPolicy,
+                inputs,
+                config.operator,
+                executionId,
+                authorityBlock,
+                availability,
+              );
+            })()
+          : undefined;
+      if (!tierPolicy) availability = await observeExecutors(probed, config.operator, probe);
+      let legacyBlock: SelectionBlock | undefined;
+      if (tierAdmission) {
+        tierSelection = tierAdmission.selection;
+        scope = `tier:${tierSelection.requestedTier ?? 'none'}`;
+        selectedExecutor = tierSelection.choice?.executor ?? 'claude';
+        log(
+          JSON.stringify({
+            ...tierSelection,
+            coverage: tierAdmission.snapshot.coverage,
+            active: tierAdmission.snapshot.active,
+            maxExecutions: tierAdmission.snapshot.machinePolicy?.maxExecutions ?? null,
+            activeTotal:
+              (tierAdmission.snapshot.active.claude ?? 0) +
+              (tierAdmission.snapshot.active.codex ?? 0),
+          }),
+        );
+      }
+      const admission = tierPolicy
+        ? tierAdmission
+          ? { gate: tierAdmission.selection.gate, slot: tierAdmission.slot }
+          : undefined
+        : withMachineAdmission(executionId, (owners) => {
+            const blocked = authorityBlock();
+            if (blocked)
               return {
                 gate: {
                   status: 'wait',
                   resetsAt: null,
-                  reason: `${selectedExecutor}: ${excluded}`,
-                  cause: 'disabled',
+                  reason: blocked,
+                  cause: 'configuration',
                 } as QuotaDecision,
                 slot: undefined,
               };
+            const snapshot = readSelectionSnapshot(config.operator);
+            snapshot.availability = availability;
+            if (modelPolicy) {
+              selection = selectExecutor(spec, modelPolicy, snapshot);
+              // The fresh decision, not the pre-admission preview, owns the slot.
+              if (selection.choice) selectedExecutor = selection.choice.executor;
+              legacyBlock = selection.block;
+            }
+            // Legacy manual runs retain conservative defaults for pre-quota configs.
+            if (!modelPolicy) {
+              legacyMachinePolicy(snapshot, selectedExecutor);
+              const excluded = excludeCandidate(selectedExecutor, snapshot);
+              if (excluded) {
+                legacyBlock = selectionBlock(1, false, [
+                  { executor: selectedExecutor, code: excluded },
+                ]);
+                return {
+                  gate: {
+                    status: 'wait',
+                    resetsAt: null,
+                    reason: `${selectedExecutor}: ${excluded}`,
+                    cause: 'disabled',
+                  } as QuotaDecision,
+                  slot: undefined,
+                };
+              }
+            }
+            log(
+              JSON.stringify({
+                executor: selectedExecutor,
+                active: snapshot.active[selectedExecutor],
+                coverage: snapshot.coverage,
+                maxExecutions: snapshot.machinePolicy?.maxExecutions ?? null,
+                activeTotal: (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
+              }),
+            );
+            if (selection && !selection.choice) return { gate: selection.gate, slot: undefined };
+            const gate =
+              selection?.gate ??
+              unprovenWait(selectedExecutor, snapshot) ??
+              quotaGate(
+                selectedExecutor,
+                snapshot.machinePolicy,
+                snapshot.capacities[selectedExecutor],
+                snapshot.active[selectedExecutor] ?? NaN,
+                snapshot.nowS,
+                (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
+              );
+            if (gate.status === 'wait') return { gate, slot: undefined };
+            const reserved = acquireExecutorSlot(
+              selectedExecutor,
+              gate.concurrencyLimit,
+              owners[selectedExecutor],
+              snapshot.machinePolicy?.maxExecutions,
+            );
+            return {
+              gate: reserved
+                ? gate
+                : ({
+                    status: 'wait',
+                    resetsAt: null,
+                    reason: `${selectedExecutor}: no free runtime executor slot; inspect ${executorSlotsDirectory(selectedExecutor)}`,
+                  } as QuotaDecision),
+              slot: reserved,
+            };
+          });
+      const admissionGate =
+        admission?.gate ??
+        ({
+          status: 'wait',
+          resetsAt: null,
+          reason: `${selectedExecutor}: runtime admission is busy; inspect ${executorSlotsDirectory(selectedExecutor)}`,
+        } as QuotaDecision);
+      slot = admission?.slot;
+      if (selection) log(selection.reason);
+      const block = tierAdmission ? tierAdmission.selection.block : legacyBlock;
+      if (block && !slot) return await escalate(block, admissionGate, scope, workStore);
+      if (admissionGate.status === 'wait' || !slot) {
+        log(admissionGate.reason);
+        audit('quota_wait');
+        process.exitCode = 3;
+        return { branch: '', commit: null, stat: '', quotaDecision: admissionGate };
+      }
+      // Admitted: any availability block for this scope no longer holds (SA-090).
+      try {
+        const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
+        const store = options.evaluation
+          ? undefined
+          : (workStore ??
+            (fs.existsSync(path.join(common, 'softwareagents/work.sqlite3'))
+              ? await openWorkStore({ repositoryPath: cwd, projectId: config.project.id })
+              : undefined));
+        try {
+          const closed = store ? await closeAvailabilityDecisions(store, scope, executionId) : [];
+          if (closed.length) log(`Availability restored for ${scope}: closed ${closed.join(', ')}`);
+        } finally {
+          if (store !== workStore) store?.close();
+        }
+      } catch (error) {
+        log(`Availability decisions for ${scope} not closed: ${(error as Error).message}`);
+      }
+      telemetry = new ExecutionTelemetry(
+        new TelemetrySink(common, config.project.id, config.operator.telemetry),
+        {
+          executionId,
+          taskKey: args.task,
+          executor: selectedExecutor,
+          agent: spec.metadata.id,
+          role: 'developer',
+          model: tierSelection?.choice?.model ?? selection?.choice?.model,
+          tier: tierSelection?.tier ?? undefined,
+          effort: tierSelection?.choice?.effort,
+          ...(verifier ? { cascade: { attempt: attempt + 1, escalatedFrom } } : {}),
+        },
+        attempt ? Date.now() : telemetryStart,
+      );
+      if (workStore && tierSelection?.choice) {
+        if (!workStore.getTask(args.task))
+          workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
+        await workStore.createExecution({
+          key: executionId,
+          task_key: args.task,
+          agent_template_version: spec.metadata.version,
+          executor: selectedExecutor,
+          model_id: tierSelection.choice.model,
+          model_tier: tierSelection.tier,
+          model_effort: tierSelection.choice.effort ?? null,
+          selection_reason: tierSelection.reason,
+          session_id: null,
+          // The manual worker owns a task lock, not a WorkStore lease. Its real
+          // supervisor PID remains in the existing registry/slot, never in recovery.
+          pid: null,
+          started_at: new Date().toISOString(),
+          system_prompt_hash: createHash('sha256').update(compiled.context).digest('hex'),
+          project_brain_sha: git(cwd, ['rev-parse', 'HEAD']),
+          task_version: workStore.getTask(args.task)!.version,
+          tool_policy_version: TOOL_POLICY_VERSION,
+        });
+      }
+      if (tierSelection)
+        new AuditLog().append({
+          projectId: config.project.id,
+          actorType: 'human',
+          actorId: 'operator',
+          action: 'launch_execution',
+          resourceType: 'execution',
+          resourceId: executionId,
+          policyDecision: decision,
+          riskLevel: 'medium',
+          taskKey: args.task,
+          executionId,
+          input: args,
+          outcome: {
+            status: 'model_selected',
+            tier: tierSelection.tier,
+            executor: tierSelection.choice!.executor,
+            model: tierSelection.choice!.model,
+            effort: tierSelection.choice!.effort ?? null,
+            reason: tierSelection.reason,
+          },
+        });
+      tree ??= options.evaluation
+        ? { path: options.evaluation.worktreePath, branch: '' }
+        : await new WorktreeManager({
+            repositoryPath: cwd,
+            defaultBranch: config.project.repo.defaultBranch,
+            manualPreparation: true,
+          }).create(args.task, 'worker');
+      if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
+        throw new Error('Existing task worktree is dirty; review it before retrying');
+      base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (interrupted) throw new Error('Worker interrupted');
+      /**
+       * SA-090: preparation is lazy and slow, so the selection is revalidated after
+       * it, immediately before the executor starts, under machine admission like
+       * SA-088: authority, a fresh probe and quota. That check is the frontier: a
+       * change before it invalidates the run (no process, slot released); a change
+       * after it drains. Not inside registerProcess: a refused registration ends the
+       * Execution as failed (the supervisor is killed before ACK), which would turn a
+       * policy change into a failure instead of a clean invalidation.
+       */
+      const spawnObservation = (await observeExecutors([selectedExecutor], config.operator, probe))[
+        selectedExecutor
+      ];
+      const machinePolicyFor = (snapshot: SelectionSnapshot) =>
+        tierPolicy || modelPolicy
+          ? snapshot.machinePolicy
+          : legacyMachinePolicy(snapshot, selectedExecutor);
+      const revalidate = (): string | undefined => {
+        const blocked = authorityBlock();
+        if (blocked) return blocked;
+        const verdict = launchBlock(spawnObservation, nowSeconds());
+        if (verdict) return `${selectedExecutor}: ${verdict.code}`;
+        const snapshot = readSelectionSnapshot(config.operator);
+        // This run already holds its slot: discount it; concurrency was decided then.
+        const gate = quotaGate(
+          selectedExecutor,
+          machinePolicyFor(snapshot),
+          snapshot.capacities[selectedExecutor],
+          (snapshot.active[selectedExecutor] ?? NaN) - 1,
+          snapshot.nowS,
+          (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0) - 1,
+        );
+        return gate.status === 'wait' && gate.cause !== 'concurrency' ? gate.reason : undefined;
+      };
+      const executor = new ExecutionRegistry(tree.path).executor(
+        selectedExecutor === 'codex'
+          ? new CodexCliExecutor({
+              operator: config.operator,
+              binaryArgs: options.binaryArgs,
+              runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
+            })
+          : new ClaudeCliExecutor({
+              binary: config.operator.binaryPaths?.claude ?? 'claude',
+              binaryArgs: options.binaryArgs,
+              runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
+            }),
+        { metricsOnly: !!options.evaluation },
+      );
+      if (interrupted) throw new Error('Worker interrupted');
+      {
+        let verdict: string | null | undefined;
+        try {
+          verdict = withMachineAdmission(`${executionId}-spawn`, () => revalidate() ?? null);
+        } catch (error) {
+          verdict = `spawn revalidation failed: ${(error as Error).message}`;
+        }
+        if (verdict !== null)
+          invalidated =
+            verdict ??
+            `${selectedExecutor}: runtime admission is busy at spawn; inspect ${executorSlotsDirectory(selectedExecutor)}`;
+      }
+      if (invalidated) return invalidatedResult(invalidated);
+      slot.markLaunching('registered_wrapper');
+      telemetry.phase('execution');
+      options.evaluation?.settled(undefined, false);
+      handle = executor.start({
+        executionId,
+        projectId: config.project.id,
+        taskKey: args.task,
+        role: 'developer',
+        prompt: compiled.context,
+        taskData,
+        agentSpec: spec,
+        flags: [],
+        ...(selection?.choice?.model ? { model: selection.choice.model } : {}),
+        ...(tierSelection?.choice
+          ? {
+              tier: tierSelection.tier!,
+              model: tierSelection.choice.model,
+              effort: tierSelection.choice.effort,
+              selectionReason: tierSelection.reason,
+            }
+          : {}),
+        worktreePath: tree.path,
+        timeoutMin: options.evaluation?.timeoutMin ?? 30,
+        registerProcess: (pid) => slot!.setExecutionProcess(pid),
+      });
+      if (handle.sessionId) {
+        slot.setSession(handle.sessionId);
+        await workStore?.setExecutionSession(executionId, handle.sessionId);
+      }
+      exitCode = undefined;
+      eventsStarted = true;
+      for await (const event of handle.events) {
+        if (event.type === 'telemetry') telemetry.observe(event.observation);
+        if (event.type === 'started') {
+          try {
+            slot.setSession(event.sessionId);
+            await workStore?.setExecutionSession(executionId, event.sessionId);
+          } catch (error) {
+            slotFailure = error;
+            try {
+              handle.cancel();
+            } catch {
+              log('Executor cancellation failed; draining events before releasing locks.');
             }
           }
-          log(
-            JSON.stringify({
-              executor: selectedExecutor,
-              active: snapshot.active[selectedExecutor],
-              coverage: snapshot.coverage,
-              maxExecutions: snapshot.machinePolicy?.maxExecutions ?? null,
-              activeTotal: (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
-            }),
-          );
-          if (selection && !selection.choice) return { gate: selection.gate, slot: undefined };
-          const gate =
-            selection?.gate ??
-            unprovenWait(selectedExecutor, snapshot) ??
-            quotaGate(
-              selectedExecutor,
-              snapshot.machinePolicy,
-              snapshot.capacities[selectedExecutor],
-              snapshot.active[selectedExecutor] ?? NaN,
-              snapshot.nowS,
-              (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
-            );
-          if (gate.status === 'wait') return { gate, slot: undefined };
-          const reserved = acquireExecutorSlot(
-            selectedExecutor,
-            gate.concurrencyLimit,
-            owners[selectedExecutor],
-            snapshot.machinePolicy?.maxExecutions,
-          );
-          return {
-            gate: reserved
-              ? gate
-              : ({
-                  status: 'wait',
-                  resetsAt: null,
-                  reason: `${selectedExecutor}: no free runtime executor slot; inspect ${executorSlotsDirectory(selectedExecutor)}`,
-                } as QuotaDecision),
-            slot: reserved,
-          };
-        });
-    const admissionGate =
-      admission?.gate ??
-      ({
-        status: 'wait',
-        resetsAt: null,
-        reason: `${selectedExecutor}: runtime admission is busy; inspect ${executorSlotsDirectory(selectedExecutor)}`,
-      } as QuotaDecision);
-    slot = admission?.slot;
-    if (selection) log(selection.reason);
-    const block = tierAdmission ? tierAdmission.selection.block : legacyBlock;
-    if (block && !slot) return await escalate(block, admissionGate, scope, workStore);
-    if (admissionGate.status === 'wait' || !slot) {
-      log(admissionGate.reason);
-      audit('quota_wait');
-      process.exitCode = 3;
-      return { branch: '', commit: null, stat: '', quotaDecision: admissionGate };
-    }
-    // Admitted: any availability block for this scope no longer holds (SA-090).
-    try {
-      const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
-      const store = options.evaluation
-        ? undefined
-        : (workStore ??
-          (fs.existsSync(path.join(common, 'softwareagents/work.sqlite3'))
-            ? await openWorkStore({ repositoryPath: cwd, projectId: config.project.id })
-            : undefined));
-      try {
-        const closed = store ? await closeAvailabilityDecisions(store, scope, executionId) : [];
-        if (closed.length) log(`Availability restored for ${scope}: closed ${closed.join(', ')}`);
-      } finally {
-        if (store !== workStore) store?.close();
-      }
-    } catch (error) {
-      log(`Availability decisions for ${scope} not closed: ${(error as Error).message}`);
-    }
-    telemetry = new ExecutionTelemetry(
-      new TelemetrySink(common, config.project.id, config.operator.telemetry),
-      {
-        executionId,
-        taskKey: args.task,
-        executor: selectedExecutor,
-        agent: spec.metadata.id,
-        role: 'developer',
-        model: tierSelection?.choice?.model ?? selection?.choice?.model,
-        tier: tierSelection?.tier ?? undefined,
-        effort: tierSelection?.choice?.effort,
-      },
-      telemetryStart,
-    );
-    if (workStore && tierSelection?.choice) {
-      if (!workStore.getTask(args.task))
-        workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
-      await workStore.createExecution({
-        key: executionId,
-        task_key: args.task,
-        agent_template_version: spec.metadata.version,
-        executor: selectedExecutor,
-        model_id: tierSelection.choice.model,
-        model_tier: tierSelection.tier,
-        model_effort: tierSelection.choice.effort ?? null,
-        selection_reason: tierSelection.reason,
-        session_id: null,
-        // The manual worker owns a task lock, not a WorkStore lease. Its real
-        // supervisor PID remains in the existing registry/slot, never in recovery.
-        pid: null,
-        started_at: new Date().toISOString(),
-        system_prompt_hash: createHash('sha256').update(compiled.context).digest('hex'),
-        project_brain_sha: git(cwd, ['rev-parse', 'HEAD']),
-        task_version: workStore.getTask(args.task)!.version,
-        tool_policy_version: TOOL_POLICY_VERSION,
-      });
-    }
-    if (tierSelection)
-      new AuditLog().append({
-        projectId: config.project.id,
-        actorType: 'human',
-        actorId: 'operator',
-        action: 'launch_execution',
-        resourceType: 'execution',
-        resourceId: executionId,
-        policyDecision: decision,
-        riskLevel: 'medium',
-        taskKey: args.task,
-        executionId,
-        input: args,
-        outcome: {
-          status: 'model_selected',
-          tier: tierSelection.tier,
-          executor: tierSelection.choice!.executor,
-          model: tierSelection.choice!.model,
-          effort: tierSelection.choice!.effort ?? null,
-          reason: tierSelection.reason,
-        },
-      });
-    const tree = options.evaluation
-      ? { path: options.evaluation.worktreePath, branch: '' }
-      : await new WorktreeManager({
-          repositoryPath: cwd,
-          defaultBranch: config.project.repo.defaultBranch,
-          manualPreparation: true,
-        }).create(args.task, 'worker');
-    if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
-      throw new Error('Existing task worktree is dirty; review it before retrying');
-    const base = git(tree.path, ['rev-parse', 'HEAD']);
-    if (interrupted) throw new Error('Worker interrupted');
-    /**
-     * SA-090: preparation is lazy and slow, so the selection is revalidated after
-     * it, immediately before the executor starts, under machine admission like
-     * SA-088: authority, a fresh probe and quota. That check is the frontier: a
-     * change before it invalidates the run (no process, slot released); a change
-     * after it drains. Not inside registerProcess: a refused registration ends the
-     * Execution as failed (the supervisor is killed before ACK), which would turn a
-     * policy change into a failure instead of a clean invalidation.
-     */
-    const spawnObservation = (await observeExecutors([selectedExecutor], config.operator, probe))[
-      selectedExecutor
-    ];
-    const machinePolicyFor = (snapshot: SelectionSnapshot) =>
-      tierPolicy || modelPolicy
-        ? snapshot.machinePolicy
-        : legacyMachinePolicy(snapshot, selectedExecutor);
-    const revalidate = (): string | undefined => {
-      const blocked = authorityBlock();
-      if (blocked) return blocked;
-      const verdict = launchBlock(spawnObservation, nowSeconds());
-      if (verdict) return `${selectedExecutor}: ${verdict.code}`;
-      const snapshot = readSelectionSnapshot(config.operator);
-      // This run already holds its slot: discount it; concurrency was decided then.
-      const gate = quotaGate(
-        selectedExecutor,
-        machinePolicyFor(snapshot),
-        snapshot.capacities[selectedExecutor],
-        (snapshot.active[selectedExecutor] ?? NaN) - 1,
-        snapshot.nowS,
-        (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0) - 1,
-      );
-      return gate.status === 'wait' && gate.cause !== 'concurrency' ? gate.reason : undefined;
-    };
-    const executor = new ExecutionRegistry(tree.path).executor(
-      selectedExecutor === 'codex'
-        ? new CodexCliExecutor({
-            operator: config.operator,
-            binaryArgs: options.binaryArgs,
-            runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
-          })
-        : new ClaudeCliExecutor({
-            binary: config.operator.binaryPaths?.claude ?? 'claude',
-            binaryArgs: options.binaryArgs,
-            runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
-          }),
-      { metricsOnly: !!options.evaluation },
-    );
-    if (interrupted) throw new Error('Worker interrupted');
-    {
-      let verdict: string | null | undefined;
-      try {
-        verdict = withMachineAdmission(`${executionId}-spawn`, () => revalidate() ?? null);
-      } catch (error) {
-        verdict = `spawn revalidation failed: ${(error as Error).message}`;
-      }
-      if (verdict !== null)
-        invalidated =
-          verdict ??
-          `${selectedExecutor}: runtime admission is busy at spawn; inspect ${executorSlotsDirectory(selectedExecutor)}`;
-    }
-    if (invalidated) return invalidatedResult(invalidated);
-    slot.markLaunching('registered_wrapper');
-    telemetry.phase('execution');
-    options.evaluation?.settled(undefined, false);
-    handle = executor.start({
-      executionId,
-      projectId: config.project.id,
-      taskKey: args.task,
-      role: 'developer',
-      prompt: compiled.context,
-      taskData,
-      agentSpec: spec,
-      flags: [],
-      ...(selection?.choice?.model ? { model: selection.choice.model } : {}),
-      ...(tierSelection?.choice
-        ? {
-            tier: tierSelection.tier!,
-            model: tierSelection.choice.model,
-            effort: tierSelection.choice.effort,
-            selectionReason: tierSelection.reason,
-          }
-        : {}),
-      worktreePath: tree.path,
-      timeoutMin: options.evaluation?.timeoutMin ?? 30,
-      registerProcess: (pid) => slot!.setExecutionProcess(pid),
-    });
-    if (handle.sessionId) {
-      slot.setSession(handle.sessionId);
-      await workStore?.setExecutionSession(executionId, handle.sessionId);
-    }
-    let exitCode: number | undefined;
-    eventsStarted = true;
-    for await (const event of handle.events) {
-      if (event.type === 'telemetry') telemetry.observe(event.observation);
-      if (event.type === 'started') {
-        try {
-          slot.setSession(event.sessionId);
-          await workStore?.setExecutionSession(executionId, event.sessionId);
-        } catch (error) {
-          slotFailure = error;
-          try {
-            handle.cancel();
-          } catch {
-            log('Executor cancellation failed; draining events before releasing locks.');
-          }
+        }
+        if (event.type === 'finished') {
+          exitCode = event.exitCode;
+          executionFinished = true;
         }
       }
-      if (event.type === 'finished') {
-        exitCode = event.exitCode;
-        executionFinished = true;
+      telemetry.phase('commit_guards');
+      if (slotFailure) throw slotFailure;
+      if (verifier) {
+        let results: CriterionResult[] = [];
+        if (!interrupted && exitCode === 0) {
+          const scratch = resolveInside(common, 'softwareagents/runtime/verifiers');
+          fs.mkdirSync(scratch, { recursive: true });
+          try {
+            results = await checkCascadeCriteria(
+              verifier,
+              base,
+              tree.path,
+              scratch,
+              verifierAbort.signal,
+            );
+          } catch (error) {
+            if (error instanceof EvalCriterionTerminationError) {
+              verifierClosed = false;
+              await recordAttempt([error.result], 'fail');
+            }
+            throw error;
+          }
+        }
+        const passed =
+          !interrupted &&
+          exitCode === 0 &&
+          results.length > 0 &&
+          results.every((r) => r === 'pass');
+        await recordAttempt(
+          results,
+          exitCode === 0 ? (passed ? 'pass' : 'fail') : 'executor_error',
+        );
+        if (!passed) {
+          // Only deterministic verifier failures permit another admitted attempt.
+          if (!interrupted && exitCode === 0 && attempt + 1 < levels.length) {
+            options.evaluation?.settled(telemetry.rootSpan, true);
+            slot.release();
+            slot = undefined;
+            resetCascadeWorktree(verifier, tree.path, base);
+            escalatedFrom = tierSelection!.tier!;
+            attempt++;
+            executionId = randomUUID();
+            handle = undefined;
+            eventsStarted = false;
+            executionFinished = false;
+            telemetry = undefined;
+            attemptRecorded = false;
+            continue;
+          }
+          if (options.evaluation)
+            return {
+              branch: '',
+              commit: null,
+              stat: '',
+              evaluationSuccess: false,
+              evaluationVerifierFailed: !interrupted && exitCode === 0,
+            };
+          throw new Error('Cascade failed; changes retained for review');
+        }
       }
+      break;
     }
-    telemetry.phase('commit_guards');
-    if (slotFailure) throw slotFailure;
     if (options.evaluation) {
       if (interrupted) throw new Error('Evaluation interrupted');
       if (git(tree.path, ['rev-parse', 'HEAD']) !== base)
         throw new Error('Evaluation changed Git HEAD');
       telemetryStatus = exitCode === 0 ? 'ok' : 'error';
-      return { branch: '', commit: null, stat: '', evaluationSuccess: exitCode === 0 };
+      return { branch: '', commit: null, stat: '', evaluationSuccess: telemetryStatus === 'ok' };
     }
     if (interrupted || exitCode !== 0)
       throw new Error('Execution failed or was interrupted; changes retained for review');
@@ -820,10 +968,11 @@ export async function runWorker(
     throw error;
   } finally {
     await telemetry?.finish(telemetryStatus);
+    await recordAttempt([], 'executor_error');
     workStore?.close();
     process.removeListener('SIGINT', cancel);
     process.removeListener('SIGTERM', cancel);
-    if (!handle || !eventsStarted || executionFinished) {
+    if (verifierClosed && (!handle || !eventsStarted || executionFinished)) {
       try {
         slot?.release();
       } finally {
@@ -832,7 +981,7 @@ export async function runWorker(
     } else log('Task lock and executor slot retained: executor termination was not confirmed.');
     options.evaluation?.settled(
       telemetry?.rootSpan,
-      !handle || !eventsStarted || executionFinished,
+      verifierClosed && (!handle || !eventsStarted || executionFinished),
     );
   }
 }

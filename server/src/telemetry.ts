@@ -163,6 +163,7 @@ export class ExecutionTelemetry {
       model?: string;
       tier?: string;
       effort?: string;
+      cascade?: { attempt: number; escalatedFrom?: string };
     },
     private start = Date.now(),
   ) {
@@ -171,6 +172,11 @@ export class ExecutionTelemetry {
       'gen_ai.operation.name': 'invoke_agent',
       'gen_ai.provider.name': input.executor === 'claude' ? 'anthropic' : 'openai',
     };
+    if (input.cascade) {
+      this.attrs['softwareagents.cascade.attempt'] = input.cascade.attempt;
+      if (input.cascade.escalatedFrom)
+        this.attrs['softwareagents.cascade.escalated_from'] = input.cascade.escalatedFrom;
+    }
     for (const [key, value] of Object.entries({
       'softwareagents.execution.id': input.executionId,
       'softwareagents.task.key': input.taskKey,

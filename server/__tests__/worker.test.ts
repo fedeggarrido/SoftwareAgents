@@ -20,9 +20,11 @@ import * as executorSlots from '../src/executorSlots.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { MachineCapacityPublisher } from '../src/machineCapacity.js';
+import { validateModelTiers } from '../src/modelTiers.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { runQuotaCheck } from '../src/quotaCommand.js';
 import { runTelemetryCommand, telemetrySummary } from '../src/telemetryCommand.js';
+import { telemetryAttributes } from '../src/telemetryCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
@@ -88,12 +90,283 @@ beforeEach(() => {
     }),
   );
 });
+
+describe('Operator verifier cascade SA-103', () => {
+  const fixture = path.join(__dirname, 'fixtures/fake-cascade-cli.cjs');
+  function configure() {
+    const raw = tierOperator('claude');
+    raw.projects.test.modelTiers = {
+      ...raw.projects.test.modelTiers,
+      maxTier: 'deep',
+      tiers: Object.fromEntries(
+        ['economy', 'standard', 'deep'].map((tier) => [
+          tier,
+          {
+            candidates: [{ executor: 'claude', model: `test-${tier}` }],
+          },
+        ]),
+      ),
+      cascade: {
+        enabled: true,
+        startTier: 'economy',
+        maxEscalations: 2,
+        verifiers: {
+          'SA-999': {
+            allowedPaths: ['worker-result.md', 'failed.tmp', 'ignored.tmp'],
+            commands: [{ argv: [process.execPath, fixture, 'verify'], timeoutMs: 5000 }],
+          },
+        },
+      },
+    };
+    raw.projects.test.telemetry = {
+      prices: { 'claude-test': { input: 1, output: 2, cacheRead: 0.1, cacheCreate: 1 } },
+    };
+    vi.stubEnv('SA_TEST_TELEMETRY', '1');
+    vi.stubEnv('CASCADE_SECRET', 'must not reach verifier');
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'ignored.tmp\n');
+    git(repo, 'add', '.gitignore');
+    git(repo, 'commit', '-m', 'ignore test output');
+    return raw;
+  }
+  function save(raw: unknown) {
+    fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(raw));
+  }
+  const run = (solve = 'economy') =>
+    runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fixture, 'claude', `--solve-at=${solve}`],
+        log: () => {},
+      },
+    );
+  function attempts() {
+    return fs
+      .readFileSync(path.join(repo, '.git/softwareagents/cascade-attempts.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  }
+  it.each(['economy', 'standard', 'deep'])(
+    'solves at %s with isolated attempts, audit, registry and spans',
+    async (solve) => {
+      save(configure());
+      const result = await run(solve);
+      expect(result.commit).toMatch(/^[a-f0-9]{40}$/);
+      const expected = ['economy', 'standard', 'deep'].slice(
+        0,
+        ['economy', 'standard', 'deep'].indexOf(solve) + 1,
+      );
+      const records = attempts();
+      expect(records.map((r) => r.tier)).toEqual(expected);
+      expect(records.map((r) => r.verifiers)).toEqual(
+        expected.map((t) => [t === solve ? 'pass' : 'fail']),
+      );
+      expect(records[0].usage.input).toBe(33);
+      expect(typeof records[0].usage.costUsd).toBe('number');
+      expect(fs.existsSync(path.join(repo, '.worktrees/SA-999/failed.tmp'))).toBe(false);
+      expect(fs.existsSync(path.join(repo, '.worktrees/SA-999/ignored.tmp'))).toBe(false);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.listExecutions()).toHaveLength(expected.length);
+      } finally {
+        store.close();
+      }
+      const audit = new AuditLog()
+        .read('test')
+        .filter((r) => !r.corrupt && r.entry.outcome.status === 'cascade_attempt');
+      expect(audit).toHaveLength(expected.length);
+      expect(JSON.stringify(audit)).not.toContain('VERIFIER_OUTPUT_MUST_NOT_BE_STORED');
+      const spans = fs
+        .readFileSync(path.join(repo, '.git/softwareagents/telemetry/test/spans.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line).resourceSpans[0].scopeSpans[0].spans[0])
+        .filter((s) => s.name === 'invoke_agent');
+      expect(spans.map((s) => telemetryAttributes(s)['softwareagents.cascade.attempt'])).toEqual(
+        expected.map((_, i) => i + 1),
+      );
+      if (spans.length > 1)
+        expect(telemetryAttributes(spans[1])['softwareagents.cascade.escalated_from']).toBe(
+          'economy',
+        );
+    },
+  );
+  it.each(['maxEscalations', 'maxTier', 'zero'])(
+    'stops at %s without committing failed work',
+    async (limit) => {
+      const raw = configure();
+      if (limit === 'maxEscalations') raw.projects.test.modelTiers.cascade.maxEscalations = 1;
+      else if (limit === 'zero') raw.projects.test.modelTiers.cascade.maxEscalations = 0;
+      else raw.projects.test.modelTiers.maxTier = 'standard';
+      save(raw);
+      await expect(run('deep')).rejects.toThrow('Cascade failed');
+      expect(attempts().map((r) => r.tier)).toEqual(
+        limit === 'zero' ? ['economy'] : ['economy', 'standard'],
+      );
+      expect(readExecutorSlots('claude').count).toBe(0);
+    },
+  );
+  it('skips a tier excluded by executorLevels', async () => {
+    const raw = configure();
+    raw.projects.test.executorLevels = { claude: ['economy', 'deep'] };
+    save(raw);
+    await run('deep');
+    expect(attempts().map((r) => r.tier)).toEqual(['economy', 'deep']);
+  });
+  it.each(['absent', 'disabled', 'unbound', 'below-start', 'repo-board'])(
+    'preserves normal selection when %s',
+    async (mode) => {
+      const raw = configure();
+      if (mode === 'absent') delete raw.projects.test.modelTiers.cascade;
+      if (mode === 'disabled') raw.projects.test.modelTiers.cascade.enabled = false;
+      if (mode === 'unbound') raw.projects.test.modelTiers.cascade.verifiers = {};
+      if (mode === 'below-start') raw.projects.test.modelTiers.cascade.startTier = 'deep';
+      if (mode === 'repo-board' || mode === 'unbound') {
+        const request = {
+          enabled: true,
+          startTier: 'economy',
+          verifiers: { 'SA-999': { commands: [{ argv: ['untrusted-program'] }] } },
+        };
+        if (mode === 'repo-board') delete raw.projects.test.modelTiers.cascade;
+        fs.appendFileSync(
+          path.join(repo, '.softwareagents/project.yaml'),
+          'legacy:\n  boardFile: board.json\n',
+        );
+        fs.writeFileSync(
+          path.join(repo, 'board.json'),
+          JSON.stringify({
+            modelTiers: { cascade: request },
+            items: [{ id: 'SA-999', size: 'M', cascade: request, verifiers: request.verifiers }],
+          }),
+        );
+        fs.mkdirSync(path.join(repo, '.softwareagents/agents'), { recursive: true });
+        fs.writeFileSync(
+          path.join(repo, '.softwareagents/agents/model-policy.yaml'),
+          'cascade: ' + JSON.stringify(request),
+        );
+        git(repo, 'add', '.');
+        git(repo, 'commit', '-m', 'untrusted cascade declarations');
+      }
+      save(raw);
+      await run('standard');
+      expect(fs.existsSync(path.join(repo, '.git/softwareagents/cascade-attempts.jsonl'))).toBe(
+        false,
+      );
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.listExecutions().map((r) => r.model_tier)).toEqual(['standard']);
+      } finally {
+        store.close();
+      }
+    },
+  );
+  it('waits for an unavailable next tier without falling back or trying deep', async () => {
+    const raw = configure();
+    raw.projects.test.allowedExecutors = ['claude', 'codex'];
+    raw.projects.test.binaryPaths.codex = path.join(root, 'missing-codex.exe');
+    raw.projects.test.modelTiers.tiers.standard.candidates = [
+      { executor: 'codex', model: 'test-standard' },
+    ];
+    save(raw);
+    const result = await run('deep');
+    expect(result.availabilityBlock?.code).toBe('not_installed');
+    expect(attempts().map((r) => r.tier)).toEqual(['economy']);
+    process.exitCode = 0;
+  });
+  it('does not retry executor failures', async () => {
+    save(configure());
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fixture, 'claude', '--fail'], log: () => {} },
+      ),
+    ).rejects.toThrow('Cascade failed');
+    expect(attempts().map((r) => r.result)).toEqual(['executor_error']);
+  });
+  it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
+    'times out a verifier, kills its tree and escalates',
+    async () => {
+      const raw = configure();
+      const pids = path.join(root, 'verifier-pids.json');
+      raw.projects.test.modelTiers.cascade.verifiers['SA-999'].commands = [
+        { argv: [process.execPath, fixture, 'verify', 'timeout', pids], timeoutMs: 1000 },
+      ];
+      save(raw);
+      try {
+        await run('standard');
+        expect(attempts().map((r) => r.verifiers)).toEqual([['timeout'], ['pass']]);
+        for (const pid of Object.values(JSON.parse(fs.readFileSync(pids, 'utf8'))) as number[])
+          await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 2000 });
+      } finally {
+        if (fs.existsSync(pids))
+          for (const pid of Object.values(JSON.parse(fs.readFileSync(pids, 'utf8'))) as number[]) {
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              /* Already closed. Test-only fixture cleanup. */
+            }
+          }
+      }
+    },
+    20000,
+  );
+  it('fails integrity before executing a verifier on forbidden changes', async () => {
+    save(configure());
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        { cwd: repo, binaryArgs: [fixture, 'claude', '--write-protected'], log: () => {} },
+      ),
+    ).rejects.toThrow('forbidden path');
+    expect(attempts()).toHaveLength(1);
+    expect(attempts()[0].verifiers).toEqual([]);
+  });
+  it('rejects unknown authority fields, invalid bounds and repository verifier declarations', () => {
+    const policy = configure().projects.test.modelTiers;
+    for (const patch of [
+      { startTier: 'unknown' },
+      { maxEscalations: 3 },
+      { shell: true },
+      {
+        verifiers: {
+          'SA-999': {
+            allowedPaths: ['package.json'],
+            commands: [{ argv: ['node'], timeoutMs: 100 }],
+          },
+        },
+      },
+    ])
+      expect(() =>
+        validateModelTiers({ ...policy, cascade: { ...policy.cascade, ...patch } }),
+      ).toThrow();
+    const repoPolicy = path.join(repo, '.softwareagents/agents');
+    fs.mkdirSync(repoPolicy, { recursive: true });
+    fs.writeFileSync(
+      path.join(repoPolicy, 'model-policy.yaml'),
+      'cascade: { enabled: true, verifiers: {} }',
+    );
+    const raw = tierOperator('claude');
+    save(raw);
+    expect(loadProjectConfig(repo)?.operator.modelTiers?.cascade).toBeUndefined();
+  });
+});
 afterEach(async () => {
   vi.restoreAllMocks();
   const actual = await vi.importActual<typeof import('child_process')>('child_process');
   vi.mocked(execFileSync).mockImplementation(actual.execFileSync);
   vi.mocked(spawn).mockClear();
   vi.unstubAllEnvs();
+  // A failed timeout test deliberately retains the verifier dependency junction.
+  const unlinkLinks = (directory: string) => {
+    for (const name of fs.readdirSync(directory)) {
+      const file = path.join(directory, name);
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) fs.unlinkSync(file);
+      else if (stat.isDirectory()) unlinkLinks(file);
+    }
+  };
+  unlinkLinks(root);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

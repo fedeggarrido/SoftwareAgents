@@ -160,6 +160,67 @@ afterEach(() => {
 });
 const readRecords = () => readEvalRecords(evalResultsDirectory(path.join(repo, '.git'), 'test'));
 
+it('evaluates cascades as one configuration and sums all attempts at captured prices', async () => {
+  const raw = JSON.parse(initialConfig);
+  const policy = raw.projects.test.modelTiers;
+  policy.tiers.economy.candidates = [{ executor: 'claude', model: 'test-economy' }];
+  policy.tiers.standard.candidates = [{ executor: 'claude', model: 'test-standard' }];
+  policy.cascade = {
+    enabled: true,
+    startTier: 'economy',
+    maxEscalations: 2,
+    verifiers: {
+      answer: {
+        allowedPaths: ['answer.txt'],
+        commands: [
+          {
+            argv: [
+              process.execPath,
+              '-e',
+              "process.exitCode = require('fs').readFileSync('answer.txt','utf8') === 'fixed' ? 0 : 1",
+            ],
+            timeoutMs: 5000,
+          },
+        ],
+      },
+    },
+  };
+  fs.writeFileSync(configFile, JSON.stringify(raw));
+  vi.stubEnv('SA_EVAL_FAKE_MODE', 'cascade');
+  const log = vi.fn();
+  await runEvalCommand(
+    ['run', '--task', 'answer', '--cascade', '--repeat', '1', '--yes', '--json'],
+    {
+      cwd: repo,
+      log,
+      worker: { binaryArgs: [fake, 'claude'], probe: ready },
+    },
+  );
+  const result = JSON.parse(log.mock.calls[0][0]);
+  expect(result.results[0].status).toBe('success');
+  expect(result.results[0].cascade.attempts).toHaveLength(2);
+  expect(result.configurations).toHaveLength(1);
+  const configuration = result.configurations[0];
+  expect(configuration.tier).toBe('cascade');
+  expect(configuration.totals.executions).toBe(2);
+  expect(configuration.totals.inputTokens).toBe(32);
+  expect(configuration.costPerSolvedTaskUsd).toBeGreaterThan(0);
+  expect(JSON.stringify(result)).not.toContain('PROMPT_SECRET_MARKER');
+  const records = (await readRecords()).records;
+  // A later admission block still spent the quota of both earlier attempts.
+  const blocked = parseEvalRecord({ ...records[0], status: 'blocked', repetition: 2 });
+  const report = buildEvalReport([...records, blocked]);
+  expect(report.configurations[0].totals.executions).toBe(4);
+  expect(report.configurations[0].costPerSolvedTaskUsd).toBeCloseTo(
+    configuration.costPerSolvedTaskUsd * 2,
+  );
+  const fixed = parseEvalRecord({ ...records[0], cascade: undefined, repetition: 3 });
+  expect(buildEvalReport([...records, fixed]).configurations).toHaveLength(2);
+  expect(() =>
+    parseEvalArgs(['run', '--task', 'answer', '--cascade', '--tier', 'economy', '--repeat', '1']),
+  ).toThrow();
+}, 20000);
+
 // Exercise only pinned local verifiers; no Executor is launched by this helper.
 async function verifyFixture(code: string, names = ['isolates criterion']) {
   fs.writeFileSync(path.join(repo, task.criteria[0].file), code);

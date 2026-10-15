@@ -21,4 +21,16 @@ export interface ModelTierPolicy {
   tiers: Partial<Record<ModelTier, { candidates: TierCandidate[]; fallbackTo?: ModelTier }>>;
   /** Overrides the repository's rule, without granting execution authority. */
   rule?: TierRule;
+  /** Trusted Operator commands, bound to exact Task keys (or eval bank ids). */
+  cascade?: {
+    enabled: boolean;
+    startTier: ModelTier;
+    maxEscalations: number;
+    verifiers: Record<string, CascadeVerifier>;
+  };
+}
+
+export interface CascadeVerifier {
+  allowedPaths: string[];
+  commands: { argv: string[]; timeoutMs: number }[];
 }

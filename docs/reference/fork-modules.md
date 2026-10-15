@@ -17,6 +17,8 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `modelCascade.ts` (SA-103): cascada opt-in del Operator, verificadores compartidos con evals, reinicio entre intentos y auditoría/telemetría por intento; [executor-selection.md](../executor-selection.md#cascada-con-verificador-sa-103-opt-in).
+
 - `evalCommand.ts`, `evalTasks.ts`, `evalCriteria.ts`, `evalWorktree.ts`, `evalReport.ts`
   (SA-094): banco histórico estricto, `eval list/validate/run/report`, ejecución
   explícita sobre la ruta del worker y JSONL de métricas en Git common dir.

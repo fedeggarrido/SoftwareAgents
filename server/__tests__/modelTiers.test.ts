@@ -83,6 +83,30 @@ const spec = (capabilityClass: string, fallbackAllowed = true): AgentSpec =>
     },
     modelPolicy: { capabilityClass, fallbackAllowed },
   }) as AgentSpec;
+it('cascade attempts wait at the exact tier under quota, never downgrade or exceed maxTier', () => {
+  expect(
+    selectModelTier(spec('standard_coding'), rule, policy, { cascadeTier: 'deep' }, snapshot(true)),
+  ).toMatchObject({
+    tier: 'deep',
+    choice: null,
+    gate: { status: 'wait', cause: 'quota' },
+    downgrades: [],
+  });
+  expect(() =>
+    selectModelTier(
+      spec('standard_coding'),
+      rule,
+      { ...policy, maxTier: 'standard' },
+      { cascadeTier: 'deep' },
+      snapshot(),
+    ),
+  ).toThrow('maxTier');
+  const excluded = snapshot();
+  excluded.executorLevels = { claude: [] };
+  expect(
+    selectModelTier(spec('standard_coding'), rule, policy, { cascadeTier: 'deep' }, excluded),
+  ).toMatchObject({ choice: null, block: { code: 'no_allowed_level' }, downgrades: [] });
+});
 function capacity(provider: 'claude' | 'codex', blocked: boolean): CapacitySnapshot {
   return {
     provider,

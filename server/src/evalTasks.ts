@@ -34,7 +34,7 @@ export function parseEvalTask(raw: unknown): EvalTask {
 }
 
 export function isProtectedEvalPath(file: string): boolean {
-  return /(^|\/)(__tests__|__mocks__|tests?|node_modules)(\/|$)|(^|\/)[^/]*\.(test|spec)\.[^/]+$|(^|\/)vitest[^/]*|(^|\/)package[^/]*\.json$/i.test(
+  return /(^|\/)(__tests__|__mocks__|tests?|node_modules)(\/|$)|(^|\/)[^/]*\.(test|spec)\.[^/]+$|(^|\/)(vitest|tsconfig|eslint)[^/]*|(^|\/)package[^/]*\.json$/i.test(
     file,
   );
 }

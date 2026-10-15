@@ -23,6 +23,8 @@ process.stdin.on('end', () => {
   const regression =
     prompt.includes('REGRESSION_SPEC') || args.some((a) => a.includes('REGRESSION_SPEC'));
   const failCriterion =
+    (process.env.SA_EVAL_FAKE_MODE === 'cascade' &&
+      args[args.indexOf('--model') + 1] === 'test-economy') ||
     process.env.SA_EVAL_FAKE_MODE === 'poison' ||
     process.env.SA_EVAL_FAKE_MODE === 'criterion-fail' ||
     (process.env.SA_EVAL_FAKE_MODE === 'inconsistent' && count % 2 === 1);

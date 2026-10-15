@@ -7,7 +7,8 @@ import { parse } from 'yaml';
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { ModelTier } from '../../core/src/modelTier.js';
-import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
+import type { ProjectConfig } from '../../core/src/project.js';
+import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
@@ -65,11 +66,14 @@ import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaG
 import { compileSchema, validateSchema } from './schemaValidation.js';
 import { taskModelInputs } from './taskModelInputs.js';
 import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
+import { WorkerLifecycle } from './workerLifecycle.js';
+import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface WorkerArgs {
   task: string;
-  brief: string;
+  brief?: string;
+  executor?: 'claude' | 'codex';
   selectExecutor?: boolean;
 }
 
@@ -88,7 +92,9 @@ export function workerCommitSubject(task: string, brief: string): string {
 
 export function parseWorkerArgs(argv: string[]): WorkerArgs {
   if (argv[0] !== 'run')
-    throw new CliUsageError('Usage: pixel-agents worker run --task SA-### --brief <file>');
+    throw new CliUsageError(
+      'Usage: pixel-agents worker run --task SA-### [--executor claude|codex] [--brief <file>]',
+    );
   const values: Record<string, string> = {};
   let selection = false;
   for (let i = 1; i < argv.length; i += 2) {
@@ -99,21 +105,48 @@ export function parseWorkerArgs(argv: string[]): WorkerArgs {
       continue;
     }
     const value = argv[i + 1];
-    if (!['--task', '--brief'].includes(key) || !value || value.startsWith('--') || values[key])
-      throw new CliUsageError('Expected unique --task and --brief values');
+    if (
+      !['--task', '--brief', '--executor'].includes(key) ||
+      !value ||
+      value.startsWith('--') ||
+      values[key]
+    )
+      throw new CliUsageError('Expected unique --task, --brief and --executor values');
     values[key] = value;
   }
-  if (!/^SA-\d{3,}$/.test(values['--task'] ?? '') || !values['--brief'])
-    throw new CliUsageError('Expected --task SA-### and --brief <file>');
+  if (
+    !/^SA-\d{3,}$/.test(values['--task'] ?? '') ||
+    (values['--executor'] && !['claude', 'codex'].includes(values['--executor']))
+  )
+    throw new CliUsageError(
+      'Expected --task SA-###, optional --executor claude|codex and --brief <file>',
+    );
   return {
     task: values['--task'],
-    brief: values['--brief'],
+    ...(values['--brief'] ? { brief: values['--brief'] } : {}),
+    ...(values['--executor'] ? { executor: values['--executor'] as 'claude' | 'codex' } : {}),
     ...(selection ? { selectExecutor: true } : {}),
   };
 }
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+}
+
+function requireGitIdentity(cwd: string): void {
+  try {
+    for (const identity of ['GIT_AUTHOR_IDENT', 'GIT_COMMITTER_IDENT'])
+      execFileSync('git', ['var', identity], {
+        cwd,
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+  } catch {
+    throw new CliUsageError(
+      'worker run requires valid Git author and committer identity; configure it before launching',
+    );
+  }
 }
 
 /** Fail closed even for dead owners: an executor child may still be alive.
@@ -174,9 +207,10 @@ function legacyMachinePolicy(snapshot: SelectionSnapshot, executor: 'claude' | '
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
-export function loadWorkerAgentSpec(file?: string): AgentSpec {
-  const template = path.join(__dirname, 'agents/templates/developer.yaml');
-  const source = path.resolve(__dirname, '../../agents/templates/developer.yaml');
+export function loadWorkerAgentSpec(file?: string, role = 'developer'): AgentSpec {
+  if (!Object.hasOwn(ROLE_PROFILES, role)) throw new CliUsageError('Unsupported task role');
+  const template = path.join(__dirname, `agents/templates/${role}.yaml`);
+  const source = path.resolve(__dirname, `../../agents/templates/${role}.yaml`);
   return validateSchema(
     compileSchema<AgentSpec>(agentSchema),
     parse(fs.readFileSync(file ?? (fs.existsSync(template) ? template : source), 'utf8')),
@@ -200,11 +234,57 @@ export async function runWorker(
   args: WorkerArgs,
   options: WorkerOptions = {},
 ): Promise<WorkerResult> {
+  if (options.evaluation) return runWorkerExecution(args, options);
+  const cwd = options.cwd ?? process.cwd();
+  const config = loadProjectConfig(cwd, true);
+  if (!config)
+    throw new CliUsageError(
+      'worker run requires .softwareagents/project.yaml in the main checkout',
+    );
+  requireGitIdentity(cwd);
+  if (!/^SA-\d{3,}$/.test(args.task)) throw new CliUsageError('Invalid task key');
+  const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
+  const legacyLock = resolveInside(common, `softwareagents/locks/${args.task}.lock`);
+  if (fs.existsSync(legacyLock))
+    throw new CliUsageError(
+      `Task locked: ${legacyLock}. Verify legacy worker and executor have stopped before removing it.`,
+    );
+  const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+  const lifecycle = new WorkerLifecycle(store, args.task);
+  try {
+    // Availability decisions must be re-evaluated by selection before claim.
+    if (store.getTask(args.task)?.status !== 'WAITING_HUMAN') await lifecycle.claim();
+    const result = await runWorkerExecution(args, options, lifecycle, config);
+    if (result.quotaDecision?.status === 'wait') await lifecycle.wait(result.quotaDecision);
+    else if (!result.availabilityBlock && !result.policyDecision)
+      await lifecycle.finish(
+        'REVIEW',
+        result.commit ? `Runtime commit ${result.commit}` : 'Execution finished without changes',
+      );
+    return result;
+  } catch (error) {
+    await lifecycle.finish(
+      'FAILED_RETRYABLE',
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  } finally {
+    await lifecycle.stopHeartbeat();
+    store.close();
+  }
+}
+
+async function runWorkerExecution(
+  args: WorkerArgs,
+  options: WorkerOptions,
+  lifecycle?: WorkerLifecycle,
+  initialConfig?: ProjectConfig,
+): Promise<WorkerResult> {
   if (options.evaluation) assertEvalRunAllowed();
   const telemetryStart = Date.now();
   const cwd = options.cwd ?? process.cwd();
   const log = options.log ?? console.log;
-  const config = loadProjectConfig(cwd, true);
+  const config = initialConfig ?? loadProjectConfig(cwd, true);
   if (!config)
     throw new CliUsageError(
       'worker run requires .softwareagents/project.yaml in the main checkout',
@@ -244,22 +324,55 @@ export async function runWorker(
     audit('denied');
     throw new CliUsageError('Operator config must authorize execution for this Project');
   }
+  audit('policy_allowed');
   // Resolve/read before any launch; task data never selects executable or authority.
-  const brief = options.evaluation?.brief ?? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8');
+  const brief =
+    options.evaluation?.brief ??
+    (args.brief
+      ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
+      : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
+  const role =
+    lifecycle?.store.getTask(args.task)?.agent_role ??
+    options.evaluation?.agentSpec?.identity.role ??
+    'developer';
   const spec = validateSchema(
     compileSchema<AgentSpec>(agentSchema),
-    options.evaluation?.agentSpec ?? loadWorkerAgentSpec(),
+    options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
   );
   const taskData = {
     task: { key: args.task, brief },
     repository: { projectId: config.project.id },
   };
-  const compiled = compileAgent(spec, 'developer', taskData);
-  const tierPolicy = config.operator.modelTiers;
+  const compiled = compileAgent(spec, role, taskData);
+  // Explicit selection only narrows the Operator catalog.
+  const tierPolicy =
+    config.operator.modelTiers && args.executor
+      ? ({
+          ...config.operator.modelTiers,
+          tiers: Object.fromEntries(
+            Object.entries(config.operator.modelTiers.tiers).map(([tier, value]) => [
+              tier,
+              {
+                ...value,
+                candidates: value!.candidates.filter((c) => c.executor === args.executor),
+              },
+            ]),
+          ),
+        } as typeof config.operator.modelTiers)
+      : config.operator.modelTiers;
   if (options.evaluation && !tierPolicy)
     throw new CliUsageError('eval run requires an Operator modelTiers catalog');
   const tierRule = tierPolicy ? (tierPolicy.rule ?? loadTierRule(cwd)) : undefined;
-  const modelPolicy = !tierPolicy && args.selectExecutor ? loadModelPolicy(cwd) : undefined;
+  const loadedPolicy = !tierPolicy && args.selectExecutor ? loadModelPolicy(cwd) : undefined;
+  const modelPolicy =
+    loadedPolicy && args.executor
+      ? Object.fromEntries(
+          Object.entries(loadedPolicy).map(([key, choices]) => [
+            key,
+            choices!.filter((c) => c.executor === args.executor),
+          ]),
+        )
+      : loadedPolicy;
   let selection = modelPolicy
     ? selectExecutor(spec, modelPolicy, readSelectionSnapshot(config.operator))
     : undefined;
@@ -311,6 +424,7 @@ export async function runWorker(
       const store =
         open ?? (await openWorkStore({ repositoryPath: cwd, projectId: config.project.id }));
       try {
+        await lifecycle?.idleForDecision(found.code);
         const result = await escalateUnavailable(
           store,
           config.operator.autonomyLevel,
@@ -340,18 +454,6 @@ export async function runWorker(
       blockedCause: cause,
     };
   };
-  if (selection && !selection.choice) {
-    if (selection.block)
-      return escalate(
-        selection.block,
-        selection.gate,
-        `capability:${spec.modelPolicy.capabilityClass}`,
-      );
-    log(selection.reason);
-    audit('quota_wait');
-    process.exitCode = 3;
-    return { branch: '', commit: null, stat: '', quotaDecision: selection.gate };
-  }
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
   // Identity is checked without writing Git configuration or consuming a runtime slot.
   try {
@@ -368,14 +470,14 @@ export async function runWorker(
       'worker run requires valid Git author and committer identity; configure it before launching',
     );
   }
-  const release = acquireTaskLock(common, args.task);
+  const release = options.evaluation ? acquireTaskLock(common, args.task) : () => {};
   let handle: ExecutionHandle | undefined;
   let interrupted = false;
   let executionFinished = false;
   let eventsStarted = false;
   let slotFailure: unknown;
   let slot: ReturnType<typeof acquireExecutorSlot>;
-  let workStore: WorkStore | undefined;
+  const workStore = lifecycle?.store;
   let telemetry: ExecutionTelemetry | undefined;
   let telemetryStatus: 'ok' | 'error' | 'require_human' = 'error';
   const verifierAbort = new AbortController();
@@ -389,6 +491,7 @@ export async function runWorker(
   let base: string;
   let attemptRecorded = false;
   let exitCode: number | undefined;
+  let runtimeQuota: QuotaDecision | undefined;
   const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
     if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
     const outcome: CascadeAttempt = {
@@ -448,10 +551,12 @@ export async function runWorker(
         ? (['claude', 'codex'] as const).filter((id) =>
             config.operator.allowedExecutors.includes(id),
           )
-        : config.operator.allowedExecutors.includes('claude')
-          ? ['claude']
+        : config.operator.allowedExecutors.includes(args.executor ?? 'claude')
+          ? [args.executor ?? 'claude']
           : [];
-  let scope = modelPolicy ? `capability:${spec.modelPolicy.capabilityClass}` : 'executor:claude';
+  let scope = modelPolicy
+    ? `capability:${spec.modelPolicy.capabilityClass}`
+    : `executor:${args.executor ?? 'claude'}`;
   let invalidated: string | undefined;
   /** Never launched: release the slot; retry reselects and reuses the clean task worktree. */
   const invalidatedResult = (reason: string) => {
@@ -471,10 +576,6 @@ export async function runWorker(
     };
   };
   try {
-    if (tierPolicy && !options.evaluation) {
-      const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
-      workStore = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-    }
     const normalInputs: TierInputs =
       options.evaluation && !options.evaluation.cascadeTask
         ? { evaluation: { tier: options.evaluation.tier, executor: options.evaluation.executor } }
@@ -514,7 +615,7 @@ export async function runWorker(
         tierPolicy && tierRule
           ? initialModelTier(spec, tierRule, tierPolicy, inputs).requested
           : null;
-      let selectedExecutor = selection?.choice?.executor ?? 'claude';
+      let selectedExecutor = args.executor ?? selection?.choice?.executor ?? 'claude';
       let availability: SelectionSnapshot['availability'];
       // Both locks are held during the fresh gate decision and exclusive slot creation.
       // The admission lock spans projects/tasks; the slot spans the entire Execution.
@@ -692,7 +793,7 @@ export async function runWorker(
           taskKey: args.task,
           executor: selectedExecutor,
           agent: spec.metadata.id,
-          role: 'developer',
+          role,
           model: tierSelection?.choice?.model ?? selection?.choice?.model,
           tier: tierSelection?.tier ?? undefined,
           effort: tierSelection?.choice?.effort,
@@ -700,7 +801,8 @@ export async function runWorker(
         },
         attempt ? Date.now() : telemetryStart,
       );
-      if (workStore && tierSelection?.choice) {
+      await lifecycle?.claim();
+      if (workStore) {
         if (!workStore.getTask(args.task))
           workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
         await workStore.createExecution({
@@ -708,21 +810,25 @@ export async function runWorker(
           task_key: args.task,
           agent_template_version: spec.metadata.version,
           executor: selectedExecutor,
-          model_id: tierSelection.choice.model,
-          model_tier: tierSelection.tier,
-          model_effort: tierSelection.choice.effort ?? null,
-          selection_reason: tierSelection.reason,
+          model_id: tierSelection?.choice?.model ?? selection?.choice?.model ?? '',
+          model_tier: tierSelection?.tier,
+          model_effort: tierSelection?.choice?.effort ?? null,
+          selection_reason:
+            tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`,
           session_id: null,
-          // The manual worker owns a task lock, not a WorkStore lease. Its real
-          // supervisor PID remains in the existing registry/slot, never in recovery.
+          // Supervisor registration is fenced before ACK, after preparation.
           pid: null,
           started_at: new Date().toISOString(),
-          system_prompt_hash: createHash('sha256').update(compiled.context).digest('hex'),
+          system_prompt_hash:
+            selectedExecutor === 'codex'
+              ? createHash('sha256').update(compiled.codex.instructions).digest('hex')
+              : compiled.systemPromptHash,
           project_brain_sha: git(cwd, ['rev-parse', 'HEAD']),
           task_version: workStore.getTask(args.task)!.version,
           tool_policy_version: TOOL_POLICY_VERSION,
         });
       }
+      audit('quota_admitted');
       if (tierSelection)
         new AuditLog().append({
           projectId: config.project.id,
@@ -755,6 +861,12 @@ export async function runWorker(
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (lifecycle)
+        await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
+      audit('worktree_prepared');
+      audit('agent_compiled', {
+        detail: JSON.stringify({ role, toolPolicyVersion: TOOL_POLICY_VERSION }),
+      });
       if (interrupted) throw new Error('Worker interrupted');
       /**
        * SA-090: preparation is lazy and slow, so the selection is revalidated after
@@ -801,7 +913,7 @@ export async function runWorker(
               binaryArgs: options.binaryArgs,
               runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
             }),
-        { metricsOnly: !!options.evaluation },
+        { metricsOnly: !!options.evaluation, workStore },
       );
       if (interrupted) throw new Error('Worker interrupted');
       {
@@ -820,11 +932,12 @@ export async function runWorker(
       slot.markLaunching('registered_wrapper');
       telemetry.phase('execution');
       options.evaluation?.settled(undefined, false);
+      await lifecycle?.running(cancel);
       handle = executor.start({
         executionId,
         projectId: config.project.id,
         taskKey: args.task,
-        role: 'developer',
+        role,
         prompt: compiled.context,
         taskData,
         agentSpec: spec,
@@ -840,7 +953,12 @@ export async function runWorker(
           : {}),
         worktreePath: tree.path,
         timeoutMin: options.evaluation?.timeoutMin ?? 30,
-        registerProcess: (pid) => slot!.setExecutionProcess(pid),
+        registerProcess: async (pid) => {
+          lifecycle?.assertOwned();
+          slot!.setExecutionProcess(pid);
+          if (lifecycle) await workStore!.setExecutionProcess(executionId, lifecycle.owner, pid);
+          audit('executor_started');
+        },
       });
       if (handle.sessionId) {
         slot.setSession(handle.sessionId);
@@ -850,6 +968,27 @@ export async function runWorker(
       eventsStarted = true;
       for await (const event of handle.events) {
         if (event.type === 'telemetry') telemetry.observe(event.observation);
+        if (
+          !options.evaluation &&
+          event.type === 'rateLimit' &&
+          (!event.capacity || event.message === 'rejected')
+        ) {
+          const resets =
+            event.capacity?.windows.flatMap((window) =>
+              window.resetsAt !== null && window.resetsAt > nowSeconds() ? [window.resetsAt] : [],
+            ) ?? [];
+          runtimeQuota = {
+            status: 'wait',
+            cause: 'quota',
+            reason: event.message,
+            resetsAt: resets.length
+              ? Math.max(...resets)
+              : event.retryAfterSec > 0
+                ? nowSeconds() + event.retryAfterSec
+                : null,
+          };
+          audit('quota_exhausted', { detail: JSON.stringify(runtimeQuota) });
+        }
         if (event.type === 'started') {
           try {
             slot.setSession(event.sessionId);
@@ -867,6 +1006,12 @@ export async function runWorker(
           exitCode = event.exitCode;
           executionFinished = true;
         }
+      }
+      if (lifecycle && executionFinished)
+        await workStore!.closeExecution(executionId, lifecycle.owner);
+      if (runtimeQuota) {
+        process.exitCode = 3;
+        return { branch: tree.branch, commit: null, stat: '', quotaDecision: runtimeQuota };
       }
       telemetry.phase('commit_guards');
       if (slotFailure) throw slotFailure;
@@ -938,6 +1083,8 @@ export async function runWorker(
       telemetryStatus = exitCode === 0 ? 'ok' : 'error';
       return { branch: '', commit: null, stat: '', evaluationSuccess: telemetryStatus === 'ok' };
     }
+    lifecycle?.assertOwned();
+    audit('commits_checked');
     if (interrupted || exitCode !== 0)
       throw new Error('Execution failed or was interrupted; changes retained for review');
     if (
@@ -946,6 +1093,7 @@ export async function runWorker(
     )
       throw new Error('Execution changed Git HEAD; refusing runtime commit');
     if (!git(tree.path, ['status', '--porcelain', '--untracked-files=all'])) {
+      audit('protected_paths_checked', { detail: 'No changes' });
       telemetryStatus = 'ok';
       audit('no_changes');
       log(`sin cambios\nRama: ${tree.branch}`);
@@ -961,7 +1109,9 @@ export async function runWorker(
       taskKey: args.task,
       executionId,
     });
+    audit('protected_paths_checked', { detail: gate.decision.outcome });
     if (gate.decision.outcome !== 'allow') {
+      await lifecycle?.finish('REVIEW', 'Protected paths require review');
       telemetryStatus = gate.decision.outcome === 'require_human' ? 'require_human' : 'error';
       if (gate.decision.outcome === 'require_human') {
         const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
@@ -971,7 +1121,7 @@ export async function runWorker(
             store.createTask({
               key: args.task,
               type: 'implementation',
-              // This legacy worker has finished its CLI and has no WorkStore lease.
+              // The executor has finished; review holds no lease.
               status: 'REVIEW',
               branch: tree.branch,
               worktree_ref: tree.path,
@@ -1022,24 +1172,20 @@ export async function runWorker(
         await telemetry?.finish(telemetryStatus);
       }
     } finally {
+      process.removeListener('SIGINT', cancel);
+      process.removeListener('SIGTERM', cancel);
+      const confirmed = verifierClosed && (!handle || !eventsStarted || executionFinished);
+      if (!confirmed) await lifecycle?.retainForRecovery();
       try {
-        workStore?.close();
+        if (confirmed) {
+          try {
+            slot?.release();
+          } finally {
+            release();
+          }
+        } else log('Lease and executor slot retained: executor termination was not confirmed.');
       } finally {
-        process.removeListener('SIGINT', cancel);
-        process.removeListener('SIGTERM', cancel);
-        const confirmed = verifierClosed && (!handle || !eventsStarted || executionFinished);
-        try {
-          if (confirmed) {
-            try {
-              slot?.release();
-            } finally {
-              release();
-            }
-          } else
-            log('Task lock and executor slot retained: executor termination was not confirmed.');
-        } finally {
-          options.evaluation?.settled(telemetry?.rootSpan, confirmed);
-        }
+        options.evaluation?.settled(telemetry?.rootSpan, confirmed);
       }
     }
   }

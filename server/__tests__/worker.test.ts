@@ -54,6 +54,25 @@ const fake = path.join(__dirname, 'fixtures/fake-cli.cjs');
 function git(cwd: string, ...args: string[]) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 }
+// Existing regressions assert their original events; SA-039 step coverage is asserted separately.
+function legacyAuditEntries() {
+  const steps = [
+    'lease_acquired',
+    'lease_released',
+    'task_transitioned',
+    'policy_allowed',
+    'quota_admitted',
+    'worktree_prepared',
+    'agent_compiled',
+    'running',
+    'executor_started',
+    'commits_checked',
+    'protected_paths_checked',
+  ];
+  return new AuditLog()
+    .read('test')
+    .filter((r) => r.corrupt || !steps.includes(r.entry.outcome.status));
+}
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-'));
   repo = path.join(root, 'repo');
@@ -61,6 +80,7 @@ beforeEach(() => {
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));
+  vi.stubEnv('SA_TEST_NO_RATE_LIMIT', '1');
   vi.stubEnv('GIT_AUTHOR_NAME', 'Test');
   vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.invalid');
   vi.stubEnv('GIT_COMMITTER_NAME', 'Test');
@@ -88,6 +108,288 @@ beforeEach(() => {
         },
       },
     }),
+  );
+});
+
+describe('worker lifecycle SA-039', () => {
+  it.each([false, true])(
+    'pins explicit Codex selection without bypassing Operator configuration (tiers=%s)',
+    async (tiers) => {
+      const raw = tierOperator('codex');
+      raw.projects.test.allowedExecutors = ['claude', 'codex'];
+      raw.projects.test.binaryPaths = { claude: process.execPath, codex: process.execPath };
+      raw.projects.test.quotaThresholds = { claude: 5, codex: 5 };
+      raw.projects.test.concurrency.perExecutor = { claude: 1, codex: 1 };
+      raw.projects.test.modelTiers.tiers.standard.candidates.unshift({
+        executor: 'claude',
+        model: 'test-claude',
+      });
+      const config = JSON.parse(JSON.stringify(raw));
+      if (!tiers) delete config.projects.test.modelTiers;
+      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(config));
+      await runWorker(
+        { task: 'SA-999', executor: 'codex' },
+        { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {} },
+      );
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.listExecutions()).toMatchObject([{ executor: 'codex' }]);
+      } finally {
+        store.close();
+      }
+      config.projects.test.allowedExecutors = ['claude'];
+      fs.writeFileSync(path.join(root, '.pixel-agents/config.json'), JSON.stringify(config));
+      const launches = vi.mocked(spawn).mock.calls.length;
+      const denied = await runWorker(
+        { task: 'SA-998', executor: 'codex' },
+        { cwd: repo, binaryArgs: [fake, 'codex'], log: () => {} },
+      );
+      expect(denied.quotaDecision?.status).toBe('wait');
+      expect(vi.mocked(spawn).mock.calls).toHaveLength(launches);
+      process.exitCode = 0;
+    },
+  );
+
+  it('honors an existing legacy task lock before acquiring a lease', async () => {
+    const release = acquireTaskLock(path.join(repo, '.git'), 'SA-999');
+    try {
+      await expect(runWorker({ task: 'SA-999' }, { cwd: repo })).rejects.toThrow('Task locked');
+      expect(spawn).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+    } finally {
+      release();
+    }
+  });
+
+  it('leases, runs, commits and enters REVIEW with durable execution and a complete audit', async () => {
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md', executor: 'claude' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'claude', '--write-doc'],
+        log: () => {},
+      },
+    );
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.listDomainEvents('SA-999').map((e) => e.to_status)).toEqual([
+        'READY',
+        'QUEUED',
+        'LEASED',
+        'RUNNING',
+        'REVIEW',
+      ]);
+      expect(store.getTask('SA-999')).toMatchObject({
+        status: 'REVIEW',
+        lease_owner: null,
+        lease_expires_at: null,
+        branch: result.branch,
+        worktree_ref: path.join(repo, '.worktrees/SA-999'),
+      });
+      expect(store.listExecutions()).toMatchObject([
+        {
+          executor: 'claude',
+          pid: expect.any(Number),
+          pid_started_at: expect.any(String),
+          tree_closed_at: expect.any(String),
+          system_prompt_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      ]);
+      expect(result.commit).toBeTruthy();
+      expect(fs.existsSync(path.join(repo, '.git/softwareagents/executions.jsonl'))).toBe(false);
+      expect(
+        new AuditLog().read('test').map((r) => (r.corrupt ? 'corrupt' : r.entry.outcome.status)),
+      ).toEqual([
+        'lease_acquired',
+        'policy_allowed',
+        'quota_admitted',
+        'worktree_prepared',
+        'agent_compiled',
+        'running',
+        'executor_started',
+        'commits_checked',
+        'protected_paths_checked',
+        'ready_for_review',
+        'task_transitioned',
+        'lease_released',
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('compiles the task role and accepts task-only CLI input', async () => {
+    expect(parseWorkerArgs(['run', '--task', 'SA-999', '--executor', 'claude'])).toEqual({
+      task: 'SA-999',
+      executor: 'claude',
+    });
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    store.createTask({ key: 'SA-999', type: 'review', agent_role: 'reviewer', status: 'READY' });
+    store.close();
+    const argv = path.join(root, 'argv.json');
+    vi.stubEnv('SA_TEST_ARGV', argv);
+    await runWorker({ task: 'SA-999' }, { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} });
+    const flags: string[] = JSON.parse(fs.readFileSync(argv, 'utf8'));
+    expect(flags[flags.indexOf('--append-system-prompt') + 1]).toContain('Role: reviewer.');
+    expect(flags[flags.indexOf('--allowedTools') + 1]).not.toContain('Write');
+    expect([...new ExecutionRegistry(repo).sessionMap().values()]).toMatchObject([
+      { role: 'reviewer' },
+    ]);
+  });
+
+  it('records real quota rejection and reset, while ignoring historical reset observations', async () => {
+    const before = Math.floor(Date.now() / 1000);
+    const result = await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      {
+        cwd: repo,
+        binaryArgs: [fake, 'claude', '--future-limit'],
+        log: () => {},
+      },
+    );
+    expect(result.quotaDecision).toMatchObject({
+      status: 'wait',
+      cause: 'quota',
+      resetsAt: expect.any(Number),
+    });
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      const task = store.getTask('SA-999')!;
+      expect(task.status).toBe('WAITING_QUOTA');
+      expect(JSON.parse(task.blocked_reason!)).toMatchObject({
+        reason: 'rejected',
+        resetsAt: expect.any(Number),
+      });
+      expect(JSON.parse(task.blocked_reason!).resetsAt).toBeGreaterThan(before);
+      expect(task.lease_owner).toBeNull();
+      expect(store.listExecutions()).toHaveLength(1);
+    } finally {
+      store.close();
+      process.exitCode = 0;
+    }
+  });
+
+  it('persists the failure reason and releases the lease', async () => {
+    await expect(
+      runWorker(
+        { task: 'SA-999', brief: 'brief.md' },
+        {
+          cwd: repo,
+          binaryArgs: [fake, 'claude', '--fail'],
+          log: () => {},
+        },
+      ),
+    ).rejects.toThrow('Execution failed');
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')).toMatchObject({
+        status: 'FAILED_RETRYABLE',
+        lease_owner: null,
+        blocked_reason: expect.stringContaining('Execution failed'),
+      });
+      expect(store.listDomainEvents('SA-999').at(-1)?.to_status).toBe('FAILED_RETRYABLE');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reads historical JSONL sessions alongside SQLite sessions', async () => {
+    const legacy = path.join(repo, '.git/softwareagents/executions.jsonl');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    const content =
+      JSON.stringify({ sessionId: 'legacy', executionId: 'old', role: 'qa', taskKey: 'SA-998' }) +
+      '\n';
+    fs.writeFileSync(legacy, content);
+    await runWorker(
+      { task: 'SA-999', brief: 'brief.md' },
+      { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
+    );
+    const sessions = new ExecutionRegistry(repo).sessionMap();
+    expect(sessions.get('legacy')).toMatchObject({ executionId: 'old', role: 'qa' });
+    expect([...sessions.values()]).toHaveLength(2);
+    expect(fs.readFileSync(legacy, 'utf8')).toBe(content);
+  });
+
+  it.skipIf(process.platform !== 'win32').for(['before_launch', 'running'] as const)(
+    'heartbeats and recovers a killed worker through SA-026 (%s)',
+    { timeout: 30000 },
+    async (phase, context) => {
+      if (phase === 'running' && process.env.SA_SKIP_TASKKILL_TEST === '1') context.skip();
+      const bundle = path.join(root, 'worker.cjs');
+      buildSync({
+        entryPoints: [path.resolve(__dirname, '../src/worker.ts')],
+        outfile: bundle,
+        bundle: true,
+        platform: 'node',
+        format: 'cjs',
+        logLevel: 'silent',
+      });
+      fs.cpSync(path.resolve(__dirname, '../../agents'), path.join(root, 'agents'), {
+        recursive: true,
+      });
+      fs.mkdirSync(path.join(root, 'hooks'));
+      fs.copyFileSync(
+        path.resolve(__dirname, '../../dist/hooks/containment-hook.js'),
+        path.join(root, 'hooks/containment-hook.js'),
+      );
+      const release = path.join(root, 'release');
+      const launches = path.join(root, 'launches');
+      const child = spawn(
+        process.execPath,
+        [path.join(__dirname, 'fixtures/worker-slot-process.cjs'), bundle],
+        {
+          env: {
+            ...process.env,
+            HOME: root,
+            USERPROFILE: root,
+            SA_SLOT_TEST_LAUNCHES: launches,
+            SA_SLOT_TEST_RELEASE: release,
+          },
+          stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+          windowsHide: true,
+        },
+      );
+      const exited = new Promise((resolve) => child.once('exit', resolve));
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        await new Promise((resolve) => child.once('message', resolve));
+        const preparing = new Promise((resolve) => child.once('message', resolve));
+        child.send({ task: 'SA-999', repo, fake, holdBeforeLaunch: phase === 'before_launch' });
+        if (phase === 'before_launch') await preparing;
+        else await vi.waitFor(() => expect(fs.existsSync(launches)).toBe(true), { timeout: 15000 });
+        const initial = store.getTask('SA-999')!.lease_expires_at!;
+        expect(store.getTask('SA-999')?.status).toBe(phase === 'running' ? 'RUNNING' : 'LEASED');
+        await vi.waitFor(
+          () => expect(store.getTask('SA-999')!.lease_expires_at!).not.toBe(initial),
+          { timeout: 10000 },
+        );
+        child.kill('SIGKILL');
+        await exited;
+        // Advance only the expired lease in the isolated DB, avoiding a minute-long test.
+        const { DatabaseSync } = await import('node:sqlite');
+        const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+        try {
+          db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+            new Date(0).toISOString(),
+            'SA-999',
+          );
+        } finally {
+          db.close();
+        }
+        expect(await store.recoverExpiredLeases()).toMatchObject([
+          { status: 'FAILED_RETRYABLE', lease_owner: null },
+        ]);
+        if (phase === 'running') expect(store.listExecutions()[0].tree_closed_at).toBeTruthy();
+        else expect(store.listExecutions()).toEqual([]);
+        expect(store.listDomainEvents('SA-999').at(-1)).toMatchObject({ reason: 'Lease expired' });
+        expect(fs.existsSync(path.join(repo, '.git/softwareagents/locks/SA-999.lock'))).toBe(false);
+      } finally {
+        fs.writeFileSync(release, 'release');
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        await exited;
+        store.close();
+      }
+    },
   );
 });
 
@@ -185,14 +487,12 @@ describe('Operator verifier cascade SA-103', () => {
       expect(fs.readFileSync(lock, 'utf8')).toBe('another writer');
       expect(log).toHaveBeenCalledWith('Cascade attempt persistence failed: EEXIST');
       expect(
-        new AuditLog()
-          .read('test')
-          .some(
-            (r) =>
-              !r.corrupt &&
-              r.entry.outcome.status === 'cascade_attempt_persistence_error' &&
-              r.entry.outcome.code === 'EEXIST',
-          ),
+        legacyAuditEntries().some(
+          (r) =>
+            !r.corrupt &&
+            r.entry.outcome.status === 'cascade_attempt_persistence_error' &&
+            r.entry.outcome.code === 'EEXIST',
+        ),
       ).toBe(true);
       expect(rootSpans().map((s) => s.status.code)).toEqual([2]);
     },
@@ -669,14 +969,14 @@ describe('supervised worker', () => {
             model_id: 'test-standard-model',
             model_effort: 'medium',
             selection_reason: expect.stringContaining('fallback:'),
-            pid: null,
+            pid: expect.any(Number),
             session_id: selected === 'codex' ? 'fake-codex-session' : expect.any(String),
           },
         ]);
       } finally {
         store.close();
       }
-      expect(new AuditLog().read('test').slice(0, 1)).toMatchObject([
+      expect(legacyAuditEntries().slice(0, 1)).toMatchObject([
         {
           entry: {
             outcome: {
@@ -740,7 +1040,7 @@ describe('supervised worker', () => {
       { task: 'SA-999', brief: 'brief.md', selectExecutor: true },
       { cwd: repo, binaryArgs: [fake, 'claude'], log: () => {} },
     );
-    const records = new AuditLog().read('test');
+    const records = legacyAuditEntries();
     expect(records.slice(0, 1)).toMatchObject([
       {
         entry: {
@@ -1307,14 +1607,13 @@ describe('supervised worker', () => {
       expect(result.commit).toBeNull();
       expect(log.mock.calls.some(([line]) => line.includes('probe'))).toBe(true);
       expect(log.mock.calls.some(([line]) => line.includes('office_store'))).toBe(true);
-      const records = fs.readFileSync(
-        path.join(repo, '.git/softwareagents/executions.jsonl'),
-        'utf8',
-      );
-      expect(JSON.parse(records.trim().split('\n')[0])).toMatchObject({
-        executor: selected,
-        model: null,
-      });
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.listExecutions()).toMatchObject([{ executor: selected, model_id: '' }]);
+      } finally {
+        store.close();
+      }
+      expect(fs.existsSync(path.join(repo, '.git/softwareagents/executions.jsonl'))).toBe(false);
     },
   );
   it('optional selection waits before creating a worktree when policy is incomplete', async () => {
@@ -1412,7 +1711,7 @@ describe('supervised worker', () => {
       role: 'developer',
       taskKey: 'SA-999',
     });
-    expect(new AuditLog().read('test')).toMatchObject([
+    expect(legacyAuditEntries()).toMatchObject([
       {
         corrupt: false,
         entry: {
@@ -1445,7 +1744,7 @@ describe('supervised worker', () => {
       work.close();
     }
     expect(git(repo, 'rev-parse', result.branch)).toBe(base);
-    expect(new AuditLog().read('test')).toMatchObject([
+    expect(legacyAuditEntries()).toMatchObject([
       {
         entry: {
           action: 'touch_protected_path',
@@ -1471,7 +1770,7 @@ describe('supervised worker', () => {
         lease_expires_at: null,
         attempt: 0,
       });
-      expect(answered.listExecutions()).toEqual([]);
+      expect(answered.listExecutions()).toMatchObject([{ tree_closed_at: expect.any(String) }]);
       expect(git(repo, 'rev-parse', result.branch)).toBe(base);
       expect(
         git(path.join(repo, '.worktrees/SA-999'), 'diff', '--cached', '--name-only'),
@@ -1580,9 +1879,7 @@ describe('supervised worker', () => {
     );
     expect(result.commit).toBeNull();
     expect(git(repo, 'rev-parse', result.branch)).toBe(base);
-    expect(new AuditLog().read('test')).toMatchObject([
-      { entry: { outcome: { status: 'no_changes' } } },
-    ]);
+    expect(legacyAuditEntries()).toMatchObject([{ entry: { outcome: { status: 'no_changes' } } }]);
   });
   it('keeps failed execution edits uncommitted and refuses dirty retries', async () => {
     const options = { cwd: repo, binaryArgs: [fake, 'claude', '--write-doc', '--fail'] };
@@ -1651,13 +1948,16 @@ it.each(['prepare', 'cancel'] as const)(
     ).rejects.toThrow();
     const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
     try {
-      expect(store.getTask('SA-999')).toMatchObject({ type: 'unknown', status: 'DRAFT' });
+      expect(store.getTask('SA-999')).toMatchObject({
+        type: 'unknown',
+        status: 'FAILED_RETRYABLE',
+      });
       expect(store.listExecutions()).toMatchObject([
         { executor: 'codex', model_id: 'test-model', session_id: null, pid: null },
       ]);
       expect(store.listExecutions()).toHaveLength(1);
       expect(
-        new AuditLog().read('test').map((r) => (!r.corrupt ? r.entry.outcome.status : 'corrupt')),
+        legacyAuditEntries().map((r) => (!r.corrupt ? r.entry.outcome.status : 'corrupt')),
       ).toEqual(['model_selected', failure === 'cancel' ? 'interrupted' : 'failed']);
     } finally {
       store.close();
@@ -1828,7 +2128,7 @@ describe('executor selection and drain (SA-090)', () => {
     fs.writeFileSync(configFile(), JSON.stringify(raw));
   };
   const statuses = () =>
-    new AuditLog().read('test').map((r) => (r.corrupt ? 'corrupt' : r.entry.outcome.status));
+    legacyAuditEntries().map((r) => (r.corrupt ? 'corrupt' : r.entry.outcome.status));
   afterEach(() => {
     process.exitCode = 0;
   });
@@ -1923,7 +2223,7 @@ describe('executor selection and drain (SA-090)', () => {
       runWorker({ task: 'SA-999', brief: 'brief.md' }, { cwd: repo, log: () => {}, probe }),
     ).rejects.toThrow('Operator config');
     expect(probe).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(true);
     expect(statuses()).toEqual(['denied']);
   });
 
@@ -2042,7 +2342,7 @@ describe('executor selection and drain (SA-090)', () => {
         answer: 'reevaluate',
         answeredBy: 'system',
       });
-      expect(store.getTask('SA-999')?.status).toBe('DRAFT');
+      expect(store.getTask('SA-999')?.status).toBe('REVIEW');
       expect(store.listExecutions()).toHaveLength(1);
     } finally {
       store.close();
@@ -2091,7 +2391,7 @@ describe('executor selection and drain (SA-090)', () => {
     expect(result.quotaDecision).toMatchObject({ status: 'wait', cause: 'availability' });
     expect(result).not.toHaveProperty('availabilityBlock');
     expect(process.exitCode).toBe(3);
-    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.git/softwareagents/work.sqlite3'))).toBe(true);
   });
 
   it('a toggle before the spawn invalidates the admitted selection: no CLI, slot released', async () => {

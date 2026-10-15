@@ -24,7 +24,7 @@ export interface ExecutionRequest {
   selectionReason?: string;
   timeoutMin: number;
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
-  registerProcess?: (pid: number) => void;
+  registerProcess?: (pid: number) => void | Promise<void>;
 }
 
 export type ExecutionEvent =

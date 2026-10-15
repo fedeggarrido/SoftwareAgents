@@ -23,7 +23,7 @@ export function spawnRegisteredProcess(
   binary: string,
   args: string[],
   cwd: string,
-  register?: (pid: number) => void,
+  register?: (pid: number) => void | Promise<void>,
 ): ChildProcess {
   if (!register)
     return spawn(binary, args, {
@@ -40,9 +40,9 @@ export function spawnRegisteredProcess(
     detached: process.platform !== 'win32',
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   });
-  child.once('spawn', () => {
+  child.once('spawn', async () => {
     try {
-      register(child.pid!);
+      await register(child.pid!);
       child.send('launch');
     } catch (error) {
       // Before ACK there is no executor: the supervisor has launched nothing, so

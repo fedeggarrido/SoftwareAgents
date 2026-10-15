@@ -386,6 +386,15 @@ class SqliteWorkStore implements WorkStore {
     }
   }
 
+  setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void> {
+    return this.write(() => {
+      this.owned(taskId, owner);
+      this.db
+        .prepare('UPDATE tasks SET branch = ?, worktree_ref = ? WHERE project_id = ? AND key = ?')
+        .run(branch, worktree, this.projectId, taskId);
+    });
+  }
+
   heartbeat(taskId: string, owner: string, ttl = DEFAULT_LEASE_TTL_MS): Promise<TaskRecord> {
     leaseDeadline(owner, ttl);
     return this.write(() => {
@@ -575,7 +584,9 @@ class SqliteWorkStore implements WorkStore {
       .run(
         to,
         attempt,
-        to === 'BLOCKED' ? reason : null,
+        ['BLOCKED', 'WAITING_QUOTA', 'FAILED_RETRYABLE', 'FAILED_FINAL'].includes(to)
+          ? reason
+          : null,
         now,
         active ? (lease?.owner ?? task.lease_owner) : null,
         active ? (lease?.expires ?? task.lease_expires_at) : null,
@@ -684,6 +695,34 @@ class SqliteWorkStore implements WorkStore {
       this.db
         .prepare('UPDATE executions SET session_id = ? WHERE project_id = ? AND key = ?')
         .run(sessionId, this.projectId, key);
+    });
+  }
+  async setExecutionProcess(key: string, owner: string, pid: number): Promise<void> {
+    const execution = this.getExecution(key);
+    if (!execution || execution.pid !== null) throw new Error('Execution not awaiting a process');
+    const task = this.owned(execution.task_key, owner);
+    const identity = await processStartIdentity(pid);
+    if (!identity) throw new Error('Executor died before its identity was recorded');
+    await this.write(() => {
+      const current = this.owned(task.key, owner);
+      if (current.version !== task.version)
+        throw new TaskVersionConflictError(task.key, task.version, current.version);
+      const result = this.db
+        .prepare(
+          'UPDATE executions SET pid = ?, pid_started_at = ? WHERE project_id = ? AND key = ? AND pid IS NULL',
+        )
+        .run(pid, identity, this.projectId, key);
+      if (result.changes !== 1) throw new Error('Execution process already registered');
+    });
+  }
+  closeExecution(key: string, owner: string): Promise<void> {
+    return this.write(() => {
+      const execution = this.getExecution(key);
+      if (!execution) throw new Error('Unknown Execution');
+      this.owned(execution.task_key, owner);
+      this.db
+        .prepare('UPDATE executions SET tree_closed_at = ? WHERE project_id = ? AND key = ?')
+        .run(new Date().toISOString(), this.projectId, key);
     });
   }
   getExecution(key: string): ExecutionRecord | undefined {

@@ -125,6 +125,7 @@ export interface WorkStore {
     ttl?: number,
   ): Promise<TaskRecord>;
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
+  setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
   release(taskId: string, owner: string): Promise<TaskRecord>;
   recoverExpiredLeases(): Promise<TaskRecord[]>;
   listLeaseRecoveries(): LeaseRecoveryRecord[];
@@ -142,6 +143,10 @@ export interface WorkStore {
   listTaskDependencies(taskKey: string): TaskDependencyRecord[];
   createExecution(execution: Omit<ExecutionRecord, 'project_id' | 'tree_closed_at'>): Promise<void>;
   setExecutionSession(key: string, sessionId: string): Promise<void>;
+  /** Fence supervisor registration before ACK; capture the OS creation identity. */
+  setExecutionProcess(key: string, owner: string, pid: number): Promise<void>;
+  /** Only after the executor event stream confirms supervisor termination. */
+  closeExecution(key: string, owner: string): Promise<void>;
   getExecution(key: string): ExecutionRecord | undefined;
   listExecutions(): ExecutionRecord[];
   recordHumanDecision(decision: Omit<HumanDecisionRecord, 'project_id'>): void;

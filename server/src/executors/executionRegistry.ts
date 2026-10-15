@@ -8,6 +8,8 @@ import { EXECUTION_REGISTRY_LOCK_TIMEOUT_MS } from '../constants.js';
 import { contentionNow, contentionPause, isFileContention } from '../fileContention.js';
 import type { CascadeAttempt } from '../modelCascade.js';
 import { resolveInside } from '../pathGuard.js';
+import { readRows } from '../sqliteReadOnly.js';
+import type { ExecutionRecord as StoredExecution, WorkStore } from '../workstore/WorkStore.js';
 import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './executor.js';
 
 export interface SessionExecution {
@@ -86,11 +88,10 @@ export class ExecutionRegistry {
 
   sessionMap(): ReadonlyMap<string, SessionExecution> {
     const file = resolveInside(this.root, 'softwareagents/executions.jsonl');
-    if (!fs.existsSync(file)) {
-      return new Map();
-    }
     const result = new Map<string, SessionExecution>();
-    for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
+    for (const line of (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '')
+      .split('\n')
+      .filter(Boolean)) {
       const record = JSON.parse(line) as ExecutionRecord;
       result.set(record.sessionId, {
         executionId: record.executionId,
@@ -106,11 +107,29 @@ export class ExecutionRegistry {
           : {}),
       });
     }
+    // SQLite is authoritative for new worker runs; legacy JSONL remains readable.
+    const rows = readRows<StoredExecution & { role: string | null }>(
+      resolveInside(this.root, 'softwareagents/work.sqlite3'),
+      'SELECT e.*, t.agent_role AS role FROM executions e JOIN tasks t ON t.project_id = e.project_id AND t.key = e.task_key WHERE e.session_id IS NOT NULL ORDER BY e.started_at, e.key',
+    );
+    for (const row of rows ?? [])
+      result.set(row.session_id!, {
+        executionId: row.key,
+        taskKey: row.task_key,
+        role: row.role ?? 'developer',
+        ...(row.model_tier ? { tier: row.model_tier } : {}),
+        model: row.model_id || null,
+        ...(row.model_effort ? { effort: row.model_effort } : {}),
+        ...(row.selection_reason ? { selectionReason: row.selection_reason } : {}),
+      });
     return result;
   }
 
   /** Snapshot HEAD before start. Events are recorded as the caller drains the handle. */
-  executor(inner: Executor, options: { metricsOnly?: boolean } = {}): Executor {
+  executor(
+    inner: Executor,
+    options: { metricsOnly?: boolean; workStore?: WorkStore } = {},
+  ): Executor {
     const registry = this;
     return {
       id: inner.id,
@@ -126,7 +145,7 @@ export class ExecutionRegistry {
         fs.mkdirSync(path.dirname(runPath), { recursive: true });
         fs.closeSync(fs.openSync(resolveInside(registry.root, run), 'wx', 0o600));
         const handle = inner.start(req);
-        if (handle.sessionId) {
+        if (handle.sessionId && !options.workStore) {
           registry.append('softwareagents/executions.jsonl', {
             executionId: req.executionId,
             projectId: req.projectId,
@@ -167,7 +186,8 @@ export class ExecutionRegistry {
                     promptHash: createHash('sha256').update(req.prompt).digest('hex'),
                     baseSha,
                   };
-                  registry.append('softwareagents/executions.jsonl', record);
+                  if (!options.workStore)
+                    registry.append('softwareagents/executions.jsonl', record);
                 }
                 if (!options.metricsOnly || event.type === 'telemetry') registry.append(run, event);
                 else if (event.type === 'finished')

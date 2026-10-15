@@ -1,5 +1,68 @@
 # Selección, niveles de modelo y quota gate (SA-036, SA-084, SA-QA-5)
 
+## Ciclo de `worker run` (SA-039)
+
+`pixel-agents worker run --task SA-### [--executor claude|codex] [--brief archivo]`
+ejecuta una sola Task. `--executor` restringe las preferencias y el catálogo del
+Operator; nunca habilita un executor ni evita política, cuota, niveles o sondas.
+Sin brief se usa el registro de la Task como contexto. La Task aporta `agent_role`
+(por defecto `developer`); solo se compilan los roles de las plantillas de la
+Platform, con sus techos y contención SA-020/062. Un rol desconocido falla cerrado.
+
+El run explícito crea una referencia DRAFT/unknown si falta y la prepara como
+READY. Claim SA-026 encadena QUEUED → LEASED; antes del lanzamiento pasa a RUNNING.
+Una lease única, TTL de 60 s y heartbeats cada 5 s cubren selección, preparación,
+executor y verificadores. Se conservan política `launch_execution`, admisión y
+revalidación SA-090, worktree por Task, compilador y guardias existentes. Cada paso
+queda auditado; las transiciones publican `TASK_TRANSITIONED` en `domain_events`.
+Al confirmar el cierre se comprueban HEAD, cambios y rutas protegidas: el runtime
+hace el commit y la Task pasa a REVIEW, incluso sin cambios. Una ruta protegida
+puede abrir WAITING_HUMAN. Push y PR son autoridad del runtime; este comando no
+los ejecuta. Rework REVIEW/QA vuelve a adquirir una lease mediante `claimRework`.
+
+Una espera del gate o rechazo de cuota del CLI deja WAITING_QUOTA, con JSON
+`{reason,resetsAt}` en `blocked_reason` (epoch seconds; null si no se conoce).
+Observaciones de cuota renovada no bloquean. Un error deja FAILED_RETRYABLE con
+su motivo. Las transiciones finales liberan la lease atómicamente. Las decisiones
+de disponibilidad SA-090 siguen deduplicadas; se reevalúan antes de reclamar una
+Task ya suspendida. Las evals conservan su ruta desechable sin Task operativa.
+
+Todos los intentos admitidos normales se guardan en `executions` del WorkStore,
+también sin catálogo y antes de preparar el worktree. Session y PID comienzan
+nulos. El supervisor espera ACK hasta registrar PID e identidad de creación en
+SQLite y en el slot. Al confirmar su fin se marca `tree_closed_at`. Si muere el
+worker, paran los heartbeats: al expirar, SA-026 verifica y cierra el árbol
+registrado antes de recuperar FAILED_RETRYABLE (o FAILED_FINAL al agotar intentos).
+La recuperación necesita un WorkStore abierto; no depende de un lock permanente
+de tarea. Si no puede demostrar el cierre, conserva la reserva y exige
+reconciliación, como SA-026. La recuperación de árboles sigue siendo Windows.
+Un fallo de heartbeat cancela el executor y nunca permite continuar haciendo commit.
+
+El overlay combina sesiones de SQLite con lectura del histórico
+`softwareagents/executions.jsonl`, sin reescribirlo ni añadir nuevos runs normales.
+Los streams `runs/*.jsonl`, telemetría y métricas de evals mantienen sus formatos.
+
+### Prueba real que realiza Claude
+
+Desde este worktree, con el build local preparado (`node esbuild.js`), Node
+compatible con WorkStore y Operator config que ya autorice Claude para el Project,
+usar una Task trivial libre (SA-999 en este ejemplo). No ejecutar mientras exista
+otro run de esa Task. En PowerShell:
+
+```powershell
+$brief = Join-Path $env:TEMP 'sa039-smoke.md'
+Set-Content -LiteralPath $brief -Encoding utf8 -Value '# crear nota de prueba SA-039: crea únicamente sa039-smoke.txt con el texto smoke ok; no hagas commit, push ni PR'
+node .\dist\cli.mjs worker run --task SA-999 --executor claude --brief $brief
+```
+
+Claude comprueba el commit y contenido en `.worktrees/SA-999`, Task REVIEW sin
+lease, Execution con Session/PID/identidad/cierre y los pasos del audit log; revisa
+los domain events LEASED → RUNNING → REVIEW y `telemetry summary --json`.
+La revisión e integración siguen el flujo manual de AGENTS.md. Para probar caída,
+usar otra Task trivial y terminar solo su proceso worker: tras el TTL, abrir el
+WorkStore y verificar recuperación SA-026; no borrar locks ni reutilizar el árbol
+sin confirmar cierre. Esta prueba real queda para Claude, no para los tests.
+
 `pixel-agents quota check --executor claude|codex --role <rol> [--json]`
 devuelve 0 para `go` o `probe`, y 3 para `wait`. JSON incluye `reason` y,
 en espera por cuota, `resetsAt` (epoch seconds; null si no se conoce).
@@ -62,8 +125,8 @@ antiguas sin este protocolo conservan recuperación manual. Solo se consultan PI
 registrados. Windows usa StartTime con fallback CIM por PID; Linux usa boot ID y
 start ticks; Darwin/BSD usa `ps -o lstart= -p PID`, con precisión de un segundo.
 La caché de identidad dura 30 s, comprueba existencia en cada consulta y fuerza
-consulta nueva ante discrepancias. El lock de tarea conserva recuperación manual
-tras una muerte abrupta.
+consulta nueva ante discrepancias. Los nuevos runs usan la lease recuperable del
+WorkStore (SA-039), descrita abajo; los locks históricos requieren inspección manual.
 
 **Qué cuenta.** `concurrency.perExecutor` limita exclusivamente Executions
 gestionadas mediante slots del runtime, entre repositorios. Las sesiones

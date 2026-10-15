@@ -25,7 +25,16 @@ const probe = async (_file, args) =>
         : { code: 0, output: help };
 process.on(
   'message',
-  async ({ task, repo, fake, operator, nowS, executor = 'claude', selectExecutor = false }) => {
+  async ({
+    task,
+    repo,
+    fake,
+    operator,
+    nowS,
+    executor = 'claude',
+    selectExecutor = false,
+    holdBeforeLaunch = false,
+  }) => {
     const logs = [];
     try {
       if (task === 'read-capacity') {
@@ -45,7 +54,12 @@ process.on(
           cwd: repo,
           binaryArgs: [fake, executor, '--slot-hold'],
           log: (line) => logs.push(line),
-          probe,
+          probe: holdBeforeLaunch
+            ? async () => {
+                process.send({ preparing: true });
+                return new Promise(() => {});
+              }
+            : probe,
         },
       );
       process.send({ result, logs, exitCode: process.exitCode ?? 0 });

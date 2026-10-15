@@ -274,6 +274,9 @@ if (!valid) {
           },
         ];
   for (const record of records) {
+    // Worker success fixtures must not simultaneously report an exhausted Codex quota.
+    if (process.env.SA_TEST_NO_RATE_LIMIT === '1' && record.code === 'rate_limit_exceeded')
+      continue;
     if (process.env.SA_TEST_TELEMETRY === '1') {
       if (record.type === 'assistant') {
         record.message.id = 'message-telemetry';

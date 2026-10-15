@@ -4,7 +4,7 @@ SoftwareAgents es su primer Managed Project. Este brain contiene conocimiento de
 
 ## Índice y fuentes canónicas
 
-- [CLAUDE.md](../../CLAUDE.md): arquitectura, módulos y validación.
+- [CLAUDE.md](../../CLAUDE.md): índice; detalle en [docs/reference/](../../docs/reference/).
 - [CONTEXT.md](../../CONTEXT.md#softwareagents): glosario canónico; Agent ≠ Model.
 - [AGENTS.md](../../AGENTS.md): colaboración, revisión cruzada e integración.
 - [docs/adr/](../../docs/adr/): decisiones en sus rutas existentes. [ADR-0002](../../docs/adr/0002-evolucion-incremental-del-fork.md) y [ADR-0003](../../docs/adr/0003-workstore-sqlite-local.md) están Accepted (Fede, 2026-10-02).

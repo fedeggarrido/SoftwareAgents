@@ -1,6 +1,6 @@
 # SoftwareAgents: Claude ↔ Codex
 
-Lee primero [CLAUDE.md](CLAUDE.md) (arquitectura, módulos y validación) y
+Lee primero [CLAUDE.md](CLAUDE.md) (índice; detalle en [docs/reference/](docs/reference/)) y
 [CONTEXT.md](CONTEXT.md) (glosario canónico, incluida la sección SoftwareAgents).
 Este archivo fija el flujo de colaboración del Development Project.
 

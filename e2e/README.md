@@ -111,7 +111,7 @@ Rules for a correct test:
 
 ## What to read before adding a test
 
-- `pixel-agents/CLAUDE.md` — architecture and message protocol
+- `pixel-agents/CLAUDE.md` — index; docs/reference/ holds architecture and message protocol
 - `pixel-agents/e2e/fixtures/pixel-agents.ts` — fixture lifecycle
 - `pixel-agents/e2e/helpers/` — every helper, especially `hooks.ts`, `mock-claude.ts`, `office.ts`, `webview.ts`
 

@@ -268,7 +268,7 @@ export function dispatchMockMessages(): void {
     window.dispatchEvent(new MessageEvent('message', { data }));
   }
 
-  // Must match the load order defined in CLAUDE.md:
+  // Must match the load order defined in docs/reference/office-ui.md:
   // characterSpritesLoaded -> floorTilesLoaded -> wallTilesLoaded -> carpetTilesLoaded
   //   -> furnitureAssetsLoaded -> layoutLoaded
   dispatch({ type: 'characterSpritesLoaded', characters });

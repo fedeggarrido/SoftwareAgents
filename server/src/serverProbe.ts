@@ -9,7 +9,7 @@ export type ServerProbe = 'healthy' | 'stale' | 'unknown';
 /**
  * Bounded liveness check, without sending the token. Health's PID is not server
  * authentication: a local impostor can imitate it and receive subsequent hook
- * tokens/events. Nonce/HMAC authentication is deferred (see CLAUDE.md discovery).
+ * tokens/events. Nonce/HMAC authentication is deferred (see docs/reference/discovery.md).
  */
 export function probeServer(
   target: Pick<ServerTarget, 'port' | 'pid' | 'host'>,

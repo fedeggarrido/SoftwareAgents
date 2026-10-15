@@ -874,7 +874,7 @@ test.describe('Hooks OFF / lifecycle', () => {
   //    tool (Bash). transcriptParser registers the sub-tool and starts the
   //    permission timer.
   // 3. ~5s with no further sub-agent data -> permission bubble appears on
-  //    both parent and sub-character (per CLAUDE.md "Sub-agent permission
+  //    both parent and sub-character (per docs/reference/agent-status.md "Sub-agent permission
   //    detection" note).
   test('sub-agent permission bubble fires on stalled non-exempt sub-tool via heuristic timer @area:cross-cutting', async ({
     pixelAgents,

@@ -30,6 +30,8 @@ npm run e2e:inventory  # regen e2e/README.md (CI drift check)
 
 ## Fork modules (short list; details in [fork-modules](docs/reference/fork-modules.md))
 
+Evaluations (SA-094): historical task bank and explicit `pixel-agents eval` CLI; [docs/evals.md](docs/evals.md).
+
 Runtime (`server/src/`): `boardWatcher`, `codexWatcher`, `companyControl`, `quotaReader`, model tiers/policy/admission (`modelTiers`, `modelPolicy`, `modelTierAdmission`, `taskModelInputs`, `quotaCommand`), `worker`, `domainEventRelay`, `agentRoles`, `executorState`/`executorAvailability`/`executorProbes`, `telemetry` (SA-095). Panels (`webview-ui/src/components/`): `CompanyHud`, `BacklogPanel`, `DecisionsPanel`, `MeetingPanel`, `ExecutorPanel`. AgentSpec v1alpha1 permission profiles: `core/src/agentSpec.ts`. These project Sessions/work into the office; they grant no permissions.
 
 ## Where to find X (read the file BEFORE touching that area)

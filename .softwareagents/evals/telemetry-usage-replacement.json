@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "telemetry-usage-replacement",
+  "baseCommit": "e18e45c2c1557a784759444363639f7e6f310e17",
+  "fixCommit": "f78e10e5c4e45cd9a695416e80e3fc71147a4407",
+  "brief": "Fix Claude usage projection in server/src/telemetryObservations.ts. After the message limit is reached, replacements for already tracked message IDs must still update aggregate usage. Continue ignoring new message IDs past the limit; keep the bounded map and do not fabricate counters. Do not install dependencies or modify tests, Git configuration or HEAD.",
+  "timeoutMin": 3,
+  "criteria": [
+    {
+      "file": "server/__tests__/telemetry.test.ts",
+      "testName": "Claude usage replacements still apply after the message limit is reached"
+    }
+  ]
+}

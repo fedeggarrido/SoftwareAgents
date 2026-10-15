@@ -10,7 +10,7 @@
 # no queda ninguno y solo entonces llama a git. Ante cualquier duda, falla sin borrar.
 #
 #   powershell -NoProfile -File scripts/remove-worktree.ps1 -Path .worktrees/SA-074
-param([Parameter(Mandatory = $true)][string]$Path)
+param([Parameter(Mandatory = $true)][string]$Path, [switch]$DiscardChanges)
 $ErrorActionPreference = 'Stop'
 
 $commonDir = git rev-parse --path-format=absolute --git-common-dir
@@ -42,6 +42,10 @@ foreach ($link in @(Find-DirectoryLinks $target)) {
 $left = @(Find-DirectoryLinks $target)
 if ($left.Count) { throw "Quedan enlaces; no se llama a git: $($left -join ', ')" }
 
-git -C $repo worktree remove $target
+if ($DiscardChanges) {
+  git -C $repo worktree remove --force $target
+} else {
+  git -C $repo worktree remove $target
+}
 if ($LASTEXITCODE) { throw "git worktree remove falló ($LASTEXITCODE); el worktree no tiene enlaces, revísalo a mano" }
 Write-Output "worktree retirado: $target"

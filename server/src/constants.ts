@@ -224,3 +224,6 @@ export const TELEMETRY_EXPORT_TIMEOUT_MS = 1000;
 export const TELEMETRY_LOCK_TIMEOUT_MS = 100;
 export const TELEMETRY_LOCK_LEASE_MS = 30_000;
 export const TELEMETRY_PRICE_TOKENS = 1_000_000;
+// SA-094: bounded, explicit operator evaluations; no background model calls.
+export const EVAL_MAX_REPETITIONS = 20;
+export const EVAL_CRITERION_TIMEOUT_MS = 60_000;

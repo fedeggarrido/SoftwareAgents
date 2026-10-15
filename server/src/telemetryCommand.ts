@@ -10,7 +10,7 @@ import { loadProjectConfig } from './projectConfig.js';
 import { telemetryDirectory, type TelemetrySpan } from './telemetry.js';
 
 type Unknown = 'unknown';
-interface Totals {
+export interface TelemetryTotals {
   executions: number;
   inputTokens: number | Unknown;
   outputTokens: number | Unknown;
@@ -20,7 +20,7 @@ interface Totals {
   costUsd: number | Unknown;
   phasesMs: { preparation: number; execution: number; commit_guards: number };
 }
-function empty(): Totals {
+export function emptyTelemetryTotals(): TelemetryTotals {
   return {
     executions: 0,
     inputTokens: 0,
@@ -32,7 +32,7 @@ function empty(): Totals {
     phasesMs: { preparation: 0, execution: 0, commit_guards: 0 },
   };
 }
-function attributes(span: TelemetrySpan): Record<string, string | number> {
+export function telemetryAttributes(span: TelemetrySpan): Record<string, string | number> {
   return Object.fromEntries(
     span.attributes.map(({ key, value }) => [
       key,
@@ -40,8 +40,8 @@ function attributes(span: TelemetrySpan): Record<string, string | number> {
     ]),
   );
 }
-function add(
-  total: Totals,
+export function addTelemetryTotals(
+  total: TelemetryTotals,
   a: Record<string, string | number>,
   prices?: TelemetryConfig['prices'],
 ) {
@@ -103,9 +103,9 @@ export async function telemetrySummary(
   prices?: TelemetryConfig['prices'],
 ) {
   const dir = telemetryDirectory(common, project);
-  const total = empty();
-  const byTask: Record<string, Totals> = Object.create(null);
-  const byExecutorLevel: Record<string, Totals> = Object.create(null);
+  const total = emptyTelemetryTotals();
+  const byTask: Record<string, TelemetryTotals> = Object.create(null);
+  const byExecutorLevel: Record<string, TelemetryTotals> = Object.create(null);
   let invalidLines = 0;
   const seen = new Set<string>();
   if (!fs.existsSync(dir)) {
@@ -129,15 +129,15 @@ export async function telemetrySummary(
         const record = JSON.parse(line);
         const span = record.resourceSpans[0].scopeSpans[0].spans[0] as TelemetrySpan;
         if (span.name !== 'invoke_agent') continue;
-        const a = attributes(span);
+        const a = telemetryAttributes(span);
         const key = a['softwareagents.task.key'];
         if (typeof key !== 'string' || (task && key !== task)) continue;
         if (seen.has(span.spanId)) continue;
         seen.add(span.spanId);
         const group = `${a['softwareagents.executor'] ?? 'unknown'}/${a['softwareagents.model.tier'] ?? 'unknown'}`;
-        add(total, a, prices);
-        add((byTask[key] ??= empty()), a, prices);
-        add((byExecutorLevel[group] ??= empty()), a, prices);
+        addTelemetryTotals(total, a, prices);
+        addTelemetryTotals((byTask[key] ??= emptyTelemetryTotals()), a, prices);
+        addTelemetryTotals((byExecutorLevel[group] ??= emptyTelemetryTotals()), a, prices);
       } catch {
         invalidLines++;
       }

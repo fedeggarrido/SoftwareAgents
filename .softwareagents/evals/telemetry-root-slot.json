@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "telemetry-root-slot",
+  "baseCommit": "e18e45c2c1557a784759444363639f7e6f310e17",
+  "fixCommit": "f78e10e5c4e45cd9a695416e80e3fc71147a4407",
+  "brief": "Fix OTLP export saturation in server/src/telemetry.ts: reserve one of the four concurrent export slots for the invoke_agent root span. Count skipped exports in an exportDropped counter. All six local spans must still be written when five tool spans followed by a root are offered to a saturated exporter; export three tools and the root. Do not install dependencies or modify tests, Git configuration or HEAD.",
+  "timeoutMin": 3,
+  "criteria": [
+    {
+      "file": "server/__tests__/telemetry.test.ts",
+      "testName": "a saturated OTLP exporter keeps a slot for the root and counts what it skips"
+    }
+  ]
+}

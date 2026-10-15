@@ -89,7 +89,7 @@ export class ExecutionRegistry {
   }
 
   /** Snapshot HEAD before start. Events are recorded as the caller drains the handle. */
-  executor(inner: Executor): Executor {
+  executor(inner: Executor, options: { metricsOnly?: boolean } = {}): Executor {
     const registry = this;
     return {
       id: inner.id,
@@ -148,7 +148,9 @@ export class ExecutionRegistry {
                   };
                   registry.append('softwareagents/executions.jsonl', record);
                 }
-                registry.append(run, event);
+                if (!options.metricsOnly || event.type === 'telemetry') registry.append(run, event);
+                else if (event.type === 'finished')
+                  registry.append(run, { type: 'finished', exitCode: event.exitCode });
                 yield event;
               }
             } finally {

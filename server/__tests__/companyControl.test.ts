@@ -267,6 +267,7 @@ describe('companyControl authorization and containment', () => {
     expect(setAutopilot(true)).toContain('en marcha');
     expect(childProcess.spawn).toHaveBeenCalledWith(command[0], command.slice(1), {
       cwd: workspace,
+      env: { ...process.env, SA_MANAGED_EXECUTION: 'autopilot' },
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

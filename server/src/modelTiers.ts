@@ -237,7 +237,10 @@ export function validateModelTierSupport(
     let tier: ModelTier | undefined = initialModelTier(agent, rule, policy, input).tier;
     while (tier) {
       reachable.add(tier);
-      tier = agent.modelPolicy.fallbackAllowed ? policy.tiers[tier]?.fallbackTo : undefined;
+      tier =
+        !input.evaluation && agent.modelPolicy.fallbackAllowed
+          ? policy.tiers[tier]?.fallbackTo
+          : undefined;
     }
   } else
     for (const tier of MODEL_TIERS.slice(0, MODEL_TIERS.indexOf(policy.maxTier) + 1))
@@ -246,6 +249,7 @@ export function validateModelTierSupport(
     const definition = policy.tiers[tier];
     if (!definition) continue;
     for (const candidate of definition.candidates) {
+      if (input.evaluation && candidate.executor !== input.evaluation.executor) continue;
       if (
         allowed.includes('claude') &&
         (executorLevels?.claude?.includes(tier) ?? true) &&
@@ -265,6 +269,8 @@ export function validateModelTierSupport(
 export interface TierInputs {
   workType?: WorkType;
   size?: WorkSize;
+  /** Explicit operator evaluation: exact configuration, never a quota fallback. */
+  evaluation?: { tier: ModelTier; executor: 'claude' | 'codex' };
 }
 export interface TierSelection {
   tier: ModelTier | null;
@@ -283,6 +289,12 @@ function initialModelTier(
   policy: ModelTierPolicy,
   input: TierInputs,
 ) {
+  if (input.evaluation) {
+    const { tier, executor } = input.evaluation;
+    if (!policy.tiers[tier] || MODEL_TIERS.indexOf(tier) > MODEL_TIERS.indexOf(policy.maxTier))
+      throw new ModelTierConfigError('Evaluation tier is undefined or exceeds Operator maxTier');
+    return { tier, requested: tier, prefix: `operator evaluation: ${executor}/${tier}` };
+  }
   const capability = agent.modelPolicy.capabilityClass;
   const base = Object.hasOwn(rule.capabilityWeights, capability)
     ? rule.capabilityWeights[capability]
@@ -326,6 +338,7 @@ export function selectModelTier(
     }
     let quotaBlocked = false;
     for (const choice of definition.candidates) {
+      if (input.evaluation && choice.executor !== input.evaluation.executor) continue;
       candidates++;
       // An Operator exclusion is not a quota wait: it never triggers fallback, so a
       // disallowed level cannot push a Task down to a lower tier (SA-092).
@@ -361,7 +374,13 @@ export function selectModelTier(
       waits.push(gate);
       quotaBlocked ||= gate.cause === 'quota';
     }
-    if (!quotaBlocked || !agent.modelPolicy.fallbackAllowed || !definition.fallbackTo) break;
+    if (
+      input.evaluation ||
+      !quotaBlocked ||
+      !agent.modelPolicy.fallbackAllowed ||
+      !definition.fallbackTo
+    )
+      break;
     current = definition.fallbackTo;
     downgrades.push(current);
   }

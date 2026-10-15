@@ -147,6 +147,11 @@ export class ExecutionTelemetry {
   private phaseStart: number;
   private phases: Attributes = {};
   private ended = false;
+  private completedRoot?: TelemetrySpan;
+  /** Content-free root retained for the eval runner, independent of sink rotation/failures. */
+  get rootSpan(): TelemetrySpan | undefined {
+    return this.completedRoot;
+  }
   constructor(
     private sink: TelemetrySink,
     input: {
@@ -243,7 +248,7 @@ export class ExecutionTelemetry {
     attributes: Attributes,
     parentSpanId?: string,
   ) {
-    this.sink.write({
+    const span: TelemetrySpan = {
       traceId: this.traceId,
       spanId,
       ...(parentSpanId ? { parentSpanId } : {}),
@@ -258,7 +263,9 @@ export class ExecutionTelemetry {
           key,
           value: typeof value === 'number' ? { intValue: String(value) } : { stringValue: value },
         })),
-    });
+    };
+    this.sink.write(span);
+    return span;
   }
   async finish(
     status: 'ok' | 'error' | 'require_human' = 'error',
@@ -268,16 +275,23 @@ export class ExecutionTelemetry {
     this.ended = true;
     for (const key of this.tools.keys()) this.endTool(key, status === 'error' ? 2 : 0, time, true);
     this.phases[`softwareagents.phase.${this.phaseName}_ms`] = Math.max(0, time - this.phaseStart);
-    this.emit(this.spanId, 'invoke_agent', this.start, time, status === 'error' ? 2 : 1, {
-      ...this.attrs,
-      ...this.phases,
-      'softwareagents.execution.status': status,
-      'softwareagents.telemetry.dropped_spans': this.sink.dropped,
-      ...(this.seen.size >= TELEMETRY_TOOL_LIMIT
-        ? { 'softwareagents.telemetry.tool_limit': 1 }
-        : {}),
-      ...(status === 'error' ? { 'error.type': 'execution_error' } : {}),
-    });
+    this.completedRoot = this.emit(
+      this.spanId,
+      'invoke_agent',
+      this.start,
+      time,
+      status === 'error' ? 2 : 1,
+      {
+        ...this.attrs,
+        ...this.phases,
+        'softwareagents.execution.status': status,
+        'softwareagents.telemetry.dropped_spans': this.sink.dropped,
+        ...(this.seen.size >= TELEMETRY_TOOL_LIMIT
+          ? { 'softwareagents.telemetry.tool_limit': 1 }
+          : {}),
+        ...(status === 'error' ? { 'error.type': 'execution_error' } : {}),
+      },
+    );
     await this.sink.flush();
   }
 }

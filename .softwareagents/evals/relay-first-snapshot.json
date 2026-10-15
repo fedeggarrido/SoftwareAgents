@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "relay-first-snapshot",
+  "baseCommit": "c50812eb6da03f9ef845c768044c827f6b75efc1",
+  "fixCommit": "1902974cc273cb119691410b570594959109bbf2",
+  "brief": "Fix server/src/domainEventRelay.ts: if the relay starts before the WorkStore can be located, initialize its polling cursor from the first successful snapshot. Do not skip transitions that arrive between that snapshot and the first tick, even when a second client requests a snapshot. Cover an initially empty event log and one with history; do not replay history or emit duplicate events. Keep the change in this module; do not install dependencies or modify tests, Git configuration or HEAD.",
+  "timeoutMin": 5,
+  "criteria": [
+    {
+      "file": "server/__tests__/domainEventRelay.test.ts",
+      "testName": "keeps transitions after the first successful snapshot"
+    }
+  ]
+}

@@ -17,6 +17,12 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `evalCommand.ts`, `evalTasks.ts`, `evalCriteria.ts`, `evalWorktree.ts`, `evalReport.ts`
+  (SA-094): banco histórico estricto, `eval list/validate/run/report`, ejecución
+  explícita sobre la ruta del worker y JSONL de métricas en Git common dir.
+  Guardas CI/autopilot en `evalGuard.ts`; comparación de AgentSpecs, coste y Pareto.
+  Véase [evals.md](../evals.md).
+
 - `telemetry.ts`, `telemetryObservations.ts`, `telemetryCommand.ts` (SA-095): spans
   GenAI por Execution/herramienta, JSONL acotado en Git common dir y OTLP opcional
   exclusivo del Operator, sin contenido. `pixel-agents telemetry summary --json`

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "levels-without-catalog",
+  "baseCommit": "777620c09cec5d30bbfea7f6c93c85c59fde3c79",
+  "fixCommit": "b96cf41acfb11c2aa035085e66ba4e7460acbf9a",
+  "brief": "Fix Project parsing in server/src/configPersistence.ts: executorLevels with at least one executor entry (including an empty level array) requires a modelTiers catalog. Reject only the invalid Project with 'Invalid Operator executorLevels: modelTiers catalog is required', retaining its original config on unrelated saves. An empty executorLevels map remains valid for legacy Projects. Do not install dependencies or modify tests, Git configuration or HEAD.",
+  "timeoutMin": 3,
+  "criteria": [
+    {
+      "file": "server/__tests__/configPersistence.test.ts",
+      "testName": "rejects only the restricted Project after its catalog is removed|keeps legacy Projects valid with an empty executorLevels map"
+    }
+  ]
+}

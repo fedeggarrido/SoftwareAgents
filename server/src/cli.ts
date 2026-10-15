@@ -38,6 +38,7 @@ import {
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { createDomainEventRelay } from './domainEventRelay.js';
+import { runEvalCommand } from './evalCommand.js';
 import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -162,6 +163,8 @@ export async function dispatchCli(
     await handlers.worker(parseWorkerArgs(argv.slice(1)));
   } else if (argv[0] === 'telemetry') {
     await runTelemetryCommand(argv.slice(1));
+  } else if (argv[0] === 'eval') {
+    await runEvalCommand(argv.slice(1));
   } else {
     await handlers.server(argv);
   }

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "effort-disabled-level",
+  "baseCommit": "777620c09cec5d30bbfea7f6c93c85c59fde3c79",
+  "fixCommit": "b96cf41acfb11c2aa035085e66ba4e7460acbf9a",
+  "brief": "Fix validateModelTierSupport in server/src/modelTiers.ts: Claude effort validation must skip candidates whose level is excluded by executorLevels, so a supported Codex candidate can run. Accept the optional per-executor level restrictions; keep validating allowed Claude levels. Preserve selection and quota behavior. Keep the change small; do not install dependencies or modify tests, Git configuration or HEAD.",
+  "timeoutMin": 3,
+  "criteria": [
+    {
+      "file": "server/__tests__/modelTiers.test.ts",
+      "testName": "skips effort validation for Claude levels"
+    }
+  ]
+}

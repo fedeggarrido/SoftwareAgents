@@ -1,5 +1,7 @@
 import { type ChildProcess, spawn } from 'child_process';
 
+import { MANAGED_EXECUTION_ENV } from '../evalGuard.js';
+
 // A worker may die immediately after spawn. This supervisor cannot launch the CLI
 // until the worker has durably registered its PID/creation identity and sent ACK.
 // It remains alive until the CLI closes, so a dead worker never hides a live CLI.
@@ -26,12 +28,14 @@ export function spawnRegisteredProcess(
   if (!register)
     return spawn(binary, args, {
       cwd,
+      env: { ...process.env, [MANAGED_EXECUTION_ENV]: 'worker' },
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   const child = spawn(process.execPath, ['-e', supervisor, binary, ...args], {
     cwd,
+    env: { ...process.env, [MANAGED_EXECUTION_ENV]: 'worker' },
     windowsHide: true,
     detached: process.platform !== 'win32',
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],

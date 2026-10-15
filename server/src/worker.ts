@@ -6,10 +6,12 @@ import { parse } from 'yaml';
 
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
+import type { ModelTier } from '../../core/src/modelTier.js';
 import { compileAgent, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
+import { assertEvalRunAllowed } from './evalGuard.js';
 import {
   closeAvailabilityDecisions,
   escalateUnavailable,
@@ -47,7 +49,7 @@ import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 import { taskModelInputs } from './taskModelInputs.js';
-import { ExecutionTelemetry, TelemetrySink } from './telemetry.js';
+import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface WorkerArgs {
@@ -130,6 +132,17 @@ export interface WorkerOptions {
   log?: (message: string) => void;
   /** Probe runner for the launch-time availability check; defaults to real probes. */
   probe?: ProbeRunner;
+  /** Internal eval runner only: same launch path, disposable detached tree, no commit. */
+  evaluation?: {
+    worktreePath: string;
+    executor: 'claude' | 'codex';
+    tier: ModelTier;
+    agentSpec?: AgentSpec;
+    /** Kept in memory; eval result storage must never contain a brief/prompt file. */
+    brief: string;
+    timeoutMin: number;
+    settled: (span: TelemetrySpan | undefined, terminationConfirmed: boolean) => void;
+  };
 }
 
 /** Manual runs without a quota policy keep conservative defaults (SA-036). */
@@ -142,6 +155,15 @@ function legacyMachinePolicy(snapshot: SelectionSnapshot, executor: 'claude' | '
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
+export function loadWorkerAgentSpec(file?: string): AgentSpec {
+  const template = path.join(__dirname, 'agents/templates/developer.yaml');
+  const source = path.resolve(__dirname, '../../agents/templates/developer.yaml');
+  return validateSchema(
+    compileSchema<AgentSpec>(agentSchema),
+    parse(fs.readFileSync(file ?? (fs.existsSync(template) ? template : source), 'utf8')),
+  );
+}
+
 export interface WorkerResult {
   branch: string;
   commit: string | null;
@@ -150,12 +172,14 @@ export interface WorkerResult {
   policyDecision?: PolicyDecision;
   /** SA-090: waiting needs the Operator; the deduplicated Human Decision, if recorded. */
   availabilityBlock?: { code: SelectionBlock['code']; decisionId: string | null };
+  evaluationSuccess?: boolean;
 }
 
 export async function runWorker(
   args: WorkerArgs,
   options: WorkerOptions = {},
 ): Promise<WorkerResult> {
+  if (options.evaluation) assertEvalRunAllowed();
   const telemetryStart = Date.now();
   const cwd = options.cwd ?? process.cwd();
   const log = options.log ?? console.log;
@@ -199,12 +223,10 @@ export async function runWorker(
     throw new CliUsageError('Operator config must authorize execution for this Project');
   }
   // Resolve/read before any launch; task data never selects executable or authority.
-  const brief = fs.readFileSync(path.resolve(cwd, args.brief), 'utf8');
-  const template = path.join(__dirname, 'agents/templates/developer.yaml');
-  const sourceTemplate = path.resolve(__dirname, '../../agents/templates/developer.yaml');
+  const brief = options.evaluation?.brief ?? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8');
   const spec = validateSchema(
     compileSchema<AgentSpec>(agentSchema),
-    parse(fs.readFileSync(fs.existsSync(template) ? template : sourceTemplate, 'utf8')),
+    options.evaluation?.agentSpec ?? loadWorkerAgentSpec(),
   );
   const taskData = {
     task: { key: args.task, brief },
@@ -212,6 +234,8 @@ export async function runWorker(
   };
   const compiled = compileAgent(spec, 'developer', taskData);
   const tierPolicy = config.operator.modelTiers;
+  if (options.evaluation && !tierPolicy)
+    throw new CliUsageError('eval run requires an Operator modelTiers catalog');
   const tierRule = tierPolicy ? (tierPolicy.rule ?? loadTierRule(cwd)) : undefined;
   const modelPolicy = !tierPolicy && args.selectExecutor ? loadModelPolicy(cwd) : undefined;
   let selection = modelPolicy
@@ -229,6 +253,15 @@ export async function runWorker(
     open?: WorkStore,
   ) => {
     let decisionId: string | null = null;
+    if (options.evaluation) {
+      return {
+        branch: '',
+        commit: null,
+        stat: '',
+        quotaDecision: gate,
+        availabilityBlock: { code: found.code, decisionId },
+      };
+    }
     try {
       const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
       const store =
@@ -279,12 +312,13 @@ export async function runWorker(
   // Identity is checked without writing Git configuration or consuming a runtime slot.
   try {
     for (const identity of ['GIT_AUTHOR_IDENT', 'GIT_COMMITTER_IDENT'])
-      execFileSync('git', ['var', identity], {
-        cwd,
-        encoding: 'utf8',
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      if (!options.evaluation)
+        execFileSync('git', ['var', identity], {
+          cwd,
+          encoding: 'utf8',
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
   } catch {
     throw new CliUsageError(
       'worker run requires valid Git author and committer identity; configure it before launching',
@@ -314,8 +348,9 @@ export async function runWorker(
   const authorityBlock = () => executorAuthorityBlock(config.project.id, config.operator);
   const probe = options.probe ?? runProbe;
   // SA-090: the server's probe cache lives in another process; probe what may launch.
-  const probed: ('claude' | 'codex')[] =
-    tierPolicy || modelPolicy
+  const probed: ('claude' | 'codex')[] = options.evaluation
+    ? [options.evaluation.executor]
+    : tierPolicy || modelPolicy
       ? (['claude', 'codex'] as const).filter((id) => config.operator.allowedExecutors.includes(id))
       : config.operator.allowedExecutors.includes('claude')
         ? ['claude']
@@ -347,9 +382,21 @@ export async function runWorker(
     const tierAdmission =
       tierPolicy && tierRule
         ? await (async () => {
-            const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
-            workStore = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-            const inputs = taskModelInputs(config, workStore.getTask(args.task), args.task);
+            if (!options.evaluation) {
+              const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
+              workStore = await openWorkStore({
+                repositoryPath: cwd,
+                projectId: config.project.id,
+              });
+            }
+            const inputs = options.evaluation
+              ? {
+                  evaluation: {
+                    tier: options.evaluation.tier,
+                    executor: options.evaluation.executor,
+                  },
+                }
+              : taskModelInputs(config, workStore!.getTask(args.task), args.task);
             availability = await observeExecutors(probed, config.operator, probe);
             validateModelTierSupport(
               tierPolicy,
@@ -492,11 +539,12 @@ export async function runWorker(
     // Admitted: any availability block for this scope no longer holds (SA-090).
     try {
       const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
-      const store =
-        workStore ??
-        (fs.existsSync(path.join(common, 'softwareagents/work.sqlite3'))
-          ? await openWorkStore({ repositoryPath: cwd, projectId: config.project.id })
-          : undefined);
+      const store = options.evaluation
+        ? undefined
+        : (workStore ??
+          (fs.existsSync(path.join(common, 'softwareagents/work.sqlite3'))
+            ? await openWorkStore({ repositoryPath: cwd, projectId: config.project.id })
+            : undefined));
       try {
         const closed = store ? await closeAvailabilityDecisions(store, scope, executionId) : [];
         if (closed.length) log(`Availability restored for ${scope}: closed ${closed.join(', ')}`);
@@ -565,11 +613,13 @@ export async function runWorker(
           reason: tierSelection.reason,
         },
       });
-    const tree = await new WorktreeManager({
-      repositoryPath: cwd,
-      defaultBranch: config.project.repo.defaultBranch,
-      manualPreparation: true,
-    }).create(args.task, 'worker');
+    const tree = options.evaluation
+      ? { path: options.evaluation.worktreePath, branch: '' }
+      : await new WorktreeManager({
+          repositoryPath: cwd,
+          defaultBranch: config.project.repo.defaultBranch,
+          manualPreparation: true,
+        }).create(args.task, 'worker');
     if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
       throw new Error('Existing task worktree is dirty; review it before retrying');
     const base = git(tree.path, ['rev-parse', 'HEAD']);
@@ -619,6 +669,7 @@ export async function runWorker(
             binaryArgs: options.binaryArgs,
             runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
           }),
+      { metricsOnly: !!options.evaluation },
     );
     if (interrupted) throw new Error('Worker interrupted');
     {
@@ -636,6 +687,7 @@ export async function runWorker(
     if (invalidated) return invalidatedResult(invalidated);
     slot.markLaunching('registered_wrapper');
     telemetry.phase('execution');
+    options.evaluation?.settled(undefined, false);
     handle = executor.start({
       executionId,
       projectId: config.project.id,
@@ -655,7 +707,7 @@ export async function runWorker(
           }
         : {}),
       worktreePath: tree.path,
-      timeoutMin: 30,
+      timeoutMin: options.evaluation?.timeoutMin ?? 30,
       registerProcess: (pid) => slot!.setExecutionProcess(pid),
     });
     if (handle.sessionId) {
@@ -686,6 +738,13 @@ export async function runWorker(
     }
     telemetry.phase('commit_guards');
     if (slotFailure) throw slotFailure;
+    if (options.evaluation) {
+      if (interrupted) throw new Error('Evaluation interrupted');
+      if (git(tree.path, ['rev-parse', 'HEAD']) !== base)
+        throw new Error('Evaluation changed Git HEAD');
+      telemetryStatus = exitCode === 0 ? 'ok' : 'error';
+      return { branch: '', commit: null, stat: '', evaluationSuccess: exitCode === 0 };
+    }
     if (interrupted || exitCode !== 0)
       throw new Error('Execution failed or was interrupted; changes retained for review');
     if (
@@ -771,5 +830,9 @@ export async function runWorker(
         release();
       }
     } else log('Task lock and executor slot retained: executor termination was not confirmed.');
+    options.evaluation?.settled(
+      telemetry?.rootSpan,
+      !handle || !eventsStarted || executionFinished,
+    );
   }
 }

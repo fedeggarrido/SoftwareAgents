@@ -42,6 +42,32 @@ const policy: ModelTierPolicy = {
     },
   },
 };
+
+it('explicit eval selection keeps executor/tier exact under quota and never falls back', () => {
+  const input = { evaluation: { executor: 'claude' as const, tier: 'deep' as const } };
+  expect(selectModelTier(spec('standard_coding'), rule, policy, input, snapshot())).toMatchObject({
+    tier: 'deep',
+    choice: { executor: 'claude' },
+    downgrades: [],
+  });
+  expect(
+    selectModelTier(spec('standard_coding'), rule, policy, input, snapshot(true)),
+  ).toMatchObject({
+    tier: 'deep',
+    choice: null,
+    gate: { status: 'wait', cause: 'quota' },
+    downgrades: [],
+  });
+  expect(() =>
+    selectModelTier(
+      spec('standard_coding'),
+      rule,
+      { ...policy, maxTier: 'economy' },
+      input,
+      snapshot(),
+    ),
+  ).toThrow('maxTier');
+});
 const spec = (capabilityClass: string, fallbackAllowed = true): AgentSpec =>
   ({
     identity: {

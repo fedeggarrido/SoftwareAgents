@@ -98,6 +98,7 @@ const migrations = [
   `ALTER TABLE executions ADD COLUMN model_tier TEXT CHECK(model_tier IN ('economy','standard','deep'));
   ALTER TABLE executions ADD COLUMN model_effort TEXT;
   ALTER TABLE executions ADD COLUMN selection_reason TEXT;`,
+  `ALTER TABLE tasks ADD COLUMN declaration TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

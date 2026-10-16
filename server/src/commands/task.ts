@@ -1,0 +1,289 @@
+import { execFileSync } from 'child_process';
+import { createHash, randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { parseDocument } from 'yaml';
+
+import { AuditLog } from '../auditLog.js';
+import { CliUsageError } from '../cliErrors.js';
+import {
+  TASK_CLI_COPY_BUFFER_BYTES,
+  TASK_CLI_DEFAULT_KEEP,
+  TASK_CLI_MAX_KEEP,
+} from '../constants.js';
+import { parseFeatureSpec } from '../featureSpec.js';
+import { loadProjectConfig } from '../projectConfig.js';
+import { analyzeTaskDag, parseTaskDag } from '../taskDag.js';
+import { openWorkStore } from '../workstore/SqliteWorkStore.js';
+import { isTaskStatus, type TaskStatus } from '../workstore/taskStateMachine.js';
+import type { WorkStore } from '../workstore/WorkStore.js';
+import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFiles.js';
+
+const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
+const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
+const USAGE =
+  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | backup [--keep N]';
+
+function parseArgs(argv: string[]) {
+  const [command, ...args] = argv;
+  let status: TaskStatus | undefined;
+  let json = false;
+  let keep = TASK_CLI_DEFAULT_KEEP;
+  if (command === 'import' && args.length === 1 && !args[0].startsWith('-'))
+    return { command, file: args[0], status, json, keep };
+  if (command === 'list') {
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--json' && !json) json = true;
+      else if (args[i] === '--status' && status === undefined && isTaskStatus(args[i + 1] ?? ''))
+        status = args[++i] as TaskStatus;
+      else throw new CliUsageError(`${USAGE}. Invalid or duplicate list option/status.`);
+    }
+  } else if (command === 'backup') {
+    if (args.length) {
+      if (args.length !== 2 || args[0] !== '--keep' || !/^[1-9]\d*$/.test(args[1]))
+        throw new CliUsageError(
+          `${USAGE}. --keep must be an integer from 1 to ${TASK_CLI_MAX_KEEP}.`,
+        );
+      keep = Number(args[1]);
+      if (keep > TASK_CLI_MAX_KEEP)
+        throw new CliUsageError(`--keep must be from 1 to ${TASK_CLI_MAX_KEEP}`);
+    }
+  } else throw new CliUsageError(USAGE);
+  return { command, file: undefined, status, json, keep };
+}
+
+function audit(projectId: string, action: string, status: string, input?: unknown) {
+  // Direct append fails visibly; intent precedes mutation, completion follows commit.
+  new AuditLog().append({
+    projectId,
+    actorType: 'human',
+    actorId: 'operator',
+    action,
+    resourceType: 'project',
+    resourceId: projectId,
+    policyDecision: null,
+    riskLevel: 'medium',
+    taskKey: null,
+    executionId: null,
+    outcome: { status },
+    input,
+  });
+}
+
+function list(store: WorkStore, status?: TaskStatus) {
+  const tasks = store.listTasks();
+  const byKey = new Map(tasks.map((task) => [task.key, task]));
+  const decisions = store.listDecisions().filter((decision) => decision.status === 'open');
+  return tasks
+    .filter((task) => !status || task.status === status)
+    .map((task) => {
+      const pendingDependencies = store
+        .listTaskDependencies(task.key)
+        .map((edge) => edge.depends_on_key)
+        .filter((key) => byKey.get(key)?.status !== 'DONE');
+      let resetsAt: string | null = null;
+      let reason = task.blocked_reason;
+      if (task.status === 'WAITING_QUOTA' && reason) {
+        try {
+          const quota = JSON.parse(reason);
+          if (typeof quota.resetsAt === 'string') resetsAt = quota.resetsAt;
+          if (typeof quota.reason === 'string') reason = quota.reason;
+        } catch {
+          /* Older reasons may be plain text. */
+        }
+      }
+      const humanDecisions = decisions.filter((decision) => decision.blocks.includes(task.key));
+      const event =
+        task.status === 'WAITING_HUMAN' ? store.listDomainEvents(task.key).at(-1) : undefined;
+      return {
+        ...task,
+        pendingDependencies,
+        resetsAt,
+        blockingReasons: [
+          ...(pendingDependencies.length
+            ? [`Dependencies pending: ${pendingDependencies.join(', ')}`]
+            : []),
+          ...(reason ? [reason] : []),
+          ...(task.status === 'WAITING_QUOTA'
+            ? [`WAITING_QUOTA (resetsAt: ${resetsAt ?? 'unknown'})`]
+            : []),
+          ...(task.status === 'WAITING_HUMAN'
+            ? [
+                `WAITING_HUMAN: ${humanDecisions.map((decision) => `${decision.id}: ${decision.context}`).join('; ') || event?.reason || 'human answer required'}`,
+              ]
+            : []),
+        ],
+      };
+    });
+}
+
+/** Remove only our three regular files, never traverse an unknown tree or a link. */
+function removeBackup(root: string, name: string): void {
+  const dir = taskPath(root, name);
+  if (!fs.lstatSync(dir).isDirectory()) throw new Error(`Invalid backup directory: ${dir}`);
+  const files = fs.readdirSync(dir);
+  for (const file of files) {
+    if (
+      !BACKUP_FILES.includes(file as (typeof BACKUP_FILES)[number]) ||
+      !fs.lstatSync(taskPath(dir, file)).isFile()
+    )
+      throw new Error(`Unexpected backup content: ${path.join(dir, file)}`);
+  }
+  for (const file of files) fs.unlinkSync(taskPath(dir, file));
+  fs.rmdirSync(dir);
+}
+
+async function backup(store: WorkStore, keep: number): Promise<string> {
+  const home = fs.realpathSync.native(os.homedir());
+  // AuditLog.file validates the Project id before it can become a path component.
+  const auditFile = new AuditLog().file(store.projectId);
+  const root = taskDirectory(home, `.pixel-agents/backups/${store.projectId}`);
+  const backupLock = taskPath(root, '.backup.lock');
+  const backupDescriptor = fs.openSync(backupLock, 'wx', 0o600);
+  const name = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`;
+  const stagingName = `.pending-${randomUUID()}`;
+  const staging = taskPath(root, stagingName);
+  try {
+    taskDirectory(root, stagingName);
+    const database = taskPath(staging, 'work.sqlite3');
+    await store.backup(database);
+    fs.chmodSync(database, 0o600);
+    // Stop cooperating JSONL writers while copying; a stale/busy lock fails closed.
+    const relativeAudit = path.relative(home, auditFile);
+    taskDirectory(home, path.dirname(relativeAudit));
+    taskPath(home, relativeAudit);
+    const lock = taskPath(home, `${relativeAudit}.lock`);
+    const fd = fs.openSync(lock, 'wx', 0o600);
+    try {
+      const output = taskPath(staging, 'audit.jsonl');
+      if (fs.existsSync(auditFile)) copyTaskFile(taskPath(home, relativeAudit), output);
+      else fs.writeFileSync(output, '', { flag: 'wx', mode: 0o600 });
+    } finally {
+      fs.closeSync(fd);
+      fs.unlinkSync(lock);
+    }
+    const hashes = Object.fromEntries(
+      ['work.sqlite3', 'audit.jsonl'].map((file) => [file, hashFile(taskPath(staging, file))]),
+    );
+    const manifest = taskPath(staging, 'manifest.json');
+    fs.writeFileSync(
+      manifest,
+      JSON.stringify(
+        {
+          format: 1,
+          projectId: store.projectId,
+          createdAt: new Date().toISOString(),
+          databaseScope: 'git-common-dir',
+          hashes,
+        },
+        null,
+        2,
+      ) + '\n',
+      { flag: 'wx', mode: 0o600 },
+    );
+    for (const file of BACKUP_FILES) {
+      const fd = fs.openSync(taskPath(staging, file), 'r+');
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    const destination = taskPath(root, name);
+    fs.renameSync(staging, destination);
+    const names = fs
+      .readdirSync(root)
+      .filter((entry) => BACKUP_NAME.test(entry))
+      .sort()
+      .reverse();
+    for (const old of names.slice(keep)) removeBackup(root, old);
+    return destination;
+  } catch (error) {
+    if (fs.existsSync(staging)) removeBackup(root, stagingName);
+    throw error;
+  } finally {
+    fs.closeSync(backupDescriptor);
+    fs.unlinkSync(backupLock);
+  }
+}
+
+function hashFile(file: string): string {
+  const hash = createHash('sha256');
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const buffer = Buffer.alloc(TASK_CLI_COPY_BUFFER_BYTES);
+    let count: number;
+    while ((count = fs.readSync(fd, buffer, 0, buffer.length, null)))
+      hash.update(buffer.subarray(0, count));
+    return hash.digest('hex');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+export async function runTaskCommand(
+  argv: string[],
+  cwd = process.cwd(),
+  log = console.log,
+): Promise<void> {
+  const args = parseArgs(argv);
+  let store: WorkStore | undefined;
+  try {
+    const config = loadProjectConfig(cwd, true);
+    if (!config)
+      throw new CliUsageError('task requires a bound Git Project (.softwareagents/project.yaml)');
+    if (args.command === 'import') {
+      const source = readTaskInput(cwd, args.file!);
+      const document = parseDocument(source, { uniqueKeys: true });
+      if (document.errors.length)
+        throw new Error(document.errors.map((error) => error.message).join('; '));
+      const dag = parseTaskDag(document.toJS({ maxAliasCount: 100 }));
+      const specRelative = path.relative(
+        cwd,
+        path.join(config.paths.brain, 'features/requests', `${dag.feature}.yaml`),
+      );
+      const spec = parseFeatureSpec(readTaskInput(cwd, specRelative), specRelative);
+      const analysis = analyzeTaskDag(dag, spec);
+      if (!analysis.valid) throw new Error(`Invalid TaskDAG: ${JSON.stringify(analysis.issues)}`);
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd,
+        encoding: 'utf8',
+        windowsHide: true,
+      }).trim();
+      store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+      taskDirectory(os.homedir(), '.pixel-agents/audit');
+      taskPath(os.homedir(), `.pixel-agents/audit/${config.project.id}.jsonl`);
+      taskPath(os.homedir(), `.pixel-agents/audit/${config.project.id}.jsonl.lock`);
+      audit(config.project.id, 'task_import', 'intent', dag);
+      const created = await store.importTaskDag(dag, {
+        key: dag.feature,
+        doc_path: specRelative,
+        git_sha: sha,
+        status: spec.status,
+      });
+      audit(config.project.id, 'task_import', 'committed', { feature: dag.feature, created });
+      log(`Imported ${dag.feature}: ${created} created, ${dag.tasks.length - created} unchanged`);
+    } else {
+      store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+      if (args.command === 'backup') log(await backup(store, args.keep));
+      else {
+        const tasks = list(store, args.status);
+        if (args.json) log(JSON.stringify(tasks, null, 2));
+        else
+          log(
+            tasks
+              .map(
+                (task) =>
+                  `${task.key}\t${task.status}\towner=${task.lease_owner ?? '-'}\texpires=${task.lease_expires_at ?? '-'}\t${task.blockingReasons.join('; ')}`,
+              )
+              .join('\n') || 'No tasks',
+          );
+      }
+    }
+  } catch (error) {
+    throw new CliUsageError(`task ${args.command}: ${(error as Error).message}`);
+  } finally {
+    store?.close();
+  }
+}

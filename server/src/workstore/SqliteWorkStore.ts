@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 
 import * as decisionSchema from '../../../core/schemas/human-decision.schema.json';
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
+import type { TaskDag } from '../../../core/src/taskDag.js';
 import {
   WORKSTORE_BUSY_TIMEOUT_MS,
   WORKSTORE_DEFAULT_MAX_ATTEMPTS,
@@ -498,7 +499,7 @@ class SqliteWorkStore implements WorkStore {
       throw new Error('New Task cannot import a lease; use claim');
     const now = new Date().toISOString();
     this.db
-      .prepare(`INSERT INTO tasks VALUES (${Array(18).fill('?').join(',')})`)
+      .prepare(`INSERT INTO tasks VALUES (${Array(18).fill('?').join(',')}, NULL)`)
       .run(
         this.projectId,
         task.feature_key ?? null,
@@ -529,6 +530,67 @@ class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as TaskRecord[];
+  }
+  importTaskDag(dag: TaskDag, feature: Omit<FeatureRecord, 'project_id'>): Promise<number> {
+    // Snapshot before a busy retry; callers cannot mutate the batch while waiting.
+    const declarations = dag.tasks.map((task) => ({
+      ...task,
+      dependsOn: [...task.dependsOn].sort(),
+      acceptanceRefs: [...task.acceptanceRefs].sort(),
+    }));
+    return this.write(() => {
+      let created = 0;
+      if (!this.getFeature(feature.key)) this.createFeature(feature);
+      for (const task of declarations) {
+        // Explicit field order makes YAML/JSON property ordering irrelevant.
+        const declaration = JSON.stringify({
+          feature: dag.feature,
+          key: task.key,
+          type: task.type,
+          title: task.title,
+          description: task.description,
+          acceptanceRefs: task.acceptanceRefs,
+          dependsOn: task.dependsOn,
+          agentRole: task.agentRole,
+          size: task.size,
+        });
+        const current = this.getTask(task.key);
+        if (current) {
+          const deps = this.listTaskDependencies(task.key).map((edge) => edge.depends_on_key);
+          if (
+            current.declaration !== declaration ||
+            current.feature_key !== dag.feature ||
+            current.type !== task.type ||
+            current.agent_role !== task.agentRole ||
+            JSON.stringify(deps) !== JSON.stringify(task.dependsOn)
+          )
+            throw new Error(`Task ${task.key}: reimport conflicts with its immutable declaration`);
+          continue;
+        }
+        this.createTask({
+          key: task.key,
+          type: task.type,
+          feature_key: dag.feature,
+          agent_role: task.agentRole,
+        });
+        this.db
+          .prepare('UPDATE tasks SET declaration = ? WHERE project_id = ? AND key = ?')
+          .run(declaration, this.projectId, task.key);
+        created++;
+      }
+      for (const task of declarations)
+        for (const dep of task.dependsOn)
+          this.db
+            .prepare('INSERT OR IGNORE INTO task_dependencies VALUES (?, ?, ?)')
+            .run(this.projectId, task.key, dep);
+      return created;
+    });
+  }
+  async backup(destination: string): Promise<void> {
+    if (this.closed) throw new Error('WorkStore is closed');
+    await retryBusy(this.db, performance.now() + WORKSTORE_BUSY_TIMEOUT_MS, () =>
+      this.db.prepare('VACUUM INTO ?').run(destination),
+    );
   }
   canStart(taskId: string): boolean {
     if (!this.getTask(taskId)) return false;

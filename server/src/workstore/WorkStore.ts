@@ -1,5 +1,6 @@
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
+import type { TaskDag } from '../../../core/src/taskDag.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
@@ -35,6 +36,7 @@ export interface TaskRecord {
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
+  declaration?: string | null;
 }
 
 export interface TaskDependencyRecord {
@@ -114,6 +116,10 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
+  /** Validated DAG ingress. Existing keys are immutable; the entire batch is atomic. */
+  importTaskDag(dag: TaskDag, feature: Omit<FeatureRecord, 'project_id'>): Promise<number>;
+  /** SQLite-consistent snapshot, including committed WAL pages. Destination must not exist. */
+  backup(destination: string): Promise<void>;
   canStart(taskId: string): boolean;
   /** TTL in milliseconds. Owner must be unique to this worker incarnation. */
   claim(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;

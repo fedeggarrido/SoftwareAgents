@@ -17,6 +17,10 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `commands/task.ts` (SA-027): `task import/list/backup`, validación SA-014,
+  importación atómica e inmutable por key, snapshots SQLite con WAL y auditoría.
+  Restore offline y pruebas en [task-cli.md](../task-cli.md).
+
 - `modelCascade.ts` (SA-103): cascada opt-in del Operator, verificadores compartidos con evals, reinicio entre intentos y auditoría/telemetría por intento; [executor-selection.md](../executor-selection.md#cascada-con-verificador-sa-103-opt-in).
 
 - `evalCommand.ts`, `evalTasks.ts`, `evalCriteria.ts`, `evalWorktree.ts`, `evalReport.ts`

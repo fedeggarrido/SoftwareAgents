@@ -10,6 +10,11 @@ const validateFeature = compileSchema<FeatureSpec>(featureSchema);
 /** Reads an explicitly selected file only. Project-scoped callers must enforce path containment. */
 export function loadFeatureSpec(file: string): FeatureSpec {
   const source = fs.readFileSync(file, 'utf8');
+  return parseFeatureSpec(source, file);
+}
+
+/** Parse a caller-supplied, bounded snapshot using the same FeatureSpec validation. */
+export function parseFeatureSpec(source: string, file: string): FeatureSpec {
   try {
     const document = parseDocument(source, { uniqueKeys: true });
     if (document.errors.length) {

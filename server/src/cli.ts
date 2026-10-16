@@ -29,6 +29,7 @@ import {
 } from './clientMessageHandler.js';
 import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
+import { runFeatureCommand } from './commands/feature.js';
 import { runTaskCommand } from './commands/task.js';
 import { configureCompanyControl } from './companyControl.js';
 import {
@@ -168,6 +169,8 @@ export async function dispatchCli(
     await runEvalCommand(argv.slice(1));
   } else if (argv[0] === 'task') {
     await runTaskCommand(argv.slice(1));
+  } else if (argv[0] === 'feature') {
+    await runFeatureCommand(argv.slice(1));
   } else {
     await handlers.server(argv);
   }

@@ -7,6 +7,7 @@ import { parseDocument } from 'yaml';
 import * as schema from '../../core/schemas/feature-spec.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import { loadFeatureSpec } from '../src/featureSpec.js';
+import { validateRequirements } from '../src/requirements.js';
 import { compileSchema, SchemaValidationError, validateSchema } from '../src/schemaValidation.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -15,6 +16,25 @@ const valid = () => loadFeatureSpec(fixture('feature-spec.valid.yaml'));
 const validate = compileSchema<FeatureSpec>(schema);
 
 describe('FeatureSpec v1alpha1', () => {
+  it('keeps old criteria valid and requires EARS only at Requirements ingress', () => {
+    const spec = valid();
+    spec.status = 'draft';
+    expect(validate(spec)).toBe(true);
+    expect(() => validateRequirements(JSON.stringify(spec), spec.key)).toThrow('/ears');
+    for (const ears of [
+      'The system shall display events.',
+      'When the operator opens audit, the system shall display events.',
+      'While a filter is active, the system shall display matching events.',
+      'Where audit is enabled, the system shall display events.',
+      'If a line is corrupt, then the system shall display the other events.',
+    ]) {
+      const output = { ...spec, acceptance: spec.acceptance.map((ac) => ({ ...ac, ears })) };
+      expect(validateRequirements(JSON.stringify(output), spec.key)).toEqual(output);
+    }
+    expect(
+      validate({ ...spec, acceptance: [{ ...spec.acceptance[0], ears: 'Show events' }] }),
+    ).toBe(false);
+  });
   it('loads the valid fixture and reusable template', () => {
     expect(valid()).toMatchObject({ key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] });
     expect(loadFeatureSpec(path.join(root, '.softwareagents/templates/FEATURE_SPEC.yaml'))).toEqual(

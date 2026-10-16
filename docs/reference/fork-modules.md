@@ -17,6 +17,10 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `commands/feature.ts`, `requirements.ts` (SA-041): petición → FeatureSpec
+  validado con Given/When/Then y EARS, vía worker `brain_write`; aprobación humana
+  vinculada al SHA y Human Decisions. [Feature pipeline](../feature-pipeline.md).
+
 - `commands/task.ts` (SA-027): `task import/list/backup`, validación SA-014,
   importación atómica e inmutable por key, snapshots SQLite con WAL y auditoría.
   Restore offline y pruebas en [task-cli.md](../task-cli.md).

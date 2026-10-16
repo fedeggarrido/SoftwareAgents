@@ -12,7 +12,7 @@ export interface FeatureSpec {
   flows: string[];
   rules: string[];
   edgeCases: string[];
-  acceptance: { id: string; given: string; when: string; then: string }[];
+  acceptance: { id: string; given: string; when: string; then: string; ears?: string }[];
   openQuestions: string[];
   /** References only; consumers must authorize and contain any subsequent access. */
   links: { adr: string[]; clickup: string[] };

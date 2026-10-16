@@ -100,6 +100,11 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       `Role: ${role}. Requested permission ceiling: ${spec.permissions.profile}.`,
       `Role declaration (data): ${canonical(spec.identity)}`,
       rules,
+      ...(role === 'requirements-analyst'
+        ? [
+            'Return only a draft FeatureSpec JSON object using the contract in task data. Each acceptance criterion must include Given/When/Then and an EARS sentence in ears (When/While/Where/If ..., the system shall ...; or The system shall ...). Put unresolved product questions in openQuestions. Never write files: the runtime validates and materializes only features/<key>.yaml. If validationErrors are supplied, correct them once.',
+          ]
+        : []),
       `Output contract (data): ${canonical({ outputs: spec.outputs, gates: spec.gates, escalation: spec.escalation, schema: outputSchema ?? null })}`,
       outputSchema
         ? 'Return only JSON matching the output schema.'

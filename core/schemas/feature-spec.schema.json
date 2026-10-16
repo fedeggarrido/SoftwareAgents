@@ -75,6 +75,10 @@
           },
           "then": {
             "$ref": "#/definitions/text"
+          },
+          "ears": {
+            "type": "string",
+            "pattern": "^(?:[Ww][Hh][Ee][Nn] .+, |[Ww][Hh][Ii][Ll][Ee] .+, |[Ww][Hh][Ee][Rr][Ee] .+, |[Ii][Ff] .+, [Tt][Hh][Ee][Nn] )?[Tt]he .+ shall .+\\S[.!]?$"
           }
         },
         "required": ["id", "given", "when", "then"]

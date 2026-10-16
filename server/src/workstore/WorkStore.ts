@@ -113,6 +113,8 @@ export interface WorkStore {
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void;
   getFeature(key: string): FeatureRecord | undefined;
   listFeatures(): FeatureRecord[];
+  /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */
+  approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void>;
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];

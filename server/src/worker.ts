@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
+import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
@@ -64,7 +65,17 @@ import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
-import { compileSchema, validateSchema } from './schemaValidation.js';
+import {
+  guardRequirementsWrites,
+  openRequirementsQuestions,
+  requirementsBrief,
+  requirementsDocPath,
+  type RequirementsRequest,
+  requirementsSnapshot,
+  validateRequirements,
+  writeRequirements,
+} from './requirements.js';
+import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskModelInputs } from './taskModelInputs.js';
 import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
@@ -176,6 +187,8 @@ export function acquireTaskLock(commonDirectory: string, task: string): () => vo
 
 export interface WorkerOptions {
   cwd?: string;
+  /** Trusted feature CLI entry; reuses admission, leases and executor containment. */
+  requirements?: RequirementsRequest;
   /** Injection for protocol tests only; CLI obtains binary exclusively from Operator config. */
   binaryArgs?: readonly string[];
   log?: (message: string) => void;
@@ -222,6 +235,7 @@ export interface WorkerResult {
   branch: string;
   commit: string | null;
   stat: string;
+  requirementsQuestions?: string[];
   quotaDecision?: QuotaDecision;
   policyDecision?: PolicyDecision;
   /** SA-090: waiting needs the Operator; the deduplicated Human Decision, if recorded. */
@@ -271,7 +285,12 @@ export async function runWorker(
       'worker run requires .softwareagents/project.yaml in the main checkout',
     );
   requireGitIdentity(cwd);
-  if (!/^SA-\d{3,}$/.test(args.task)) throw new CliUsageError('Invalid task key');
+  if (
+    options.requirements
+      ? !/^FEAT-\d{3}$/.test(args.task) || options.requirements.key !== args.task
+      : !/^SA-\d{3,}$/.test(args.task)
+  )
+    throw new CliUsageError('Invalid task key');
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
   const legacyLock = resolveInside(common, `softwareagents/locks/${args.task}.lock`);
   if (fs.existsSync(legacyLock))
@@ -281,6 +300,21 @@ export async function runWorker(
   const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
   const lifecycle = new WorkerLifecycle(store, args.task);
   try {
+    if (options.requirements) {
+      const existing = store.getTask(args.task);
+      if (existing && (existing.agent_role !== 'requirements-analyst' || existing.type !== 'docs'))
+        throw new CliUsageError('Feature task belongs to another workflow');
+      if (!existing)
+        store.createTask({ key: args.task, type: 'docs', agent_role: 'requirements-analyst' });
+      if (existing?.status === 'FAILED_RETRYABLE')
+        await store.transition(
+          existing.key,
+          existing.version,
+          'READY',
+          'Explicit Requirements retry',
+          'operator',
+        );
+    }
     // Availability decisions must be re-evaluated by selection before claim.
     if (store.getTask(args.task)?.status !== 'WAITING_HUMAN') await lifecycle.claim();
     const result = await runWorkerExecution(args, options, lifecycle, config);
@@ -290,6 +324,8 @@ export async function runWorker(
         'REVIEW',
         result.commit ? `Runtime commit ${result.commit}` : 'Execution finished without changes',
       );
+    if (result.requirementsQuestions)
+      await openRequirementsQuestions(store, args.task, result.requirementsQuestions);
     return result;
   } catch (error) {
     await lifecycle.finish(
@@ -358,11 +394,13 @@ async function runWorkerExecution(
   audit('policy_allowed');
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief =
+    (options.requirements ? requirementsBrief(options.requirements) : undefined) ??
     options.evaluation?.brief ??
     (args.brief
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
+    (options.requirements ? 'requirements-analyst' : undefined) ??
     lifecycle?.store.getTask(args.task)?.agent_role ??
     options.evaluation?.agentSpec?.identity.role ??
     'developer';
@@ -372,9 +410,12 @@ async function runWorkerExecution(
   );
   const taskData = {
     task: { key: args.task, brief },
-    repository: { projectId: config.project.id },
+    repository: {
+      projectId: config.project.id,
+      ...(options.requirements ? { brainPath: config.project.brain.path } : {}),
+    },
   };
-  const compiled = compileAgent(spec, role, taskData);
+  let compiled = compileAgent(spec, role, taskData);
   // Explicit selection only narrows the Operator catalog.
   const tierPolicy =
     config.operator.modelTiers && args.executor
@@ -525,6 +566,13 @@ async function runWorkerExecution(
   let exitCode: number | undefined;
   let executionDiagnostic: string | undefined;
   let runtimeQuota: QuotaDecision | undefined;
+  let requirementsAttempt = 0;
+  let requirementsOutput = '';
+  let featureSpec: FeatureSpec | undefined;
+  let requirementsBefore: Map<string, string> | undefined;
+  const featureDoc = options.requirements
+    ? requirementsDocPath(config.project.brain.path, options.requirements.key)
+    : undefined;
   const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
     if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
     const outcome: CascadeAttempt = {
@@ -619,6 +667,7 @@ async function runWorkerExecution(
             : {};
     cascade = tierPolicy?.cascade;
     if (
+      !options.requirements &&
       cascade?.enabled &&
       tierPolicy &&
       tierRule &&
@@ -897,6 +946,7 @@ async function runWorkerExecution(
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (options.requirements) requirementsBefore ??= requirementsSnapshot(tree.path);
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
       audit('worktree_prepared');
@@ -1009,6 +1059,7 @@ async function runWorkerExecution(
         await workStore?.setExecutionSession(executionId, handle.sessionId);
       }
       exitCode = undefined;
+      requirementsOutput = '';
       executionDiagnostic = undefined;
       eventsStarted = true;
       for await (const event of handle.events) {
@@ -1052,6 +1103,7 @@ async function runWorkerExecution(
         }
         if (event.type === 'finished') {
           exitCode = event.exitCode;
+          if (options.requirements && exitCode === 0) requirementsOutput = event.resultSummary;
           if (exitCode !== 0)
             executionDiagnostic = failureDiagnostic(event.resultSummary, exitCode);
           executionFinished = true;
@@ -1059,12 +1111,48 @@ async function runWorkerExecution(
       }
       if (lifecycle && executionFinished)
         await workStore!.closeExecution(executionId, lifecycle.owner);
+      if (options.requirements) guardRequirementsWrites(tree.path, requirementsBefore!);
       if (runtimeQuota) {
         process.exitCode = 3;
         return { branch: tree.branch, commit: null, stat: '', quotaDecision: runtimeQuota };
       }
       telemetry.phase('commit_guards');
       if (slotFailure) throw slotFailure;
+      if (options.requirements) {
+        guardRequirementsWrites(tree.path, requirementsBefore!);
+        if (
+          git(tree.path, ['rev-parse', 'HEAD']) !== base ||
+          git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch
+        )
+          throw new Error('Requirements containment: Git HEAD changed');
+        if (!interrupted && exitCode === 0) {
+          try {
+            featureSpec = validateRequirements(requirementsOutput, args.task);
+          } catch (error) {
+            if (!(error instanceof SchemaValidationError)) throw error;
+            audit('featurespec_validation_failed', { attempt: requirementsAttempt + 1 });
+            if (requirementsAttempt++ === 0) {
+              taskData.task.brief = requirementsBrief(options.requirements, error.errors);
+              compiled = compileAgent(spec, role, taskData);
+              await telemetry.finish('error');
+              slot.release();
+              slot = undefined;
+              executionId = randomUUID();
+              handle = undefined;
+              eventsStarted = false;
+              executionFinished = false;
+              telemetry = undefined;
+              continue;
+            }
+            throw new WorkerExecutionError(
+              'FeatureSpec validation failed after two attempts; schema or Requirements contract invalid',
+            );
+          }
+          lifecycle?.assertOwned();
+          writeRequirements(tree.path, featureDoc!, featureSpec!);
+          guardRequirementsWrites(tree.path, requirementsBefore!, featureDoc!);
+        }
+      }
       if (verifier) {
         let results: CriterionResult[] = [];
         if (!interrupted && exitCode === 0) {
@@ -1159,6 +1247,14 @@ async function runWorkerExecution(
       return { branch: tree.branch, commit: null, stat: '' };
     }
     git(tree.path, ['add', '--all']);
+    if (options.requirements) {
+      guardRequirementsWrites(tree.path, requirementsBefore!, featureDoc!);
+      const staged = git(tree.path, ['diff', '--cached', '--name-only', '-z', base])
+        .split('\0')
+        .filter(Boolean);
+      if (staged.length !== 1 || staged[0] !== featureDoc)
+        throw new Error('Requirements containment: staged paths exceed the FeatureSpec artifact');
+    }
     const gate = guardProtectedPaths({
       cwd: tree.path,
       base,
@@ -1205,17 +1301,29 @@ async function runWorkerExecution(
         'core.hooksPath=',
         'commit',
         '-m',
-        `${workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
+        `${options.requirements ? `feat(${args.task}): proponer requisitos` : workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
       ]);
     } catch {
       throw new CliUsageError('Runtime Git commit failed; changes retained for review');
     }
     const commit = git(tree.path, ['rev-parse', 'HEAD']);
+    if (options.requirements)
+      workStore!.createFeature({
+        key: args.task,
+        doc_path: featureDoc!,
+        git_sha: commit,
+        status: 'in_review',
+      });
     const stat = git(tree.path, ['diff', '--stat', base, commit]);
     audit('ready_for_review');
     telemetryStatus = 'ok';
     log(`rama lista para revisión\nRama: ${tree.branch}\nCommit: ${commit}\n${stat}`);
-    return { branch: tree.branch, commit, stat };
+    return {
+      branch: tree.branch,
+      commit,
+      stat,
+      ...(featureSpec ? { requirementsQuestions: featureSpec.openQuestions } : {}),
+    };
   } catch (error) {
     telemetryStatus = 'error';
     audit(interrupted ? 'interrupted' : 'failed');

@@ -498,6 +498,23 @@ class SqliteWorkStore implements WorkStore {
       .prepare('SELECT * FROM features WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as FeatureRecord[];
   }
+  approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void> {
+    return this.write(() => {
+      const feature = this.getFeature(key);
+      if (!feature || feature.git_sha !== gitSha) throw new Error('Feature revision changed');
+      if (!['draft', 'in_review', 'approved'].includes(feature.status))
+        throw new Error('Feature is not reviewable');
+      if (this.listDecisions().some((d) => d.status !== 'answered' && d.blocks.includes(key)))
+        throw new Error('Feature has unresolved Human Decisions');
+      const task = this.getTask(key);
+      if (task && (task.lease_owner || task.status === 'WAITING_HUMAN'))
+        throw new Error('Feature requirements are still active or waiting for a human');
+      beforeCommit();
+      this.db
+        .prepare('UPDATE features SET status = ? WHERE project_id = ? AND key = ?')
+        .run('approved', this.projectId, key);
+    });
+  }
   createTask(task: NewTask): void {
     if (['LEASED', 'RUNNING'].includes(task.status ?? ''))
       throw new Error('Active Task must be acquired through claim or claimRework');

@@ -176,7 +176,9 @@ class SqliteWorkStore implements WorkStore {
     this.assertNotRecovering(task.key);
     const token = randomUUID();
     this.db
-      .prepare('INSERT INTO lease_recoveries VALUES (?, ?, ?, ?, ?, ?, ?, NULL)')
+      .prepare(
+        'INSERT INTO lease_recoveries (project_id, task_key, token, task_version, reason, actor, started_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)',
+      )
       .run(this.projectId, task.key, token, task.version, reason, actor, new Date().toISOString());
     return token;
   }
@@ -455,7 +457,9 @@ class SqliteWorkStore implements WorkStore {
         return { cached: true, result: existing.result as string };
       }
       this.db
-        .prepare("INSERT INTO idempotency_keys VALUES (?, ?, 'PENDING', NULL, ?)")
+        .prepare(
+          "INSERT INTO idempotency_keys (project_id, key, state, result, created_at) VALUES (?, ?, 'PENDING', NULL, ?)",
+        )
         .run(this.projectId, key, new Date().toISOString());
       return { cached: false, result: '' };
     });
@@ -479,7 +483,9 @@ class SqliteWorkStore implements WorkStore {
   }
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void {
     this.db
-      .prepare('INSERT INTO features VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO features (project_id, key, doc_path, git_sha, status) VALUES (?, ?, ?, ?, ?)',
+      )
       .run(this.projectId, feature.key, feature.doc_path, feature.git_sha, feature.status);
   }
   getFeature(key: string): FeatureRecord | undefined {
@@ -499,7 +505,13 @@ class SqliteWorkStore implements WorkStore {
       throw new Error('New Task cannot import a lease; use claim');
     const now = new Date().toISOString();
     this.db
-      .prepare(`INSERT INTO tasks VALUES (${Array(18).fill('?').join(',')}, NULL)`)
+      .prepare(
+        `INSERT INTO tasks (
+        project_id, feature_key, key, type, status, priority, agent_role,
+        version, lease_owner, lease_expires_at, attempt, max_attempts,
+        branch, worktree_ref, pr_ref, blocked_reason, created_at, updated_at
+      ) VALUES (${Array(18).fill('?').join(',')})`,
+      )
       .run(
         this.projectId,
         task.feature_key ?? null,
@@ -581,7 +593,9 @@ class SqliteWorkStore implements WorkStore {
       for (const task of declarations)
         for (const dep of task.dependsOn)
           this.db
-            .prepare('INSERT OR IGNORE INTO task_dependencies VALUES (?, ?, ?)')
+            .prepare(
+              'INSERT OR IGNORE INTO task_dependencies (project_id, task_key, depends_on_key) VALUES (?, ?, ?)',
+            )
             .run(this.projectId, task.key, dep);
       return created;
     });
@@ -683,7 +697,9 @@ class SqliteWorkStore implements WorkStore {
   }
   addTaskDependency(taskKey: string, dependsOnKey: string): void {
     this.db
-      .prepare('INSERT INTO task_dependencies VALUES (?, ?, ?)')
+      .prepare(
+        'INSERT INTO task_dependencies (project_id, task_key, depends_on_key) VALUES (?, ?, ?)',
+      )
       .run(this.projectId, taskKey, dependsOnKey);
   }
   listTaskDependencies(taskKey: string): TaskDependencyRecord[] {
@@ -723,7 +739,12 @@ class SqliteWorkStore implements WorkStore {
     const result = await this.write(() =>
       this.db
         .prepare(
-          `INSERT INTO executions SELECT ${Array(14).fill('?').join(',')}, NULL, ?, ?, ?${guard}`,
+          `INSERT INTO executions (
+            project_id, key, task_key, agent_template_version, executor, model_id,
+            session_id, pid, started_at, system_prompt_hash, project_brain_sha,
+            task_version, tool_policy_version, pid_started_at, tree_closed_at,
+            model_tier, model_effort, selection_reason
+          ) SELECT ${Array(14).fill('?').join(',')}, NULL, ?, ?, ?${guard}`,
         )
         .run(
           this.projectId,

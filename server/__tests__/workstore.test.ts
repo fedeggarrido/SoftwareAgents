@@ -57,6 +57,86 @@ describe('WorkStore (real SQLite)', () => {
     }
     expect(() => first.createTask({ key: 'task', type: 'implementation' })).toThrow();
   });
+  it('keeps writers working after additive columns on every WorkStore table', async () => {
+    await open();
+    const db = await inspect();
+    try {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+      for (const { name } of tables) db.exec(`ALTER TABLE ${name} ADD COLUMN future TEXT`);
+      // Reopen exercises schema_version and projects writes against the expanded schema.
+      const store = await open('future-project');
+      store.createFeature({
+        key: 'feature',
+        doc_path: 'spec.yaml',
+        git_sha: 'sha',
+        status: 'approved',
+      });
+      store.createTask({ key: 'dependency', type: 'doc', status: 'DONE' });
+      store.createTask({ key: 'task', type: 'code', feature_key: 'feature', status: 'READY' });
+      store.addTaskDependency('task', 'dependency');
+      await store.createExecution({
+        key: 'execution',
+        task_key: 'task',
+        agent_template_version: 'developer@v1',
+        executor: 'codex',
+        model_id: 'test',
+        session_id: null,
+        pid: null,
+        started_at: '2026-10-02T00:00:00Z',
+        system_prompt_hash: 'hash',
+        project_brain_sha: 'sha',
+        task_version: 1,
+        tool_policy_version: 'v1',
+        model_tier: 'standard',
+        model_effort: 'medium',
+        selection_reason: 'test',
+      });
+      store.recordHumanDecision({
+        key: 'decision',
+        task_key: 'task',
+        execution_key: 'execution',
+        question: 'Proceed?',
+        answer: 'yes',
+        actor: 'operator',
+        decided_at: 'now',
+      });
+      expect(await store.withIdempotency('effect', () => 'result')).toBe('result');
+      expect(await store.withIdempotency('effect', () => 'unexpected')).toBe('result');
+      await store.claim('task', 'worker');
+      // No real process is attached: expiry exercises lease_recoveries without taskkill.
+      db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE project_id = ? AND key = ?').run(
+        '2000-01-01T00:00:00Z',
+        store.projectId,
+        'task',
+      );
+      expect(await store.recoverExpiredLeases()).toMatchObject([
+        { key: 'task', status: 'FAILED_RETRYABLE' },
+      ]);
+      expect(store.getTask('task')).toMatchObject({
+        feature_key: 'feature',
+        future: null,
+        declaration: null,
+      });
+      expect(store.listTaskDependencies('task')).toMatchObject([
+        { depends_on_key: 'dependency', future: null },
+      ]);
+      expect(store.getExecution('execution')).toMatchObject({
+        model_tier: 'standard',
+        model_effort: 'medium',
+        selection_reason: 'test',
+        future: null,
+      });
+      expect(store.getHumanDecision('decision')).toMatchObject({ answer: 'yes', future: null });
+      expect(store.listDomainEvents('task').map((event) => event.to_status)).toEqual([
+        'QUEUED',
+        'LEASED',
+        'FAILED_RETRYABLE',
+      ]);
+      expect(store.listLeaseRecoveries()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
   it('isolates all entities and rejects references to records existing only in another Project', async () => {
     const a = await open('a');
     const b = await open('b');

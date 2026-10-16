@@ -168,6 +168,85 @@ it('rejects changed declarations atomically, including changes to declarative-on
   expect(store.getTask('FEAT-001-T03')).toBeUndefined();
 });
 
+it('imports and reimports with an additive tasks/dependencies column', async () => {
+  await open();
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(dbFile());
+  try {
+    db.exec(
+      'ALTER TABLE tasks ADD COLUMN future TEXT; ALTER TABLE task_dependencies ADD COLUMN future TEXT;',
+    );
+    expect(cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });
+    expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
+    expect(db.prepare('SELECT declaration, future FROM tasks WHERE key = ?').get(first)).toEqual({
+      declaration: expect.any(String),
+      future: null,
+    });
+    expect(db.prepare('SELECT future FROM task_dependencies').all()).toEqual([{ future: null }]);
+  } finally {
+    db.close();
+  }
+});
+
+it('escapes terminal controls in text fields while preserving original JSON values', async () => {
+  expect(cli('import', 'dag.yaml').code).toBe(0);
+  const store = await open();
+  const controls = '\n\r\t\x1b[2J\x01\x1f\x7f\x85\x9f';
+  const escaped = '\\n\\r\\t\\u001b[2J\\u0001\\u001f\\u007f\\u0085\\u009f';
+  const key = `extra${controls}`;
+  const reason = `blocked${controls}`;
+  const owner = `worker${controls}`;
+  store.createTask({ key, type: 'doc', blocked_reason: reason });
+  await store.transition(first, 1, 'READY', 'ready', 'operator');
+  await store.claim(first, owner);
+  const text = cli('list');
+  expect(text).toMatchObject({ code: 0, err: '' });
+  const lines = text.out.trimEnd().split(/\r?\n/);
+  expect(lines).toHaveLength(3);
+  for (const line of lines) expect(line.split('\t')).toHaveLength(5);
+  expect(text.out).toContain(`extra${escaped}`);
+  expect(text.out).toContain(`blocked${escaped}`);
+  expect(text.out).toContain(`owner=worker${escaped}`);
+  expect(JSON.parse(cli('list', '--json').out)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ key, blocked_reason: reason, blockingReasons: [reason] }),
+      expect.objectContaining({ key: first, lease_owner: owner }),
+    ]),
+  );
+});
+
+it('escapes controls in import error diagnostics', () => {
+  const result = cli('import', 'missing\n\r\x1b.yaml');
+  expect(result.code).toBe(1);
+  expect(result.err.trimEnd().split(/\r?\n/)).toHaveLength(1);
+  expect(result.err).not.toContain('\x1b');
+});
+
+it('rejects a declared Brain junction targeting another directory inside the checkout', () => {
+  const link = path.join(repo, '.softwareagents/linked-brain');
+  const target = path.join(repo, '.softwareagents/brain');
+  const spec = path.join(target, 'features/requests/FEAT-001.yaml');
+  const original = fs.readFileSync(spec, 'utf8');
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  try {
+    const config = path.join(repo, '.softwareagents/project.yaml');
+    fs.writeFileSync(
+      config,
+      fs
+        .readFileSync(config, 'utf8')
+        .replace('path: .softwareagents/brain', 'path: .softwareagents/linked-brain'),
+    );
+    expect(cli('import', 'dag.yaml')).toMatchObject({
+      code: 1,
+      err: expect.stringContaining('Links are forbidden'),
+    });
+    expect(fs.existsSync(dbFile())).toBe(false);
+    expect(fs.readFileSync(spec, 'utf8')).toBe(original);
+  } finally {
+    fs.unlinkSync(link);
+  }
+});
+
 it.each(['schema', 'cycle', 'dangling', 'duplicate', 'coverage', 'yaml', 'large'])(
   'invalid %s input exits nonzero, without stack or partial DB activation',
   (kind) => {

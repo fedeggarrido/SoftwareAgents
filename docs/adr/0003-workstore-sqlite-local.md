@@ -66,6 +66,22 @@ Mantener transacciones cortas: ninguna ejecución CLI, llamada de red o espera h
 
 `DatabaseSync` y la espera por locks pueden bloquear el event loop. La implementación deberá aislar operaciones potencialmente bloqueantes del hilo HTTP/WS cuando sea necesario y medir latencia, duración de transacciones, frecuencia de busy y reintentos. Coordinar migraciones versionadas entre procesos, cierre y checkpoints; estos detalles y sus pruebas pertenecen a tareas de implementación.
 
+### Migraciones
+
+La apertura del WorkStore aplica migraciones versionadas bajo el bloqueo de
+escritura. Antes de abrir la base compartida con código nuevo, detener oficina,
+workers y CLI que la usen y actualizar **todos los procesos y worktrees** a una
+versión compatible; reiniciarlos después de la actualización. El bloqueo de SQLite
+serializa la migración, pero no convierte los escritores antiguos en compatibles.
+La migración v7 (`tasks.declaration`) ya aplicada permanece sin cambios ni reordenación;
+el INSERT posicional del código anterior deja de funcionar sobre ese esquema.
+
+Todos los INSERT y UPDATE de todas las tablas del WorkStore deben nombrar sus
+columnas explícitamente. Así, añadir una columna nullable o con valor por defecto
+no cambia la correspondencia de valores de los escritores. Esta regla protege
+frente a migraciones aditivas futuras; no sustituye la actualización coordinada
+ni garantiza compatibilidad con cambios de restricciones o semántica.
+
 ### Fuentes de verdad
 
 | Fuente                  | Autoridad                                                                                                                                                            |

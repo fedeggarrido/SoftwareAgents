@@ -25,6 +25,16 @@ const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/
 const USAGE =
   'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | backup [--keep N]';
 
+/** Keep untrusted fields on one terminal line without executing control sequences. */
+function textField(value: string): string {
+  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, (control) => {
+    if (control === '\n') return '\\n';
+    if (control === '\r') return '\\r';
+    if (control === '\t') return '\\t';
+    return `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
+  });
+}
+
 function parseArgs(argv: string[]) {
   const [command, ...args] = argv;
   let status: TaskStatus | undefined;
@@ -234,6 +244,8 @@ export async function runTaskCommand(
     if (!config)
       throw new CliUsageError('task requires a bound Git Project (.softwareagents/project.yaml)');
     if (args.command === 'import') {
+      // Check the declared path before its canonical form loses evidence of links.
+      taskPath(cwd, config.project.brain.path);
       const source = readTaskInput(cwd, args.file!);
       const document = parseDocument(source, { uniqueKeys: true });
       if (document.errors.length)
@@ -263,10 +275,12 @@ export async function runTaskCommand(
         status: spec.status,
       });
       audit(config.project.id, 'task_import', 'committed', { feature: dag.feature, created });
-      log(`Imported ${dag.feature}: ${created} created, ${dag.tasks.length - created} unchanged`);
+      log(
+        `Imported ${textField(dag.feature)}: ${created} created, ${dag.tasks.length - created} unchanged`,
+      );
     } else {
       store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-      if (args.command === 'backup') log(await backup(store, args.keep));
+      if (args.command === 'backup') log(textField(await backup(store, args.keep)));
       else {
         const tasks = list(store, args.status);
         if (args.json) log(JSON.stringify(tasks, null, 2));
@@ -275,14 +289,16 @@ export async function runTaskCommand(
             tasks
               .map(
                 (task) =>
-                  `${task.key}\t${task.status}\towner=${task.lease_owner ?? '-'}\texpires=${task.lease_expires_at ?? '-'}\t${task.blockingReasons.join('; ')}`,
+                  `${textField(task.key)}\t${textField(task.status)}\towner=${textField(task.lease_owner ?? '-')}\texpires=${textField(task.lease_expires_at ?? '-')}\t${textField(task.blockingReasons.join('; '))}`,
               )
               .join('\n') || 'No tasks',
           );
       }
     }
   } catch (error) {
-    throw new CliUsageError(`task ${args.command}: ${(error as Error).message}`);
+    throw new CliUsageError(
+      `task ${textField(args.command)}: ${textField((error as Error).message)}`,
+    );
   } finally {
     store?.close();
   }

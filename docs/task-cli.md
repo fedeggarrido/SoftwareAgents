@@ -14,6 +14,18 @@ worktrees (`<git-common-dir>/softwareagents/work.sqlite3`). No arrancan la ofici
 ni Executors. La configuración inválida del Operator se rechaza; no se conceden
 permisos desde el DAG. Los errores devuelven exit 1 y un diagnóstico sin stack.
 
+## Migraciones de la base compartida
+
+Abrir el WorkStore aplica sus migraciones automáticamente. Antes de abrir la base
+con código nuevo, detener todos los procesos que la comparten (oficina, workers y
+CLI) y actualizar **todos los procesos y worktrees** a una versión compatible.
+Reiniciarlos solo después de la actualización; no mezclar escritores antiguos y
+nuevos sobre la misma base. La migración v7 ya aplicada no se cambia ni reordena:
+el código antiguo con INSERT posicional en `tasks` falla al encontrar `declaration`.
+Todos los INSERT y UPDATE del WorkStore deben nombrar explícitamente sus columnas
+para tolerar futuras columnas aditivas; esto no garantiza compatibilidad con otros
+cambios de esquema ni sustituye la actualización coordinada.
+
 ## Importación y reimportación
 
 El fichero debe ser un `TaskDAG` de SA-014. Se comprueban esquema, keys duplicadas
@@ -54,6 +66,8 @@ registros con `pendingDependencies`, `blockingReasons` y `resetsAt` (null si se
 desconoce). WAITING_QUOTA conserva la razón y el reset persistidos por el worker;
 WAITING_HUMAN muestra las decisiones abiertas o el motivo del último evento.
 No sondea cuotas ni cambia estados para inferir disponibilidad.
+El formato texto mantiene una fila por Task y escapa LF, CR, TAB y los controles
+C0/C1 (incluido ESC) de sus campos. JSON conserva los valores originales.
 
 ## Backup
 

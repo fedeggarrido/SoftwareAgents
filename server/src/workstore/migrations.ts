@@ -109,7 +109,7 @@ export function runMigrations(db: DatabaseSync): void {
       singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
       version INTEGER NOT NULL CHECK(version >= 0)
     ) STRICT;
-    INSERT OR IGNORE INTO schema_version VALUES (1, 0);`);
+    INSERT OR IGNORE INTO schema_version (singleton, version) VALUES (1, 0);`);
     const version = db
       .prepare('SELECT version FROM schema_version WHERE singleton = 1')
       .get()?.version;

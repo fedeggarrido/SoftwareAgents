@@ -251,10 +251,17 @@ export async function runTaskCommand(
       if (document.errors.length)
         throw new Error(document.errors.map((error) => error.message).join('; '));
       const dag = parseTaskDag(document.toJS({ maxAliasCount: 100 }));
-      const specRelative = path.relative(
+      // Resolve canonical pipeline artifacts without opening/activating SQLite for invalid DAGs.
+      const pipelineSpec = path.relative(
         cwd,
-        path.join(config.paths.brain, 'features/requests', `${dag.feature}.yaml`),
+        path.join(config.paths.brain, 'features', `${dag.feature}.yaml`),
       );
+      const specRelative = fs.existsSync(taskPath(cwd, pipelineSpec))
+        ? pipelineSpec
+        : path.relative(
+            cwd,
+            path.join(config.paths.brain, 'features/requests', `${dag.feature}.yaml`),
+          );
       const spec = parseFeatureSpec(readTaskInput(cwd, specRelative), specRelative);
       const analysis = analyzeTaskDag(dag, spec);
       if (!analysis.valid) throw new Error(`Invalid TaskDAG: ${JSON.stringify(analysis.issues)}`);

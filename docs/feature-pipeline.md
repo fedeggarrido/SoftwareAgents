@@ -1,4 +1,4 @@
-# Feature pipeline: Requirements (SA-041)
+# Feature pipeline: Requirements y Architect (SA-041, SA-042)
 
 El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
@@ -150,15 +150,100 @@ prueba que la operación no sucediera. Un YAML previo sin registro no se sobresc
 Los worktrees sucios y leases pendientes siguen la recuperación/manual review
 existentes. Este comando no integra, hace push ni retira worktrees.
 
+## Architect: FeatureSpec aprobado → TechnicalDesign + TaskDAG (SA-042)
+
+Después de aprobar el FeatureSpec, Claude ejecuta desde el checkout principal,
+con el paquete construido (`node esbuild.js`) y Operator config existente:
+
+```powershell
+node dist/cli.js feature design FEAT-001
+node dist/cli.js feature show FEAT-001 --json
+```
+
+Equivalente instalado: `pixel-agents feature design FEAT-001`. El comando exige
+`features.status=approved`, igualdad del SHA aprobado con HEAD y la ref de la
+rama, y contenido idéntico en disco, índice y commit. Revalida antes de lanzar.
+No aprueba requisitos ni ejecuta las Tasks importadas (eso corresponde a SA-043).
+
+Reutiliza worker, admisión, cuota, leases, supervisor, contención, compilador y
+rol `architect` con `brain_write` efectivo de solo lectura. Usa la misma rama
+`sa/FEAT-001-worker` y `.worktrees/FEAT-001` que Requirements, con una Task
+operativa distinta `FEAT-001-DESIGN` de tipo `architecture`. La selección usa
+`high_reasoning`; la cascada de verificadores de implementación no se aplica.
+El contexto incluye el FeatureSpec aprobado y ARCHITECTURE, VISION, RULES y
+CONSTRAINTS del Brain (archivos `.md`). Cada archivo ausente se transmite como
+`null`, explícitamente ausente; no se inventa contenido. Las entradas siguen
+siendo datos no confiables y no conceden autoridad.
+
+La propuesta es un objeto JSON estricto: `components`, `risks`, `body`, `dag` y,
+opcionalmente, `adrs: [{title, body}]`. No admite rutas, números de ADR ni status
+elegidos por el modelo. El runtime materializa exclusivamente:
+
+- `<brain>/technical-designs/FEAT-001.md`: front matter TechnicalDesign SA-014,
+  versión `1.0.0`, status `proposed`, seguido del cuerpo Markdown.
+- `<brain>/technical-designs/FEAT-001.dag.yaml`: TaskDAG SA-014 en YAML.
+- Opcionalmente `<brain>/adr/NNNN-<título-normalizado>.md`: numeración global del
+  Brain, máximo existente + 1, cuatro dígitos; referencias `ADR-NNNN` insertadas
+  por el runtime en el diseño. No sobrescribe artefactos previos sin registro.
+
+Las keys son `FEAT-001-T##`. Cada Task exige tipo, tamaño S/M/L, dependencias,
+`acceptanceRefs`, `changeZones` (rutas/globs relativos al repositorio, sin escapes)
+y `parallelizable` booleano. `parseTaskDag` y `analyzeTaskDag` validan esquema,
+keys únicas y del mismo Feature, dependencias existentes, ausencia de ciclos y
+cobertura de **cada AC**. Las zonas y la marca se persisten en la declaración
+inmutable; son datos para SA-097, no un permiso para lanzar en paralelo. Los DAG
+históricos siguen aceptándose sin esos dos campos.
+
+Ante una propuesta inválida, devuelve errores deterministas al mismo rol una
+sola vez, con otra Execution/admisión. El segundo fallo abre una Human Decision
+y deja `FEAT-001-DESIGN` en `WAITING_HUMAN`, sin `FAILED_RETRYABLE` ni diseño
+registrado. Repetir el comando no duplica el gate ni lanza otra Execution.
+Para incorporar aclaraciones desde ingreso humano:
+
+```powershell
+node dist/cli.js feature design FEAT-001 --answers docs/examples/FEAT-001-design-answers.md
+```
+
+Ese Markdown debe existir dentro del checkout, ser regular, sin enlaces y de
+hasta 1 MiB. Los marcadores de ingreso gestionado/agente bloquean `--answers`.
+La decisión se conserva durante la regeneración; solo se cierra al registrar el
+diseño y las Tasks, en la misma transacción SQLite, con SHA y hash de respuestas.
+Un fallo conserva el gate. No se registra el texto de las respuestas en auditoría.
+
+El runtime verifica las escrituras y los paths staged, crea un commit con trailer
+`SoftwareAgents-Execution` y registra en `technical_designs` (migración v8)
+`doc_path`, `dag_path`, `git_sha` y `feature_sha`. Conserva el SHA aprobado del
+FeatureSpec. Registro e importación reutilizan `WorkStore.importTaskDag` en una
+transacción: Tasks sin dependencias pendientes en READY, las demás en DRAFT.
+`feature show` incluye diseño y decisiones; verifica el nuevo HEAD registrado y
+que el spec aprobado no haya cambiado. El reimport idéntico es un no-op y no
+altera estados, versiones ni leases:
+
+```powershell
+Push-Location .worktrees/FEAT-001
+node ../../dist/cli.js task import .softwareagents/brain/technical-designs/FEAT-001.dag.yaml
+node ../../dist/cli.js task list --json
+Pop-Location
+```
+
+Claude comprueba en real los flags de solo lectura de Architect, contexto real o
+ausente, cobertura de AC, las únicas rutas creadas, numeración ADR, trailer/SHA,
+READY/DRAFT y `0 created` al reimportar. El pipeline no integra ni hace push.
+Git, SQLite y auditoría no comparten transacción: un corte tras commit y antes del
+registro exige inspección manual; no se sobrescriben los archivos huérfanos.
+Antes de abrir la base v8, actualizar y reiniciar coordinadamente todos sus
+escritores como indica [task CLI](task-cli.md#migraciones-de-la-base-compartida).
+Las pruebas automatizadas usan únicamente fake CLIs.
+
 ## Próximos pasos
 
-| Paso                 | Estado y contrato pendiente                                                                                            |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Requirements Analyst | SA-041: petición → FeatureSpec validado → aprobación humana                                                            |
-| Architect            | SA-042: consumir el FeatureSpec aprobado, TechnicalDesign y TaskDAG; conectar la ruta nueva con el importador de Tasks |
-| Developer            | Pendiente: ejecutar Tasks y producir implementación/evidencia                                                          |
-| Reviewer             | Pendiente: revisión cruzada de los cambios                                                                             |
-| QA                   | Pendiente: verificar criterios y pruebas reales antes de integrar                                                      |
+| Paso                 | Estado y contrato pendiente                                                     |
+| -------------------- | ------------------------------------------------------------------------------- |
+| Requirements Analyst | SA-041: petición → FeatureSpec validado → aprobación humana                     |
+| Architect            | SA-042: FeatureSpec aprobado → TechnicalDesign y TaskDAG validados e importados |
+| Developer            | Pendiente: ejecutar Tasks y producir implementación/evidencia                   |
+| Reviewer             | Pendiente: revisión cruzada de los cambios                                      |
+| QA                   | Pendiente: verificar criterios y pruebas reales antes de integrar               |
 
-El importador histórico [task CLI](task-cli.md) mantiene su ruta
-`features/requests/`; la conexión del siguiente paso queda para Architect.
+El importador [task CLI](task-cli.md) usa `features/<FEAT-ID>.yaml` si existe;
+mantiene `features/requests/` como alternativa para documentos históricos.

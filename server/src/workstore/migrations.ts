@@ -99,6 +99,12 @@ const migrations = [
   ALTER TABLE executions ADD COLUMN model_effort TEXT;
   ALTER TABLE executions ADD COLUMN selection_reason TEXT;`,
   `ALTER TABLE tasks ADD COLUMN declaration TEXT;`,
+  `CREATE TABLE technical_designs (
+    project_id TEXT NOT NULL, feature_key TEXT NOT NULL,
+    doc_path TEXT NOT NULL, dag_path TEXT NOT NULL, git_sha TEXT NOT NULL, feature_sha TEXT NOT NULL,
+    PRIMARY KEY(project_id, feature_key),
+    FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
+  ) STRICT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

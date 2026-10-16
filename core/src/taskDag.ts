@@ -15,6 +15,10 @@ export interface DagTask {
   /** AgentSpec `metadata.id`; a role reference, never a permission grant. */
   agentRole: string;
   size: WorkSize;
+  /** Declarative repository-relative paths/globs; required for new Architect output. */
+  changeZones?: string[];
+  /** A scheduling hint, never authorization to run concurrently. */
+  parallelizable?: boolean;
 }
 
 /** Task DAG produced by the Architect for one FeatureSpec. Not persisted by itself. */

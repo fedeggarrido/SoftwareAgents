@@ -29,6 +29,8 @@ import {
   TaskVersionConflictError,
 } from './taskStateMachine.js';
 import type {
+  DesignImport,
+  DesignRecord,
   DomainEventRecord,
   ExecutionRecord,
   FeatureRecord,
@@ -345,17 +347,20 @@ class SqliteWorkStore implements WorkStore {
   }
 
   private assertRequirementsRevision(key: string, gitSha: string, decisionId: string): void {
-    const feature = this.getFeature(key);
+    const design = /^FEAT-\d{3}-DESIGN$/.test(key);
+    const feature = this.getFeature(design ? key.replace(/-DESIGN$/, '') : key);
     const task = this.getTask(key);
     const decision = this.listDecisions().find((d) => d.id === decisionId);
     if (
       !feature ||
       feature.git_sha !== gitSha ||
-      feature.status !== 'in_review' ||
-      task?.agent_role !== 'requirements-analyst' ||
-      task.type !== 'docs' ||
+      feature.status !== (design ? 'approved' : 'in_review') ||
+      task?.agent_role !== (design ? 'architect' : 'requirements-analyst') ||
+      task.type !== (design ? 'architecture' : 'docs') ||
       !decision?.blocks.includes(key) ||
-      !decision.context.startsWith(`feature-requirements/${key}/`) ||
+      !decision.context.startsWith(
+        `${design ? 'feature-design' : 'feature-requirements'}/${key}/`,
+      ) ||
       this.listDecisions().some(
         (d) => d.id !== decisionId && d.status !== 'answered' && d.blocks.includes(key),
       )
@@ -556,25 +561,28 @@ class SqliteWorkStore implements WorkStore {
           'UPDATE features SET doc_path = ?, git_sha = ?, status = ? WHERE project_id = ? AND key = ?',
         )
         .run(feature.doc_path, feature.git_sha, feature.status, this.projectId, feature.key);
-      const decision = this.listDecisions().find((d) => d.id === decisionId)!;
-      decision.status = 'answered';
-      decision.answer = JSON.stringify({ ...evidence, gitSha: feature.git_sha });
-      decision.answeredBy = 'operator';
-      decision.answeredAt = new Date().toISOString();
-      this.db
-        .prepare(
-          'UPDATE human_decisions SET escalation = ?, answer = ?, actor = ?, decided_at = ? WHERE project_id = ? AND key = ?',
-        )
-        .run(
-          JSON.stringify(decision),
-          decision.answer,
-          'operator',
-          decision.answeredAt,
-          this.projectId,
-          decisionId,
-        );
+      this.answerArtifactDecision(decisionId, { ...evidence, gitSha: feature.git_sha });
       beforeCommit();
     });
+  }
+  private answerArtifactDecision(decisionId: string, evidence: Record<string, string>): void {
+    const decision = this.listDecisions().find((d) => d.id === decisionId)!;
+    decision.status = 'answered';
+    decision.answer = JSON.stringify(evidence);
+    decision.answeredBy = 'operator';
+    decision.answeredAt = new Date().toISOString();
+    this.db
+      .prepare(
+        'UPDATE human_decisions SET escalation = ?, answer = ?, actor = ?, decided_at = ? WHERE project_id = ? AND key = ?',
+      )
+      .run(
+        JSON.stringify(decision),
+        decision.answer,
+        'operator',
+        decision.answeredAt,
+        this.projectId,
+        decisionId,
+      );
   }
   getFeature(key: string): FeatureRecord | undefined {
     return this.db
@@ -585,6 +593,11 @@ class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM features WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as FeatureRecord[];
+  }
+  getDesign(key: string): DesignRecord | undefined {
+    return this.db
+      .prepare('SELECT * FROM technical_designs WHERE project_id = ? AND feature_key = ?')
+      .get(this.projectId, key) as unknown as DesignRecord | undefined;
   }
   approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void> {
     return this.write(() => {
@@ -648,16 +661,55 @@ class SqliteWorkStore implements WorkStore {
       .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as TaskRecord[];
   }
-  importTaskDag(dag: TaskDag, feature: Omit<FeatureRecord, 'project_id'>): Promise<number> {
+  importTaskDag(
+    dag: TaskDag,
+    feature: Omit<FeatureRecord, 'project_id'>,
+    design?: DesignImport,
+  ): Promise<number> {
     // Snapshot before a busy retry; callers cannot mutate the batch while waiting.
     const declarations = dag.tasks.map((task) => ({
       ...task,
       dependsOn: [...task.dependsOn].sort(),
       acceptanceRefs: [...task.acceptanceRefs].sort(),
+      ...(task.changeZones ? { changeZones: [...task.changeZones].sort() } : {}),
     }));
     return this.write(() => {
       let created = 0;
       if (!this.getFeature(feature.key)) this.createFeature(feature);
+      if (design) {
+        const current = this.getFeature(feature.key)!;
+        const taskKey = `${feature.key}-DESIGN`;
+        this.owned(taskKey, design.owner);
+        this.assertNoDecisionGate(taskKey, design.revision?.decisionId);
+        if (
+          this.listExecutions().some(
+            (e) => e.task_key === taskKey && e.pid !== null && !e.tree_closed_at,
+          )
+        )
+          throw new Error('Architect Execution still active');
+        if (
+          current.status !== 'approved' ||
+          current.git_sha !== design.design.feature_sha ||
+          design.design.feature_key !== dag.feature ||
+          dag.feature !== feature.key
+        )
+          throw new Error('Approved FeatureSpec changed before design registration');
+        if (design.revision)
+          this.assertRequirementsRevision(taskKey, current.git_sha, design.revision.decisionId);
+        if (this.getDesign(feature.key)) throw new Error('Design already registered');
+        this.db
+          .prepare(
+            'INSERT INTO technical_designs (project_id, feature_key, doc_path, dag_path, git_sha, feature_sha) VALUES (?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            this.projectId,
+            dag.feature,
+            design.design.doc_path,
+            design.design.dag_path,
+            design.design.git_sha,
+            design.design.feature_sha,
+          );
+      }
       for (const task of declarations) {
         // Explicit field order makes YAML/JSON property ordering irrelevant.
         const declaration = JSON.stringify({
@@ -670,6 +722,8 @@ class SqliteWorkStore implements WorkStore {
           dependsOn: task.dependsOn,
           agentRole: task.agentRole,
           size: task.size,
+          ...(task.changeZones ? { changeZones: task.changeZones } : {}),
+          ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
         });
         const current = this.getTask(task.key);
         if (current) {
@@ -689,6 +743,11 @@ class SqliteWorkStore implements WorkStore {
           type: task.type,
           feature_key: dag.feature,
           agent_role: task.agentRole,
+          // Legacy task import remains DRAFT. Architect roots are ready immediately.
+          status:
+            design && task.dependsOn.every((dep) => this.getTask(dep)?.status === 'DONE')
+              ? 'READY'
+              : 'DRAFT',
         });
         this.db
           .prepare('UPDATE tasks SET declaration = ? WHERE project_id = ? AND key = ?')
@@ -702,6 +761,13 @@ class SqliteWorkStore implements WorkStore {
               'INSERT OR IGNORE INTO task_dependencies (project_id, task_key, depends_on_key) VALUES (?, ?, ?)',
             )
             .run(this.projectId, task.key, dep);
+      if (design?.revision) {
+        this.answerArtifactDecision(design.revision.decisionId, {
+          gitSha: design.design.git_sha,
+          answersHash: design.revision.answersHash,
+        });
+        design.revision.beforeCommit();
+      }
       return created;
     });
   }
@@ -983,7 +1049,8 @@ class SqliteWorkStore implements WorkStore {
       (d) =>
         d.status !== 'answered' &&
         d.blocks.includes(taskId) &&
-        d.context.startsWith(`feature-requirements/${taskId}/`),
+        (d.context.startsWith(`feature-requirements/${taskId}/`) ||
+          d.context.startsWith(`feature-design/${taskId}/`)),
     );
   }
   private assertNoDecisionGate(taskId: string, exceptId?: string): void {

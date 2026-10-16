@@ -30,7 +30,9 @@ cambios de esquema ni sustituye la actualización coordinada.
 
 El fichero debe ser un `TaskDAG` de SA-014. Se comprueban esquema, keys duplicadas
 o ajenas, ciclos, dependencias y cobertura contra la FeatureSpec real en
-`<brain.path>/features/requests/<FEAT-###>.yaml`. Se reutilizan `parseTaskDag`,
+`<brain.path>/features/<FEAT-###>.yaml` (pipeline SA-041/042) o, si ese archivo no
+existe, `<brain.path>/features/requests/<FEAT-###>.yaml` (histórico). La validación
+precede a la apertura de SQLite. Se reutilizan `parseTaskDag`,
 `analyzeTaskDag` y el parser de FeatureSpec. Ambos YAML admiten como máximo 1 MiB,
 rechazan claves duplicadas y acotan aliases. La ruta del DAG es relativa al
 checkout, sin `..`, enlaces ni junctions; se contiene con `resolveInside`.

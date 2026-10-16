@@ -79,17 +79,17 @@ export function requirementsSnapshot(cwd: string): Map<string, string> {
 export function guardRequirementsWrites(
   cwd: string,
   before: Map<string, string>,
-  allowed?: string,
+  allowed?: string | string[],
 ) {
+  const paths = typeof allowed === 'string' ? [allowed] : (allowed ?? []);
   const after = requirementsSnapshot(cwd);
   for (const file of new Set([...before.keys(), ...after.keys()]))
     if (
-      file !== allowed &&
+      !paths.includes(file) &&
       // Only the runtime may create missing parents of its fixed artifact.
       !(
-        allowed &&
         file.endsWith('/') &&
-        allowed.startsWith(file) &&
+        paths.some((target) => target.startsWith(file)) &&
         after.get(file) === 'directory'
       ) &&
       before.get(file) !== after.get(file)

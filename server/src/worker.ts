@@ -12,8 +12,21 @@ import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
+import {
+  architectArtifacts,
+  architectBrief,
+  architectContext,
+  architectPaths,
+  type ArchitectProposal,
+  type ArchitectRequest,
+  architectTaskKey,
+  openArchitectDecision,
+  validateArchitect,
+  writeArchitectArtifacts,
+} from './architect.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
+import { readTaskInput } from './commands/taskFiles.js';
 import { readConfig } from './configPersistence.js';
 import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
@@ -197,6 +210,7 @@ export interface WorkerOptions {
   cwd?: string;
   /** Trusted feature CLI entry; reuses admission, leases and executor containment. */
   requirements?: RequirementsRequest;
+  architect?: ArchitectRequest;
   /** Injection for protocol tests only; CLI obtains binary exclusively from Operator config. */
   binaryArgs?: readonly string[];
   log?: (message: string) => void;
@@ -243,6 +257,7 @@ export interface WorkerResult {
   branch: string;
   commit: string | null;
   stat: string;
+  designErrors?: string[];
   requirementsQuestions?: string[];
   requirementsVersion?: string;
   quotaDecision?: QuotaDecision;
@@ -297,9 +312,11 @@ export async function runWorker(
     );
   requireGitIdentity(cwd);
   if (
-    options.requirements
-      ? !/^FEAT-\d{3}$/.test(args.task) || options.requirements.key !== args.task
-      : !/^SA-\d{3,}$/.test(args.task)
+    options.architect
+      ? args.task !== architectTaskKey(options.architect.key)
+      : options.requirements
+        ? !/^FEAT-\d{3}$/.test(args.task) || options.requirements.key !== args.task
+        : !/^SA-\d{3,}$/.test(args.task)
   )
     throw new CliUsageError('Invalid task key');
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
@@ -311,6 +328,13 @@ export async function runWorker(
   const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
   const lifecycle = new WorkerLifecycle(store, args.task);
   try {
+    if (options.architect) {
+      const existing = store.getTask(args.task);
+      if (existing && (existing.agent_role !== 'architect' || existing.type !== 'architecture'))
+        throw new CliUsageError('Design task belongs to another workflow');
+      if (!existing)
+        store.createTask({ key: args.task, type: 'architecture', agent_role: 'architect' });
+    }
     if (options.requirements) {
       const existing = store.getTask(args.task);
       if (existing && (existing.agent_role !== 'requirements-analyst' || existing.type !== 'docs'))
@@ -327,8 +351,12 @@ export async function runWorker(
         );
     }
     // Availability decisions must be re-evaluated by selection before claim.
-    if (options.requirements?.revision || store.getTask(args.task)?.status !== 'WAITING_HUMAN')
-      await lifecycle.claim(options.requirements?.revision);
+    if (
+      options.requirements?.revision ||
+      options.architect?.revision ||
+      store.getTask(args.task)?.status !== 'WAITING_HUMAN'
+    )
+      await lifecycle.claim(options.requirements?.revision ?? options.architect?.revision);
     const result = await runWorkerExecution(args, options, lifecycle, config);
     if (result.quotaDecision?.status === 'wait') await lifecycle.wait(result.quotaDecision);
     else if (!result.availabilityBlock && !result.policyDecision)
@@ -336,6 +364,10 @@ export async function runWorker(
         'REVIEW',
         result.commit ? `Runtime commit ${result.commit}` : 'Execution finished without changes',
       );
+    if (result.designErrors) {
+      await openArchitectDecision(store, options.architect!.key, result.designErrors);
+      process.exitCode = 3;
+    }
     if (result.requirementsQuestions)
       await openRequirementsQuestions(
         store,
@@ -411,12 +443,14 @@ async function runWorkerExecution(
   audit('policy_allowed');
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief =
+    (options.architect ? architectBrief(options.architect, {}) : undefined) ??
     (options.requirements ? requirementsBrief(options.requirements) : undefined) ??
     options.evaluation?.brief ??
     (args.brief
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
+    (options.architect ? 'architect' : undefined) ??
     (options.requirements ? 'requirements-analyst' : undefined) ??
     lifecycle?.store.getTask(args.task)?.agent_role ??
     options.evaluation?.agentSpec?.identity.role ??
@@ -427,9 +461,12 @@ async function runWorkerExecution(
   );
   const taskData = {
     task: { key: args.task, brief },
+    brainContents: {} as Record<string, string>,
     repository: {
       projectId: config.project.id,
-      ...(options.requirements ? { brainPath: config.project.brain.path } : {}),
+      ...(options.requirements || options.architect
+        ? { brainPath: config.project.brain.path }
+        : {}),
     },
   };
   let compiled = compileAgent(spec, role, taskData);
@@ -588,6 +625,9 @@ async function runWorkerExecution(
   let requirementsAttempt = 0;
   let requirementsOutput = '';
   let featureSpec: FeatureSpec | undefined;
+  let designProposal: ArchitectProposal | undefined;
+  let designFiles: Map<string, string> | undefined;
+  let designContext: Record<string, string | null> = {};
   let requirementsBefore: Map<string, string> | undefined;
   const featureDoc = options.requirements
     ? requirementsDocPath(config.project.brain.path, options.requirements.key)
@@ -687,6 +727,7 @@ async function runWorkerExecution(
     cascade = tierPolicy?.cascade;
     if (
       !options.requirements &&
+      !options.architect &&
       cascade?.enabled &&
       tierPolicy &&
       tierRule &&
@@ -961,13 +1002,38 @@ async function runWorkerExecution(
             repositoryPath: cwd,
             defaultBranch: config.project.repo.defaultBranch,
             manualPreparation: true,
-          }).create(args.task, 'worker');
+          }).create(options.architect?.key ?? args.task, 'worker');
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= git(tree.path, ['rev-parse', 'HEAD']);
       if (options.requirements?.revision && base !== options.requirements.revision.gitSha)
         throw new Error('Feature SHA changed before Requirements revision');
-      if (options.requirements) requirementsBefore ??= requirementsSnapshot(tree.path);
+      if (options.architect) {
+        const input = options.architect;
+        const approved = workStore!.getFeature(input.key);
+        if (
+          approved?.status !== 'approved' ||
+          approved.git_sha !== input.gitSha ||
+          base !== input.gitSha
+        )
+          throw new Error('Approved FeatureSpec SHA changed before Architect launch');
+        const relative = requirementsDocPath(config.project.brain.path, input.key);
+        if (
+          git(tree.path, ['show', input.gitSha + ':' + relative]) !==
+          readTaskInput(tree.path, relative).trim()
+        )
+          throw new Error('Approved FeatureSpec file changed before Architect launch');
+        designContext = architectContext(tree.path, config.project.brain.path);
+        taskData.brainContents = Object.fromEntries(
+          Object.entries(designContext).filter(
+            (entry): entry is [string, string] => entry[1] !== null,
+          ),
+        );
+        if (requirementsAttempt === 0) taskData.task.brief = architectBrief(input, designContext);
+        compiled = compileAgent(spec, role, taskData);
+      }
+      if (options.requirements || options.architect)
+        requirementsBefore ??= requirementsSnapshot(tree.path);
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
       audit('worktree_prepared');
@@ -1132,7 +1198,8 @@ async function runWorkerExecution(
         }
         if (event.type === 'finished') {
           exitCode = event.exitCode;
-          if (options.requirements && exitCode === 0) requirementsOutput = event.resultSummary;
+          if ((options.requirements || options.architect) && exitCode === 0)
+            requirementsOutput = event.resultSummary;
           if (exitCode !== 0)
             executionDiagnostic = failureDiagnostic(event.resultSummary, exitCode);
           executionFinished = true;
@@ -1146,7 +1213,8 @@ async function runWorkerExecution(
         /category=(executor|auth);/.test(executionDiagnostic ?? '')
       )
         executionDiagnostic = failureDiagnostic(CLAUDE_OAUTH_REFRESH_CONTENTION, exitCode);
-      if (options.requirements) guardRequirementsWrites(tree.path, requirementsBefore!);
+      if (options.requirements || options.architect)
+        guardRequirementsWrites(tree.path, requirementsBefore!);
       if (runtimeQuota) {
         process.exitCode = 3;
         return { branch: tree.branch, commit: null, stat: '', quotaDecision: runtimeQuota };
@@ -1193,7 +1261,7 @@ async function runWorkerExecution(
         executionId = randomUUID();
         continue;
       }
-      if (options.requirements) {
+      if (options.requirements || options.architect) {
         guardRequirementsWrites(tree.path, requirementsBefore!);
         if (
           git(tree.path, ['rev-parse', 'HEAD']) !== base ||
@@ -1202,10 +1270,18 @@ async function runWorkerExecution(
           throw new Error('Requirements containment: Git HEAD changed');
         if (!interrupted && exitCode === 0) {
           try {
-            featureSpec = validateRequirements(requirementsOutput, args.task);
+            if (options.architect) {
+              designProposal = validateArchitect(requirementsOutput, options.architect.spec);
+              designFiles = architectArtifacts(
+                tree.path,
+                config.project.brain.path,
+                options.architect.key,
+                designProposal,
+              );
+            } else featureSpec = validateRequirements(requirementsOutput, args.task);
             if (
-              options.requirements.revision &&
-              featureSpec.version !==
+              options.requirements?.revision &&
+              featureSpec!.version !==
                 nextRequirementsVersion(options.requirements.revision.spec.version)
             )
               throw new SchemaValidationError([
@@ -1213,9 +1289,14 @@ async function runWorkerExecution(
               ]);
           } catch (error) {
             if (!(error instanceof SchemaValidationError)) throw error;
-            audit('featurespec_validation_failed', { attempt: requirementsAttempt + 1 });
+            audit(
+              options.architect ? 'design_validation_failed' : 'featurespec_validation_failed',
+              { attempt: requirementsAttempt + 1 },
+            );
             if (requirementsAttempt++ === 0) {
-              taskData.task.brief = requirementsBrief(options.requirements, error.errors);
+              taskData.task.brief = options.architect
+                ? architectBrief(options.architect, designContext, error.errors)
+                : requirementsBrief(options.requirements!, error.errors);
               compiled = compileAgent(spec, role, taskData);
               await telemetry.finish('error');
               slot.release();
@@ -1227,18 +1308,26 @@ async function runWorkerExecution(
               telemetry = undefined;
               continue;
             }
+            if (options.architect)
+              return { branch: tree.branch, commit: null, stat: '', designErrors: error.errors };
             throw new WorkerExecutionError(
               'FeatureSpec validation failed after two attempts; schema or Requirements contract invalid',
             );
           }
           lifecycle?.assertOwned();
-          writeRequirements(
+          if (options.architect) writeArchitectArtifacts(tree.path, designFiles!);
+          else
+            writeRequirements(
+              tree.path,
+              featureDoc!,
+              featureSpec!,
+              options.requirements!.revision?.spec,
+            );
+          guardRequirementsWrites(
             tree.path,
-            featureDoc!,
-            featureSpec!,
-            options.requirements.revision?.spec,
+            requirementsBefore!,
+            designFiles ? [...designFiles.keys()] : featureDoc!,
           );
-          guardRequirementsWrites(tree.path, requirementsBefore!, featureDoc!);
         }
       }
       if (verifier) {
@@ -1335,12 +1424,13 @@ async function runWorkerExecution(
       return { branch: tree.branch, commit: null, stat: '' };
     }
     git(tree.path, ['add', '--all']);
-    if (options.requirements) {
-      guardRequirementsWrites(tree.path, requirementsBefore!, featureDoc!);
+    if (options.requirements || options.architect) {
+      const allowed = designFiles ? [...designFiles.keys()] : [featureDoc!];
+      guardRequirementsWrites(tree.path, requirementsBefore!, allowed);
       const staged = git(tree.path, ['diff', '--cached', '--name-only', '-z', base])
         .split('\0')
         .filter(Boolean);
-      if (staged.length !== 1 || staged[0] !== featureDoc)
+      if (staged.length !== allowed.length || staged.some((file) => !allowed.includes(file)))
         throw new Error('Requirements containment: staged paths exceed the FeatureSpec artifact');
     }
     const gate = guardProtectedPaths({
@@ -1389,7 +1479,7 @@ async function runWorkerExecution(
         'core.hooksPath=',
         'commit',
         '-m',
-        `${options.requirements ? `feat(${args.task}): proponer requisitos` : workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
+        `${options.architect ? `feat(${options.architect.key}): proponer dise?o t?cnico` : options.requirements ? `feat(${args.task}): proponer requisitos` : workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
       ]);
     } catch {
       throw new CliUsageError('Runtime Git commit failed; changes retained for review');
@@ -1451,6 +1541,36 @@ async function runWorkerExecution(
           );
         }
       } else workStore!.createFeature(feature);
+    }
+    if (options.architect) {
+      const input = options.architect;
+      const paths = architectPaths(config.project.brain.path, input.key);
+      const revision = input.revision;
+      const evidence = revision
+        ? {
+            decisionId: revision.decisionId,
+            answersHash: createHash('sha256').update(revision.answers).digest('hex'),
+            beforeCommit: () =>
+              audit('design_answers_registered', {
+                detail: JSON.stringify({
+                  gitSha: commit,
+                  answersHash: createHash('sha256').update(revision!.answers).digest('hex'),
+                }),
+              }),
+          }
+        : undefined;
+      await workStore!.importTaskDag(designProposal!.dag, workStore!.getFeature(input.key)!, {
+        design: {
+          feature_key: input.key,
+          doc_path: paths.doc,
+          dag_path: paths.dag,
+          git_sha: commit,
+          feature_sha: input.gitSha,
+        },
+        owner: lifecycle!.owner,
+        revision: evidence,
+      });
+      audit('design_registered', { detail: JSON.stringify({ gitSha: commit }) });
     }
     const stat = git(tree.path, ['diff', '--stat', base, commit]);
     audit('ready_for_review');

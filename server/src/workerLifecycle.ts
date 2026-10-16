@@ -117,7 +117,8 @@ export class WorkerLifecycle {
           (d) =>
             d.status !== 'answered' &&
             d.blocks.includes(this.task) &&
-            d.context.startsWith(`feature-requirements/${this.task}/`),
+            (d.context.startsWith(`feature-requirements/${this.task}/`) ||
+              d.context.startsWith(`feature-design/${this.task}/`)),
         )
     )
       status = 'WAITING_HUMAN';

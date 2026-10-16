@@ -17,6 +17,21 @@ export interface FeatureRecord {
   status: string;
 }
 
+export interface DesignRecord {
+  project_id: string;
+  feature_key: string;
+  doc_path: string;
+  dag_path: string;
+  git_sha: string;
+  feature_sha: string;
+}
+
+export interface DesignImport {
+  design: Omit<DesignRecord, 'project_id'>;
+  owner: string;
+  revision?: { decisionId: string; answersHash: string; beforeCommit: () => void };
+}
+
 export interface TaskRecord {
   project_id: string;
   feature_key: string | null;
@@ -111,7 +126,7 @@ export interface WorkStore {
   readonly projectId: string;
   getProject(): ProjectRecord;
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void;
-  /** Trusted human Requirements ingress; retains the question gate during regeneration. */
+  /** Trusted human feature ingress (Requirements or Architect); retains the gate during regeneration. */
   claimRequirementsRevision(
     key: string,
     gitSha: string,
@@ -129,13 +144,18 @@ export interface WorkStore {
   ): Promise<void>;
   getFeature(key: string): FeatureRecord | undefined;
   listFeatures(): FeatureRecord[];
+  getDesign(key: string): DesignRecord | undefined;
   /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */
   approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void>;
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
   /** Validated DAG ingress. Existing keys are immutable; the entire batch is atomic. */
-  importTaskDag(dag: TaskDag, feature: Omit<FeatureRecord, 'project_id'>): Promise<number>;
+  importTaskDag(
+    dag: TaskDag,
+    feature: Omit<FeatureRecord, 'project_id'>,
+    design?: DesignImport,
+  ): Promise<number>;
   /** SQLite-consistent snapshot, including committed WAL pages. Destination must not exist. */
   backup(destination: string): Promise<void>;
   canStart(taskId: string): boolean;

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import * as path from 'path';
 
 import type { ProjectConfig } from '../../../core/src/project.js';
+import { architectPaths, architectTaskKey } from '../architect.js';
 import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
@@ -19,7 +20,7 @@ import type { FeatureRecord, WorkStore } from '../workstore/WorkStore.js';
 import { readTaskInput, taskPath } from './taskFiles.js';
 
 const USAGE =
-  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | approve <FEAT-ID> | show <FEAT-ID> [--json]';
+  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | approve <FEAT-ID> | show <FEAT-ID> [--json]';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
@@ -38,14 +39,33 @@ function featureDocument(store: WorkStore, config: ProjectConfig, feature: Featu
   )
     throw new Error('Feature branch or document binding changed');
   const source = readTaskInput(expectedTree, relative);
+  const design = store.getDesign(feature.key);
+  const head = design?.git_sha ?? feature.git_sha;
   if (
-    git(expectedTree, ['rev-parse', 'HEAD']).trim() !== feature.git_sha ||
-    git(expectedTree, ['rev-parse', `refs/heads/${task.branch}`]).trim() !== feature.git_sha ||
+    git(expectedTree, ['rev-parse', 'HEAD']).trim() !== head ||
+    git(expectedTree, ['rev-parse', `refs/heads/${task.branch}`]).trim() !== head ||
     git(expectedTree, ['show', `${feature.git_sha}:${relative}`]) !== source ||
     git(expectedTree, ['show', `refs/heads/${task.branch}:${relative}`]) !== source ||
     git(expectedTree, ['show', `:${relative}`]) !== source
   )
     throw new Error('Feature SHA no longer matches the branch file');
+  if (design) {
+    const paths = architectPaths(config.project.brain.path, feature.key);
+    if (
+      design.feature_sha !== feature.git_sha ||
+      design.doc_path !== paths.doc ||
+      design.dag_path !== paths.dag
+    )
+      throw new Error('Design binding changed');
+    for (const relative of [paths.doc, paths.dag]) {
+      const content = readTaskInput(expectedTree, relative);
+      if (
+        git(expectedTree, ['show', `${head}:${relative}`]) !== content ||
+        git(expectedTree, ['show', `:${relative}`]) !== content
+      )
+        throw new Error('Design SHA no longer matches the branch file');
+    }
+  }
   return { spec: readRequirements(expectedTree, relative, feature.key), branch: task.branch };
 }
 
@@ -124,6 +144,9 @@ export async function runFeatureCommand(
         ['--request', '--answers'].includes(rest[0]) &&
         !rest[1].startsWith('-')) ||
       (command === 'approve' && rest.length === 0) ||
+      (command === 'design' &&
+        (rest.length === 0 ||
+          (rest.length === 2 && rest[0] === '--answers' && !rest[1].startsWith('-')))) ||
       (command === 'show' && (rest.length === 0 || (rest.length === 1 && rest[0] === '--json')))
     )
   )
@@ -213,6 +236,48 @@ export async function runFeatureCommand(
       );
       feature = store.getFeature(key);
       if (feature) log(`${key}: ${feature.status} (${feature.git_sha})`);
+    } else if (command === 'design') {
+      if (!feature || feature.status !== 'approved')
+        throw new Error('Architect requires an approved FeatureSpec');
+      const { spec } = featureDocument(store, config, feature);
+      if (spec.openQuestions.length)
+        throw new Error('Approved FeatureSpec has unresolved questions');
+      if (store.getDesign(key)) {
+        if (rest.length) throw new Error('Design already registered; no answers expected');
+        log(`${key}: design already registered (${store.getDesign(key)!.git_sha})`);
+        return;
+      }
+      const taskKey = architectTaskKey(key);
+      const decisions = store
+        .listDecisions()
+        .filter(
+          (d) => d.blocks.includes(taskKey) && d.context.startsWith(`feature-design/${taskKey}/`),
+        );
+      const decision = decisions.find((d) => d.status !== 'answered') ?? decisions.at(-1);
+      let revision;
+      if (rest.length) {
+        if (featureIngressActor() !== 'human')
+          throw new Error('Architect answers require the human operator');
+        if (!decision) throw new Error('Design is not awaiting answers');
+        const answers = readTaskInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
+        if (!answers.trim()) throw new Error('Answers must not be empty');
+        revision = { gitSha: feature.git_sha, decisionId: decision.id, answers };
+      } else if (decision) {
+        log(`${key}: design requires --answers (${decision.id})`);
+        process.exitCode = 3;
+        return;
+      }
+      await runWorker(
+        { task: taskKey, selectExecutor: true },
+        {
+          ...workerOptions,
+          cwd,
+          log,
+          architect: { key, spec, gitSha: feature.git_sha, revision },
+        },
+      );
+      const design = store.getDesign(key);
+      if (design) log(`${key}: design registered (${design.git_sha})`);
     } else if (command === 'approve') {
       await approveFeature(store, config, key, 'human');
       log(`${key}: approved`);
@@ -222,12 +287,15 @@ export async function runFeatureCommand(
       const result = {
         ...feature,
         ...document,
-        decisions: store.listDecisions().filter((d) => d.blocks.includes(key)),
+        design: store.getDesign(key) ?? null,
+        decisions: store
+          .listDecisions()
+          .filter((d) => d.blocks.includes(key) || d.blocks.includes(architectTaskKey(key))),
       };
       log(
         rest[0] === '--json'
           ? JSON.stringify(result, null, 2)
-          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}`,
+          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}`,
       );
     }
   } catch (error) {

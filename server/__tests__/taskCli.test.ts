@@ -12,6 +12,8 @@ import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };

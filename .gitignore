@@ -52,4 +52,5 @@ agent-orchestrator.yaml
 # Agent-orchestrator / tooling scaffolding
 .ao/
 .serena/
-tasks/.vitest-tmp/
+tasks/
+.vitest-tmp/

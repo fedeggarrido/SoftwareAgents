@@ -15,6 +15,7 @@ import {
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
+import { taskDagDeclaration, taskDeclaration } from '../taskDag.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
 import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
@@ -596,8 +597,42 @@ class SqliteWorkStore implements WorkStore {
   }
   getDesign(key: string): DesignRecord | undefined {
     return this.db
-      .prepare('SELECT * FROM technical_designs WHERE project_id = ? AND feature_key = ?')
+      .prepare(
+        'SELECT project_id, feature_key, doc_path, dag_path, git_sha, feature_sha FROM technical_designs WHERE project_id = ? AND feature_key = ?',
+      )
       .get(this.projectId, key) as unknown as DesignRecord | undefined;
+  }
+  reserveAdrNumbers(featureKey: string, count: number, minimum: number): Promise<number[]> {
+    if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(minimum) || minimum < 0)
+      throw new Error('Invalid ADR reservation');
+    return this.write(() => {
+      const reserved = this.db
+        .prepare(
+          'SELECT number FROM adr_reservations WHERE project_id = ? AND feature_key = ? ORDER BY ordinal',
+        )
+        .all(this.projectId, featureKey)
+        .map((row) => Number(row.number));
+      let number = Math.max(
+        minimum,
+        Number(
+          this.db
+            .prepare(
+              'SELECT coalesce(max(number), 0) AS number FROM adr_reservations WHERE project_id = ?',
+            )
+            .get(this.projectId)!.number,
+        ),
+      );
+      for (let ordinal = reserved.length; ordinal < count; ordinal++) {
+        if (++number > 9999) throw new Error('ADR numbering exhausted');
+        this.db
+          .prepare(
+            'INSERT INTO adr_reservations (project_id, feature_key, ordinal, number) VALUES (?, ?, ?, ?)',
+          )
+          .run(this.projectId, featureKey, ordinal, number);
+        reserved.push(number);
+      }
+      return reserved.slice(0, count);
+    });
   }
   approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void> {
     return this.write(() => {
@@ -667,6 +702,7 @@ class SqliteWorkStore implements WorkStore {
     design?: DesignImport,
   ): Promise<number> {
     // Snapshot before a busy retry; callers cannot mutate the batch while waiting.
+    dag = structuredClone(dag);
     const declarations = dag.tasks.map((task) => ({
       ...task,
       dependsOn: [...task.dependsOn].sort(),
@@ -675,6 +711,24 @@ class SqliteWorkStore implements WorkStore {
     }));
     return this.write(() => {
       let created = 0;
+      const registered = this.db
+        .prepare(
+          'SELECT dag_declaration FROM technical_designs WHERE project_id = ? AND feature_key = ?',
+        )
+        .get(this.projectId, dag.feature);
+      if (registered && !design) {
+        // v8 records predate the snapshot column; their immutable declarations are the baseline.
+        const baseline =
+          registered.dag_declaration ??
+          JSON.stringify(
+            this.listTasks()
+              .filter((task) => task.feature_key === dag.feature && task.declaration)
+              .map((task) => task.declaration!)
+              .sort(),
+          );
+        if (baseline !== taskDagDeclaration(dag))
+          throw new Error('TaskDAG differs from the registered design; run feature design again');
+      }
       if (!this.getFeature(feature.key)) this.createFeature(feature);
       if (design) {
         const current = this.getFeature(feature.key)!;
@@ -699,7 +753,7 @@ class SqliteWorkStore implements WorkStore {
         if (this.getDesign(feature.key)) throw new Error('Design already registered');
         this.db
           .prepare(
-            'INSERT INTO technical_designs (project_id, feature_key, doc_path, dag_path, git_sha, feature_sha) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO technical_designs (project_id, feature_key, doc_path, dag_path, git_sha, feature_sha, dag_declaration) VALUES (?, ?, ?, ?, ?, ?, ?)',
           )
           .run(
             this.projectId,
@@ -708,23 +762,12 @@ class SqliteWorkStore implements WorkStore {
             design.design.dag_path,
             design.design.git_sha,
             design.design.feature_sha,
+            taskDagDeclaration(dag),
           );
       }
       for (const task of declarations) {
         // Explicit field order makes YAML/JSON property ordering irrelevant.
-        const declaration = JSON.stringify({
-          feature: dag.feature,
-          key: task.key,
-          type: task.type,
-          title: task.title,
-          description: task.description,
-          acceptanceRefs: task.acceptanceRefs,
-          dependsOn: task.dependsOn,
-          agentRole: task.agentRole,
-          size: task.size,
-          ...(task.changeZones ? { changeZones: task.changeZones } : {}),
-          ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
-        });
+        const declaration = taskDeclaration(dag.feature, task);
         const current = this.getTask(task.key);
         if (current) {
           const deps = this.listTaskDependencies(task.key).map((edge) => edge.depends_on_key);

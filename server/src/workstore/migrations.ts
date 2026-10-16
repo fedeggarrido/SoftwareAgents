@@ -105,6 +105,15 @@ const migrations = [
     PRIMARY KEY(project_id, feature_key),
     FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
   ) STRICT;`,
+  `ALTER TABLE technical_designs ADD COLUMN dag_declaration TEXT;
+  CREATE TABLE adr_reservations (
+    project_id TEXT NOT NULL, feature_key TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+    number INTEGER NOT NULL CHECK(number BETWEEN 1 AND 9999),
+    PRIMARY KEY(project_id, feature_key, ordinal),
+    UNIQUE(project_id, number),
+    FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
+  ) STRICT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

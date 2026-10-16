@@ -170,6 +170,17 @@ it('rejects changed declarations atomically, including changes to declarative-on
   expect(store.getTask('FEAT-001-T03')).toBeUndefined();
 });
 
+it('keeps additive imports and partial reimports for historical DAGs without a registered design', async () => {
+  expect(cli('import', 'dag.yaml').code).toBe(0);
+  const extended = dag();
+  extended.tasks.push({ ...extended.tasks[0], key: 'FEAT-001-T03' });
+  writeDag(extended);
+  expect(cli('import', 'dag.yaml').out).toContain('1 created, 2 unchanged');
+  writeDag(dag());
+  expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
+  expect((await open()).listTasks()).toHaveLength(3);
+});
+
 it('imports and reimports with an additive tasks/dependencies column', async () => {
   await open();
   const { DatabaseSync } = await import('node:sqlite');

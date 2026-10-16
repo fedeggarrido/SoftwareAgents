@@ -145,6 +145,8 @@ export interface WorkStore {
   getFeature(key: string): FeatureRecord | undefined;
   listFeatures(): FeatureRecord[];
   getDesign(key: string): DesignRecord | undefined;
+  /** Durable per-Feature reservations, unique throughout the Project, including failed materialization. */
+  reserveAdrNumbers(featureKey: string, count: number, minimum: number): Promise<number[]>;
   /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */
   approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void>;
   createTask(task: NewTask): void;

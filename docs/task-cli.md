@@ -41,7 +41,13 @@ La misma protección se aplica a la FeatureSpec.
 Cada importación crea la Feature si falta (ruta, HEAD y status como procedencia),
 Tasks en DRAFT y sus dependencias en **una transacción**. La migración 7 conserva
 la declaración completa en `tasks.declaration`, sin tablas nuevas. No actualiza
-la procedencia de una Feature ya existente ni elimina Tasks omitidas en otro DAG.
+la procedencia de una Feature ya existente. Sin diseño registrado permite altas
+y no elimina Tasks omitidas. Con diseño registrado exige igualdad completa con el
+DAG del commit registrado en `technical_designs`: altas, omisiones o cambios se
+rechazan indicando que debe usarse `feature design`, nunca `task import`, para
+cambiar el diseño. La regeneración de diseños ya registrados requiere un flujo
+explícito de revisión aún no disponible. La migración aditiva v9 conserva además
+una declaración del DAG y reservas persistentes de numeración ADR por Project.
 
 **La primera declaración de cada key es inmutable.** Reimportar la misma key con
 los mismos campos es un no-op, en cualquier estado, incluso con lease activa.

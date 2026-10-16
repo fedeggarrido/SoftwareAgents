@@ -111,6 +111,25 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getTask('FEAT-001-T01')?.status).toBe('READY');
     expect(store.listDecisions()[0].status).toBe('answered');
     expect(await store.importTaskDag(dag, store.getFeature('FEAT-001')!)).toBe(0);
+    const db = await inspect();
+    try {
+      // Designs migrated from v8 have no snapshot column value yet.
+      db.exec('UPDATE technical_designs SET dag_declaration = NULL;');
+      expect(await store.importTaskDag(dag, store.getFeature('FEAT-001')!)).toBe(0);
+      const before = store.listTasks();
+      for (const tasks of [
+        [],
+        [...dag.tasks, { ...dag.tasks[0], key: 'FEAT-001-T02' }],
+        [{ ...dag.tasks[0], title: 'Edited' }],
+      ]) {
+        await expect(
+          store.importTaskDag({ ...dag, tasks }, store.getFeature('FEAT-001')!),
+        ).rejects.toThrow(/registered design; run feature design/);
+        expect(store.listTasks()).toEqual(before);
+      }
+    } finally {
+      db.close();
+    }
   });
   it('fences Requirements rework and rolls back artifact registration together with decision closure', async () => {
     const first = await open();
@@ -206,15 +225,47 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 8 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 9 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
-        11,
+        12,
       );
     } finally {
       db.close();
     }
     expect(() => first.createTask({ key: 'task', type: 'implementation' })).toThrow();
+  });
+  it('migrates v8 additively and persists Project-scoped ADR reservations', async () => {
+    const store = await open();
+    store.createFeature({
+      key: 'FEAT-001',
+      doc_path: 'spec.yaml',
+      git_sha: 'spec',
+      status: 'approved',
+    });
+    const db = await inspect();
+    try {
+      db.exec(
+        'DROP TABLE adr_reservations; ALTER TABLE technical_designs DROP COLUMN dag_declaration; UPDATE schema_version SET version = 8;',
+      );
+      const migrated = await open();
+      expect(migrated.getFeature('FEAT-001')).toEqual(store.getFeature('FEAT-001'));
+      db.exec('ALTER TABLE adr_reservations ADD COLUMN future TEXT;');
+      expect(await migrated.reserveAdrNumbers('FEAT-001', 2, 7)).toEqual([8, 9]);
+      const other = await open('b');
+      other.createFeature({
+        key: 'FEAT-001',
+        doc_path: 'spec.yaml',
+        git_sha: 'spec',
+        status: 'approved',
+      });
+      expect(await other.reserveAdrNumbers('FEAT-001', 1, 7)).toEqual([8]);
+      expect(await store.reserveAdrNumbers('FEAT-001', 2, 100)).toEqual([8, 9]);
+      await expect(store.reserveAdrNumbers('FEAT-001', 3, 9999)).rejects.toThrow('exhausted');
+      expect(await store.reserveAdrNumbers('FEAT-001', 3, 7)).toEqual([8, 9, 10]);
+    } finally {
+      db.close();
+    }
   });
   it('keeps writers working after additive columns on every WorkStore table', async () => {
     await open();
@@ -478,7 +529,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
+        'DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
       );
       db.prepare(
         `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
@@ -495,7 +546,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
+        'DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
       );
       db.exec(
         "INSERT INTO tasks VALUES ('a', NULL, 'old-running', 'dev', 'RUNNING', 0, NULL, 7, NULL, NULL, 1, 3, NULL, NULL, NULL, NULL, 'then', 'then')",
@@ -641,7 +692,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 8 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 9 }]);
     } finally {
       db.close();
     }

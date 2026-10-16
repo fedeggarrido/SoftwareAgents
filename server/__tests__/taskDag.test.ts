@@ -42,6 +42,36 @@ function dag(...tasks: DagTask[]): TaskDag {
 const covered = (...tasks: DagTask[]) => dag(task(99, [], ['AC-001', 'AC-002']), ...tasks);
 
 describe('TaskDAG schema', () => {
+  it('accepts only documented POSIX paths and simple star globs for changeZones', () => {
+    for (const zone of [
+      'src/file.ts',
+      'src/',
+      'src/audit*.ts',
+      'src/**/*.ts',
+      '**/*.ts',
+      'src/new-dir/**',
+    ])
+      expect(() => parseTaskDag(dag({ ...task(1), changeZones: [zone] })), zone).not.toThrow();
+    for (const zone of [
+      '{..,src}/**',
+      '../src',
+      'src/../file',
+      '/src',
+      'C:/src',
+      'src\\file',
+      'src/{a,b}',
+      'src/?.ts',
+      'src/[ab].ts',
+      'src/**x',
+      'src/***',
+      './src',
+      'src//file',
+    ])
+      expect(() => parseTaskDag(dag({ ...task(1), changeZones: [zone] })), zone).toThrow(
+        SchemaValidationError,
+      );
+  });
+
   it('accepts a well-formed DAG and every task type', () => {
     for (const type of ['spec', 'design', 'code', 'review', 'qa', 'doc', 'spike'] as const) {
       expect(parseTaskDag(dag({ ...task(1), type }))).toMatchObject({ feature: 'FEAT-001' });

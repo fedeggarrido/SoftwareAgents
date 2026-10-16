@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 
 import { architectArtifacts, architectContext, validateArchitect } from '../src/architect.js';
 import { AuditLog } from '../src/auditLog.js';
@@ -140,6 +141,154 @@ async function approved() {
 }
 
 describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CLIs)', () => {
+  it.each(['addition', 'omission', 'local change'])(
+    'rejects %s against the complete registered DAG',
+    async (mode) => {
+      await approved();
+      await design();
+      const file = path.join(tree(), dagDoc);
+      const dag = parse(fs.readFileSync(file, 'utf8'));
+      if (mode === 'addition') dag.tasks.push({ ...dag.tasks[0], key: 'FEAT-001-T03' });
+      if (mode === 'omission') dag.tasks.pop();
+      if (mode === 'local change') dag.tasks[0].title = 'Local edit';
+      fs.writeFileSync(file, JSON.stringify(dag));
+      const store = await storeFor();
+      try {
+        const before = store.listTasks();
+        await expect(runTaskCommand(['import', dagDoc], tree())).rejects.toThrow(
+          /registered design; run feature design/,
+        );
+        await expect(store.importTaskDag(dag, store.getFeature('FEAT-001')!)).rejects.toThrow(
+          /registered design/,
+        );
+        expect(store.listTasks()).toEqual(before);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it('reserves distinct ADR numbers for two features from the same Brain snapshot', async () => {
+    const store = await storeFor();
+    const second = await storeFor();
+    const proposal = {
+      components: ['Reader'],
+      risks: [],
+      body: 'Design',
+      dag: {
+        apiVersion: 'softwareagents.io/v1alpha1' as const,
+        kind: 'TaskDAG' as const,
+        feature: 'FEAT-001',
+        tasks: [],
+      },
+      adrs: [{ title: 'Read only audit', body: 'Decision' }],
+    };
+    try {
+      for (const key of ['FEAT-001', 'FEAT-002'])
+        store.createFeature({
+          key,
+          doc_path: `features/${key}.yaml`,
+          git_sha: 'snapshot',
+          status: 'approved',
+        });
+      const [firstFiles, secondFiles] = await Promise.all([
+        architectArtifacts(repo, '.softwareagents/brain', 'FEAT-001', proposal, store),
+        architectArtifacts(repo, '.softwareagents/brain', 'FEAT-002', proposal, second),
+      ]);
+      expect([...firstFiles.keys()]).toContain('.softwareagents/brain/adr/0008-read-only-audit.md');
+      expect([...secondFiles.keys()]).toContain(
+        '.softwareagents/brain/adr/0009-read-only-audit.md',
+      );
+      expect(await second.reserveAdrNumbers('FEAT-001', 1, 7)).toEqual([8]);
+      // No artifact has been written; reservations already survive reopening the store.
+      const reopened = await storeFor();
+      try {
+        expect(await reopened.reserveAdrNumbers('FEAT-002', 1, 7)).toEqual([9]);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      store.close();
+      second.close();
+    }
+  });
+
+  it('retries protected changeZones as validation errors exactly once', async () => {
+    await approved();
+    await design('protected-repair');
+    expect(launchLog()).toHaveLength(2);
+    expect(launchLog()[1].data.validationErrors.join('\n')).toContain('protected path .git/**');
+  });
+
+  it('rejects unsafe zones, physical junction escapes and Operator-protected glob overlaps', () => {
+    const spec = { key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] } as Parameters<
+      typeof validateArchitect
+    >[1];
+    const proposal = {
+      components: ['Reader'],
+      risks: [],
+      body: 'Design',
+      dag: {
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'TaskDAG',
+        feature: 'FEAT-001',
+        tasks: [
+          {
+            key: 'FEAT-001-T01',
+            type: 'code',
+            title: 'Read',
+            description: 'Read',
+            acceptanceRefs: ['AC-001'],
+            dependsOn: [],
+            agentRole: 'developer',
+            size: 'S',
+            changeZones: ['src/audit*.ts'],
+            parallelizable: true,
+          },
+        ],
+      },
+    };
+    const checkout = { cwd: repo, protectedPaths: ['src/secrets/**', 'private/*.key'] };
+    const validate = (zone: string) => {
+      proposal.dag.tasks[0].changeZones = [zone];
+      return () => validateArchitect(JSON.stringify(proposal), spec, checkout);
+    };
+    for (const zone of [
+      '{..,src}/**',
+      '.git/config',
+      '.softwareagents/brain/file.md',
+      'AGENTS.md',
+      '**/AGENTS.md',
+      'src/secrets/file.ts',
+      'src/secrets',
+      'src/*/file.ts',
+      'private/*',
+      '**/*.key',
+      'src/**',
+      'src/**/*.ts',
+      '.github/workflows/ci.yaml',
+    ])
+      expect(validate(zone), zone).toThrow();
+    for (const zone of ['src/audit*.ts', 'src/module/*.ts', 'private/*.ts', 'src/new-file.ts'])
+      expect(() =>
+        validateArchitect(
+          JSON.stringify({
+            ...proposal,
+            dag: { ...proposal.dag, tasks: [{ ...proposal.dag.tasks[0], changeZones: [zone] }] },
+          }),
+          spec,
+          { cwd: repo },
+        ),
+      ).not.toThrow();
+    fs.mkdirSync(path.join(repo, 'src'));
+    expect(validate('src')).toThrow(/protected path/);
+    fs.writeFileSync(path.join(repo, 'src/new-file.ts'), '// safe file');
+    expect(validate('src/new-file.ts')).not.toThrow();
+    expect(validate('src/new-file.ts/*.ts')).toThrow(/prefix must be a directory/);
+    fs.symlinkSync(root, path.join(repo, 'escape'), 'junction');
+    expect(validate('escape/new/*.ts')).toThrow(/inside|Links/);
+  });
+
   it.each(['claude', 'codex'] as const)(
     'registers design SHA and imports covered DAG through %s',
     async (selected) => {
@@ -368,16 +517,23 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     ]) {
       const proposal = structuredClone(valid);
       mutate(proposal);
-      expect(() => validateArchitect(JSON.stringify(proposal), spec)).toThrow();
+      expect(() => validateArchitect(JSON.stringify(proposal), spec, { cwd: tree() })).toThrow();
     }
     for (const forbidden of [
       { path: 'outside.md' },
       { adrs: [{ title: 'Decision', body: 'Content', path: 'outside.md' }] },
     ])
-      expect(() => validateArchitect(JSON.stringify({ ...valid, ...forbidden }), spec)).toThrow();
-    expect(() => architectArtifacts(tree(), '.softwareagents/brain', 'FEAT-001', valid)).toThrow(
-      'already exists',
-    );
+      expect(() =>
+        validateArchitect(JSON.stringify({ ...valid, ...forbidden }), spec, { cwd: tree() }),
+      ).toThrow();
+    const store = await storeFor();
+    try {
+      await expect(
+        architectArtifacts(tree(), '.softwareagents/brain', 'FEAT-001', valid, store),
+      ).rejects.toThrow('already exists');
+    } finally {
+      store.close();
+    }
     expect(architectContext(tree(), '.softwareagents/brain')['ARCHITECTURE.md']).toBeNull();
     fs.symlinkSync(root, path.join(tree(), '.softwareagents/brain/ARCHITECTURE.md'), 'junction');
     expect(() => architectContext(tree(), '.softwareagents/brain')).toThrow(/Links|inside/);

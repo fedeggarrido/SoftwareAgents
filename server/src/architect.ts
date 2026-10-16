@@ -6,6 +6,7 @@ import { stringify } from 'yaml';
 import * as dagContract from '../../core/schemas/task-dag.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { TaskDag } from '../../core/src/taskDag.js';
+import { validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskDirectory, taskPath } from './commands/taskFiles.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
@@ -89,7 +90,11 @@ export function architectBrief(
   });
 }
 
-export function validateArchitect(source: string, spec: FeatureSpec): ArchitectProposal {
+export function validateArchitect(
+  source: string,
+  spec: FeatureSpec,
+  checkout: { cwd: string; protectedPaths?: readonly string[] },
+): ArchitectProposal {
   if (Buffer.byteLength(source) > TASK_CLI_INPUT_BYTES)
     throw new SchemaValidationError(['Architect proposal exceeds 1 MiB limit']);
   let value: unknown;
@@ -105,28 +110,36 @@ export function validateArchitect(source: string, spec: FeatureSpec): ArchitectP
     if (!task.changeZones?.length) errors.push(`${task.key}: changeZones required`);
     if (typeof task.parallelizable !== 'boolean')
       errors.push(`${task.key}: parallelizable required`);
+    for (const zone of task.changeZones ?? []) {
+      try {
+        validateChangeZone(checkout.cwd, zone, checkout.protectedPaths ?? []);
+      } catch (error) {
+        errors.push(`${task.key}: changeZones ${zone}: ${(error as Error).message}`);
+      }
+    }
   });
   if (errors.length) throw new SchemaValidationError(errors);
   return proposal;
 }
 
 /** The model supplies content only. Paths, metadata and ADR numbers belong to the runtime. */
-export function architectArtifacts(
+export async function architectArtifacts(
   cwd: string,
   brain: string,
   key: string,
   proposal: ArchitectProposal,
-): Map<string, string> {
+  store: WorkStore,
+): Promise<Map<string, string>> {
   const paths = architectPaths(brain, key);
   const adrDir = taskPath(cwd, path.join(brain, 'adr'));
-  let number = fs.existsSync(adrDir)
+  const minimum = fs.existsSync(adrDir)
     ? Math.max(0, ...fs.readdirSync(adrDir).map((file) => Number(/^(\d{4})-/.exec(file)?.[1] ?? 0)))
     : 0;
+  const numbers = await store.reserveAdrNumbers(key, proposal.adrs?.length ?? 0, minimum);
   const files = new Map<string, string>();
   const adrs: string[] = [];
-  for (const adr of proposal.adrs ?? []) {
-    if (++number > 9999) throw new Error('ADR numbering exhausted');
-    const id = String(number).padStart(4, '0');
+  for (const [index, adr] of (proposal.adrs ?? []).entries()) {
+    const id = String(numbers[index]).padStart(4, '0');
     const slug =
       adr.title
         .toLowerCase()

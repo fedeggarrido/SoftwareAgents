@@ -1271,12 +1271,17 @@ async function runWorkerExecution(
         if (!interrupted && exitCode === 0) {
           try {
             if (options.architect) {
-              designProposal = validateArchitect(requirementsOutput, options.architect.spec);
-              designFiles = architectArtifacts(
+              designProposal = validateArchitect(requirementsOutput, options.architect.spec, {
+                cwd: tree.path,
+                protectedPaths: config.operator.protectedPaths,
+              });
+              if (!workStore) throw new Error('Architect requires a persistent WorkStore');
+              designFiles = await architectArtifacts(
                 tree.path,
                 config.project.brain.path,
                 options.architect.key,
                 designProposal,
+                workStore,
               );
             } else featureSpec = validateRequirements(requirementsOutput, args.task);
             if (

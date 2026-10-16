@@ -43,7 +43,7 @@ process.stdin.on('end', () => {
           dependsOn: ['FEAT-001-T01'],
           agentRole: 'qa',
           size: 'S',
-          changeZones: ['server/__tests__/**'],
+          changeZones: ['server/__tests__/*.test.ts'],
           parallelizable: false,
         },
       ],
@@ -54,6 +54,8 @@ process.stdin.on('end', () => {
     proposal.dag.tasks[0].acceptanceRefs = [];
   if (mode === 'invalid' || (mode === 'repair' && !data.validationErrors.length))
     proposal.dag.tasks[1].acceptanceRefs = [];
+  if (mode === 'protected-repair' && !data.validationErrors.length)
+    proposal.dag.tasks[0].changeZones = ['.git/config'];
   if (mode === 'outside') fs.writeFileSync('outside.txt', 'unauthorized');
   const output = JSON.stringify(proposal);
   const emit = (r) => console.log(JSON.stringify(r));

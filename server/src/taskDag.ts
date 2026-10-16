@@ -11,6 +11,27 @@ import { compileSchema, validateSchema } from './schemaValidation.js';
 const validateDag = compileSchema<TaskDag>(taskDagSchema);
 const validateDesign = compileSchema<TechnicalDesign>(technicalDesignSchema);
 
+/** Complete immutable content; task and set-valued field ordering is immaterial. */
+export function taskDeclaration(feature: string, task: TaskDag['tasks'][number]): string {
+  return JSON.stringify({
+    feature,
+    key: task.key,
+    type: task.type,
+    title: task.title,
+    description: task.description,
+    acceptanceRefs: [...task.acceptanceRefs].sort(),
+    dependsOn: [...task.dependsOn].sort(),
+    agentRole: task.agentRole,
+    size: task.size,
+    ...(task.changeZones ? { changeZones: [...task.changeZones].sort() } : {}),
+    ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
+  });
+}
+
+export function taskDagDeclaration(dag: TaskDag): string {
+  return JSON.stringify(dag.tasks.map((task) => taskDeclaration(dag.feature, task)).sort());
+}
+
 /** Shape only; throws SchemaValidationError. Graph rules live in analyzeTaskDag. */
 export function parseTaskDag(value: unknown): TaskDag {
   return validateSchema(validateDag, value);

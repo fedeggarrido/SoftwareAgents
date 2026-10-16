@@ -10,11 +10,12 @@ import { CliUsageError } from '../cliErrors.js';
 import {
   TASK_CLI_COPY_BUFFER_BYTES,
   TASK_CLI_DEFAULT_KEEP,
+  TASK_CLI_INPUT_BYTES,
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
-import { analyzeTaskDag, parseTaskDag } from '../taskDag.js';
+import { analyzeTaskDag, parseTaskDag, taskDagDeclaration } from '../taskDag.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import { isTaskStatus, type TaskStatus } from '../workstore/taskStateMachine.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
@@ -271,6 +272,24 @@ export async function runTaskCommand(
         windowsHide: true,
       }).trim();
       store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+      const design = store.getDesign(dag.feature);
+      if (design) {
+        const registered = parseDocument(
+          execFileSync('git', ['show', `${design.git_sha}:${design.dag_path}`], {
+            cwd,
+            encoding: 'utf8',
+            windowsHide: true,
+            maxBuffer: TASK_CLI_INPUT_BYTES,
+          }),
+          { uniqueKeys: true },
+        );
+        if (registered.errors.length) throw new Error('Invalid registered TaskDAG');
+        if (
+          taskDagDeclaration(dag) !==
+          taskDagDeclaration(parseTaskDag(registered.toJS({ maxAliasCount: 100 })))
+        )
+          throw new Error('TaskDAG differs from the registered design; run feature design again');
+      }
       taskDirectory(os.homedir(), '.pixel-agents/audit');
       taskPath(os.homedir(), `.pixel-agents/audit/${config.project.id}.jsonl`);
       taskPath(os.homedir(), `.pixel-agents/audit/${config.project.id}.jsonl.lock`);

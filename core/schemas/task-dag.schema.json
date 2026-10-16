@@ -60,8 +60,9 @@
             "items": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\:\\u0000-\\u0020]).+$"
-            }
+              "pattern": "^(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*(?:[^/]\\*\\*|\\*\\*[^/]))[A-Za-z0-9_@.*-]+(?:/[A-Za-z0-9_@.*-]+)*/?$"
+            },
+            "description": "Relative POSIX paths: ASCII letters, digits, underscore, dot, @ and hyphen; * within a segment, ** as a whole segment. Existing literal directories and a trailing slash include descendants; other literal paths match exactly. No dot/parent segments, braces, absolute paths, drive letters or backslashes. Architect also checks physical containment and protected-path overlap."
           },
           "parallelizable": {
             "type": "boolean"

@@ -182,13 +182,28 @@ elegidos por el modelo. El runtime materializa exclusivamente:
 - `<brain>/technical-designs/FEAT-001.md`: front matter TechnicalDesign SA-014,
   versión `1.0.0`, status `proposed`, seguido del cuerpo Markdown.
 - `<brain>/technical-designs/FEAT-001.dag.yaml`: TaskDAG SA-014 en YAML.
-- Opcionalmente `<brain>/adr/NNNN-<título-normalizado>.md`: numeración global del
-  Brain, máximo existente + 1, cuatro dígitos; referencias `ADR-NNNN` insertadas
-  por el runtime en el diseño. No sobrescribe artefactos previos sin registro.
+- Opcionalmente `<brain>/adr/NNNN-<título-normalizado>.md`: numeración única por
+  Project, cuatro dígitos. El WorkStore reserva los números bajo transacción antes
+  de materializar, por encima del máximo del Brain y de las reservas previas.
+  Cada reserva queda ligada al Feature y sobrevive a fallos y reintentos.
+  El runtime inserta referencias `ADR-NNNN` en el diseño. No sobrescribe
+  artefactos previos sin registro.
 
 Las keys son `FEAT-001-T##`. Cada Task exige tipo, tamaño S/M/L, dependencias,
 `acceptanceRefs`, `changeZones` (rutas/globs relativos al repositorio, sin escapes)
-y `parallelizable` booleano. `parseTaskDag` y `analyzeTaskDag` validan esquema,
+y `parallelizable` booleano. Las rutas son POSIX relativas, con letras ASCII,
+dígitos, `_`, `.`, `@` y `-`; `*` admite caracteres dentro de un segmento y `**`
+ocupa un segmento completo (cero o más directorios). Se permite `/` final.
+Se rechazan segmentos `.`/`..`, llaves, `?`, corchetes, rutas absolutas, letras de
+unidad y backslashes. El prefijo de directorios anterior al primer glob debe
+quedar físicamente dentro del checkout; se rechazan enlaces/junctions en él,
+incluso cuando el resto de la ruta aún no existe. Se rechaza cualquier zona que
+pueda cubrir `.git/`, `.softwareagents/`, `AGENTS.md`, las rutas SA-063 por defecto
+o los `protectedPaths` externos del Operator, aunque la ruta protegida no exista.
+Una ruta literal existente de directorio o con `/` final incluye descendientes.
+Las demás rutas literales seleccionan solo esa ruta; un glob selecciona las
+rutas que coincidan. Estos fallos son errores de validación y reciben el
+mismo reintento único. `parseTaskDag` y `analyzeTaskDag` validan esquema,
 keys únicas y del mismo Feature, dependencias existentes, ausencia de ciclos y
 cobertura de **cada AC**. Las zonas y la marca se persisten en la declaración
 inmutable; son datos para SA-097, no un permiso para lanzar en paralelo. Los DAG
@@ -216,7 +231,13 @@ El runtime verifica las escrituras y los paths staged, crea un commit con traile
 FeatureSpec. Registro e importación reutilizan `WorkStore.importTaskDag` en una
 transacción: Tasks sin dependencias pendientes en READY, las demás en DRAFT.
 `feature show` incluye diseño y decisiones; verifica el nuevo HEAD registrado y
-que el spec aprobado no haya cambiado. El reimport idéntico es un no-op y no
+que el spec aprobado no haya cambiado. Con diseño registrado, `task import` exige
+el mismo conjunto completo de Tasks y contenido que el DAG del commit registrado:
+rechaza altas, omisiones y cambios locales. El mensaje remite a `feature design`
+para cambiar el diseño; la regeneración de un diseño ya registrado requiere un
+flujo explícito de revisión, todavía no disponible. Solo los DAG históricos sin
+diseño registrado conservan importación aditiva. El orden de Tasks, dependencias,
+referencias AC y zonas no cambia el contenido. El reimport idéntico es un no-op y no
 altera estados, versiones ni leases:
 
 ```powershell
@@ -231,7 +252,10 @@ ausente, cobertura de AC, las únicas rutas creadas, numeración ADR, trailer/SH
 READY/DRAFT y `0 created` al reimportar. El pipeline no integra ni hace push.
 Git, SQLite y auditoría no comparten transacción: un corte tras commit y antes del
 registro exige inspección manual; no se sobrescriben los archivos huérfanos.
-Antes de abrir la base v8, actualizar y reiniciar coordinadamente todos sus
+La migración aditiva v9 añade la declaración completa del DAG registrado y las
+reservas ADR por Project/Feature; los diseños v8 conservan sus declaraciones
+inmutables como referencia al migrar. Antes de abrir la base v9, actualizar y
+reiniciar coordinadamente todos sus
 escritores como indica [task CLI](task-cli.md#migraciones-de-la-base-compartida).
 Las pruebas automatizadas usan únicamente fake CLIs.
 

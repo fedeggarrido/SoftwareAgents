@@ -40,13 +40,15 @@ export function isProtectedEvalPath(file: string): boolean {
 }
 
 export function evalGit(cwd: string, args: string[]): string {
-  return execFileSync('git', args, {
+  const output = execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  });
+  // NUL-delimited paths may start with whitespace; never change their identity.
+  return args.includes('-z') ? output : output.trim();
 }
 
 /** Reads declarations and pinned verifiers only. No worktree, config writes or probes. */

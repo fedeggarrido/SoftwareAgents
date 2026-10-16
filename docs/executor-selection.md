@@ -287,8 +287,7 @@ recomendado dentro de `modelTiers` (typecheck global y tests relacionados):
         {
           "argv": ["node", "node_modules/typescript/bin/tsc", "--noEmit"],
           "timeoutMs": 60000
-        },
-        { "vitestRelated": true, "timeoutMs": 60000 }
+        }
       ]
     }
   }
@@ -304,6 +303,11 @@ alteración produce `criteria_tampered` y termina sin ejecutar más verificadore
 ni escalar. **Riesgo residual:** un agente puede sabotear un test desde un fichero
 de código que sí puede modificar; el default amplía esos ficheros respecto a un
 binding exacto. Esto sigue requiriendo agentes cooperativos y revisión humana.
+
+Medido en este repo (2026-10-16): `vitestRelated` sobre un módulo del runtime arrastra
+~23 ficheros de test y tarda ~5 min (más que el tope de 60 s), así que como default
+siempre fallaría y escalaría todas las Tasks; por eso el default recomendado es solo
+`tsc --noEmit`, y `vitestRelated` queda para bindings de Tasks con grafo de tests ligero.
 
 `vitestRelated` también se admite en bindings propios. Es una alternativa estricta
 a `argv`: solo acepta `vitestRelated: true` y `timeoutMs` (1–60000 ms), sin rutas,

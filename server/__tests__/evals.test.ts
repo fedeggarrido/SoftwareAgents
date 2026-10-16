@@ -8,7 +8,7 @@ import { AuditLog } from '../src/auditLog.js';
 import { parseEvalArgs, runEvalCommand } from '../src/evalCommand.js';
 import { checkEvalCriteria } from '../src/evalCriteria.js';
 import { assertEvalRunAllowed } from '../src/evalGuard.js';
-import { assertEvalIntegrity } from '../src/evalIntegrity.js';
+import { assertEvalIntegrity, evalChangedFiles } from '../src/evalIntegrity.js';
 import {
   buildEvalReport,
   evalResultsDirectory,
@@ -170,6 +170,27 @@ function detachCascadeMetadata() {
 }
 
 describe('default cascade integrity and related tests', () => {
+  it('derives exact changed paths from tracked, staged, deleted, untracked and ignored files', () => {
+    for (const file of [' leading.ts', 'staged.cjs', 'deleted.mjs'])
+      fs.writeFileSync(path.join(repo, file), 'export {};');
+    evalGit(repo, ['add', ' leading.ts', 'staged.cjs', 'deleted.mjs']);
+    evalGit(repo, ['commit', '-m', 'source fixtures']);
+    const base = evalGit(repo, ['rev-parse', 'HEAD']);
+    detachCascadeMetadata();
+    fs.writeFileSync(path.join(repo, ' leading.ts'), 'export const changed = true;');
+    fs.writeFileSync(path.join(repo, 'staged.cjs'), 'module.exports = true;');
+    evalGit(repo, ['add', 'staged.cjs']);
+    // A staged-only edit must still count after the worktree content is restored.
+    fs.writeFileSync(path.join(repo, 'staged.cjs'), 'export {};');
+    fs.unlinkSync(path.join(repo, 'deleted.mjs'));
+    fs.writeFileSync(path.join(repo, '--config.mjs'), 'export {};');
+    fs.writeFileSync(path.join(root, 'metadata/info/exclude'), 'ignored.jsx\n');
+    fs.writeFileSync(path.join(repo, 'ignored.jsx'), 'export {};');
+    expect(evalChangedFiles(repo, base).sort()).toEqual(
+      [' leading.ts', 'staged.cjs', 'deleted.mjs', '--config.mjs', 'ignored.jsx'].sort(),
+    );
+  });
+
   it.each([
     'server/__tests__/answer.test.ts',
     'server/foo.spec.ts',

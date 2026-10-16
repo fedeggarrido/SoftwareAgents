@@ -17,7 +17,7 @@ process.stdin.on('end', () => {
     apiVersion: 'softwareagents.io/v1alpha1',
     kind: 'FeatureSpec',
     key: 'FEAT-001',
-    version: '1.0.0',
+    version: data.nextVersion ?? '1.0.0',
     status: 'draft',
     title: 'Audit view in Command Center',
     goal: 'Inspect audit events',
@@ -38,6 +38,11 @@ process.stdin.on('end', () => {
     openQuestions: mode === 'questions' ? ['Which retention period?', 'Which export formats?'] : [],
     links: { adr: [], clickup: [] },
   };
+  if (data.currentSpec) {
+    spec.rules.push('Retention: 30 days; export: CSV');
+    if (mode === 'new-questions') spec.openQuestions = ['Which timezone?'];
+    if (mode === 'same-version') spec.version = data.currentSpec.version;
+  }
   if (mode === 'invalid' || (mode === 'repair' && attempts === 0)) delete spec.acceptance[0].then;
   if (mode === 'no-ears') delete spec.acceptance[0].ears;
   if (mode === 'wrong-key') spec.key = 'FEAT-002';
@@ -47,6 +52,11 @@ process.stdin.on('end', () => {
   if (mode === 'empty-dir') fs.mkdirSync('unauthorized-directory');
   if (mode === 'other-brain') fs.writeFileSync('.softwareagents/brain/RULES.md', 'unauthorized');
   const emit = (r) => console.log(JSON.stringify(r));
+  let output = JSON.stringify(spec);
+  if (mode === 'alias-expansion') {
+    const text = 'x'.repeat(220000);
+    output = `apiVersion: softwareagents.io/v1alpha1\nkind: FeatureSpec\nkey: FEAT-001\nversion: 1.0.0\nstatus: draft\ntitle: &text ${text}\ngoal: *text\nuserValue: *text\nactors: [*text]\nflows: [*text]\nrules: []\nedgeCases: []\nacceptance: ${JSON.stringify(spec.acceptance)}\nopenQuestions: []\nlinks: {adr: [], clickup: []}\n`;
+  }
   if (executor === 'claude') {
     emit({
       type: 'system',
@@ -54,14 +64,14 @@ process.stdin.on('end', () => {
       session_id: 'fake-requirements-claude',
       tools: ['Read'],
     });
-    emit({ type: 'result', subtype: 'success', result: JSON.stringify(spec), is_error: false });
+    emit({ type: 'result', subtype: 'success', result: output, is_error: false });
   } else {
     require('./codex-rollout.cjs')('fake-requirements-codex');
     emit({ type: 'thread.started', thread_id: 'fake-requirements-codex' });
     emit({ type: 'turn.started' });
     emit({
       type: 'item.completed',
-      item: { id: 'output', type: 'agent_message', text: JSON.stringify(spec) },
+      item: { id: 'output', type: 'agent_message', text: output },
     });
     emit({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
   }

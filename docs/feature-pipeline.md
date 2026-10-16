@@ -40,10 +40,35 @@ Claude debe comprobar en real:
 3. Criterios con Given/When/Then y `ears`; ausencia de cambios de código/diseño.
    Las preguntas de producto sin respuesta abren una Human Decision en el panel
    existente y dejan la Task de Requirements en `WAITING_HUMAN`.
-4. Revisar el contenido y, si procede, resolver la decisión desde la oficina
-   mediante el mecanismo humano existente. La opción «Resolver todas las preguntas»
-   certifica la revisión de todas ellas; el mecanismo actual registra opciones,
-   no respuestas libres. Después, ejecutar explícitamente:
+4. Revisar el contenido y escribir las respuestas de producto en un Markdown del
+   checkout principal (por ejemplo, `docs/examples/FEAT-001-answers.md`). Relanzar
+   Requirements explícitamente desde el CLI humano:
+
+   ```powershell
+   node dist/cli.js feature spec FEAT-001 --answers docs/examples/FEAT-001-answers.md
+   node dist/cli.js feature show FEAT-001 --json
+   ```
+
+   Equivalente instalado:
+   `pixel-agents feature spec FEAT-001 --answers docs/examples/FEAT-001-answers.md`.
+   El fichero debe existir, ser regular, estar dentro del checkout sin enlaces y
+   ocupar como máximo 1 MiB. Las respuestas y el spec actual entran como datos
+   no confiables; no conceden herramientas ni autoridad. Los mismos marcadores de
+   ingreso gestionado/agente/autopilot que bloquean `approve` bloquean `--answers`.
+
+   Requirements reutiliza la misma rama y worktree, incorpora las respuestas,
+   elimina las preguntas respondidas y propone la siguiente versión de parche
+   (`1.0.0` → `1.0.1`). El runtime valida la versión, materializa el YAML, lo
+   commitea y actualiza `doc_path`/`git_sha`. Solo después del registro cierra la
+   decisión anterior, vinculándola a versión, SHA y hash SHA-256 de respuestas;
+   el contenido de las respuestas no se guarda en auditoría. Registro y cierre
+   comparten transacción SQLite. Si falla la regeneración, la decisión conserva
+   su gate y el artefacto anterior sigue registrado. Las nuevas preguntas abren
+   una nueva decisión por versión, incluso si repiten texto de una versión previa.
+
+   La opción de la oficina «Resolver todas las preguntas» por sí sola no incorpora
+   respuestas al YAML y nunca permite aprobar mientras queden `openQuestions`.
+   Cuando la nueva versión no tenga preguntas, ejecutar explícitamente:
 
    ```powershell
    node dist/cli.js feature approve FEAT-001
@@ -53,7 +78,8 @@ Claude debe comprobar en real:
 5. Confirmar `approved` y auditoría `approve_featurespec/pending` seguida de
    `approved`, actor humano. Repetir `feature spec` no lanza otro executor ni duplica
    Features/decisiones. Cambiar el YAML (también un comentario) debe impedir aprobar;
-   una decisión pendiente o expirada también lo impide.
+   un commit vacío posterior que conserve el YAML también debe impedir aprobar.
+   Una decisión pendiente o expirada también lo impide.
 
 Las pruebas automatizadas usan exclusivamente los fake CLIs de
 `server/__tests__/fixtures/fake-requirements-cli.cjs`; Claude realiza la prueba real.
@@ -74,20 +100,28 @@ la forma «When/While/Where …, the system shall …», «If …, then the syst
 o «The system shall …». La validación es estructural/sintáctica; la calidad y
 coherencia semántica corresponden a la revisión humana.
 
+Antes de aceptar una propuesta se serializa sin aliases y se comprueba que el
+YAML persistido no supere el límite de lectura de 1 MiB. Una expansión de aliases
+que lo exceda cuenta como error de validación y no produce artefacto registrado.
+
 Si falla YAML, esquema o contrato de Requirements, el worker devuelve los errores
 al mismo rol en una segunda Execution, con nueva admisión y auditoría. Conserva
 la lease de la Task y el worktree limpio. Hay **un solo reintento de validación**;
 un segundo fallo deja `FAILED_RETRYABLE` con motivo y sin Feature registrado.
-Un fallo de executor o contención no recibe ese reintento. La cascada de modelos
+Un fallo de executor o contención no recibe ese reintento de validación. La única
+excepción transitoria de credenciales es el mensaje específico de Claude Code
+«another Claude Code process is refreshing it»: espera cancelable de 30 segundos
+y hasta dos reintentos, cada uno con nueva Execution, admisión y auditoría. Otros
+errores de credenciales no se reintentan. La cascada de modelos
 SA-103 no se aplica a Requirements: sus verificadores de implementación no
 validan este artefacto y no deben multiplicar el límite de dos intentos.
 
 `openQuestions: string[]` conserva el campo estructurado existente. Todas las
 preguntas de una propuesta se agrupan en **una Human Decision**, con una clave
-estable por contenido, usando el gate existente (una Task no admite gates
-simultáneos). Reejecutar no duplica la decisión. Aprobar comprueba además que esa
-decisión existe y está respondida, incluso si hubo un corte entre registro y
-apertura del gate.
+estable por contenido y versión, usando el gate existente (una Task no admite gates
+simultáneos). Reejecutar no duplica la decisión. Aprobar comprueba además que
+no queden preguntas en el artefacto, incluso si una decisión se marcó respondida
+sin incorporar las respuestas o hubo un corte antes de abrir el gate.
 
 ## Contención y aprobación
 
@@ -104,7 +138,8 @@ frente a otro proceso del mismo usuario.
 `approve_featurespec` reutiliza la política SA-019: solo ingreso humano del CLI,
 sin flags de actor ni acciones desde el board. Los procesos gestionados/autopilot
 se rechazan como agentes. La aprobación compara el fichero de trabajo, índice y
-versión de la rama con el contenido del commit registrado, y comprueba decisiones
+versión de la rama con el contenido del commit registrado. Además exige igualdad
+entre el SHA registrado, HEAD del worktree y la ref de la rama, y comprueba decisiones
 pendientes/expiradas dentro de la transacción de WorkStore. El `status=approved`
 autoritativo es el de WorkStore: no se reescribe el YAML `draft` ni se altera el SHA
 revisado para simular una aprobación del agente.

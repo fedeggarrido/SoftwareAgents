@@ -235,3 +235,8 @@ export const TASK_CLI_INPUT_BYTES = 1024 * 1024;
 export const TASK_CLI_COPY_BUFFER_BYTES = 64 * 1024;
 export const TASK_CLI_DEFAULT_KEEP = 7;
 export const TASK_CLI_MAX_KEEP = 1000;
+
+/** Claude Code refresh-lock contention only; other credential failures never retry. */
+export const CLAUDE_OAUTH_REFRESH_RETRIES = 2;
+export const CLAUDE_OAUTH_REFRESH_WAIT_MS = 30_000;
+export const CLAUDE_OAUTH_REFRESH_CONTENTION = 'another Claude Code process is refreshing it';

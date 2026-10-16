@@ -249,6 +249,10 @@ class SqliteWorkStore implements WorkStore {
   }
 
   private failLease(task: TaskRecord, reason: string, actor: string, token: string): TaskRecord {
+    if (this.requirementsGate(task.key)) {
+      this.decisionTask(task, 'WAITING_HUMAN', actor, reason, token);
+      return this.getTask(task.key)!;
+    }
     return this.change(
       task.key,
       task.version,
@@ -330,22 +334,57 @@ class SqliteWorkStore implements WorkStore {
     return this.acquire(taskId, owner, ttl, expectedVersion);
   }
 
+  claimRequirementsRevision(
+    key: string,
+    gitSha: string,
+    decisionId: string,
+    owner: string,
+  ): Promise<TaskRecord> {
+    leaseDeadline(owner, DEFAULT_LEASE_TTL_MS);
+    return this.acquire(key, owner, DEFAULT_LEASE_TTL_MS, undefined, { gitSha, decisionId });
+  }
+
+  private assertRequirementsRevision(key: string, gitSha: string, decisionId: string): void {
+    const feature = this.getFeature(key);
+    const task = this.getTask(key);
+    const decision = this.listDecisions().find((d) => d.id === decisionId);
+    if (
+      !feature ||
+      feature.git_sha !== gitSha ||
+      feature.status !== 'in_review' ||
+      task?.agent_role !== 'requirements-analyst' ||
+      task.type !== 'docs' ||
+      !decision?.blocks.includes(key) ||
+      !decision.context.startsWith(`feature-requirements/${key}/`) ||
+      this.listDecisions().some(
+        (d) => d.id !== decisionId && d.status !== 'answered' && d.blocks.includes(key),
+      )
+    )
+      throw new Error('Requirements revision or decision changed');
+  }
+
   private async acquire(
     taskId: string,
     owner: string,
     ttl: number,
     reworkVersion?: number,
+    revision?: { gitSha: string; decisionId: string },
   ): Promise<TaskRecord> {
     const reservation = await this.write(() => {
       this.assertNotRecovering(taskId);
       const task = this.getTask(taskId);
       if (!task) throw new TaskTransitionError(taskId, 'NOT_FOUND');
-      this.assertNoDecisionGate(taskId);
+      if (revision) this.assertRequirementsRevision(taskId, revision.gitSha, revision.decisionId);
+      this.assertNoDecisionGate(taskId, revision?.decisionId);
       if (reworkVersion !== undefined && task.version !== reworkVersion)
         throw new TaskVersionConflictError(taskId, reworkVersion, task.version);
       if (
         !(
-          reworkVersion === undefined ? ['QUEUED', 'READY', 'FAILED_RETRYABLE'] : ['REVIEW', 'QA']
+          revision
+            ? ['WAITING_HUMAN', 'REVIEW', 'READY', 'FAILED_RETRYABLE', 'WAITING_QUOTA']
+            : reworkVersion === undefined
+              ? ['QUEUED', 'READY', 'FAILED_RETRYABLE']
+              : ['REVIEW', 'QA']
         ).includes(task.status)
       )
         throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
@@ -357,6 +396,12 @@ class SqliteWorkStore implements WorkStore {
       await this.terminate(candidate, token);
       return await this.write(() => {
         let task = this.reservedTask(taskId, token);
+        if (revision) {
+          this.assertRequirementsRevision(taskId, revision.gitSha, revision.decisionId);
+          if (task.status !== 'REVIEW')
+            this.decisionTask(task, 'REVIEW', owner, 'Human Requirements revision', token);
+          task = this.getTask(taskId)!;
+        }
         if (task.status === 'FAILED_RETRYABLE')
           task = this.change(
             taskId,
@@ -382,12 +427,13 @@ class SqliteWorkStore implements WorkStore {
         task = this.change(
           taskId,
           task.version,
-          reworkVersion === undefined ? 'LEASED' : 'RUNNING',
+          revision || reworkVersion !== undefined ? 'RUNNING' : 'LEASED',
           'Claim lease',
           owner,
           undefined,
           { owner, expires: leaseDeadline(owner, ttl) },
           token,
+          revision?.decisionId,
         );
         this.clearReservation(taskId, token);
         return task;
@@ -487,6 +533,48 @@ class SqliteWorkStore implements WorkStore {
         'INSERT INTO features (project_id, key, doc_path, git_sha, status) VALUES (?, ?, ?, ?, ?)',
       )
       .run(this.projectId, feature.key, feature.doc_path, feature.git_sha, feature.status);
+  }
+  reviseFeature(
+    feature: Omit<FeatureRecord, 'project_id'>,
+    previousSha: string,
+    decisionId: string,
+    owner: string,
+    evidence: { version: string; answersHash: string },
+    beforeCommit: () => void,
+  ): Promise<void> {
+    return this.write(() => {
+      this.owned(feature.key, owner);
+      this.assertRequirementsRevision(feature.key, previousSha, decisionId);
+      if (
+        this.listExecutions().some(
+          (e) => e.task_key === feature.key && e.pid !== null && !e.tree_closed_at,
+        )
+      )
+        throw new Error('Requirements Execution still active');
+      this.db
+        .prepare(
+          'UPDATE features SET doc_path = ?, git_sha = ?, status = ? WHERE project_id = ? AND key = ?',
+        )
+        .run(feature.doc_path, feature.git_sha, feature.status, this.projectId, feature.key);
+      const decision = this.listDecisions().find((d) => d.id === decisionId)!;
+      decision.status = 'answered';
+      decision.answer = JSON.stringify({ ...evidence, gitSha: feature.git_sha });
+      decision.answeredBy = 'operator';
+      decision.answeredAt = new Date().toISOString();
+      this.db
+        .prepare(
+          'UPDATE human_decisions SET escalation = ?, answer = ?, actor = ?, decided_at = ? WHERE project_id = ? AND key = ?',
+        )
+        .run(
+          JSON.stringify(decision),
+          decision.answer,
+          'operator',
+          decision.answeredAt,
+          this.projectId,
+          decisionId,
+        );
+      beforeCommit();
+    });
   }
   getFeature(key: string): FeatureRecord | undefined {
     return this.db
@@ -650,6 +738,7 @@ class SqliteWorkStore implements WorkStore {
     failureAttempt?: number,
     lease?: { owner: string; expires: string },
     token?: string,
+    requirementsDecisionId?: string,
   ): TaskRecord {
     this.assertNotRecovering(taskId, token);
     const task = this.getTask(taskId);
@@ -658,7 +747,17 @@ class SqliteWorkStore implements WorkStore {
       throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
     if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
       throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
-    this.assertNoDecisionGate(taskId);
+    // Failure/cleanup retains the unresolved gate. Only the dedicated human revision
+    // claim may enter RUNNING while that one gate remains open.
+    const returningToGate =
+      to === 'WAITING_HUMAN' &&
+      task.lease_owner === actor &&
+      ['LEASED', 'RUNNING'].includes(task.status) &&
+      this.requirementsGate(taskId);
+    this.assertNoDecisionGate(
+      taskId,
+      requirementsDecisionId ?? (returningToGate ? this.requirementsGate(taskId)!.id : undefined),
+    );
     if (['QUEUED', 'LEASED', 'RUNNING'].includes(to) && !this.canStart(taskId))
       throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
     if (
@@ -879,11 +978,20 @@ class SqliteWorkStore implements WorkStore {
       .all(this.projectId)
       .map((row) => JSON.parse(row.escalation as string) as HumanDecision);
   }
-  private assertNoDecisionGate(taskId: string): void {
+  private requirementsGate(taskId: string): HumanDecision | undefined {
+    return this.listDecisions().find(
+      (d) =>
+        d.status !== 'answered' &&
+        d.blocks.includes(taskId) &&
+        d.context.startsWith(`feature-requirements/${taskId}/`),
+    );
+  }
+  private assertNoDecisionGate(taskId: string, exceptId?: string): void {
     // Expiry retains the gate; only explicit decision resolution/reconciliation releases it.
     if (
       this.listDecisions().some(
-        (d) => ['open', 'expired'].includes(d.status) && d.blocks.includes(taskId),
+        (d) =>
+          d.id !== exceptId && ['open', 'expired'].includes(d.status) && d.blocks.includes(taskId),
       )
     )
       throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');

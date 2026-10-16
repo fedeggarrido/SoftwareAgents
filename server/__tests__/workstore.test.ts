@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { openRequirementsQuestions } from '../src/requirements.js';
 import { retryBusy } from '../src/workstore/retryBusy.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import {
@@ -35,6 +36,88 @@ describe('WorkStore (real SQLite)', () => {
     const { DatabaseSync } = await import('node:sqlite');
     return new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
   }
+  it('fences Requirements rework and rolls back artifact registration together with decision closure', async () => {
+    const first = await open();
+    const second = await open();
+    first.createTask({
+      key: 'FEAT-001',
+      type: 'docs',
+      status: 'REVIEW',
+      agent_role: 'requirements-analyst',
+    });
+    first.createFeature({
+      key: 'FEAT-001',
+      doc_path: 'features/FEAT-001.yaml',
+      git_sha: 'old',
+      status: 'in_review',
+    });
+    await openRequirementsQuestions(first, 'FEAT-001', ['Retention?'], '1.0.0');
+    const id = first.listDecisions()[0].id;
+    await expect(first.claim('FEAT-001', 'ordinary')).rejects.toThrow();
+    await expect(
+      first.claimRequirementsRevision('FEAT-001', 'stale', id, 'operator-run'),
+    ).rejects.toThrow('revision');
+    await first.claimRequirementsRevision('FEAT-001', 'old', id, 'operator-run');
+    await expect(
+      second.claimRequirementsRevision('FEAT-001', 'old', id, 'concurrent'),
+    ).rejects.toThrow();
+    expect(second.listDecisions()[0].status).toBe('open');
+    const feature = {
+      key: 'FEAT-001',
+      doc_path: 'features/FEAT-001.yaml',
+      git_sha: 'new',
+      status: 'in_review',
+    };
+    const evidence = { version: '1.0.1', answersHash: 'digest' };
+    await expect(
+      first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {
+        throw new Error('audit unavailable');
+      }),
+    ).rejects.toThrow('audit unavailable');
+    expect(second.getFeature('FEAT-001')?.git_sha).toBe('old');
+    expect(second.listDecisions()[0].status).toBe('open');
+    await first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {});
+    expect(second.getFeature('FEAT-001')?.git_sha).toBe('new');
+    expect(JSON.parse(second.listDecisions()[0].answer!)).toEqual({ ...evidence, gitSha: 'new' });
+    const task = first.getTask('FEAT-001')!;
+    await first.transition(task.key, task.version, 'REVIEW', 'registered', 'operator-run');
+    expect(second.getTask('FEAT-001')?.lease_owner).toBeNull();
+  });
+  it('recovers an expired Requirements revision lease without resolving its question gate', async () => {
+    const store = await open();
+    store.createTask({
+      key: 'FEAT-001',
+      type: 'docs',
+      status: 'REVIEW',
+      agent_role: 'requirements-analyst',
+    });
+    store.createFeature({
+      key: 'FEAT-001',
+      doc_path: 'features/FEAT-001.yaml',
+      git_sha: 'old',
+      status: 'in_review',
+    });
+    await openRequirementsQuestions(store, 'FEAT-001', ['Retention?'], '1.0.0');
+    await store.claimRequirementsRevision(
+      'FEAT-001',
+      'old',
+      store.listDecisions()[0].id,
+      'operator-run',
+    );
+    const db = await inspect();
+    try {
+      db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+        '2000-01-01T00:00:00.000Z',
+        'FEAT-001',
+      );
+    } finally {
+      db.close();
+    }
+    expect(await store.recoverExpiredLeases()).toHaveLength(1);
+    expect(store.getTask('FEAT-001')).toMatchObject({ status: 'WAITING_HUMAN', lease_owner: null });
+    expect(store.listDecisions()[0].status).toBe('open');
+    await store.claimRequirementsRevision('FEAT-001', 'old', store.listDecisions()[0].id, 'retry');
+  });
   it('migrates an empty DB once, persists records and configures every connection', async () => {
     const { DatabaseSync } = await import('node:sqlite');
     const configure = vi.spyOn(DatabaseSync.prototype, 'exec');

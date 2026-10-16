@@ -36,14 +36,14 @@ export class WorkerLifecycle {
     );
   }
 
-  async claim(): Promise<void> {
+  async claim(revision?: { gitSha: string; decisionId: string }): Promise<void> {
     if (this.claimed) return;
     let task = this.store.getTask(this.task);
     if (!task) {
       this.store.createTask({ key: this.task, type: 'unknown', status: 'DRAFT' });
       task = this.store.getTask(this.task)!;
     }
-    if (['DRAFT', 'WAITING_QUOTA'].includes(task.status))
+    if (!revision && ['DRAFT', 'WAITING_QUOTA'].includes(task.status))
       task = await this.store.transition(
         task.key,
         task.version,
@@ -51,7 +51,14 @@ export class WorkerLifecycle {
         'Explicit worker run',
         this.owner,
       );
-    if (['REVIEW', 'QA'].includes(task.status))
+    if (revision)
+      await this.store.claimRequirementsRevision(
+        task.key,
+        revision.gitSha,
+        revision.decisionId,
+        this.owner,
+      );
+    else if (['REVIEW', 'QA'].includes(task.status))
       await this.store.claimRework(task.key, task.version, this.owner);
     else await this.store.claim(task.key, this.owner);
     this.claimed = this.active = true;
@@ -103,6 +110,17 @@ export class WorkerLifecycle {
     await this.stopHeartbeat();
     this.assertOwned();
     const task = this.store.getTask(this.task)!;
+    if (
+      this.store
+        .listDecisions()
+        .some(
+          (d) =>
+            d.status !== 'answered' &&
+            d.blocks.includes(this.task) &&
+            d.context.startsWith(`feature-requirements/${this.task}/`),
+        )
+    )
+      status = 'WAITING_HUMAN';
     await this.store.transition(this.task, task.version, status, reason, this.owner);
     this.active = false;
     this.audit('task_transitioned', `${status}: ${reason}`);

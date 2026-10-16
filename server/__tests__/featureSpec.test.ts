@@ -1,13 +1,15 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { describe, expect, it } from 'vitest';
-import { parseDocument } from 'yaml';
+import { parseDocument, stringify } from 'yaml';
 
 import * as schema from '../../core/schemas/feature-spec.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
+import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
 import { loadFeatureSpec } from '../src/featureSpec.js';
-import { validateRequirements } from '../src/requirements.js';
+import { readRequirements, validateRequirements, writeRequirements } from '../src/requirements.js';
 import { compileSchema, SchemaValidationError, validateSchema } from '../src/schemaValidation.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -16,6 +18,36 @@ const valid = () => loadFeatureSpec(fixture('feature-spec.valid.yaml'));
 const validate = compileSchema<FeatureSpec>(schema);
 
 describe('FeatureSpec v1alpha1', () => {
+  it('bounds the serialized YAML after alias expansion and can read every accepted artifact', () => {
+    const spec = {
+      ...valid(),
+      status: 'draft',
+      acceptance: valid().acceptance.map((ac) => ({
+        ...ac,
+        ears: 'The system shall display events.',
+      })),
+    };
+    const prefix = stringify(spec)
+      .replace(/^title:.*\n/m, '')
+      .replace(/^goal:.*\n/m, '')
+      .replace(/^userValue:.*\n/m, '')
+      .replace(/^actors:[\s\S]*?(?=flows:)/m, '');
+    const aliased = (length: number) =>
+      prefix +
+      `title: &text ${'x'.repeat(length)}\ngoal: *text\nuserValue: *text\nactors: [*text]\n`;
+    // The source is bounded but four expanded scalar values exceed the read limit.
+    expect(Buffer.byteLength(aliased(270000))).toBeLessThan(TASK_CLI_INPUT_BYTES);
+    expect(() => validateRequirements(aliased(270000), spec.key)).toThrow(
+      'Serialized FeatureSpec exceeds',
+    );
+    const accepted = validateRequirements(aliased(10000), spec.key);
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featurespec-roundtrip-'));
+    writeRequirements(directory, 'features/feature.yaml', accepted);
+    expect(fs.statSync(path.join(directory, 'features/feature.yaml')).size).toBeLessThanOrEqual(
+      TASK_CLI_INPUT_BYTES,
+    );
+    expect(readRequirements(directory, 'features/feature.yaml', spec.key)).toEqual(accepted);
+  });
   it('keeps old criteria valid and requires EARS only at Requirements ingress', () => {
     const spec = valid();
     spec.status = 'draft';

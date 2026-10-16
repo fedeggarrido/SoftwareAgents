@@ -30,6 +30,9 @@ import { processStartIdentity } from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
+// These tests spawn real processes and Git; on Windows they take ~10 s each.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
@@ -49,6 +52,10 @@ vi.mock('../src/executorProbes.js', async (original) => {
 });
 
 const readyProbe = readyProbeFor(EXECUTOR_PROBE_CATALOG);
+vi.mock('../src/constants.js', async (original) => ({
+  ...(await original<typeof import('../src/constants.js')>()),
+  CLAUDE_OAUTH_REFRESH_WAIT_MS: 1,
+}));
 // Normal runs require Windows recovery. Keep the POSIX refusal regression below
 // active everywhere; the remaining integration cases exercise Windows launches.
 const it = test.skipIf(process.platform !== 'win32');
@@ -938,6 +945,95 @@ afterEach(async () => {
 });
 
 describe('supervised worker', () => {
+  it('never retries OAuth output without confirmed executor closure', async () => {
+    const start = vi.spyOn(ClaudeCliExecutor.prototype, 'start').mockReturnValue({
+      cancel: vi.fn(),
+      events: (async function* (): AsyncGenerator<ExecutionEvent> {
+        yield {
+          type: 'output',
+          stream: 'stderr',
+          text: 'another Claude Code process is refreshing it',
+        };
+      })(),
+    });
+    await expect(runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} })).rejects.toThrow(
+      'Execution failed',
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')).toMatchObject({
+        status: 'RUNNING',
+        lease_owner: expect.any(String),
+      });
+      expect(readExecutorSlots('claude').count).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
+  it.each(['once', 'always', 'credentials', 'cancel'] as const)(
+    'handles Claude OAuth refresh contention: %s',
+    async (mode) => {
+      const attempts = path.join(root, 'oauth-attempts');
+      vi.stubEnv('SA_TEST_OAUTH_LOG', attempts);
+      const probe = vi.fn(readyProbe);
+      const run = () =>
+        runWorker(
+          { task: 'SA-999', brief: 'brief.md' },
+          {
+            cwd: repo,
+            probe,
+            binaryArgs: [
+              fake,
+              'claude',
+              mode === 'credentials'
+                ? '--credential-failure'
+                : mode === 'always'
+                  ? '--oauth-refresh-always'
+                  : '--oauth-refresh-once',
+              '--write-doc',
+            ],
+            log: (line) => {
+              if (mode === 'cancel' && line.includes('OAuth refresh contention'))
+                process.emit('SIGINT');
+            },
+          },
+        );
+      if (mode === 'once') expect((await run()).commit).toMatch(/^[a-f0-9]{40}$/);
+      else
+        await expect(run()).rejects.toThrow(
+          mode === 'always'
+            ? 'oauth_refresh_contention'
+            : mode === 'cancel'
+              ? 'interrupted'
+              : 'Execution failed',
+        );
+      const expectedAttempts = mode === 'once' ? 2 : mode === 'always' ? 3 : 1;
+      expect(fs.readFileSync(attempts, 'utf8')).toHaveLength(expectedAttempts);
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.listExecutions()).toHaveLength(expectedAttempts);
+        expect(store.listExecutions().every((e) => e.tree_closed_at !== null)).toBe(true);
+        expect(new Set(store.listExecutions().map((e) => e.key)).size).toBe(expectedAttempts);
+        expect(store.getTask('SA-999')?.lease_owner).toBeNull();
+        const entries = new AuditLog()
+          .read('test')
+          .filter((r) => !r.corrupt)
+          .map((r) => r.entry);
+        expect(entries.filter((r) => r.outcome.status === 'quota_admitted')).toHaveLength(
+          expectedAttempts,
+        );
+        expect(entries.filter((r) => r.outcome.status === 'oauth_refresh_retry')).toHaveLength(
+          expectedAttempts - 1,
+        );
+        expect(probe.mock.calls.length).toBeGreaterThanOrEqual(expectedAttempts * 2);
+        expect(readExecutorSlots('claude').count).toBe(0);
+      } finally {
+        store.close();
+      }
+    },
+    20000,
+  );
   it('records all worker phases and summary is read-only even with an enabled, unreachable exporter', async () => {
     const file = path.join(root, '.pixel-agents/config.json');
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));

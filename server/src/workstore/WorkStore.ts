@@ -111,6 +111,22 @@ export interface WorkStore {
   readonly projectId: string;
   getProject(): ProjectRecord;
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void;
+  /** Trusted human Requirements ingress; retains the question gate during regeneration. */
+  claimRequirementsRevision(
+    key: string,
+    gitSha: string,
+    decisionId: string,
+    owner: string,
+  ): Promise<TaskRecord>;
+  /** Register the new artifact before answering its prior decision, atomically. */
+  reviseFeature(
+    feature: Omit<FeatureRecord, 'project_id'>,
+    previousSha: string,
+    decisionId: string,
+    owner: string,
+    evidence: { version: string; answersHash: string },
+    beforeCommit: () => void,
+  ): Promise<void>;
   getFeature(key: string): FeatureRecord | undefined;
   listFeatures(): FeatureRecord[];
   /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */

@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises';
+
 import { execFileSync } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
@@ -13,6 +15,11 @@ import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompile
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
+import {
+  CLAUDE_OAUTH_REFRESH_CONTENTION,
+  CLAUDE_OAUTH_REFRESH_RETRIES,
+  CLAUDE_OAUTH_REFRESH_WAIT_MS,
+} from './constants.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
@@ -67,6 +74,7 @@ import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
 import {
   guardRequirementsWrites,
+  nextRequirementsVersion,
   openRequirementsQuestions,
   requirementsBrief,
   requirementsDocPath,
@@ -236,6 +244,7 @@ export interface WorkerResult {
   commit: string | null;
   stat: string;
   requirementsQuestions?: string[];
+  requirementsVersion?: string;
   quotaDecision?: QuotaDecision;
   policyDecision?: PolicyDecision;
   /** SA-090: waiting needs the Operator; the deduplicated Human Decision, if recorded. */
@@ -251,17 +260,19 @@ function failureDiagnostic(detail: string, exitCode?: number): string {
     ? 'containment'
     : /timed? ?out|timeout/i.test(detail)
       ? 'timeout'
-      : /auth|not logged in|invalid_api_key/i.test(detail)
-        ? 'auth'
-        : /spawn|ENOENT|EACCES|launch process/i.test(detail)
-          ? 'spawn'
-          : /cancel|interrupt/i.test(detail)
-            ? 'cancelled'
-            : /lease/i.test(detail)
-              ? 'lease'
-              : /worktree|git/i.test(detail)
-                ? 'workspace'
-                : 'executor';
+      : detail.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)
+        ? 'oauth_refresh_contention'
+        : /auth|not logged in|invalid_api_key/i.test(detail)
+          ? 'auth'
+          : /spawn|ENOENT|EACCES|launch process/i.test(detail)
+            ? 'spawn'
+            : /cancel|interrupt/i.test(detail)
+              ? 'cancelled'
+              : /lease/i.test(detail)
+                ? 'lease'
+                : /worktree|git/i.test(detail)
+                  ? 'workspace'
+                  : 'executor';
   return `category=${category}; exit_code=${Number.isSafeInteger(exitCode) ? exitCode : 'unknown'}`;
 }
 
@@ -306,7 +317,7 @@ export async function runWorker(
         throw new CliUsageError('Feature task belongs to another workflow');
       if (!existing)
         store.createTask({ key: args.task, type: 'docs', agent_role: 'requirements-analyst' });
-      if (existing?.status === 'FAILED_RETRYABLE')
+      if (existing?.status === 'FAILED_RETRYABLE' && !options.requirements.revision)
         await store.transition(
           existing.key,
           existing.version,
@@ -316,7 +327,8 @@ export async function runWorker(
         );
     }
     // Availability decisions must be re-evaluated by selection before claim.
-    if (store.getTask(args.task)?.status !== 'WAITING_HUMAN') await lifecycle.claim();
+    if (options.requirements?.revision || store.getTask(args.task)?.status !== 'WAITING_HUMAN')
+      await lifecycle.claim(options.requirements?.revision);
     const result = await runWorkerExecution(args, options, lifecycle, config);
     if (result.quotaDecision?.status === 'wait') await lifecycle.wait(result.quotaDecision);
     else if (!result.availabilityBlock && !result.policyDecision)
@@ -325,7 +337,12 @@ export async function runWorker(
         result.commit ? `Runtime commit ${result.commit}` : 'Execution finished without changes',
       );
     if (result.requirementsQuestions)
-      await openRequirementsQuestions(store, args.task, result.requirementsQuestions);
+      await openRequirementsQuestions(
+        store,
+        args.task,
+        result.requirementsQuestions,
+        result.requirementsVersion,
+      );
     return result;
   } catch (error) {
     await lifecycle.finish(
@@ -565,6 +582,8 @@ async function runWorkerExecution(
   let attemptRecorded = false;
   let exitCode: number | undefined;
   let executionDiagnostic: string | undefined;
+  let oauthRefreshContention = false;
+  let oauthRefreshRetries = 0;
   let runtimeQuota: QuotaDecision | undefined;
   let requirementsAttempt = 0;
   let requirementsOutput = '';
@@ -946,6 +965,8 @@ async function runWorkerExecution(
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (options.requirements?.revision && base !== options.requirements.revision.gitSha)
+        throw new Error('Feature SHA changed before Requirements revision');
       if (options.requirements) requirementsBefore ??= requirementsSnapshot(tree.path);
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
@@ -1061,8 +1082,16 @@ async function runWorkerExecution(
       exitCode = undefined;
       requirementsOutput = '';
       executionDiagnostic = undefined;
+      oauthRefreshContention = false;
       eventsStarted = true;
       for await (const event of handle.events) {
+        if (
+          selectedExecutor === 'claude' &&
+          ((event.type === 'output' && event.text.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)) ||
+            (event.type === 'finished' &&
+              event.resultSummary.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)))
+        )
+          oauthRefreshContention = true;
         if (event.type === 'telemetry') telemetry.observe(event.observation);
         if (
           !options.evaluation &&
@@ -1111,6 +1140,12 @@ async function runWorkerExecution(
       }
       if (lifecycle && executionFinished)
         await workStore!.closeExecution(executionId, lifecycle.owner);
+      if (
+        oauthRefreshContention &&
+        exitCode !== 0 &&
+        /category=(executor|auth);/.test(executionDiagnostic ?? '')
+      )
+        executionDiagnostic = failureDiagnostic(CLAUDE_OAUTH_REFRESH_CONTENTION, exitCode);
       if (options.requirements) guardRequirementsWrites(tree.path, requirementsBefore!);
       if (runtimeQuota) {
         process.exitCode = 3;
@@ -1118,6 +1153,46 @@ async function runWorkerExecution(
       }
       telemetry.phase('commit_guards');
       if (slotFailure) throw slotFailure;
+      if (
+        !interrupted &&
+        executionFinished &&
+        exitCode !== 0 &&
+        oauthRefreshContention &&
+        oauthRefreshRetries < CLAUDE_OAUTH_REFRESH_RETRIES &&
+        executionDiagnostic?.includes('category=oauth_refresh_contention;')
+      ) {
+        // A credential failure must leave a pristine workspace before any relaunch.
+        if (
+          git(tree.path, ['rev-parse', 'HEAD']) !== base ||
+          (tree.branch && git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch) ||
+          git(tree.path, ['status', '--porcelain', '--untracked-files=all'])
+        )
+          throw new Error('OAuth contention left workspace changes; review before retrying');
+        oauthRefreshRetries++;
+        audit('oauth_refresh_wait', {
+          attempt: oauthRefreshRetries,
+          detail: JSON.stringify({ waitMs: CLAUDE_OAUTH_REFRESH_WAIT_MS }),
+        });
+        await telemetry.finish('error');
+        slot.release();
+        slot = undefined;
+        handle = undefined;
+        eventsStarted = false;
+        executionFinished = false;
+        telemetry = undefined;
+        log('Claude OAuth refresh contention; waiting before a fresh admission');
+        try {
+          await delay(CLAUDE_OAUTH_REFRESH_WAIT_MS, undefined, { signal: verifierAbort.signal });
+        } catch {
+          throw new WorkerExecutionError(
+            `Execution interrupted (${failureDiagnostic('cancelled')})`,
+          );
+        }
+        lifecycle?.assertOwned();
+        audit('oauth_refresh_retry', { attempt: oauthRefreshRetries });
+        executionId = randomUUID();
+        continue;
+      }
       if (options.requirements) {
         guardRequirementsWrites(tree.path, requirementsBefore!);
         if (
@@ -1128,6 +1203,14 @@ async function runWorkerExecution(
         if (!interrupted && exitCode === 0) {
           try {
             featureSpec = validateRequirements(requirementsOutput, args.task);
+            if (
+              options.requirements.revision &&
+              featureSpec.version !==
+                nextRequirementsVersion(options.requirements.revision.spec.version)
+            )
+              throw new SchemaValidationError([
+                '/version: must match the next Requirements version',
+              ]);
           } catch (error) {
             if (!(error instanceof SchemaValidationError)) throw error;
             audit('featurespec_validation_failed', { attempt: requirementsAttempt + 1 });
@@ -1149,7 +1232,12 @@ async function runWorkerExecution(
             );
           }
           lifecycle?.assertOwned();
-          writeRequirements(tree.path, featureDoc!, featureSpec!);
+          writeRequirements(
+            tree.path,
+            featureDoc!,
+            featureSpec!,
+            options.requirements.revision?.spec,
+          );
           guardRequirementsWrites(tree.path, requirementsBefore!, featureDoc!);
         }
       }
@@ -1307,13 +1395,63 @@ async function runWorkerExecution(
       throw new CliUsageError('Runtime Git commit failed; changes retained for review');
     }
     const commit = git(tree.path, ['rev-parse', 'HEAD']);
-    if (options.requirements)
-      workStore!.createFeature({
+    if (options.requirements) {
+      const feature = {
         key: args.task,
         doc_path: featureDoc!,
         git_sha: commit,
         status: 'in_review',
-      });
+      };
+      const revision = options.requirements.revision;
+      if (revision) {
+        const evidence = {
+          version: featureSpec!.version,
+          answersHash: createHash('sha256').update(revision.answers).digest('hex'),
+        };
+        const auditAnswers = (status: string) =>
+          recordAudit(
+            'answer_decision',
+            'human_decision',
+            revision.decisionId,
+            {
+              status,
+              detail: JSON.stringify({
+                ...evidence,
+                gitSha: commit,
+                decisionId: revision.decisionId,
+              }),
+            },
+            {
+              projectId: config.project.id,
+              actorType: 'human',
+              actorId: 'operator',
+              taskKey: args.task,
+              executionId,
+              policyDecision: evaluatePolicy(
+                'answer_decision',
+                'human',
+                config.operator.autonomyLevel,
+              ),
+            },
+          );
+        await workStore!.reviseFeature(
+          feature,
+          revision.gitSha,
+          revision.decisionId,
+          lifecycle!.owner,
+          evidence,
+          () => auditAnswers('featurespec_answers_registered'),
+        );
+        try {
+          auditAnswers('featurespec_answers_incorporated');
+        } catch (cause) {
+          throw new Error(
+            'Feature revision registered; audit confirmation pending. Inspect WorkStore before retrying.',
+            { cause },
+          );
+        }
+      } else workStore!.createFeature(feature);
+    }
     const stat = git(tree.path, ['diff', '--stat', base, commit]);
     audit('ready_for_review');
     telemetryStatus = 'ok';
@@ -1322,7 +1460,12 @@ async function runWorkerExecution(
       branch: tree.branch,
       commit,
       stat,
-      ...(featureSpec ? { requirementsQuestions: featureSpec.openQuestions } : {}),
+      ...(featureSpec
+        ? {
+            requirementsQuestions: featureSpec.openQuestions,
+            requirementsVersion: featureSpec.version,
+          }
+        : {}),
     };
   } catch (error) {
     telemetryStatus = 'error';

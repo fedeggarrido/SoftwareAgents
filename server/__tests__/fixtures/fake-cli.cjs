@@ -15,6 +15,25 @@ if (!valid) {
   process.stderr.write('Expected claude -p --output-format stream-json or codex exec --json\n');
   process.exitCode = 2;
 } else {
+  if (
+    args.includes('--oauth-refresh-once') ||
+    args.includes('--oauth-refresh-always') ||
+    args.includes('--credential-failure')
+  ) {
+    const fs = require('fs');
+    const log = process.env.SA_TEST_OAUTH_LOG;
+    const previous = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').length : 0;
+    fs.appendFileSync(log, 'x');
+    if (!previous || !args.includes('--oauth-refresh-once')) {
+      console.error(
+        args.includes('--credential-failure')
+          ? 'Authentication failed: invalid credentials'
+          : 'OAuth token refresh failed: another Claude Code process is refreshing it',
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
   if (executor === 'codex') require('./codex-rollout.cjs')('fake-codex-session');
   if (args.includes('--write-doc')) {
     require('fs').writeFileSync('worker-result.md', 'Synthetic documentation correction\n');

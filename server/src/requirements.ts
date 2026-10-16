@@ -15,12 +15,25 @@ import type { WorkStore } from './workstore/WorkStore.js';
 export interface RequirementsRequest {
   key: string;
   request: string;
+  revision?: {
+    spec: FeatureSpec;
+    gitSha: string;
+    decisionId: string;
+    answers: string;
+  };
 }
 
 export function requirementsBrief(input: RequirementsRequest, errors: string[] = []): string {
   return JSON.stringify({
     request: input.request,
     featureKey: input.key,
+    ...(input.revision
+      ? {
+          currentSpec: input.revision.spec,
+          answers: input.revision.answers,
+          nextVersion: nextRequirementsVersion(input.revision.spec.version),
+        }
+      : {}),
     contract: featureSchema,
     validationErrors: errors,
   });
@@ -97,6 +110,7 @@ export function validateRequirements(source: string, key: string): FeatureSpec {
     if (!ac.ears) errors.push(`/acceptance/${i}/ears: required for Requirements output`);
   });
   if (errors.length) throw new SchemaValidationError(errors);
+  serializeRequirements(spec);
   return spec;
 }
 
@@ -105,15 +119,43 @@ export function requirementsDocPath(brain: string, key: string): string {
   return path.join(brain, 'features', `${key}.yaml`).replaceAll('\\', '/');
 }
 
-export function writeRequirements(cwd: string, relative: string, spec: FeatureSpec): void {
-  taskDirectory(cwd, path.dirname(relative));
-  const file = taskPath(cwd, relative);
-  // Never overwrite a previous proposal or an agent-created artifact.
-  fs.writeFileSync(file, stringify(spec), { flag: 'wx', mode: 0o600 });
+export function nextRequirementsVersion(version: string): string {
+  const [major, minor, patch] = version.split(/[.+-]/);
+  return `${major}.${minor}.${BigInt(patch) + 1n}`;
 }
 
-export function requirementsDecisionContext(key: string, questions: string[]): string {
-  const content = JSON.stringify(questions);
+/** The byte limit covers the persisted representation, including expanded aliases. */
+export function serializeRequirements(spec: FeatureSpec): string {
+  const source = stringify(spec, { aliasDuplicateObjects: false });
+  if (Buffer.byteLength(source) > TASK_CLI_INPUT_BYTES)
+    throw new SchemaValidationError(['Serialized FeatureSpec exceeds 1 MiB limit']);
+  return source;
+}
+
+export function writeRequirements(
+  cwd: string,
+  relative: string,
+  spec: FeatureSpec,
+  previous?: FeatureSpec,
+): void {
+  taskDirectory(cwd, path.dirname(relative));
+  const file = taskPath(cwd, relative);
+  const source = serializeRequirements(spec);
+  if (previous) {
+    if (JSON.stringify(readRequirements(cwd, relative, spec.key)) !== JSON.stringify(previous))
+      throw new Error('Feature revision changed before writing');
+    // Existing file has passed path/link/regular-file checks and the containment guard.
+    fs.writeFileSync(file, source, { flag: 'r+', mode: 0o600 });
+    fs.truncateSync(file, Buffer.byteLength(source));
+  } else fs.writeFileSync(file, source, { flag: 'wx', mode: 0o600 });
+}
+
+export function requirementsDecisionContext(
+  key: string,
+  questions: string[],
+  version?: string,
+): string {
+  const content = JSON.stringify(version ? { questions, version } : questions);
   const digest = createHash('sha256').update(content).digest('hex');
   return `feature-requirements/${key}/${digest}\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`;
 }
@@ -123,10 +165,20 @@ export async function openRequirementsQuestions(
   store: WorkStore,
   key: string,
   questions: string[],
+  version?: string,
 ) {
   if (!questions.length) return;
-  const context = requirementsDecisionContext(key, questions);
-  if (store.listDecisions().some((d) => d.context === context)) return;
+  const context = requirementsDecisionContext(key, questions, version);
+  if (
+    store
+      .listDecisions()
+      .some(
+        (d) =>
+          d.context === context ||
+          (d.context === requirementsDecisionContext(key, questions) && !d.answer?.startsWith('{')),
+      )
+  )
+    return;
   await store.openOrJoinIdleDecision({
     id: randomUUID(),
     context,

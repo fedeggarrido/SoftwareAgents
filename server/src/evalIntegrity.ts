@@ -62,6 +62,27 @@ export function assertEvalIntegrity(
       .some((entry) => entry && !entry.startsWith('H '))
   )
     throw new EvalIntegrityError('Eval index hides changes');
+  // Git reports a submodule as a single gitlink, hiding its protected descendants.
+  // Check both views: staged-only changes can disappear from the worktree diff.
+  for (const staged of [false, true]) {
+    const entries = evalGit(tree, [
+      'diff',
+      ...(staged ? ['--cached'] : []),
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-renames',
+      '--ignore-submodules=none',
+      '--raw',
+      '-z',
+      task.baseCommit,
+      '--',
+    ]).split('\0');
+    for (let i = 0; i < entries.length - 1; i += 2) {
+      const [before, after] = entries[i].slice(1).split(' ');
+      if (before === '160000' || after === '160000')
+        throw new EvalIntegrityError('Eval changed a Git submodule');
+    }
+  }
   const changed = evalChangedFiles(tree, task.baseCommit);
   const protectedPaths = [
     ...DEFAULT_PROTECTED_PATHS,
@@ -72,6 +93,8 @@ export function assertEvalIntegrity(
   ];
   for (const file of changed)
     if (
+      // Vitest's path normalization (pathe) treats backslashes as separators even on POSIX.
+      (process.platform !== 'win32' && file.includes('\\')) ||
       (task.allowedPaths && !task.allowedPaths.includes(file)) ||
       isProtectedEvalPath(file) ||
       protectedPaths.some((pattern) => matchesProtectedPath(file, pattern))
@@ -79,6 +102,8 @@ export function assertEvalIntegrity(
       throw new EvalIntegrityError('Eval modified a forbidden path');
   const inspect = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
+      if (name === '.git' && dir !== tree)
+        throw new EvalIntegrityError('Unexpected nested .git in eval');
       const child = path.join(dir, name);
       const stat = fs.lstatSync(child);
       if (stat.isSymbolicLink()) throw new EvalIntegrityError('Eval contains a link');

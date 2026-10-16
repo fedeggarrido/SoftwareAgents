@@ -67,6 +67,13 @@ export function cascadeUsage(
   };
 }
 
+// Vitest normalizes with pathe: backslashes are separators, then POSIX normalization.
+// Backslash names are already rejected on POSIX, so this matches it without a dependency.
+const normalize = (value: string): string => path.posix.normalize(value.replace(/\\/g, '/'));
+const relative = (from: string, to: string): string => path.posix.relative(from, to);
+const isAbsolute = (value: string): boolean =>
+  path.posix.isAbsolute(value) || /^[A-Za-z]:\//.test(value);
+
 /** Same SA-QA-20 integrity and command isolation as evals, before any repository code runs.
  * Commands must use no-emit / external cache options; changes outside allowedPaths fail closed. */
 export async function checkCascadeCriteria(
@@ -79,9 +86,22 @@ export async function checkCascadeCriteria(
 ): Promise<CriterionResult[]> {
   const integrity = { baseCommit: base, allowedPaths: verifier.allowedPaths, protectedPaths };
   assertEvalIntegrity(integrity, tree);
+  const normalizedRoot = normalize(path.resolve(tree));
   const related = evalChangedFiles(tree, base)
     .filter((file) => /\.[cm]?[jt]sx?$/i.test(file))
-    .map((file) => path.resolve(tree, file).replace(/\\/g, '/'));
+    .map((file) => {
+      // Validate the exact normalization Vitest applies, including deleted paths.
+      const normalized = normalize(path.resolve(tree, file));
+      const descendant = relative(normalizedRoot, normalized);
+      if (
+        !descendant ||
+        descendant === '..' ||
+        descendant.startsWith('../') ||
+        isAbsolute(descendant)
+      )
+        throw new EvalIntegrityError('Related test path escaped the eval tree');
+      return normalized;
+    });
   const link = resolveInside(tree, 'node_modules');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');

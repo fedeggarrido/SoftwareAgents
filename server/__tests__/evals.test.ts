@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 
 import { AuditLog } from '../src/auditLog.js';
 import { parseEvalArgs, runEvalCommand } from '../src/evalCommand.js';
+import * as evalCriteria from '../src/evalCriteria.js';
 import { checkEvalCriteria } from '../src/evalCriteria.js';
 import { assertEvalRunAllowed } from '../src/evalGuard.js';
 import { assertEvalIntegrity, evalChangedFiles } from '../src/evalIntegrity.js';
@@ -15,6 +16,7 @@ import {
   parseEvalRecord,
   readEvalRecords,
 } from '../src/evalReport.js';
+import * as evalTasks from '../src/evalTasks.js';
 import { evalGit, type EvalTask, loadEvalTasks, parseEvalTask } from '../src/evalTasks.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
@@ -170,6 +172,181 @@ function detachCascadeMetadata() {
 }
 
 describe('default cascade integrity and related tests', () => {
+  it.each(['new', 'modified', 'staged-only', 'deleted'])(
+    'rejects a %s gitlink even without submodule metadata on disk',
+    async (kind) => {
+      let base = task.fixCommit;
+      if (kind !== 'new') {
+        evalGit(repo, ['update-index', '--add', '--cacheinfo', `160000,${task.baseCommit},module`]);
+        evalGit(repo, ['commit', '-m', 'gitlink fixture']);
+        base = evalGit(repo, ['rev-parse', 'HEAD']);
+      }
+      detachCascadeMetadata();
+      if (kind === 'deleted') evalGit(repo, ['update-index', '--force-remove', 'module']);
+      else
+        evalGit(repo, ['update-index', '--add', '--cacheinfo', `160000,${task.fixCommit},module`]);
+      if (kind === 'staged-only') {
+        fs.mkdirSync(path.join(repo, 'module'));
+        fs.writeFileSync(path.join(repo, 'module/source.ts'), 'export {};');
+        // The directory masks the staged gitlink change in the worktree diff.
+      }
+      const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+      for (const allowedPaths of [undefined, ['module', 'module/source.ts']]) {
+        expect(() => assertEvalIntegrity({ baseCommit: base, allowedPaths }, repo)).toThrow(
+          'criteria_tampered: Eval changed a Git submodule',
+        );
+        await expect(
+          checkCascadeCriteria(
+            { allowedPaths, commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+            base,
+            repo,
+            root,
+            new AbortController().signal,
+          ),
+        ).rejects.toThrow('criteria_tampered');
+      }
+      expect(command).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+    },
+  );
+
+  it.each(['server/__tests__/guard.test.ts', 'operator-private/guard.ts'])(
+    'rejects edits inside an existing submodule protecting %s',
+    async (protectedFile) => {
+      const module = path.join(repo, 'module');
+      fs.mkdirSync(path.dirname(path.join(module, protectedFile)), { recursive: true });
+      evalGit(module, ['init', '-b', 'main']);
+      fs.writeFileSync(path.join(module, protectedFile), 'original');
+      evalGit(module, ['add', '.']);
+      evalGit(module, ['commit', '-m', 'protected submodule fixture']);
+      const commit = evalGit(module, ['rev-parse', 'HEAD']);
+      const metadata = path.join(root, 'module-metadata');
+      fs.renameSync(path.join(module, '.git'), metadata);
+      fs.writeFileSync(path.join(module, '.git'), `gitdir: ${metadata.replace(/\\/g, '/')}\n`);
+      evalGit(repo, ['update-index', '--add', '--cacheinfo', `160000,${commit},module`]);
+      evalGit(repo, ['commit', '-m', 'submodule fixture']);
+      const base = evalGit(repo, ['rev-parse', 'HEAD']);
+      detachCascadeMetadata();
+      fs.writeFileSync(path.join(module, protectedFile), 'tampered');
+      const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+      const protectedPaths = [`module/${protectedFile}`];
+      for (const allowedPaths of [undefined, ['module']]) {
+        // Covers evals and custom/default cascade bindings through their shared guard.
+        expect(() =>
+          assertEvalIntegrity({ baseCommit: base, allowedPaths, protectedPaths }, repo),
+        ).toThrow('criteria_tampered');
+        await expect(
+          checkCascadeCriteria(
+            { allowedPaths, commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+            base,
+            repo,
+            root,
+            new AbortController().signal,
+            protectedPaths,
+          ),
+        ).rejects.toThrow('criteria_tampered');
+      }
+      expect(command).not.toHaveBeenCalled();
+      // Even a clean submodule is rejected because nested Git metadata is opaque.
+      fs.writeFileSync(path.join(module, protectedFile), 'original');
+      expect(() => assertEvalIntegrity({ baseCommit: base }, repo)).toThrow('nested .git');
+    },
+  );
+
+  it.each(['file', 'directory'])('rejects nested .git metadata (%s)', (kind) => {
+    detachCascadeMetadata();
+    const nested = path.join(repo, 'server/.git');
+    if (kind === 'file') fs.writeFileSync(nested, 'gitdir: elsewhere\n');
+    else fs.mkdirSync(nested);
+    expect(() => assertEvalIntegrity({ baseCommit: task.fixCommit }, repo)).toThrow(
+      'criteria_tampered',
+    );
+  });
+
+  it.each(['..\\..\\outside.ts', 'ordinary\\source.ts'])(
+    'rejects a POSIX changed name with backslashes before constructing argv: %s',
+    async (file) => {
+      detachCascadeMetadata();
+      // Git can return these literal names on POSIX; inject them on Windows too.
+      const actualGit = evalGit;
+      vi.spyOn(evalTasks, 'evalGit').mockImplementation((cwd, args) =>
+        args[0] === 'ls-files' && args.includes('--others') ? `${file}\0` : actualGit(cwd, args),
+      );
+      const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      try {
+        Object.defineProperty(process, 'platform', { ...descriptor, value: 'linux' });
+        await expect(
+          checkCascadeCriteria(
+            { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+            task.fixCommit,
+            repo,
+            root,
+            new AbortController().signal,
+          ),
+        ).rejects.toThrow('criteria_tampered');
+      } finally {
+        Object.defineProperty(process, 'platform', descriptor);
+      }
+      expect(command).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+    },
+  );
+
+  it('checks containment of normalized related arguments before launching Vitest', async () => {
+    detachCascadeMetadata();
+    const actualGit = evalGit;
+    vi.spyOn(evalTasks, 'evalGit').mockImplementation((cwd, args) =>
+      args[0] === 'ls-files' && args.includes('--others')
+        ? '../outside.ts\0'
+        : actualGit(cwd, args),
+    );
+    const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+    await expect(
+      checkCascadeCriteria(
+        { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+        task.fixCommit,
+        repo,
+        root,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('criteria_tampered: Related test path escaped');
+    expect(command).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+  });
+
+  it('passes only normalized, contained absolute filenames in the final related argv', async () => {
+    detachCascadeMetadata();
+    const files = [' leading.ts', '--config.mjs', 'server/deleted.ts', 'ordinary.jsx'];
+    fs.writeFileSync(path.join(repo, 'server/deleted.ts'), 'export {};');
+    evalGit(repo, ['add', 'server/deleted.ts']);
+    evalGit(repo, ['commit', '-m', 'deleted source fixture']);
+    const base = evalGit(repo, ['rev-parse', 'HEAD']);
+    fs.unlinkSync(path.join(repo, 'server/deleted.ts'));
+    for (const file of files.filter((file) => file !== 'server/deleted.ts'))
+      fs.writeFileSync(path.join(repo, file), 'export {};');
+    const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+    expect(
+      await checkCascadeCriteria(
+        { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+        base,
+        repo,
+        root,
+        new AbortController().signal,
+      ),
+    ).toEqual(['pass']);
+    const argv = command.mock.calls[0][0];
+    const related = argv.slice(argv.indexOf('native') + 1);
+    expect(related).toHaveLength(files.length);
+    expect([...related].sort()).toEqual(
+      files.map((file) => path.resolve(repo, file).replace(/\\/g, '/')).sort(),
+    );
+    for (const file of related) {
+      expect(file).toBe(path.posix.normalize(file));
+      expect(path.posix.relative(repo.replace(/\\/g, '/'), file)).not.toMatch(/^\.\.(?:\/|$)/);
+    }
+  });
+
   it('derives exact changed paths from tracked, staged, deleted, untracked and ignored files', () => {
     for (const file of [' leading.ts', 'staged.cjs', 'deleted.mjs'])
       fs.writeFileSync(path.join(repo, file), 'export {};');

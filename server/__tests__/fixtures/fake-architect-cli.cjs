@@ -50,6 +50,15 @@ process.stdin.on('end', () => {
     },
     adrs: [{ title: 'Read only audit', body: 'Use existing audit reader.' }],
   };
+  if (mode === 'developer-dependency') {
+    proposal.dag.tasks[0].dependsOn = ['FEAT-001-T02'];
+    Object.assign(proposal.dag.tasks[1], {
+      type: 'code',
+      agentRole: 'developer',
+      dependsOn: [],
+      changeZones: ['server/src/audit*.ts'],
+    });
+  }
   if (mode === 'invalid' || (mode === 'repair' && !data.validationErrors.length))
     proposal.dag.tasks[0].acceptanceRefs = [];
   if (mode === 'invalid' || (mode === 'repair' && !data.validationErrors.length))

@@ -234,7 +234,11 @@ cada intento auditado con coste. Complementa SA-084 y SA-038 (fallback por cuota
 - **SA-042 (Architect):** el TaskDAG declara zonas de cambio por tarea (SA-097) y
   marca qué niveles son paralelizables.
 - **SA-043 (Developer):** test-first: test de reproducción o de aceptación antes del
-  código; el runtime verifica que falla antes y pasa después.
+  código. Implementado: el runtime exige cambios de test y ejecuta tests y
+  verificadores al final antes del commit; la evidencia roja sobre la base se
+  declara y se reproduce cuando existe un contexto compatible. No se acredita
+  automáticamente el orden de las ediciones ni el rojo de cualquier test generado.
+  Véanse límites y prueba de SA-043 en [feature pipeline](../feature-pipeline.md#developer-task-ready--rama-con-commits-para-revisión-sa-043).
 - **SA-045 (QA):** validar con tests de reproducción + regresión (estilo Agentless) y
   exigir evidencia por hallazgo (SA-101).
 - **SA-046 (orquestador):** respetar WIP (SA-096) y zonas (SA-097); paralelizar solo

@@ -114,6 +114,7 @@ const migrations = [
     UNIQUE(project_id, number),
     FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
   ) STRICT;`,
+  `ALTER TABLE tasks ADD COLUMN review_ref TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

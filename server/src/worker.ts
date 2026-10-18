@@ -25,6 +25,7 @@ import {
   writeArchitectArtifacts,
 } from './architect.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
+import { validateChangeZone } from './changeZones.js';
 import { CliUsageError } from './cliErrors.js';
 import { readTaskInput } from './commands/taskFiles.js';
 import { readConfig } from './configPersistence.js';
@@ -33,6 +34,12 @@ import {
   CLAUDE_OAUTH_REFRESH_RETRIES,
   CLAUDE_OAUTH_REFRESH_WAIT_MS,
 } from './constants.js';
+import {
+  type DeveloperRequest,
+  developerRequest,
+  developerVerifier,
+  guardDeveloperChanges,
+} from './developer.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
@@ -211,6 +218,7 @@ export interface WorkerOptions {
   /** Trusted feature CLI entry; reuses admission, leases and executor containment. */
   requirements?: RequirementsRequest;
   architect?: ArchitectRequest;
+  developer?: DeveloperRequest;
   /** Injection for protocol tests only; CLI obtains binary exclusively from Operator config. */
   binaryArgs?: readonly string[];
   log?: (message: string) => void;
@@ -316,7 +324,9 @@ export async function runWorker(
       ? args.task !== architectTaskKey(options.architect.key)
       : options.requirements
         ? !/^FEAT-\d{3}$/.test(args.task) || options.requirements.key !== args.task
-        : !/^SA-\d{3,}$/.test(args.task)
+        : options.developer
+          ? args.task !== options.developer.task.key || !/^FEAT-\d{3}-T\d{2}$/.test(args.task)
+          : !/^SA-\d{3,}$/.test(args.task)
   )
     throw new CliUsageError('Invalid task key');
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
@@ -328,6 +338,13 @@ export async function runWorker(
   const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
   const lifecycle = new WorkerLifecycle(store, args.task);
   try {
+    if (options.developer) {
+      const current = developerRequest(store, config, options.developer.key, args.task);
+      if (JSON.stringify(current) !== JSON.stringify(options.developer))
+        throw new Error('Developer context changed');
+      if (store.getTask(args.task)?.review_ref)
+        throw new Error('Developer task already has a review_ref');
+    }
     if (options.architect) {
       const existing = store.getTask(args.task);
       if (existing && (existing.agent_role !== 'architect' || existing.type !== 'architecture'))
@@ -443,6 +460,7 @@ async function runWorkerExecution(
   audit('policy_allowed');
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief =
+    (options.developer ? JSON.stringify(options.developer) : undefined) ??
     (options.architect ? architectBrief(options.architect, {}) : undefined) ??
     (options.requirements ? requirementsBrief(options.requirements) : undefined) ??
     options.evaluation?.brief ??
@@ -450,6 +468,7 @@ async function runWorkerExecution(
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
+    (options.developer ? 'developer' : undefined) ??
     (options.architect ? 'architect' : undefined) ??
     (options.requirements ? 'requirements-analyst' : undefined) ??
     lifecycle?.store.getTask(args.task)?.agent_role ??
@@ -749,12 +768,19 @@ async function runWorkerExecution(
         };
       if (verifier) levels = cascadeLevels(tierPolicy, config.operator);
     }
+    if (options.developer && !verifier) {
+      verifier = developerVerifier(config, args.task);
+      usingDefaultVerifier = !verifier.allowedPaths;
+      // Mandatory final checks without enabling model escalation.
+      levels = [];
+    }
     if (options.evaluation?.cascadeTask && !verifier)
       throw new CliUsageError(
         'Cascade eval requires an enabled, eligible Operator verifier binding',
       );
     for (;;) {
-      const inputs: TierInputs = verifier ? { cascadeTier: levels[attempt] } : normalInputs;
+      const inputs: TierInputs =
+        verifier && levels.length ? { cascadeTier: levels[attempt] } : normalInputs;
       tierSelection = undefined;
       admissionTier =
         tierPolicy && tierRule
@@ -1002,10 +1028,28 @@ async function runWorkerExecution(
             repositoryPath: cwd,
             defaultBranch: config.project.repo.defaultBranch,
             manualPreparation: true,
-          }).create(options.architect?.key ?? args.task, 'worker');
+          }).create(
+            options.architect?.key ?? args.task,
+            options.developer ? 'developer' : 'worker',
+          );
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (options.developer) {
+        const current = developerRequest(
+          workStore!,
+          config,
+          options.developer.key,
+          args.task,
+          lifecycle!.owner,
+        );
+        if (JSON.stringify(current) !== JSON.stringify(options.developer))
+          throw new Error('Developer context changed before launch');
+        for (const zone of options.developer.task.changeZones!) {
+          // Physical containment is checked again in the actual task checkout.
+          validateChangeZone(tree.path, zone, config.operator.protectedPaths ?? []);
+        }
+      }
       if (options.requirements?.revision && base !== options.requirements.revision.gitSha)
         throw new Error('Feature SHA changed before Requirements revision');
       if (options.architect) {
@@ -1338,6 +1382,9 @@ async function runWorkerExecution(
       if (verifier) {
         let results: CriterionResult[] = [];
         if (!interrupted && exitCode === 0) {
+          const developerTests = options.developer
+            ? guardDeveloperChanges(options.developer, config, tree.path, base)
+            : undefined;
           const scratch = resolveInside(common, 'softwareagents/runtime/verifiers');
           fs.mkdirSync(scratch, { recursive: true });
           try {
@@ -1348,7 +1395,10 @@ async function runWorkerExecution(
               scratch,
               verifierAbort.signal,
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
+              developerTests,
             );
+            if (options.developer)
+              guardDeveloperChanges(options.developer, config, tree.path, base);
           } catch (error) {
             if (error instanceof EvalIntegrityError) await recordAttempt([], 'criteria_tampered');
             if (error instanceof EvalCriterionTerminationError) {
@@ -1379,6 +1429,9 @@ async function runWorkerExecution(
               tree.path,
               base,
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
+              options.developer
+                ? guardDeveloperChanges(options.developer, config, tree.path, base)
+                : undefined,
             );
             escalatedFrom = tierSelection!.tier!;
             attempt++;
@@ -1398,7 +1451,11 @@ async function runWorkerExecution(
               evaluationSuccess: false,
               evaluationVerifierFailed: !interrupted && exitCode === 0,
             };
-          throw new Error('Cascade failed; changes retained for review');
+          throw new Error(
+            options.developer
+              ? 'Developer verifier failed; changes retained for review'
+              : 'Cascade failed; changes retained for review',
+          );
         }
       }
       break;
@@ -1421,6 +1478,7 @@ async function runWorkerExecution(
       git(tree.path, ['rev-parse', 'HEAD']) !== base
     )
       throw new Error('Execution changed Git HEAD; refusing runtime commit');
+    if (options.developer) guardDeveloperChanges(options.developer, config, tree.path, base);
     if (!git(tree.path, ['status', '--porcelain', '--untracked-files=all'])) {
       audit('protected_paths_checked', { detail: 'No changes' });
       telemetryStatus = 'ok';
@@ -1429,6 +1487,7 @@ async function runWorkerExecution(
       return { branch: tree.branch, commit: null, stat: '' };
     }
     git(tree.path, ['add', '--all']);
+    if (options.developer) guardDeveloperChanges(options.developer, config, tree.path, base);
     if (options.requirements || options.architect) {
       const allowed = designFiles ? [...designFiles.keys()] : [featureDoc!];
       guardRequirementsWrites(tree.path, requirementsBefore!, allowed);
@@ -1478,18 +1537,39 @@ async function runWorkerExecution(
       log('require_human: rutas protegidas: ' + gate.paths.join(', ') + '\nRama: ' + tree.branch);
       return { branch: tree.branch, commit: null, stat: '', policyDecision: gate.decision };
     }
-    try {
+    const commitChanges = () => {
       git(tree.path, [
         '-c',
         'core.hooksPath=',
         'commit',
         '-m',
-        `${options.architect ? `feat(${options.architect.key}): proponer dise?o t?cnico` : options.requirements ? `feat(${args.task}): proponer requisitos` : workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
+        `${options.developer ? workerCommitSubject(args.task, options.developer.task.title.toLowerCase()) : options.architect ? `feat(${options.architect.key}): proponer dise?o t?cnico` : options.requirements ? `feat(${args.task}): proponer requisitos` : workerCommitSubject(args.task, brief)}\n\nSoftwareAgents-Execution: ${executionId}`,
       ]);
+      return git(tree.path, ['rev-parse', 'HEAD']);
+    };
+    let commit: string;
+    try {
+      commit = options.developer
+        ? await workStore!.withIdempotency(
+            `developer-commit/${args.task}/${options.developer.designSha}`,
+            async () => {
+              lifecycle!.assertOwned();
+              const sha = commitChanges();
+              await workStore!.setTaskReview(args.task, lifecycle!.owner, {
+                branch: tree.branch,
+                sha,
+                base,
+              });
+              audit('developer_review_registered', {
+                detail: JSON.stringify({ branch: tree.branch, sha, base }),
+              });
+              return sha;
+            },
+          )
+        : commitChanges();
     } catch {
       throw new CliUsageError('Runtime Git commit failed; changes retained for review');
     }
-    const commit = git(tree.path, ['rev-parse', 'HEAD']);
     if (options.requirements) {
       const feature = {
         key: args.task,

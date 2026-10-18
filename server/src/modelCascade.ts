@@ -3,6 +3,7 @@ import * as path from 'path';
 
 import type { CascadeVerifier, ModelTier, ModelTierPolicy } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
 import {
   type CriterionResult,
   EvalCriterionTerminationError,
@@ -83,8 +84,17 @@ export async function checkCascadeCriteria(
   scratch: string,
   signal: AbortSignal,
   protectedPaths?: readonly string[],
+  developerTests?: string[],
 ): Promise<CriterionResult[]> {
-  const integrity = { baseCommit: base, allowedPaths: verifier.allowedPaths, protectedPaths };
+  const integrity = {
+    baseCommit: base,
+    allowedPaths:
+      verifier.allowedPaths && developerTests
+        ? [...verifier.allowedPaths, ...developerTests]
+        : verifier.allowedPaths,
+    protectedPaths,
+    allowTestChanges: !!developerTests,
+  };
   assertEvalIntegrity(integrity, tree);
   const normalizedRoot = normalize(path.resolve(tree));
   const related = evalChangedFiles(tree, base)
@@ -109,13 +119,17 @@ export async function checkCascadeCriteria(
   let safe = true;
   try {
     const results: CriterionResult[] = [];
-    for (const command of verifier.commands) {
+    const commands = developerTests
+      ? [...verifier.commands, { developerTests, timeoutMs: EVAL_CRITERION_TIMEOUT_MS }]
+      : verifier.commands;
+    for (const command of commands) {
       if (signal.aborted) throw new Error('Cascade interrupted');
       if ('vitestRelated' in command && !related.length) {
         results.push('pass');
         continue;
       }
       const home = fs.mkdtempSync(path.join(temporary, 'home-'));
+      const directTests = 'developerTests' in command ? command.developerTests : undefined;
       let argv: string[];
       if ('argv' in command) argv = command.argv;
       else {
@@ -145,9 +159,9 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
         argv = [
           process.execPath,
           path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
-          'related',
+          ...(directTests ? ['run'] : ['related']),
           '--run',
-          '--passWithNoTests',
+          ...(directTests ? [] : ['--passWithNoTests']),
           '--no-cache',
           '--root',
           tree,
@@ -155,7 +169,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
           config,
           '--configLoader',
           'native',
-          ...related,
+          ...(directTests ? directTests.map((file) => path.resolve(tree, file)) : related),
         ];
       }
       results.push(await runVerifierCommand(argv, tree, home, command.timeoutMs, signal));
@@ -187,9 +201,18 @@ export function resetCascadeWorktree(
   tree: string,
   base: string,
   protectedPaths?: readonly string[],
+  developerTests?: string[],
 ): void {
   assertEvalIntegrity(
-    { baseCommit: base, allowedPaths: verifier.allowedPaths, protectedPaths },
+    {
+      baseCommit: base,
+      allowedPaths:
+        verifier.allowedPaths && developerTests
+          ? [...verifier.allowedPaths, ...developerTests]
+          : verifier.allowedPaths,
+      protectedPaths,
+      allowTestChanges: !!developerTests,
+    },
     tree,
   );
   evalGit(tree, ['reset', '--hard', base]);

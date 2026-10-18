@@ -39,12 +39,18 @@ import type {
   LeaseRecoveryRecord,
   NewTask,
   ProjectRecord,
+  ReviewRef,
   TaskDependencyRecord,
   TaskRecord,
   WorkStore,
 } from './WorkStore.js';
 
 const execute = promisify(execFile);
+
+function taskRecord(row: unknown): TaskRecord {
+  const record = row as Omit<TaskRecord, 'review_ref'> & { review_ref: string | null };
+  return { ...record, review_ref: record.review_ref ? JSON.parse(record.review_ref) : null };
+}
 
 export interface OpenWorkStoreOptions {
   /** Trusted operator-selected repository. Never a DB path supplied by Project Brain. */
@@ -459,6 +465,17 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
+  setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void> {
+    return this.write(() => {
+      const task = this.owned(taskId, owner);
+      if (task.branch !== review.branch || task.review_ref)
+        throw new Error('Task review binding changed');
+      this.db
+        .prepare('UPDATE tasks SET review_ref = ? WHERE project_id = ? AND key = ?')
+        .run(JSON.stringify(review), this.projectId, taskId);
+    });
+  }
+
   heartbeat(taskId: string, owner: string, ttl = DEFAULT_LEASE_TTL_MS): Promise<TaskRecord> {
     leaseDeadline(owner, ttl);
     return this.write(() => {
@@ -687,14 +704,16 @@ class SqliteWorkStore implements WorkStore {
       );
   }
   getTask(key: string): TaskRecord | undefined {
-    return this.db
+    const row = this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? AND key = ?')
-      .get(this.projectId, key) as unknown as TaskRecord | undefined;
+      .get(this.projectId, key);
+    return row ? taskRecord(row) : undefined;
   }
   listTasks(): TaskRecord[] {
     return this.db
       .prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY key')
-      .all(this.projectId) as unknown as TaskRecord[];
+      .all(this.projectId)
+      .map(taskRecord);
   }
   importTaskDag(
     dag: TaskDag,

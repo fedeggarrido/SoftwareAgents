@@ -33,9 +33,13 @@ export function parseEvalTask(raw: unknown): EvalTask {
   return task;
 }
 
-export function isProtectedEvalPath(file: string): boolean {
-  return /(^|\/)(__tests__|__mocks__|tests?|node_modules)(\/|$)|(^|\/)[^/]*\.(test|spec)\.[^/]+$|(^|\/)(vitest|tsconfig|\.?eslint)[^/]*|(^|\/)package[^/]*\.json$|(^|\/)([^/]+\.lockb?|pnpm-lock\.yaml|npm-shrinkwrap\.json)$/i.test(
-    file,
+export function isProtectedEvalPath(file: string, allowTestChanges = false): boolean {
+  return (
+    /(^|\/)node_modules(\/|$)|(^|\/)(vitest|tsconfig|\.?eslint)[^/]*|(^|\/)package[^/]*\.json$|(^|\/)([^/]+\.lockb?|pnpm-lock\.yaml|npm-shrinkwrap\.json)$/i.test(
+      file,
+    ) ||
+    (!allowTestChanges &&
+      /(^|\/)(__tests__|__mocks__|tests?)(\/|$)|(^|\/)[^/]*\.(test|spec)\.[^/]+$/i.test(file))
   );
 }
 

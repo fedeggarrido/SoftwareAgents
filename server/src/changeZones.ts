@@ -5,6 +5,26 @@ import { DEFAULT_PROTECTED_PATHS } from './executors/protectedPaths.js';
 
 type Edge = { to: number; char?: string; wildcard?: 'segment' | 'any' };
 
+/** Match the same zone language, including zero directories for an interior globstar. */
+export function matchesChangeZone(file: string, zone: string, directory = false): boolean {
+  const parts = zone.replace(/\/$/, '').split('/');
+  const segments = file.split('/');
+  const match = (i: number, j: number): boolean => {
+    if (i === parts.length) return j === segments.length || (directory && j < segments.length);
+    if (parts[i] === '**') return match(i + 1, j) || (j < segments.length && match(i, j + 1));
+    const expression = parts[i]
+      .split('*')
+      .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[^/]*');
+    return (
+      j < segments.length &&
+      new RegExp(`^${expression}$`, 'i').test(segments[j]) &&
+      match(i + 1, j + 1)
+    );
+  };
+  return match(0, 0);
+}
+
 /** Same simple glob language as SA-063; globstar may match zero directories. */
 function automaton(pattern: string, descendants = false): Edge[][] {
   const states: Edge[][] = [[]];

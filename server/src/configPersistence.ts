@@ -106,6 +106,22 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     autonomyLevel: { enum: ['A0', 'A1', 'A2', 'A3', 'A4'] },
     allowedExecutors: { type: 'array', items: nonEmptyString, uniqueItems: true },
     modelTiers: tierPolicySchema,
+    developer: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['pushBranch'],
+      properties: {
+        pushBranch: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['enabled', 'remote'],
+          properties: {
+            enabled: { type: 'boolean' },
+            remote: { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$' },
+          },
+        },
+      },
+    },
     telemetry: {
       type: 'object',
       additionalProperties: false,

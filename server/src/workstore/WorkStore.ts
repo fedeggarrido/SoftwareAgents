@@ -48,10 +48,17 @@ export interface TaskRecord {
   branch: string | null;
   worktree_ref: string | null;
   pr_ref: string | null;
+  review_ref?: ReviewRef | null;
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
   declaration?: string | null;
+}
+
+export interface ReviewRef {
+  branch: string;
+  sha: string;
+  base: string;
 }
 
 export interface TaskDependencyRecord {
@@ -172,6 +179,7 @@ export interface WorkStore {
   ): Promise<TaskRecord>;
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
+  setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void>;
   release(taskId: string, owner: string): Promise<TaskRecord>;
   recoverExpiredLeases(): Promise<TaskRecord[]>;
   listLeaseRecoveries(): LeaseRecoveryRecord[];

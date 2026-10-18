@@ -49,6 +49,8 @@ export function assertEvalIntegrity(
   task: Pick<EvalTask, 'baseCommit'> & {
     allowedPaths?: string[];
     protectedPaths?: readonly string[];
+    /** Trusted Developer ingress only. Evals continue pinning tests. */
+    allowTestChanges?: boolean;
   },
   tree: string,
 ): void {
@@ -96,7 +98,7 @@ export function assertEvalIntegrity(
       // Vitest's path normalization (pathe) treats backslashes as separators even on POSIX.
       (process.platform !== 'win32' && file.includes('\\')) ||
       (task.allowedPaths && !task.allowedPaths.includes(file)) ||
-      isProtectedEvalPath(file) ||
+      isProtectedEvalPath(file, task.allowTestChanges) ||
       protectedPaths.some((pattern) => matchesProtectedPath(file, pattern))
     )
       throw new EvalIntegrityError('Eval modified a forbidden path');

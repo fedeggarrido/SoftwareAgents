@@ -1,4 +1,4 @@
-# Feature pipeline: Requirements y Architect (SA-041, SA-042)
+# Feature pipeline: Requirements, Architect y Developer (SA-041–043)
 
 El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
@@ -259,13 +259,94 @@ reiniciar coordinadamente todos sus
 escritores como indica [task CLI](task-cli.md#migraciones-de-la-base-compartida).
 Las pruebas automatizadas usan únicamente fake CLIs.
 
+## Developer: Task READY → rama con commits para revisión (SA-043)
+
+Después de aprobar el FeatureSpec y registrar el diseño, desde el checkout
+principal, construir `node esbuild.js`. Comando para la prueba real de Claude:
+
+```powershell
+node dist/cli.js feature develop FEAT-001 --task FEAT-001-T01
+node dist/cli.js feature show FEAT-001 --json
+```
+
+Equivalente instalado: `pixel-agents feature develop FEAT-001 --task FEAT-001-T01`.
+Sin `--task`, selecciona la primera tarea `code`/`developer` del DAG en READY
+que cumple `canStart` (dependencias DONE). Ejecuta **una sola tarea**; no promueve
+dependientes ni integra. Si no hay otra elegible, devuelve la referencia de revisión
+ya existente. Con `--task`, un reintento devuelve la misma referencia sin volver
+a lanzar al agente. Una tarea bloqueada, ajena al Feature o sin zonas se rechaza.
+
+Reutiliza worker, selección/cascada SA-103, leases y recuperación SA-026,
+compilador y contención SA-062 con `branch_write`, guardia SA-063, commit con
+trailer y transición a REVIEW. La rama es `sa/FEAT-001-T01-developer` y el
+worktree `.worktrees/FEAT-001-T01`, desde la base declarada del Project.
+El contexto incluye el FeatureSpec aprobado, el diseño registrado, la tarea,
+sus referencias AC y `changeZones`, siempre como datos no confiables. Se comprueban
+SHA, disco, índice, rama y declaraciones importadas antes de admitir y de lanzar.
+
+El rol pide un test de aceptación o reproducción antes de implementar. Antes de
+verificar, después de verificar y antes del commit, el runtime comprueba el diff
+completo contra la base (índice, disco, archivos nuevos e ignorados): solo admite
+las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*`. Una zona literal que ya
+era directorio en el checkout principal, o acaba en `/`, incluye descendientes;
+los globs usan la gramática de Architect, incluido `**/` sin directorios.
+Las rutas protegidas/configuración/dependencias, enlaces y cambios ignorados se
+rechazan. Exige al menos un test no vacío con líneas añadidas; eliminar un test
+o modificar únicamente fixtures no satisface el contrato. Cualquier rechazo
+conserva el trabajo para inspección y no crea un commit.
+
+Los verificadores usan los comandos del binding SA-103 de la tarea, o
+`defaultVerifier`; sin ninguno, `tsc --noEmit --incremental false`. Se ejecutan
+también cuando la cascada está desactivada. Además ejecuta los tests modificados
+con Vitest instalado, configuración neutral externa, un worker y HOME/USERPROFILE
+aislados, sin caché ni instalaciones. Un test sin recoger o fallido impide el commit.
+Los tests que requieren aliases/setup especiales necesitan adaptación explícita;
+no se carga configuración del repositorio generada por el agente. Como SA-103,
+esto valida agentes cooperativos y no confina código adversarial en el SO.
+
+La comprobación roja sobre la base no se automatiza en este slice: aplicar tests
+nuevos a otra base requiere un árbol separado y contexto de test compatible;
+no se revierte código del worktree activo para simularlo. El agente debe declarar
+esa limitación y Claude revisa el test y reproduce el rojo cuando corresponda.
+Durante SA-043 se ejecutó primero el test de aceptación del nuevo CLI sobre la
+implementación base: falló por `Usage` al no existir `feature develop`; después
+pasó. La presencia de cambios de test y su ejecución verde no acredita su calidad
+semántica ni demuestra el orden temporal de las ediciones.
+
+WorkStore v10 añade `tasks.review_ref = {branch, sha, base}`, visible en
+`feature show` (texto y JSON), ligado a la tarea. El commit y registro usan una
+clave SA-026 por tarea/diseño: nunca se repite un efecto pendiente o incierto.
+Un corte entre Git, SQLite y auditoría exige reconciliación humana; no crea una
+rama alternativa ni descarta evidencia. Actualizar/reiniciar todos los escritores
+antes de abrir la base v10, como en [task CLI](task-cli.md#migraciones-de-la-base-compartida).
+
+No hay PRs, `gh`, merge ni integración automática. `push_main = deny` siempre.
+Por defecto no publica ninguna rama. Solo Operator config externo puede activar:
+
+```json
+"developer": { "pushBranch": { "enabled": true, "remote": "origin" } }
+```
+
+El runtime resuelve el nombre del remoto en el checkout principal a una URL
+explícita, revalida la rama y SA-063 y publica únicamente
+`<sha>:refs/heads/sa/<TASK>-developer`, sin hooks ni refspecs implícitos. Ni siquiera
+un remoto llamado `main` cambia ese destino. Publicar es idempotente por
+tarea/SHA/nombre de remoto; un resultado incierto requiere reconciliación SA-026.
+La contención del agente y su pushurl bloqueado se conservan. Un fallo de publicación
+conserva la referencia local lista para revisión.
+
+Claude comprueba en real el contexto/flags, tests, commit/trailer, `review_ref`,
+main intacto y ausencia de push por defecto; repite el mismo comando y confirma
+el mismo SHA y número de Executions. La QA automática solo usa CLIs falsas y
+repositorios/remotos Git desechables.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |
 | -------------------- | ------------------------------------------------------------------------------- |
 | Requirements Analyst | SA-041: petición → FeatureSpec validado → aprobación humana                     |
 | Architect            | SA-042: FeatureSpec aprobado → TechnicalDesign y TaskDAG validados e importados |
-| Developer            | Pendiente: ejecutar Tasks y producir implementación/evidencia                   |
+| Developer            | SA-043: una tarea READY → rama y commits con tests y `review_ref`               |
 | Reviewer             | Pendiente: revisión cruzada de los cambios                                      |
 | QA                   | Pendiente: verificar criterios y pruebas reales antes de integrar               |
 

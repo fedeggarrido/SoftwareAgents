@@ -38,6 +38,8 @@ export interface ProjectOperatorConfig {
   allowedExecutors: string[];
   modelTiers?: ModelTierPolicy;
   telemetry?: TelemetryConfig;
+  /** Runtime-only branch publication. Absent/disabled means no push. */
+  developer?: { pushBranch: { enabled: boolean; remote: string } };
   /**
    * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
    * (or no entry) = every catalog tier; an empty list blocks that Executor.

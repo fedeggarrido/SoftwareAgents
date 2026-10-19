@@ -197,9 +197,17 @@ ocupa un segmento completo (cero o más directorios). Se permite `/` final.
 Se rechazan segmentos `.`/`..`, llaves, `?`, corchetes, rutas absolutas, letras de
 unidad y backslashes. El prefijo de directorios anterior al primer glob debe
 quedar físicamente dentro del checkout; se rechazan enlaces/junctions en él,
-incluso cuando el resto de la ruta aún no existe. Se rechaza cualquier zona que
-pueda cubrir `.git/`, `.softwareagents/`, `AGENTS.md`, las rutas SA-063 por defecto
-o los `protectedPaths` externos del Operator, aunque la ruta protegida no exista.
+incluso cuando el resto de la ruta aún no existe. Se rechaza una zona si su
+prefijo fijo es o está dentro de una ruta protegida anclada (`.git/`,
+`.softwareagents/`, `AGENTS.md`, rutas SA-063 por defecto o `protectedPaths`
+externos del Operator sin comodín inicial), aunque esa ruta no exista. También se
+rechazan segmentos protegidos nombrados explícitamente, como `foo/.codex/bar`,
+`src/**/.codex/*` o `foo/.git/config`. Los patrones recursivos con `**/` inicial
+no invalidan un directorio solo porque podría contener un descendiente protegido:
+`webview-ui/test`, `e2e/` y `server/src/**` son válidos con `**/.codex/**` protegido.
+Declarar una zona no autoriza esos descendientes: tanto la guardia de zonas del
+Developer como la guardia de commit SA-063 aplican todos los patrones fichero a
+fichero y rechazan, por ejemplo, `webview-ui/test/.codex/x` dentro de una zona válida.
 Una ruta literal existente de directorio o con `/` final incluye descendientes.
 Las demás rutas literales seleccionan solo esa ruta; un glob selecciona las
 rutas que coincidan. Estos fallos son errores de validación y reciben el

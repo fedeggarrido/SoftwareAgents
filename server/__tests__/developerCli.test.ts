@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { matchesChangeZone } from '../src/changeZones.js';
+import { matchesChangeZone, validateChangeZone } from '../src/changeZones.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
 import {
   type DeveloperRequest,
@@ -12,6 +12,7 @@ import {
   pushDeveloperBranch,
 } from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
 import { WorktreeManager } from '../src/executors/worktreeManager.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
@@ -126,6 +127,33 @@ describe('Developer diff guard', () => {
     expect(matchesChangeZone('src/a.ts', 'src')).toBe(false);
     expect(matchesChangeZone('src/a.ts', 'src/', true)).toBe(true);
     expect(matchesChangeZone('outside/a.ts', 'src/**')).toBe(false);
+  });
+
+  it('rejects a concrete protected descendant inside an otherwise valid directory zone', () => {
+    fs.mkdirSync(path.join(repo, 'webview-ui/test'), { recursive: true });
+    const zone = 'webview-ui/test';
+    const config = loadProjectConfig(repo, true)!;
+    config.operator.protectedPaths = ['**/.codex/**'];
+    expect(() => validateChangeZone(repo, zone, config.operator.protectedPaths!)).not.toThrow();
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    const relative = 'webview-ui/test/.codex/x';
+    expect(matchesChangeZone(relative, zone, true)).toBe(true);
+    fs.mkdirSync(path.dirname(path.join(directory, relative)), { recursive: true });
+    fs.writeFileSync(path.join(directory, relative), 'protected instructions');
+    git(directory, 'add', '.');
+    const input = { task: { changeZones: [zone] } } as DeveloperRequest;
+    expect(() => guardDeveloperChanges(input, config, directory, base)).toThrow('forbidden path');
+    const gate = guardProtectedPaths({
+      cwd: directory,
+      base,
+      staged: true,
+      operator: config.operator,
+      projectId: 'test',
+    });
+    expect(gate.paths).toEqual([relative]);
+    expect(gate.decision.outcome).not.toBe('allow');
+    expect(git(directory, 'rev-parse', 'HEAD')).toBe(base);
   });
 
   it('requires actual test additions and rejects staged-only or deleted evidence', () => {

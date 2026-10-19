@@ -220,7 +220,55 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     expect(launchLog()[1].data.validationErrors.join('\n')).toContain('protected path .git/**');
   });
 
-  it('rejects unsafe zones, physical junction escapes and Operator-protected glob overlaps', () => {
+  it.each(['changeZones', 'testZones'] as const)(
+    'accepts ordinary %s despite recursive protected descendants',
+    (field) => {
+      const spec = { key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] } as Parameters<
+        typeof validateArchitect
+      >[1];
+      for (const exists of [false, true]) {
+        for (const zone of ['webview-ui/test', 'e2e/', 'server/src/**']) {
+          if (exists)
+            fs.mkdirSync(path.join(repo, zone.replace(/\/\*\*$/, '')), { recursive: true });
+          const proposal = {
+            components: ['Reader'],
+            risks: [],
+            body: 'Design',
+            dag: {
+              apiVersion: 'softwareagents.io/v1alpha1',
+              kind: 'TaskDAG',
+              feature: 'FEAT-001',
+              tasks: [
+                {
+                  key: 'FEAT-001-T01',
+                  type: 'code',
+                  title: 'Read',
+                  description: 'Read',
+                  acceptanceRefs: ['AC-001'],
+                  dependsOn: [],
+                  agentRole: 'developer',
+                  size: 'S',
+                  changeZones: ['server/src/**'],
+                  [field]: [zone],
+                  parallelizable: true,
+                },
+              ],
+            },
+          };
+          expect(
+            () =>
+              validateArchitect(JSON.stringify(proposal), spec, {
+                cwd: repo,
+                protectedPaths: ['**/.codex/**'],
+              }),
+            `${zone} (exists=${exists})`,
+          ).not.toThrow();
+        }
+      }
+    },
+  );
+
+  it('rejects unsafe zones, physical junction escapes and Operator-protected prefixes', () => {
     const spec = { key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] } as Parameters<
       typeof validateArchitect
     >[1];
@@ -277,15 +325,26 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
       '**/AGENTS.md',
       'src/secrets/file.ts',
       'src/secrets',
+      'foo/.codex/bar',
+      'src/**/.codex/*',
+      'foo/.git/config',
+      'foo/**/AGENTS.md',
+      'src/secrets/**',
+      'private/file.key/child',
+      '.github/workflows/ci.yaml',
+    ])
+      expect(validate(zone), zone).toThrow();
+    for (const zone of [
+      'src/audit*.ts',
+      'src/module/*.ts',
+      'private/*.ts',
+      'src/new-file.ts',
       'src/*/file.ts',
       'private/*',
       '**/*.key',
       'src/**',
       'src/**/*.ts',
-      '.github/workflows/ci.yaml',
     ])
-      expect(validate(zone), zone).toThrow();
-    for (const zone of ['src/audit*.ts', 'src/module/*.ts', 'private/*.ts', 'src/new-file.ts'])
       expect(() =>
         validateArchitect(
           JSON.stringify({
@@ -293,11 +352,11 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
             dag: { ...proposal.dag, tasks: [{ ...proposal.dag.tasks[0], changeZones: [zone] }] },
           }),
           spec,
-          { cwd: repo },
+          checkout,
         ),
       ).not.toThrow();
     fs.mkdirSync(path.join(repo, 'src'));
-    expect(validate('src')).toThrow(/protected path/);
+    expect(validate('src')).not.toThrow();
     fs.writeFileSync(path.join(repo, 'src/new-file.ts'), '// safe file');
     expect(validate('src/new-file.ts')).not.toThrow();
     expect(validate('src/new-file.ts/*.ts')).toThrow(/prefix must be a directory/);

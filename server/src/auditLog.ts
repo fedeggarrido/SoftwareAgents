@@ -216,7 +216,7 @@ export class AuditLog {
   }
 }
 
-function isAuditEntry(value: unknown): value is AuditEntry {
+export function isAuditEntry(value: unknown): value is AuditEntry {
   if (!value || typeof value !== 'object') return false;
   const entry = value as Record<string, unknown>;
   return (
@@ -239,6 +239,11 @@ function isAuditEntry(value: unknown): value is AuditEntry {
         ) &&
         typeof (entry.policyDecision as Record<string, unknown>).reason === 'string'))
   );
+}
+
+/** Reapply the existing redaction with current server discovery tokens. */
+export function redactAuditForDisplay(value: unknown): unknown {
+  return redactAudit(value, serverTokens());
 }
 
 /** Runtime integrations degrade visibly without leaking error payloads. Direct

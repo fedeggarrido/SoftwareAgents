@@ -10,10 +10,12 @@ import { recordAudit } from './auditLog.js';
 import { matchesChangeZone, validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
+import { validateDeveloperTests } from './developerTests.js';
 import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
+import { taskBranchBase } from './taskBranchBase.js';
 import { analyzeTaskDag, parseTaskDag, taskDeclaration } from './taskDag.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
 
@@ -65,7 +67,7 @@ export function developerRequest(
     return (
       task.type === 'code' &&
       task.agentRole === 'developer' &&
-      (record.status === 'READY' ||
+      (['READY', 'WAITING_QUOTA'].includes(record.status) ||
         (owner && record.lease_owner === owner && ['LEASED', 'RUNNING'].includes(record.status))) &&
       store.canStart(task.key)
     );
@@ -87,7 +89,7 @@ export function developerRequest(
     throw new Error('Developer review registration requires human reconciliation before retrying');
   if (task.type !== 'code' || task.agentRole !== 'developer' || !task.changeZones?.length)
     throw new Error('Developer task requires code, developer role and changeZones');
-  for (const zone of task.changeZones)
+  for (const zone of [...task.changeZones, ...(task.testZones ?? [])])
     validateChangeZone(config.repoRoot, zone, config.operator.protectedPaths ?? []);
   return {
     key,
@@ -127,15 +129,24 @@ export function guardDeveloperChanges(
     if (!committable.has(file) && fs.existsSync(taskPath(tree, file)))
       throw new Error('Developer changed an ignored file; human review required');
     if (
-      !isDeveloperTest(file) &&
-      !input.task.changeZones!.some((zone) => {
+      ![
+        ...input.task.changeZones!,
+        ...(isDeveloperTest(file) ? (input.task.testZones ?? []) : []),
+      ].some((zone) => {
         const literal = zone.replace(/\/$/, '');
         const directory =
           zone.endsWith('/') ||
           (!zone.includes('*') &&
             fs.existsSync(taskPath(config.repoRoot, literal)) &&
             fs.statSync(taskPath(config.repoRoot, literal)).isDirectory());
-        return matchesChangeZone(file, zone, directory);
+        const candidates = [file];
+        if (isDeveloperTest(file)) {
+          const source = file.replace(/\.(test|spec)(?=\.[cm]?[jt]sx?$)/i, '');
+          candidates.push(source);
+          if (source.startsWith('server/__tests__/'))
+            candidates.push(source.replace('server/__tests__/', 'server/src/'));
+        }
+        return candidates.some((candidate) => matchesChangeZone(candidate, zone, directory));
       })
     )
       throw new Error(`Developer changeZones exceeded: ${file}; human review required`);
@@ -151,6 +162,12 @@ export function guardDeveloperChanges(
   );
   if (!tests.length)
     throw new Error('Developer requires an added or adjusted acceptance/reproduction test');
+  for (const file of tests)
+    validateDeveloperTests(
+      file,
+      fs.readFileSync(taskPath(tree, file), 'utf8'),
+      baseFiles.has(file) ? evalGit(tree, ['show', `${base}:${file}`]) : '',
+    );
   return tests;
 }
 
@@ -191,6 +208,11 @@ export async function pushDeveloperBranch(
   )
     throw new Error('Developer push_main = deny; invalid branch publication target');
   const tree = store.getTask(taskKey)?.worktree_ref;
+  if (
+    taskBranchBase(config.repoRoot, review.branch, config.project.repo.defaultBranch) !==
+    review.base
+  )
+    throw new Error('Review base differs from registered trusted base');
   if (
     !tree ||
     evalGit(tree, ['rev-parse', 'HEAD']) !== review.sha ||

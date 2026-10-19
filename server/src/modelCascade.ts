@@ -130,6 +130,7 @@ export async function checkCascadeCriteria(
       }
       const home = fs.mkdtempSync(path.join(temporary, 'home-'));
       const directTests = 'developerTests' in command ? command.developerTests : undefined;
+      const report = path.join(home, 'tests.json');
       let argv: string[];
       if ('argv' in command) argv = command.argv;
       else {
@@ -149,6 +150,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
             cacheDir: path.join(home, 'cache'),
             test: {
               globals: true,
+              ...(directTests ? { reporters: ['json'], outputFile: report, allowOnly: false } : {}),
               setupFiles: [setup],
               pool: 'threads',
               maxWorkers: 1,
@@ -172,7 +174,31 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
           ...(directTests ? directTests.map((file) => path.resolve(tree, file)) : related),
         ];
       }
-      results.push(await runVerifierCommand(argv, tree, home, command.timeoutMs, signal));
+      let result = await runVerifierCommand(argv, tree, home, command.timeoutMs, signal);
+      if (directTests && result === 'pass') {
+        // An exit code of zero includes empty/skipped suites; require evidence per file.
+        try {
+          const data = JSON.parse(fs.readFileSync(report, 'utf8')) as {
+            testResults: { name: string; assertionResults: { status: string }[] }[];
+          };
+          if (
+            !directTests.every((file) => {
+              const suites = data.testResults.filter(
+                (suite) =>
+                  normalize(path.resolve(suite.name)) === normalize(path.resolve(tree, file)),
+              );
+              return (
+                suites.length === 1 &&
+                suites[0].assertionResults.some((test) => test.status === 'passed')
+              );
+            })
+          )
+            result = 'fail';
+        } catch {
+          result = 'fail';
+        }
+      }
+      results.push(result);
     }
     return results;
   } catch (error) {

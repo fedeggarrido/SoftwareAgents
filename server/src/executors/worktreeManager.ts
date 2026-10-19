@@ -6,6 +6,7 @@ import { performance } from 'perf_hooks';
 import { promisify } from 'util';
 
 import { resolveInside } from '../pathGuard.js';
+import { taskBranchBase } from '../taskBranchBase.js';
 
 const execute = promisify(execFile);
 const BLOCKED_PUSH_URL = 'softwareagents-push-disabled://origin';
@@ -14,6 +15,7 @@ export interface WorktreeResult {
   path: string;
   branch: string;
   reused: boolean;
+  base?: string;
   bootstrap: { durationMs: number; cached: boolean; skipped: boolean };
 }
 
@@ -26,6 +28,8 @@ export interface WorktreeManagerOptions {
   npmCliPath?: string;
   /** Supervised worker: skip the dependency install; agent pushes stay blocked. */
   manualPreparation?: boolean;
+  /** Developer branches must never infer their baseline from an existing branch tip. */
+  trustedBase?: boolean;
 }
 
 /** Serializes operations in this instance. The runtime must hold the Project Lease across processes. */
@@ -41,6 +45,9 @@ export class WorktreeManager {
     return this.serial(async () => {
       const { directory, branch } = this.target(taskKey, slug);
       await this.assertMainRepository();
+      const base = this.options.trustedBase
+        ? taskBranchBase(this.root, branch, this.options.defaultBranch, true)
+        : undefined;
       const existing = await this.registered(directory);
       if (existing) {
         await this.assertTask(directory, branch);
@@ -62,7 +69,7 @@ export class WorktreeManager {
           directory,
           branches.split('\n').includes(`refs/heads/${branch}`)
             ? branch
-            : this.options.defaultBranch,
+            : (base ?? this.options.defaultBranch),
         ]);
       }
       // worktreeConfig affects all checkouts: refuse configurations that need migration.
@@ -78,7 +85,7 @@ export class WorktreeManager {
       const bootstrap = this.options.manualPreparation
         ? { durationMs: 0, cached: false, skipped: true }
         : await this.bootstrap(directory);
-      return { path: directory, branch, reused: existing, bootstrap };
+      return { path: directory, branch, ...(base ? { base } : {}), reused: existing, bootstrap };
     });
   }
 

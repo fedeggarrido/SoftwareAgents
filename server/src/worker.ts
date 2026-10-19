@@ -104,6 +104,7 @@ import {
   writeRequirements,
 } from './requirements.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
+import { taskBranchBase } from './taskBranchBase.js';
 import { taskModelInputs } from './taskModelInputs.js';
 import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
@@ -1028,13 +1029,16 @@ async function runWorkerExecution(
             repositoryPath: cwd,
             defaultBranch: config.project.repo.defaultBranch,
             manualPreparation: true,
+            trustedBase: !!options.developer,
           }).create(
             options.architect?.key ?? args.task,
             options.developer ? 'developer' : 'worker',
           );
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
-      base ??= git(tree.path, ['rev-parse', 'HEAD']);
+      base ??= options.developer
+        ? taskBranchBase(cwd, tree.branch, config.project.repo.defaultBranch)
+        : git(tree.path, ['rev-parse', 'HEAD']);
       if (options.developer) {
         const current = developerRequest(
           workStore!,
@@ -1045,7 +1049,10 @@ async function runWorkerExecution(
         );
         if (JSON.stringify(current) !== JSON.stringify(options.developer))
           throw new Error('Developer context changed before launch');
-        for (const zone of options.developer.task.changeZones!) {
+        for (const zone of [
+          ...options.developer.task.changeZones!,
+          ...(options.developer.task.testZones ?? []),
+        ]) {
           // Physical containment is checked again in the actual task checkout.
           validateChangeZone(tree.path, zone, config.operator.protectedPaths ?? []);
         }

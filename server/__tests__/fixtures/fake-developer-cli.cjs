@@ -19,6 +19,16 @@ process.stdin.on('end', () => {
 import { implemented } from '../src/audit';
 it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? 'false' : 'true'}));\n`,
     );
+    if (mode === 'empty-test')
+      fs.writeFileSync(
+        'server/__tests__/audit.test.ts',
+        "import { it } from 'vitest'; it('empty', () => {});\n",
+      );
+    if (mode === 'skip-suite')
+      fs.writeFileSync(
+        'server/__tests__/audit.test.ts',
+        "import { it, expect, describe } from 'vitest'; describe.skip('skip', () => { it('test', () => expect(true).toBe(true)); });\n",
+      );
   }
   if (mode === 'outside') fs.writeFileSync('outside.txt', 'outside changeZones');
   const emit = (value) => console.log(JSON.stringify(value));

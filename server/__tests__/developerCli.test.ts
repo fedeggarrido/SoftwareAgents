@@ -12,7 +12,10 @@ import {
   pushDeveloperBranch,
 } from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { WorktreeManager } from '../src/executors/worktreeManager.js';
+import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
+import { taskBranchBase } from '../src/taskBranchBase.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
@@ -30,6 +33,11 @@ const git = (cwd: string, ...args: string[]) =>
 const task = 'FEAT-001-T01';
 const tree = () => path.join(repo, '.worktrees', task);
 const storeFor = () => openWorkStore({ repositoryPath: repo, projectId: 'test' });
+function detachedTree(): string {
+  const directory = path.join(root, 'guard-tree');
+  git(repo, 'worktree', 'add', '--detach', directory, 'main');
+  return directory;
+}
 function configure(
   push?: { enabled: boolean; remote: string },
   selected: 'claude' | 'codex' = 'claude',
@@ -135,12 +143,133 @@ describe('Developer diff guard', () => {
     const check = () =>
       guardDeveloperChanges(input, loadProjectConfig(repo, true)!, guardTree, base);
     fs.appendFileSync(file, "it('acceptance', () => {});\n");
+    expect(check).toThrow('requires an assertion');
+    fs.writeFileSync(file, original + "it('acceptance', () => expect(true).toBe(true));\n");
     expect(check()).toEqual([relative]);
     git(guardTree, 'add', '.');
     fs.writeFileSync(file, original);
     expect(check).toThrow('requires an added or adjusted');
     fs.unlinkSync(file);
     expect(check).toThrow('requires an added or adjusted');
+  });
+
+  it.each(['delete', 'empty', 'disguised'])('rejects %s of a foreign test suite', (mode) => {
+    const relative = 'server/__tests__/foreign.test.ts';
+    fs.mkdirSync(path.dirname(path.join(repo, relative)), { recursive: true });
+    fs.writeFileSync(path.join(repo, relative), "it('foreign', () => expect(true).toBe(true));\n");
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'foreign suite');
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    if (mode === 'delete') fs.unlinkSync(path.join(directory, relative));
+    else
+      fs.writeFileSync(
+        path.join(directory, relative),
+        mode === 'empty' ? '' : 'export const logic = 1;',
+      );
+    const input = { task: { changeZones: ['server/src/audit*.ts'] } } as DeveloperRequest;
+    expect(() =>
+      guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base),
+    ).toThrow('changeZones exceeded');
+  });
+
+  it('allows explicit testZones, while suffixes alone grant no scope', () => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    const relative = 'integration/audit.test.ts';
+    fs.mkdirSync(path.join(directory, 'integration'));
+    fs.writeFileSync(
+      path.join(directory, relative),
+      "it('acceptance', () => expect(true).toBe(true));\n",
+    );
+    const input = { task: { changeZones: ['server/src/audit.ts'] } } as DeveloperRequest;
+    const check = () =>
+      guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base);
+    expect(check).toThrow('changeZones exceeded');
+    input.task.testZones = ['integration/audit.test.ts'];
+    expect(check()).toEqual([relative]);
+  });
+
+  it.each([
+    "it('empty', () => {});",
+    "describe.skip('skipped', () => { it('test', () => expect(true).toBe(true)); });",
+    "it.todo('later');",
+    "it.only('focused', () => expect(true).toBe(true));",
+    "it['skip']('skipped', () => expect(true).toBe(true));",
+    "it('skipped', { skip: true }, () => expect(true).toBe(true));",
+    "it.skipIf(true)('skipped', () => expect(true).toBe(true));",
+  ])('rejects invalid test additions: %s', (source) => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    fs.mkdirSync(path.join(directory, 'server/__tests__'), { recursive: true });
+    fs.writeFileSync(path.join(directory, 'server/__tests__/audit.test.ts'), source);
+    const input = { task: { changeZones: ['server/src/audit.ts'] } } as DeveloperRequest;
+    expect(() =>
+      guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base),
+    ).toThrow(/assertion|skip\/todo\/only/);
+  });
+
+  it.each(['empty', 'skipped', 'missing', 'passed'])(
+    'requires structured execution evidence per file: %s',
+    async (mode) => {
+      const base = git(repo, 'rev-parse', 'HEAD');
+      const directory = detachedTree();
+      fs.mkdirSync(path.join(directory, 'server/__tests__'), { recursive: true });
+      const relative = 'server/__tests__/audit.test.ts';
+      fs.writeFileSync(
+        path.join(directory, relative),
+        `import { it, expect, describe } from 'vitest';\n${
+          mode === 'empty'
+            ? "describe('empty', () => {});"
+            : `it${mode === 'skipped' ? '.skip' : ''}('evidence', () => expect(true).toBe(true));`
+        }`,
+      );
+      const result = await checkCascadeCriteria(
+        { commands: [] },
+        base,
+        directory,
+        root,
+        new AbortController().signal,
+        undefined,
+        mode === 'missing' ? [relative, 'server/__tests__/missing.test.ts'] : [relative],
+      );
+      expect(result).toEqual([mode === 'passed' ? 'pass' : 'fail']);
+    },
+  );
+
+  it('rejects preseeded branches without a trusted base, including outside commits', async () => {
+    const branch = `sa/${task}-developer`;
+    git(repo, 'checkout', '-b', branch);
+    fs.writeFileSync(path.join(repo, 'outside.txt'), 'hidden outside changes');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'outside');
+    git(repo, 'checkout', 'main');
+    const manager = new WorktreeManager({
+      repositoryPath: repo,
+      defaultBranch: 'main',
+      manualPreparation: true,
+      trustedBase: true,
+    });
+    await expect(manager.create(task, 'developer')).rejects.toThrow('no registered trusted base');
+    expect(fs.existsSync(tree())).toBe(false);
+  });
+
+  it('persists a trusted base and checks it on every retry', async () => {
+    const manager = new WorktreeManager({
+      repositoryPath: repo,
+      defaultBranch: 'main',
+      manualPreparation: true,
+      trustedBase: true,
+    });
+    const base = git(repo, 'rev-parse', 'HEAD');
+    expect((await manager.create(task, 'developer')).base).toBe(base);
+    expect((await manager.create(task, 'developer')).base).toBe(base);
+    fs.writeFileSync(path.join(repo, 'outside.txt'), 'new main');
+    git(repo, 'add', 'outside.txt');
+    git(repo, 'commit', '-m', 'main advanced');
+    expect(taskBranchBase(repo, `sa/${task}-developer`, 'main')).toBe(base);
+    git(tree(), 'reset', '--hard', 'main');
+    await expect(manager.create(task, 'developer')).rejects.toThrow('merge-base differs');
   });
 });
 
@@ -211,14 +340,31 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       store.close();
     }
   });
-  it.each(['outside', 'no-test', 'bad-test'])('rejects %s without committing', async (mode) => {
+  it.each(['outside', 'no-test', 'bad-test', 'empty-test', 'skip-suite'])(
+    'rejects %s without committing',
+    async (mode) => {
+      await prepare();
+      const main = git(repo, 'rev-parse', 'main');
+      await expect(develop(mode)).rejects.toThrow(/changeZones|test|verifier/i);
+      expect(git(tree(), 'rev-parse', 'HEAD')).toBe(main);
+      const store = await storeFor();
+      try {
+        expect(store.getTask(task)?.review_ref).toBeNull();
+      } finally {
+        store.close();
+      }
+    },
+  );
+  it('reevaluates WAITING_QUOTA through lifecycle recovery', async () => {
     await prepare();
-    const main = git(repo, 'rev-parse', 'main');
-    await expect(develop(mode)).rejects.toThrow(/changeZones|test|verifier/i);
-    expect(git(tree(), 'rev-parse', 'HEAD')).toBe(main);
     const store = await storeFor();
     try {
-      expect(store.getTask(task)?.review_ref).toBeNull();
+      let record = store.getTask(task)!;
+      await store.transition(task, record.version, 'WAITING_QUOTA', 'quota wait', 'test');
+      await develop();
+      record = store.getTask(task)!;
+      expect(record.status).toBe('REVIEW');
+      expect(record.review_ref?.base).toBe(git(repo, 'rev-parse', 'main'));
     } finally {
       store.close();
     }

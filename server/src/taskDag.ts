@@ -24,6 +24,7 @@ export function taskDeclaration(feature: string, task: TaskDag['tasks'][number])
     agentRole: task.agentRole,
     size: task.size,
     ...(task.changeZones ? { changeZones: [...task.changeZones].sort() } : {}),
+    ...(task.testZones ? { testZones: [...task.testZones].sort() } : {}),
     ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
   });
 }

@@ -209,6 +209,12 @@ cobertura de **cada AC**. Las zonas y la marca se persisten en la declaración
 inmutable; son datos para SA-097, no un permiso para lanzar en paralelo. Los DAG
 históricos siguen aceptándose sin esos dos campos.
 
+`testZones?: string[]` declara rutas o globs adicionales para los tests de la tarea.
+Es opcional para conservar los DAG históricos; usa exactamente el esquema y las
+validaciones físicas y de rutas protegidas de `changeZones`, y forma parte de la
+declaración inmutable. Architect debe declarar aquí las raíces de tests que no
+sean co-ubicadas ni el espejo `server/src/` → `server/__tests__/`.
+
 Ante una propuesta inválida, devuelve errores deterministas al mismo rol una
 sola vez, con otra Execution/admisión. El segundo fallo abre una Human Decision
 y deja `FEAT-001-DESIGN` en `WAITING_HUMAN`, sin `FAILED_RETRYABLE` ni diseño
@@ -270,16 +276,24 @@ node dist/cli.js feature show FEAT-001 --json
 ```
 
 Equivalente instalado: `pixel-agents feature develop FEAT-001 --task FEAT-001-T01`.
-Sin `--task`, selecciona la primera tarea `code`/`developer` del DAG en READY
+Sin `--task`, selecciona la primera tarea `code`/`developer` del DAG en READY o WAITING_QUOTA
 que cumple `canStart` (dependencias DONE). Ejecuta **una sola tarea**; no promueve
 dependientes ni integra. Si no hay otra elegible, devuelve la referencia de revisión
 ya existente. Con `--task`, un reintento devuelve la misma referencia sin volver
 a lanzar al agente. Una tarea bloqueada, ajena al Feature o sin zonas se rechaza.
+WAITING_QUOTA conserva las mismas validaciones de feature, diseño y dependencias;
+WorkerLifecycle la devuelve a READY y reevalúa selección y disponibilidad.
 
 Reutiliza worker, selección/cascada SA-103, leases y recuperación SA-026,
 compilador y contención SA-062 con `branch_write`, guardia SA-063, commit con
 trailer y transición a REVIEW. La rama es `sa/FEAT-001-T01-developer` y el
 worktree `.worktrees/FEAT-001-T01`, desde la base declarada del Project.
+Antes de crear la rama, el runtime registra el SHA de esa base en
+`<git-common-dir>/softwareagents/task-bases/<rama-codificada>.json`. En cada
+reintento, incluso al devolver `review_ref`, exige ese registro y que el merge-base
+entre la rama y la base del Project coincida con el SHA registrado. Una rama
+preexistente sin registro requiere reconciliación humana; no se adopta su HEAD
+como base. Todas las guardias y `review_ref.base` usan el SHA registrado.
 El contexto incluye el FeatureSpec aprobado, el diseño registrado, la tarea,
 sus referencias AC y `changeZones`, siempre como datos no confiables. Se comprueban
 SHA, disco, índice, rama y declaraciones importadas antes de admitir y de lanzar.
@@ -287,7 +301,11 @@ SHA, disco, índice, rama y declaraciones importadas antes de admitir y de lanza
 El rol pide un test de aceptación o reproducción antes de implementar. Antes de
 verificar, después de verificar y antes del commit, el runtime comprueba el diff
 completo contra la base (índice, disco, archivos nuevos e ignorados): solo admite
-las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*`. Una zona literal que ya
+las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*` autorizados. Estos tests
+deben estar en `changeZones`, ser co-ubicados con sus archivos fuente (retirando
+`.test`/`.spec` de su nombre), ser su espejo `server/__tests__/` de `server/src/`,
+o coincidir con `testZones`. El sufijo no autoriza rutas ajenas, ni siquiera para
+borrar o vaciar suites existentes. Una zona literal que ya
 era directorio en el checkout principal, o acaba en `/`, incluye descendientes;
 los globs usan la gramática de Architect, incluido `**/` sin directorios.
 Las rutas protegidas/configuración/dependencias, enlaces y cambios ignorados se
@@ -299,7 +317,11 @@ Los verificadores usan los comandos del binding SA-103 de la tarea, o
 `defaultVerifier`; sin ninguno, `tsc --noEmit --incremental false`. Se ejecutan
 también cuando la cascada está desactivada. Además ejecuta los tests modificados
 con Vitest instalado, configuración neutral externa, un worker y HOME/USERPROFILE
-aislados, sin caché ni instalaciones. Un test sin recoger o fallido impide el commit.
+aislados, sin caché ni instalaciones. El reporter JSON escribe fuera del worktree:
+cada fichero requerido debe aportar al menos un test ejecutado y aprobado. Los
+tests y suites añadidos no admiten `skip`, `todo` ni `only`; una comprobación
+estática con el parser de TypeScript exige `expect` o `assert` en el cuerpo de
+cada test nuevo o modificado. Un test sin recoger o fallido impide el commit.
 Los tests que requieren aliases/setup especiales necesitan adaptación explícita;
 no se carga configuración del repositorio generada por el agente. Como SA-103,
 esto valida agentes cooperativos y no confina código adversarial en el SO.

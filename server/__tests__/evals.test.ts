@@ -24,6 +24,8 @@ import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadWorkerAgentSpec } from '../src/worker.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };

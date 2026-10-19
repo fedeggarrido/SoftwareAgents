@@ -17,6 +17,8 @@ export interface DagTask {
   size: WorkSize;
   /** Declarative repository-relative paths/globs; required for new Architect output. */
   changeZones?: string[];
+  /** Additional test paths/globs, subject to the same validation as changeZones. */
+  testZones?: string[];
   /** A scheduling hint, never authorization to run concurrently. */
   parallelizable?: boolean;
 }

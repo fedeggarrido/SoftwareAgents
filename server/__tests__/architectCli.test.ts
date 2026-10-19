@@ -243,12 +243,28 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
             agentRole: 'developer',
             size: 'S',
             changeZones: ['src/audit*.ts'],
+            testZones: ['tests/audit.test.ts'],
             parallelizable: true,
           },
         ],
       },
     };
     const checkout = { cwd: repo, protectedPaths: ['src/secrets/**', 'private/*.key'] };
+    for (const zone of ['.git/config', 'private/file.key', '../escape']) {
+      expect(() =>
+        validateArchitect(
+          JSON.stringify({
+            ...proposal,
+            dag: {
+              ...proposal.dag,
+              tasks: [{ ...proposal.dag.tasks[0], testZones: [zone] }],
+            },
+          }),
+          spec,
+          checkout,
+        ),
+      ).toThrow();
+    }
     const validate = (zone: string) => {
       proposal.dag.tasks[0].changeZones = [zone];
       return () => validateArchitect(JSON.stringify(proposal), spec, checkout);

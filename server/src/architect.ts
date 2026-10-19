@@ -86,6 +86,8 @@ export function architectBrief(
     answers: input.revision?.answers ?? null,
     contract: architectContract,
     dagContract,
+    testScope:
+      'Declare additional test roots in optional testZones; otherwise only changeZones, colocated tests and the server/src -> server/__tests__ mirror are allowed.',
     validationErrors: errors,
   });
 }
@@ -110,11 +112,11 @@ export function validateArchitect(
     if (!task.changeZones?.length) errors.push(`${task.key}: changeZones required`);
     if (typeof task.parallelizable !== 'boolean')
       errors.push(`${task.key}: parallelizable required`);
-    for (const zone of task.changeZones ?? []) {
+    for (const zone of [...(task.changeZones ?? []), ...(task.testZones ?? [])]) {
       try {
         validateChangeZone(checkout.cwd, zone, checkout.protectedPaths ?? []);
       } catch (error) {
-        errors.push(`${task.key}: changeZones ${zone}: ${(error as Error).message}`);
+        errors.push(`${task.key}: changeZones/testZones ${zone}: ${(error as Error).message}`);
       }
     }
   });

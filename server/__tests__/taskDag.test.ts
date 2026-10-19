@@ -13,7 +13,12 @@ import type {
 } from '../../core/src/index.js';
 import { loadFeatureSpec } from '../src/featureSpec.js';
 import { SchemaValidationError } from '../src/schemaValidation.js';
-import { analyzeTaskDag, parseTaskDag, parseTechnicalDesign } from '../src/taskDag.js';
+import {
+  analyzeTaskDag,
+  parseTaskDag,
+  parseTechnicalDesign,
+  taskDeclaration,
+} from '../src/taskDag.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const spec = {
@@ -42,6 +47,22 @@ function dag(...tasks: DagTask[]): TaskDag {
 const covered = (...tasks: DagTask[]) => dag(task(99, [], ['AC-001', 'AC-002']), ...tasks);
 
 describe('TaskDAG schema', () => {
+  it('keeps testZones optional, validates their paths and persists their immutable content', () => {
+    const base = task(1);
+    expect(parseTaskDag(dag(base)).tasks[0].testZones).toBeUndefined();
+    for (const zone of ['server/__tests__/audit.test.ts', 'integration/**/*.test.ts'])
+      expect(parseTaskDag(dag({ ...base, testZones: [zone] })).tasks[0].testZones).toEqual([zone]);
+    for (const zone of ['../outside', 'C:/outside', 'tests\\file', 'tests/{a,b}'])
+      expect(() => parseTaskDag(dag({ ...base, testZones: [zone] }))).toThrow(
+        SchemaValidationError,
+      );
+    expect(taskDeclaration('FEAT-001', { ...base, testZones: ['b/', 'a/'] })).toBe(
+      taskDeclaration('FEAT-001', { ...base, testZones: ['a/', 'b/'] }),
+    );
+    expect(taskDeclaration('FEAT-001', { ...base, testZones: ['a/'] })).not.toBe(
+      taskDeclaration('FEAT-001', base),
+    );
+  });
   it('accepts only documented POSIX paths and simple star globs for changeZones', () => {
     for (const zone of [
       'src/file.ts',

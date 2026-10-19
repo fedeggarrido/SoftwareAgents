@@ -34,6 +34,8 @@ export interface AuditEntry {
     blockedCause?: ExecutionBlock;
     code?: string;
     attempt?: number;
+    /** Validation errors of a failed Architect/Requirements attempt (bounded). */
+    errors?: string[];
   };
   taskKey: string | null;
   executionId: string | null;

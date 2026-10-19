@@ -12,6 +12,7 @@ import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
+import { extractJsonObject } from './agentOutput.js';
 import {
   architectArtifacts,
   architectBrief,
@@ -33,6 +34,8 @@ import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
   CLAUDE_OAUTH_REFRESH_RETRIES,
   CLAUDE_OAUTH_REFRESH_WAIT_MS,
+  VALIDATION_AUDIT_MAX_ERROR_CHARS,
+  VALIDATION_AUDIT_MAX_ERRORS,
 } from './constants.js';
 import {
   type DeveloperRequest,
@@ -1250,7 +1253,7 @@ async function runWorkerExecution(
         if (event.type === 'finished') {
           exitCode = event.exitCode;
           if ((options.requirements || options.architect) && exitCode === 0)
-            requirementsOutput = event.resultSummary;
+            requirementsOutput = extractJsonObject(event.resultSummary);
           if (exitCode !== 0)
             executionDiagnostic = failureDiagnostic(event.resultSummary, exitCode);
           executionFinished = true;
@@ -1347,7 +1350,13 @@ async function runWorkerExecution(
             if (!(error instanceof SchemaValidationError)) throw error;
             audit(
               options.architect ? 'design_validation_failed' : 'featurespec_validation_failed',
-              { attempt: requirementsAttempt + 1 },
+              {
+                attempt: requirementsAttempt + 1,
+                // The open decision keeps its first text; the latest errors live here.
+                errors: error.errors
+                  .slice(0, VALIDATION_AUDIT_MAX_ERRORS)
+                  .map((e) => e.slice(0, VALIDATION_AUDIT_MAX_ERROR_CHARS)),
+              },
             );
             if (requirementsAttempt++ === 0) {
               taskData.task.brief = options.architect

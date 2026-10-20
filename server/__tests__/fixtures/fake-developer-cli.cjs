@@ -10,7 +10,8 @@ process.stdin.on('end', () => {
   );
   fs.appendFileSync(log, JSON.stringify({ args, context, cwd: process.cwd() }) + '\n');
   fs.mkdirSync('server/src', { recursive: true });
-  const { reviewFindings: findings, reworkAttempt } = JSON.parse(context.task.brief);
+  const { reviewFindings = [], qaDefects = [], reworkAttempt } = JSON.parse(context.task.brief);
+  const findings = [...reviewFindings, ...qaDefects];
   fs.writeFileSync(
     'server/src/audit.ts',
     `export const implemented = true;\n${findings?.length ? `// Reworked ${reworkAttempt}: bounded pagination\n` : ''}`,

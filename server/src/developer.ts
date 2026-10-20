@@ -28,6 +28,7 @@ export interface DeveloperRequest {
   task: DagTask;
   reviewFindings?: import('../../core/src/reviewReport.js').ReviewReport['findings'];
   reworkAttempt?: number;
+  qaDefects?: import('./workstore/WorkStore.js').DefectContext[];
 }
 
 /** Re-read registered artifacts and immutable declarations, never trust caller-supplied scope. */
@@ -102,6 +103,14 @@ export function developerRequest(
     designSha: design.git_sha,
     design: readTaskInput(source, design.doc_path),
     task,
+    ...(record.test_reports?.some((r) => r.report.verdict === 'fail')
+      ? {
+          qaDefects: store
+            .listTasks()
+            .flatMap((t) => (t.defect_context?.task === record.key ? [t.defect_context] : [])),
+          reworkAttempt: record.attempt,
+        }
+      : {}),
     ...(record.review_reports?.length
       ? {
           reviewFindings: record.review_reports.at(-1)!.report.findings,

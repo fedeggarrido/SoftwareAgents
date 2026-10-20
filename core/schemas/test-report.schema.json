@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TestReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "acceptance", "commands", "defects"],
+  "properties": {
+    "verdict": {
+      "enum": ["pass", "fail", "not_tested"]
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ac", "status", "evidence"],
+        "properties": {
+          "ac": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "status": {
+            "enum": ["pass", "fail", "not_tested"]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "result", "passed", "failed"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "result": {
+            "enum": ["pass", "fail"]
+          },
+          "passed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ac", "severity", "summary", "reproduction"],
+        "properties": {
+          "ac": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "severity": {
+            "enum": ["blocker", "major", "minor", "nit"]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "reproduction": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "fail"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "defects": {
+            "minItems": 1,
+            "type": "array"
+          },
+          "acceptance": {
+            "contains": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {
+                "status": {
+                  "const": "fail"
+                }
+              }
+            },
+            "type": "array"
+          }
+        }
+      }
+    }
+  ]
+}

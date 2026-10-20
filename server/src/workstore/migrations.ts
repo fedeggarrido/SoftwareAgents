@@ -117,6 +117,8 @@ const migrations = [
   `ALTER TABLE tasks ADD COLUMN review_ref TEXT;`,
   `ALTER TABLE tasks ADD COLUMN review_reports TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE executions ADD COLUMN agent_role TEXT;`,
+  `ALTER TABLE tasks ADD COLUMN test_reports TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE tasks ADD COLUMN defect_context TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

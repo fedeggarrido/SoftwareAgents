@@ -11,6 +11,7 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
+import type { TestReport } from '../../core/src/testReport.js';
 import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { extractJsonObject } from './agentOutput.js';
 import {
@@ -94,6 +95,7 @@ import {
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { qaBrief, qaCommands, qaRequestedCommands, validateTestReport } from './qa.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
 import {
@@ -107,7 +109,7 @@ import {
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
-import { REVIEW_FAILURE_PREFIX } from './reviewAttempts.js';
+import { REVIEW_FAILURE_PREFIX, reviewReworkRounds } from './reviewAttempts.js';
 import {
   preferCrossExecutor,
   reviewerBrief,
@@ -234,6 +236,8 @@ export interface WorkerOptions {
   architect?: ArchitectRequest;
   developer?: DeveloperRequest;
   reviewer?: ReviewerRequest;
+  /** QA reuses the read-only Reviewer execution cycle, with a different report/outcome. */
+  qa?: boolean;
   /** Injection for protocol tests only; CLI obtains binary exclusively from Operator config. */
   binaryArgs?: readonly string[];
   log?: (message: string) => void;
@@ -357,8 +361,16 @@ export async function runWorker(
   try {
     if (options.reviewer) {
       if (
-        JSON.stringify(reviewerRequest(store, config, options.reviewer.key, args.task)) !==
-        JSON.stringify(options.reviewer)
+        JSON.stringify(
+          reviewerRequest(
+            store,
+            config,
+            options.reviewer.key,
+            args.task,
+            undefined,
+            options.qa ? 'qa' : 'review',
+          ),
+        ) !== JSON.stringify(options.reviewer)
       )
         throw new Error('Reviewer context changed');
     }
@@ -399,13 +411,13 @@ export async function runWorker(
     )
       await lifecycle.claim(
         options.requirements?.revision ?? options.architect?.revision,
-        !!options.reviewer,
+        options.reviewer ? (options.qa ? 'qa' : 'review') : false,
       );
     const result = await runWorkerExecution(args, options, lifecycle, config);
     if (result.quotaDecision?.status === 'wait') {
       if (options.reviewer)
         await lifecycle.finish(
-          'REVIEW',
+          options.qa ? 'QA' : 'REVIEW',
           `${REVIEW_FAILURE_PREFIX}category=${result.quotaDecision.cause ?? 'quota'}; exit_code=unknown`,
         );
       else await lifecycle.wait(result.quotaDecision);
@@ -428,7 +440,7 @@ export async function runWorker(
     return result;
   } catch (error) {
     await lifecycle.finish(
-      options.reviewer ? 'REVIEW' : 'FAILED_RETRYABLE',
+      options.reviewer ? (options.qa ? 'QA' : 'REVIEW') : 'FAILED_RETRYABLE',
       (options.reviewer ? REVIEW_FAILURE_PREFIX : '') +
         (error instanceof WorkerExecutionError
           ? error.message
@@ -503,7 +515,7 @@ async function runWorkerExecution(
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
-    (options.reviewer ? 'reviewer' : undefined) ??
+    (options.reviewer ? (options.qa ? 'qa' : 'reviewer') : undefined) ??
     (options.developer ? 'developer' : undefined) ??
     (options.architect ? 'architect' : undefined) ??
     (options.requirements ? 'requirements-analyst' : undefined) ??
@@ -592,7 +604,7 @@ async function runWorkerExecution(
     audit('availability_blocked', { blockedCause: cause });
     if (options.reviewer) {
       await lifecycle?.finish(
-        'REVIEW',
+        options.qa ? 'QA' : 'REVIEW',
         `${REVIEW_FAILURE_PREFIX}category=${found.code}; exit_code=unknown`,
       );
       process.exitCode = 3;
@@ -694,6 +706,8 @@ async function runWorkerExecution(
   let runtimeQuota: QuotaDecision | undefined;
   let requirementsAttempt = 0;
   let requirementsOutput = '';
+  let qaEvidence: TestReport['commands'] | undefined;
+  let qaRequestsUsed = false;
   let featureSpec: FeatureSpec | undefined;
   let designProposal: ArchitectProposal | undefined;
   let designFiles: Map<string, string> | undefined;
@@ -1070,7 +1084,7 @@ async function runWorkerExecution(
         },
         attempt ? Date.now() : telemetryStart,
       );
-      await lifecycle?.claim(undefined, !!options.reviewer);
+      await lifecycle?.claim(undefined, options.reviewer ? (options.qa ? 'qa' : 'review') : false);
       if (workStore) {
         if (!workStore.getTask(args.task))
           workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
@@ -1142,7 +1156,14 @@ async function runWorkerExecution(
       if (
         options.reviewer &&
         JSON.stringify(
-          reviewerRequest(workStore!, config, options.reviewer.key, args.task, lifecycle!.owner),
+          reviewerRequest(
+            workStore!,
+            config,
+            options.reviewer.key,
+            args.task,
+            lifecycle!.owner,
+            options.qa ? 'qa' : 'review',
+          ),
         ) !== JSON.stringify(options.reviewer)
       )
         throw new Error('Reviewer context changed before launch');
@@ -1192,6 +1213,16 @@ async function runWorkerExecution(
       }
       if (options.requirements || options.architect || options.reviewer)
         requirementsBefore ??= requirementsSnapshot(tree.path);
+      if (options.qa && !qaEvidence) {
+        qaEvidence = await qaCommands(
+          options.reviewer!,
+          resolveInside(common, 'softwareagents/runtime/verifiers'),
+          verifierAbort.signal,
+        );
+        guardRequirementsWrites(tree.path, requirementsBefore!);
+        taskData.task.brief = qaBrief(options.reviewer!, qaEvidence);
+        compiled = compileAgent(spec, role, taskData);
+      }
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
       audit('worktree_prepared');
@@ -1400,7 +1431,7 @@ async function runWorkerExecution(
           attempt: oauthRefreshRetries,
           detail: JSON.stringify({ waitMs: CLAUDE_OAUTH_REFRESH_WAIT_MS }),
         });
-        await telemetry.finish('error');
+        await telemetry!.finish('error');
         slot.release();
         slot = undefined;
         handle = undefined;
@@ -1429,13 +1460,90 @@ async function runWorkerExecution(
           throw new Error('Requirements containment: Git HEAD changed');
         if (!interrupted && exitCode === 0) {
           try {
-            if (options.reviewer) {
+            if (options.qa) {
+              const requested = qaRequestedCommands(
+                requirementsOutput,
+                qaEvidence!,
+                qaRequestsUsed,
+              );
+              if (requested) {
+                qaRequestsUsed = true;
+                qaEvidence!.push(
+                  ...(await qaCommands(
+                    options.reviewer!,
+                    resolveInside(common, 'softwareagents/runtime/verifiers'),
+                    verifierAbort.signal,
+                    requested,
+                  )),
+                );
+                guardRequirementsWrites(tree.path, requirementsBefore!);
+                taskData.task.brief = qaBrief(options.reviewer!, qaEvidence!, [], true);
+                compiled = compileAgent(spec, role, taskData);
+                await telemetry.finish('ok');
+                slot!.release();
+                slot = undefined;
+                executionId = randomUUID();
+                handle = undefined;
+                eventsStarted = false;
+                executionFinished = false;
+                telemetry = undefined;
+                continue;
+              }
+              const report = validateTestReport(requirementsOutput, options.reviewer!, qaEvidence!);
+              const capped =
+                report.verdict === 'fail' &&
+                reviewReworkRounds(workStore!.getTask(args.task)!) >= REVIEW_MAX_REWORK_ROUNDS;
+              const artifact = resolveInside(
+                common,
+                'softwareagents/brain/test-reports/' + args.task + '/' + executionId + '.json',
+              );
+              const record = {
+                execution_id: executionId,
+                review_ref: options.reviewer!.reviewRef,
+                report,
+                artifact_path: artifact,
+              };
+              await lifecycle!.completeReview(() =>
+                workStore!.completeQa(
+                  args.task,
+                  lifecycle!.owner,
+                  record,
+                  () => {
+                    guardRequirementsWrites(tree.path, requirementsBefore!);
+                    if (
+                      JSON.stringify(
+                        reviewerRequest(
+                          workStore!,
+                          config,
+                          options.reviewer!.key,
+                          args.task,
+                          lifecycle!.owner,
+                          'qa',
+                        ),
+                      ) !== JSON.stringify(options.reviewer)
+                    )
+                      throw new Error('QA SHA/context changed before report persistence');
+                    audit('test_report_pending', { detail: JSON.stringify(record) });
+                    fs.mkdirSync(path.dirname(artifact), { recursive: true });
+                    fs.writeFileSync(artifact, JSON.stringify(record, null, 2) + '\n', {
+                      flag: 'wx',
+                    });
+                  },
+                  capped
+                    ? { ...reviewerDecision(args.task, 'rework_limit'), requestedBy: 'qa' }
+                    : undefined,
+                ),
+              );
+              audit('test_report_persisted', { detail: JSON.stringify(record) });
+              telemetryStatus = capped ? 'require_human' : 'ok';
+              if (capped) process.exitCode = 3;
+              log(
+                args.task + ': ' + report.verdict + ' -> ' + workStore!.getTask(args.task)!.status,
+              );
+              return { branch: tree.branch, commit: null, stat: '' };
+            } else if (options.reviewer) {
               const report = validateReview(requirementsOutput, options.reviewer);
-              const rounds =
-                workStore!
-                  .getTask(args.task)!
-                  .review_reports?.filter((r) => r.report.verdict === 'request_changes').length ??
-                0;
+              const rounds = reviewReworkRounds(workStore!.getTask(args.task)!);
               const capped =
                 report.verdict === 'request_changes' && rounds >= REVIEW_MAX_REWORK_ROUNDS;
               const review = {
@@ -1513,14 +1621,16 @@ async function runWorkerExecution(
               },
             );
             if (requirementsAttempt++ === 0) {
-              taskData.task.brief = options.reviewer
-                ? reviewerBrief(options.reviewer, error.errors)
-                : options.architect
-                  ? architectBrief(options.architect, designContext, error.errors)
-                  : requirementsBrief(options.requirements!, error.errors);
+              taskData.task.brief = options.qa
+                ? qaBrief(options.reviewer!, qaEvidence!, error.errors, qaRequestsUsed)
+                : options.reviewer
+                  ? reviewerBrief(options.reviewer, error.errors)
+                  : options.architect
+                    ? architectBrief(options.architect, designContext, error.errors)
+                    : requirementsBrief(options.requirements!, error.errors);
               compiled = compileAgent(spec, role, taskData);
-              await telemetry.finish('error');
-              slot.release();
+              await telemetry!.finish('error');
+              slot!.release();
               slot = undefined;
               executionId = randomUUID();
               handle = undefined;
@@ -1532,7 +1642,7 @@ async function runWorkerExecution(
             if (options.reviewer) {
               // Preserve the reviewed SHA and release the lease before opening the existing human gate.
               await lifecycle!.finish(
-                'REVIEW',
+                options.qa ? 'QA' : 'REVIEW',
                 `${REVIEW_FAILURE_PREFIX}category=invalid_report; exit_code=0`,
               );
               telemetryStatus = 'error';
@@ -1603,7 +1713,7 @@ async function runWorkerExecution(
         if (!passed) {
           // Only deterministic verifier failures permit another admitted attempt.
           if (!interrupted && exitCode === 0 && attempt + 1 < levels.length) {
-            await telemetry.finish('error');
+            await telemetry!.finish('error');
             options.evaluation?.settled(telemetry.rootSpan, true);
             slot.release();
             slot = undefined;
@@ -1863,6 +1973,7 @@ async function runWorkerExecution(
         : {}),
     };
   } catch (error) {
+    if (error instanceof EvalCriterionTerminationError) verifierClosed = false;
     telemetryStatus = 'error';
     audit(interrupted ? 'interrupted' : 'failed');
     throw error;

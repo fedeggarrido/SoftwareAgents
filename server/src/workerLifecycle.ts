@@ -36,7 +36,10 @@ export class WorkerLifecycle {
     );
   }
 
-  async claim(revision?: { gitSha: string; decisionId: string }, reviewing = false): Promise<void> {
+  async claim(
+    revision?: { gitSha: string; decisionId: string },
+    reviewing: false | 'review' | 'qa' = false,
+  ): Promise<void> {
     if (this.claimed) return;
     let task = this.store.getTask(this.task);
     if (!task) {
@@ -51,7 +54,7 @@ export class WorkerLifecycle {
         'Explicit worker run',
         this.owner,
       );
-    if (reviewing) await this.store.claimReview(task.key, task.version, this.owner);
+    if (reviewing) await this.store.claimReview(task.key, task.version, this.owner, reviewing);
     else if (revision)
       await this.store.claimRequirementsRevision(
         task.key,
@@ -123,7 +126,16 @@ export class WorkerLifecycle {
         )
     )
       status = 'WAITING_HUMAN';
-    await this.store.transition(this.task, task.version, status, reason, this.owner);
+    if (status === 'QA' && task.status !== 'REVIEW') {
+      const review = await this.store.transition(
+        this.task,
+        task.version,
+        'REVIEW',
+        reason,
+        this.owner,
+      );
+      await this.store.transition(this.task, review.version, 'QA', reason, this.owner);
+    } else await this.store.transition(this.task, task.version, status, reason, this.owner);
     this.active = false;
     this.audit('task_transitioned', `${status}: ${reason}`);
     // WorkStore transitions out of active states clear the lease atomically.

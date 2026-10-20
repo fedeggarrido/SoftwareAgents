@@ -19,7 +19,21 @@ export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
 export function lastReviewFailure(store: WorkStore, task: TaskRecord) {
   const event = store
     .listDomainEvents(task.key)
-    .filter((e) => e.reason.startsWith(REVIEW_FAILURE_PREFIX))
+    .filter(
+      (e) =>
+        e.reason.startsWith(REVIEW_FAILURE_PREFIX) ||
+        ['Reviewer report persisted', 'QA report persisted'].includes(e.reason),
+    )
     .at(-1);
-  return event ? { reason: event.reason, created_at: event.created_at } : null;
+  return event?.reason.startsWith(REVIEW_FAILURE_PREFIX)
+    ? { reason: event.reason, created_at: event.created_at }
+    : null;
+}
+
+/** Only validated negative reports consume shared rework rounds; historical infrastructure attempts do not. */
+export function reviewReworkRounds(task: TaskRecord): number {
+  return (
+    (task.review_reports?.filter((r) => r.report.verdict === 'request_changes').length ?? 0) +
+    (task.test_reports?.filter((r) => r.report.verdict === 'fail').length ?? 0)
+  );
 }

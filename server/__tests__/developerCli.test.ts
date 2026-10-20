@@ -20,7 +20,8 @@ import { taskBranchBase } from '../src/taskBranchBase.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+// Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
+vi.setConfig({ testTimeout: 90_000 });
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,

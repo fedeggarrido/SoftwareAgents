@@ -1,4 +1,4 @@
-# Feature pipeline: Requirements, Architect, Developer y Reviewer (SA-041–044)
+# Feature pipeline: Requirements, Architect, Developer, Reviewer y QA (SA-041–045)
 
 El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
@@ -432,8 +432,7 @@ Un rechazo válido guarda el informe, limpia `review_ref` y pasa a READY con
 SHA. `REVIEW_MAX_REWORK_ROUNDS = 3`: permite tres reworks automáticos; el cuarto
 rechazo guarda el informe y abre una Human Decision en WAITING_HUMAN sin otro
 incremento. Informe, transición y decisión por tope son una transacción SQLite.
-Una aprobación pasa a **QA**, estado existente; la ejecución automática de QA
-sigue pendiente. Nunca declara DONE ni integra.
+Una aprobación pasa a **QA**, estado existente; QA se ejecuta explícitamente con `feature qa` (SA-045). Nunca declara DONE ni integra.
 
 WorkStore v11 añade `tasks.review_reports` (histórico con informe, `review_ref`,
 Execution y ambos executors) y `executions.agent_role`. El histórico aparece en
@@ -450,6 +449,91 @@ rechazo, los findings en el siguiente `feature develop`. La prueba automatizada
 solo usa CLIs falsas y repositorios Git desechables; la prueba real corresponde
 a Claude antes de integrar.
 
+## QA: criterios, comandos del runtime y defectos trazables (SA-045)
+
+Con FEAT-001-T01 ya en QA y su review aprobado, Claude realiza la prueba real
+desde el checkout principal, con Operator config autorizada y el build actualizado:
+
+```powershell
+node esbuild.js
+node dist/cli.mjs feature qa FEAT-001 --task FEAT-001-T01
+node dist/cli.mjs feature show FEAT-001 --json
+```
+
+Equivalente instalado: `pixel-agents feature qa FEAT-001 --task FEAT-001-T01`.
+Sin `--task`, selecciona una tarea del Feature en QA. Exige el último ReviewReport
+aprobado para exactamente el mismo `review_ref`, SHA/base/rama y worktree limpio;
+revalida antes del spawn y al persistir. No ejecuta Developer ni hace merge o push.
+
+Reutiliza el ciclo de Reviewer/worker, admisión, selección, cuota, lease, reintento
+único de informe, compilador y contención. `test_analysis` admite preferencias
+propias; los Projects históricos reutilizan el orden `review` si no la declaran. El rol es `qa`, perfil `read_only`:
+Claude Read/Glob/Grep; Codex sandbox read-only, sin conectores, red ni delegación.
+El agente intenta romper cada AC asignado mediante lectura y razonamiento sobre
+código, diff y resultados; nunca recibe Bash ni autoridad para ejecutar tests.
+
+El runtime deriva un conjunto cerrado de 1–32 tests versionados de
+`server/__tests__/` y `webview-ui/test/`: tests del diff, de `testZones` y de
+`changeZones`, incluidos los espejos `server/src/` → `server/__tests__/`.
+Cada fichero se ejecuta con Vitest y JSON reporter neutral, sin cargar configuración
+ni reporters del repositorio. Usa el verificador compartido de evals SA-QA-20:
+entorno por allowlist, perfiles/caché temporales, mock de os.homedir en Windows,
+60 segundos y 1 MiB por comando/informe, terminación del árbol e integridad antes
+y después. Solo enlaza las dependencias existentes durante la verificación y
+retira su propio enlace sin recorrerlo; no instala dependencias. Un cierre sin
+confirmar conserva temporales, enlace, lease y slot para inspección.
+Los límites de aislamiento de SO siguen siendo los de [evals](evals.md#límites-de-seguridad).
+
+Los resúmenes `commands[{command,result,passed,failed}]` llegan al agente como datos,
+sin stdout/stderr. Ejecuta todo el conjunto declarado antes del agente. QA puede
+pedir **una** tanda adicional para reproducir resultados, devolviendo únicamente
+`{requestCommands: [IDs de commandAllowlist]}`. Solo admite IDs de esos comandos
+del runtime, sin duplicados; después la allowlist queda vacía y exige el informe
+final. Cada tanda usa nueva Execution/admisión y se añade a la evidencia. No acepta
+argv, shell ni comandos nuevos propuestos por el modelo o por el Brain. Fuera de esas
+raíces o por encima del límite, requiere acotar/declarar tests compatibles antes
+de reintentar. No lanza un e2e ni una suite completa de forma implícita.
+
+La salida pasa por `extractJsonObject` y `test-report.schema.json`. Exige exactamente
+una entrada por AC asignado con `pass|fail|not_tested` y evidencia no vacía,
+comandos idénticos a la evidencia del runtime y defectos con AC, severidad,
+resumen y reproducción. Cada AC fallido exige al menos un defecto enlazado.
+No admite pass con tests fallidos o AC no probados. `not_tested` conserva QA
+sin consumir rondas ni desbloquear dependencias.
+
+Un fail válido crea bugs `<TASK>-D<n>` en WorkStore con `defect_context`: tarea
+original, AC, `review_ref` y Execution del informe. Original e informes conservan
+la trazabilidad; la tarea vuelve a READY (rework), limpia su `review_ref` y suma
+una ronda. El siguiente Developer recibe los defectos y reutiliza su rama/base.
+Reviewer y QA comparten las tres rondas de SA-044: al superar el límite se
+persisten informe y bugs y se abre WAITING_HUMAN sin otra ronda automática.
+Un pass válido deja DONE, con `review_ref` aprobado (lista para merge humano), y
+promueve a READY las tareas DRAFT del DAG cuyas dependencias estén todas DONE.
+Los bugs son registros de seguimiento del rework de la tarea original; no se
+introducen como nodos ejecutables del DAG ni se cierran sin verificación humana.
+
+WorkStore v12 persiste `tasks.test_reports` y `defect_context`; antes de abrirla,
+actualizar/reiniciar los escritores como indica [task CLI](task-cli.md#migraciones-de-la-base-compartida).
+Ubicación alternativa deliberada del artefacto: el **Brain operativo compartido**,
+`<git-common-dir>/softwareagents/brain/test-reports/<TASK>/<Execution>.json`.
+Cada fichero inmutable contiene informe y vínculos y aparece con `artifact_path`
+en `feature show` (texto y JSON). Se elige esta ubicación fuera de los checkouts
+para conservar el SHA aprobado y la inmutabilidad de FeatureSpec/diseño: el runtime
+no añade commits de informes a las ramas de código o del Feature. No hay informe
+versionado en Git. SQLite y filesystem no comparten transacción: un corte tras
+escribir el fichero puede dejar un artefacto huérfano; WorkStore es la referencia
+autoritativa y nunca se sobrescribe un huérfano automáticamente.
+
+OAuth/auth, cuota, spawn, timeout, informe inválido tras dos intentos, lease perdida,
+JSON ausente/vacío o tests omitidos conservan QA y `review_ref`, sin consumir rondas.
+`last_review_failure` conserva el diagnóstico saneado del último fallo de revisión/QA;
+se limpia en cuanto se persiste un informe válido de cualquiera de los dos pasos.
+
+Claude comprueba en real los flags, resumen de tests del runtime, TestReport y
+artefacto, DONE con review_ref aprobado y T02 READY. Las pruebas automatizadas
+solo usan CLIs falsas y repositorios/perfiles desechables. La revisión cruzada,
+QA real e integración siguen pendientes hasta que Claude las valide.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |
@@ -458,7 +542,7 @@ a Claude antes de integrar.
 | Architect            | SA-042: FeatureSpec aprobado → TechnicalDesign y TaskDAG validados e importados |
 | Developer            | SA-043: una tarea READY → rama y commits con tests y `review_ref`               |
 | Reviewer             | SA-044: ReviewReport persistido, executor cruzado y rework acotado              |
-| QA                   | Pendiente: verificar criterios y pruebas reales antes de integrar               |
+| QA                   | SA-045: TestReport, defectos trazables, DONE y dependientes READY               |
 
 El importador [task CLI](task-cli.md) usa `features/<FEAT-ID>.yaml` si existe;
 mantiene `features/requests/` como alternativa para documentos históricos.

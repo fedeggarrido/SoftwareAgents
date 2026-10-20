@@ -2,6 +2,7 @@ import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDec
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { ReviewReport } from '../../../core/src/reviewReport.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
+import type { TestReport } from '../../../core/src/testReport.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
@@ -51,6 +52,8 @@ export interface TaskRecord {
   pr_ref: string | null;
   review_ref?: ReviewRef | null;
   review_reports?: ReviewRecord[];
+  test_reports?: TestRecord[];
+  defect_context?: DefectContext | null;
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
@@ -69,6 +72,22 @@ export interface ReviewRecord {
   developer_executor: string;
   reviewer_executor: string;
   report: ReviewReport;
+}
+
+export interface TestRecord {
+  execution_id: string;
+  review_ref: ReviewRef;
+  report: TestReport;
+  artifact_path: string;
+}
+export interface DefectContext {
+  task: string;
+  review_ref: ReviewRef;
+  execution_id: string;
+  ac: string;
+  severity: string;
+  summary: string;
+  reproduction: string;
 }
 
 export interface TaskDependencyRecord {
@@ -191,11 +210,23 @@ export interface WorkStore {
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
   setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void>;
-  claimReview(taskId: string, expectedVersion: number, owner: string): Promise<TaskRecord>;
+  claimReview(
+    taskId: string,
+    expectedVersion: number,
+    owner: string,
+    phase?: 'review' | 'qa',
+  ): Promise<TaskRecord>;
   completeReview(
     taskId: string,
     owner: string,
     review: ReviewRecord,
+    beforeCommit: () => void,
+    decision?: NewHumanDecision,
+  ): Promise<void>;
+  completeQa(
+    taskId: string,
+    owner: string,
+    record: TestRecord,
     beforeCommit: () => void,
     decision?: NewHumanDecision,
   ): Promise<void>;

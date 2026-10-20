@@ -246,3 +246,6 @@ export const VALIDATION_AUDIT_MAX_ERRORS = 20;
 export const VALIDATION_AUDIT_MAX_ERROR_CHARS = 300;
 /** Maximum automatic Developer reworks requested by Reviewer. */
 export const REVIEW_MAX_REWORK_ROUNDS = 3;
+
+/** Bound total QA command count; each verifier also has its existing timeout/output cap. */
+export const QA_MAX_TEST_FILES = 32;

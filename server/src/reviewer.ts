@@ -31,6 +31,7 @@ export function reviewerRequest(
   key: string,
   taskKey?: string,
   owner?: string,
+  phase: 'review' | 'qa' = 'review',
 ): ReviewerRequest {
   const record = taskKey
     ? store.getTask(taskKey)
@@ -40,7 +41,9 @@ export function reviewerRequest(
           (t) =>
             t.feature_key === key &&
             t.review_ref &&
-            (['REVIEW', 'WAITING_QUOTA'].includes(t.status) || isFailedReview(store, t)),
+            (phase === 'qa'
+              ? t.status === 'QA'
+              : ['REVIEW', 'WAITING_QUOTA'].includes(t.status) || isFailedReview(store, t)),
         );
   const gates = record
     ? store.listDecisions().filter((d) => d.status !== 'answered' && d.blocks.includes(record.key))
@@ -55,11 +58,26 @@ export function reviewerRequest(
     !(owner && record.lease_owner === owner && record.status === 'RUNNING'
       ? true
       : !record.lease_owner &&
-        (availabilityWait ||
-          ['REVIEW', 'WAITING_QUOTA'].includes(record.status) ||
-          isFailedReview(store, record)))
+        (phase === 'qa'
+          ? record.status === 'QA'
+          : availabilityWait ||
+            ['REVIEW', 'WAITING_QUOTA'].includes(record.status) ||
+            isFailedReview(store, record)))
   )
-    throw new Error('Reviewer requires a REVIEW task with a valid review_ref');
+    throw new Error(
+      phase === 'qa'
+        ? 'QA requires a QA task with a valid review_ref'
+        : 'Reviewer requires a REVIEW task with a valid review_ref',
+    );
+  if (phase === 'qa') {
+    const approved = record.review_reports?.at(-1);
+    if (
+      !approved ||
+      approved.report.verdict !== 'approve' ||
+      JSON.stringify(approved.review_ref) !== JSON.stringify(record.review_ref)
+    )
+      throw new Error('QA requires an approved review for the matching SHA');
+  }
   // Same artifact/declaration validation as Developer; reviewer-owned runs may retain review_ref.
   const input = developerRequest(store, config, key, record.key, owner, true);
   const ref = record.review_ref;
@@ -101,7 +119,9 @@ export function reviewerRequest(
     throw new Error('Reviewer requires a nonempty diff of at most 1 MiB');
   const execution = store
     .listExecutions()
-    .filter((e) => e.task_key === record.key && e.agent_role !== 'reviewer')
+    .filter(
+      (e) => e.task_key === record.key && e.agent_role !== 'reviewer' && e.agent_role !== 'qa',
+    )
     .sort((a, b) => a.task_version - b.task_version || a.started_at.localeCompare(b.started_at))
     .at(-1);
   if (!execution || !['claude', 'codex'].includes(execution.executor))

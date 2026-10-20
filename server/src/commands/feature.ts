@@ -22,7 +22,7 @@ import type { WorkStore } from '../workstore/WorkStore.js';
 import { readTaskInput, taskPath } from './taskFiles.js';
 
 const USAGE =
-  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | approve <FEAT-ID> | show <FEAT-ID> [--json]';
+  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | approve <FEAT-ID> | show <FEAT-ID> [--json]';
 
 export function featureIngressActor(actor: PolicyActor = 'human'): PolicyActor {
   return ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'].some(
@@ -99,7 +99,7 @@ export async function runFeatureCommand(
         ['--request', '--answers'].includes(rest[0]) &&
         !rest[1].startsWith('-')) ||
       (command === 'approve' && rest.length === 0) ||
-      (['develop', 'review'].includes(command) &&
+      (['develop', 'review', 'qa'].includes(command) &&
         (rest.length === 0 ||
           (rest.length === 2 && rest[0] === '--task' && /^FEAT-\d{3}-T\d{2}$/.test(rest[1])))) ||
       (command === 'design' &&
@@ -236,8 +236,15 @@ export async function runFeatureCommand(
       );
       const design = store.getDesign(key);
       if (design) log(`${key}: design registered (${design.git_sha})`);
-    } else if (command === 'review') {
-      const input = reviewerRequest(store, config, key, rest[1]);
+    } else if (command === 'review' || command === 'qa') {
+      const input = reviewerRequest(
+        store,
+        config,
+        key,
+        rest[1],
+        undefined,
+        command === 'qa' ? 'qa' : 'review',
+      );
       await runWorker(
         { task: input.task.key, selectExecutor: true },
         {
@@ -245,6 +252,7 @@ export async function runFeatureCommand(
           cwd,
           log,
           reviewer: input,
+          qa: command === 'qa',
         },
       );
     } else if (command === 'develop') {
@@ -297,7 +305,7 @@ export async function runFeatureCommand(
       log(
         rest[0] === '--json'
           ? JSON.stringify(result, null, 2)
-          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports, last_review_failure }) => ({ key, status, review_ref, review_reports, last_review_failure })))}`,
+          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure }) => ({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure })))}`,
       );
     }
   } catch (error) {

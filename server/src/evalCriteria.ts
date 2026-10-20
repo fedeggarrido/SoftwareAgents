@@ -123,72 +123,111 @@ export async function checkEvalCriteria(
   }
   const results: boolean[] = [];
   for (const criterion of task.criteria) {
-    const temporary = fs.mkdtempSync(path.join(scratch, 'criterion-'));
-    const home = resolveInside(temporary, 'home');
-    fs.mkdirSync(home);
-    const setup = resolveInside(temporary, 'isolated-home.mjs');
-    fs.writeFileSync(
-      setup,
-      `import { vi } from 'vitest';
-vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
-`,
-    );
-    const config = resolveInside(temporary, 'vitest.config.mjs');
-    const report = resolveInside(temporary, 'criteria.json');
-    fs.writeFileSync(
-      config,
-      `export default ${JSON.stringify({
-        cacheDir: resolveInside(temporary, 'cache'),
-        test: {
-          include: ['__tests__/**/*.test.ts'],
-          setupFiles: [setup],
-          globals: true,
-          reporters: ['json'],
-          outputFile: report,
-          pool: 'threads',
-          maxWorkers: 1,
-          testTimeout: EVAL_CRITERION_TIMEOUT_MS / 2,
-        },
-      })};`,
-    );
-    let safeToCleanup = true;
     try {
-      const passed = await runVerifierCommand(
-        [
-          process.execPath,
-          path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
-          'run',
-          '--root',
-          path.join(tree, 'server'),
-          '--config',
-          config,
-          '--configLoader',
-          'native',
-          '--no-cache',
-          criterion.file.slice('server/'.length),
-          '--testNamePattern',
-          criterion.testName,
-        ],
-        tree,
-        home,
-      );
-      if (passed !== 'pass' || fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES) {
-        results.push(false);
-        continue;
-      }
-      const result = JSON.parse(fs.readFileSync(report, 'utf8'));
-      results.push(
-        result.success === true && result.numPassedTests > 0 && result.numFailedTests === 0,
-      );
+      const result = await runIsolatedVitest(tree, scratch, criterion.file, criterion.testName);
+      results.push(result.result === 'pass');
     } catch (error) {
-      if (error instanceof EvalCriterionTerminationError) {
-        safeToCleanup = false;
-        throw error;
-      }
+      if (error instanceof EvalCriterionTerminationError) throw error;
       results.push(false);
-    } finally {
-      if (safeToCleanup) fs.rmSync(temporary, { recursive: true, force: true });
     }
   }
   return results;
+}
+
+/** Shared neutral Vitest JSON verifier. Missing/empty reports are infrastructure, not test failures. */
+export async function runIsolatedVitest(
+  tree: string,
+  scratch: string,
+  file: string,
+  testName?: string,
+  signal?: AbortSignal,
+): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
+  const temporary = fs.mkdtempSync(path.join(scratch, 'criterion-'));
+  const home = resolveInside(temporary, 'home');
+  fs.mkdirSync(home);
+  const setup = resolveInside(temporary, 'isolated-home.mjs');
+  fs.writeFileSync(
+    setup,
+    `import { vi } from 'vitest';
+vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
+`,
+  );
+  const config = resolveInside(temporary, 'vitest.config.mjs');
+  const report = resolveInside(temporary, 'criteria.json');
+  fs.writeFileSync(
+    config,
+    `export default ${JSON.stringify({
+      cacheDir: resolveInside(temporary, 'cache'),
+      test: {
+        include: [file],
+        allowOnly: false,
+        setupFiles: [setup],
+        globals: true,
+        reporters: ['json'],
+        outputFile: report,
+        pool: 'threads',
+        maxWorkers: 1,
+        testTimeout: EVAL_CRITERION_TIMEOUT_MS / 2,
+      },
+    })};`,
+  );
+  let safeToCleanup = true;
+  try {
+    const passed = await runVerifierCommand(
+      [
+        process.execPath,
+        path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
+        'run',
+        '--root',
+        tree,
+        '--config',
+        config,
+        '--configLoader',
+        'native',
+        '--no-cache',
+        file,
+        ...(testName === undefined ? [] : ['--testNamePattern', testName]),
+      ],
+      tree,
+      home,
+      EVAL_CRITERION_TIMEOUT_MS,
+      signal,
+    );
+    if (
+      passed === 'timeout' ||
+      signal?.aborted ||
+      !fs.existsSync(report) ||
+      fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES
+    )
+      throw new Error('Vitest infrastructure failed: timeout or missing/oversized JSON report');
+    const result = JSON.parse(fs.readFileSync(report, 'utf8'));
+    const suites = result.testResults?.filter(
+      (suite: { name: string }) => path.resolve(suite.name) === path.resolve(tree, file),
+    );
+    const assertions = suites?.flatMap(
+      (suite: { assertionResults: { status: string }[] }) => suite.assertionResults,
+    );
+    if (
+      suites?.length !== 1 ||
+      !assertions?.length ||
+      (testName === undefined &&
+        assertions.some((test: { status: string }) => !['passed', 'failed'].includes(test.status)))
+    )
+      throw new Error('Vitest infrastructure failed: missing, skipped or incomplete tests');
+    const counts = {
+      passed: assertions.filter((test: { status: string }) => test.status === 'passed').length,
+      failed: assertions.filter((test: { status: string }) => test.status === 'failed').length,
+    };
+    if (
+      (!counts.passed && !counts.failed) ||
+      (!counts.failed && (passed !== 'pass' || result.success !== true))
+    )
+      throw new Error('Vitest infrastructure failed without assertion failures');
+    return { result: counts.failed ? 'fail' : 'pass', ...counts };
+  } catch (error) {
+    if (error instanceof EvalCriterionTerminationError) safeToCleanup = false;
+    throw error;
+  } finally {
+    if (safeToCleanup) fs.rmSync(temporary, { recursive: true, force: true });
+  }
 }

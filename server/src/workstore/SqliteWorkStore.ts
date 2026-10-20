@@ -44,20 +44,28 @@ import type {
   ReviewRef,
   TaskDependencyRecord,
   TaskRecord,
+  TestRecord,
   WorkStore,
 } from './WorkStore.js';
 
 const execute = promisify(execFile);
 
 function taskRecord(row: unknown): TaskRecord {
-  const record = row as Omit<TaskRecord, 'review_ref' | 'review_reports'> & {
+  const record = row as Omit<
+    TaskRecord,
+    'review_ref' | 'review_reports' | 'test_reports' | 'defect_context'
+  > & {
     review_ref: string | null;
     review_reports: string;
+    test_reports: string;
+    defect_context: string | null;
   };
   return {
     ...record,
     review_ref: record.review_ref ? JSON.parse(record.review_ref) : null,
     review_reports: JSON.parse(record.review_reports),
+    test_reports: JSON.parse(record.test_reports),
+    defect_context: record.defect_context ? JSON.parse(record.defect_context) : null,
   };
 }
 
@@ -269,8 +277,12 @@ class SqliteWorkStore implements WorkStore {
   private failLease(task: TaskRecord, reason: string, actor: string, token: string): TaskRecord {
     // A registered Developer result survives loss of the read-only Reviewer lease.
     // terminate() has confirmed closure before this transaction can release it.
-    if (task.review_ref)
-      return this.change(
+    if (task.review_ref) {
+      const qa =
+        this.listDomainEvents(task.key)
+          .filter((e) => e.to_status === 'RUNNING')
+          .at(-1)?.reason === 'Claim QA lease';
+      let recovered = this.change(
         task.key,
         task.version,
         'REVIEW',
@@ -280,6 +292,19 @@ class SqliteWorkStore implements WorkStore {
         undefined,
         token,
       );
+      if (qa)
+        recovered = this.change(
+          task.key,
+          recovered.version,
+          'QA',
+          'QA lease recovery',
+          actor,
+          task.attempt,
+          undefined,
+          token,
+        );
+      return recovered;
+    }
     if (this.requirementsGate(task.key)) {
       this.decisionTask(task, 'WAITING_HUMAN', actor, reason, token);
       return this.getTask(task.key)!;
@@ -365,9 +390,14 @@ class SqliteWorkStore implements WorkStore {
     return this.acquire(taskId, owner, ttl, expectedVersion);
   }
 
-  claimReview(taskId: string, expectedVersion: number, owner: string): Promise<TaskRecord> {
+  claimReview(
+    taskId: string,
+    expectedVersion: number,
+    owner: string,
+    phase: 'review' | 'qa' = 'review',
+  ): Promise<TaskRecord> {
     leaseDeadline(owner, DEFAULT_LEASE_TTL_MS);
-    return this.acquire(taskId, owner, DEFAULT_LEASE_TTL_MS, expectedVersion, undefined, true);
+    return this.acquire(taskId, owner, DEFAULT_LEASE_TTL_MS, expectedVersion, undefined, phase);
   }
 
   claimRequirementsRevision(
@@ -408,7 +438,7 @@ class SqliteWorkStore implements WorkStore {
     ttl: number,
     reworkVersion?: number,
     revision?: { gitSha: string; decisionId: string },
-    reviewOnly = false,
+    reviewOnly: false | 'review' | 'qa' = false,
   ): Promise<TaskRecord> {
     const reservation = await this.write(() => {
       this.assertNotRecovering(taskId);
@@ -418,7 +448,9 @@ class SqliteWorkStore implements WorkStore {
       if (
         reviewOnly &&
         (!task.review_ref ||
-          !(['REVIEW', 'WAITING_QUOTA'].includes(task.status) || isFailedReview(this, task)))
+          !(reviewOnly === 'qa'
+            ? task.status === 'QA'
+            : ['REVIEW', 'WAITING_QUOTA'].includes(task.status) || isFailedReview(this, task)))
       )
         throw new Error('Reviewer requires a registered review_ref');
       this.assertNoDecisionGate(taskId, revision?.decisionId);
@@ -427,7 +459,9 @@ class SqliteWorkStore implements WorkStore {
       if (
         !(
           reviewOnly
-            ? ['REVIEW', 'WAITING_QUOTA', 'FAILED_RETRYABLE']
+            ? reviewOnly === 'qa'
+              ? ['QA']
+              : ['REVIEW', 'WAITING_QUOTA', 'FAILED_RETRYABLE']
             : revision
               ? ['WAITING_HUMAN', 'REVIEW', 'READY', 'FAILED_RETRYABLE', 'WAITING_QUOTA']
               : reworkVersion === undefined
@@ -444,7 +478,7 @@ class SqliteWorkStore implements WorkStore {
       await this.terminate(candidate, token);
       return await this.write(() => {
         let task = this.reservedTask(taskId, token);
-        if (reviewOnly && task.status !== 'REVIEW') {
+        if (reviewOnly === 'review' && task.status !== 'REVIEW') {
           this.decisionTask(task, 'REVIEW', owner, 'Resume Reviewer', token);
           task = this.getTask(taskId)!;
         }
@@ -480,7 +514,7 @@ class SqliteWorkStore implements WorkStore {
           taskId,
           task.version,
           revision || reworkVersion !== undefined ? 'RUNNING' : 'LEASED',
-          'Claim lease',
+          reviewOnly === 'qa' ? 'Claim QA lease' : 'Claim lease',
           owner,
           reviewOnly ? task.attempt : undefined,
           { owner, expires: leaseDeadline(owner, ttl) },
@@ -566,6 +600,96 @@ class SqliteWorkStore implements WorkStore {
         this.db
           .prepare('UPDATE tasks SET review_ref = NULL WHERE project_id = ? AND key = ?')
           .run(this.projectId, taskId);
+      }
+    });
+  }
+
+  completeQa(
+    taskId: string,
+    owner: string,
+    record: TestRecord,
+    beforeCommit: () => void,
+    input?: NewHumanDecision,
+  ): Promise<void> {
+    const decision = input ? this.validateDecision(input) : undefined;
+    return this.write(() => {
+      let task = this.owned(taskId, owner);
+      const execution = this.getExecution(record.execution_id);
+      if (
+        JSON.stringify(task.review_ref) !== JSON.stringify(record.review_ref) ||
+        task.review_reports?.at(-1)?.report.verdict !== 'approve' ||
+        !execution ||
+        execution.task_key !== taskId ||
+        execution.agent_role !== 'qa' ||
+        !execution.tree_closed_at
+      )
+        throw new Error('QA binding changed or execution closure unconfirmed');
+      beforeCommit();
+      this.db
+        .prepare('UPDATE tasks SET test_reports = ? WHERE project_id = ? AND key = ?')
+        .run(JSON.stringify([...(task.test_reports ?? []), record]), this.projectId, taskId);
+      task = this.change(taskId, task.version, 'REVIEW', 'QA report persisted', owner);
+      task = this.change(taskId, task.version, 'QA', 'QA report accepted', owner);
+      if (record.report.verdict === 'pass') {
+        this.change(taskId, task.version, 'DONE', 'QA passed; ready for human merge', owner);
+        for (const dependent of this.listTasks())
+          if (
+            dependent.feature_key === task.feature_key &&
+            dependent.declaration &&
+            dependent.status === 'DRAFT' &&
+            this.listTaskDependencies(dependent.key).some((d) => d.depends_on_key === taskId) &&
+            this.canStart(dependent.key)
+          )
+            this.change(
+              dependent.key,
+              dependent.version,
+              'READY',
+              'QA dependency completed',
+              owner,
+            );
+      } else if (record.report.verdict === 'fail') {
+        let ordinal = 1;
+        for (const defect of record.report.defects) {
+          while (this.getTask(taskId + '-D' + ordinal)) ordinal++;
+          const key = taskId + '-D' + ordinal++;
+          this.createTask({ key, type: 'bug', feature_key: task.feature_key, status: 'DRAFT' });
+          this.db
+            .prepare('UPDATE tasks SET defect_context = ? WHERE project_id = ? AND key = ?')
+            .run(
+              JSON.stringify({
+                task: taskId,
+                review_ref: record.review_ref,
+                execution_id: record.execution_id,
+                ...defect,
+              }),
+              this.projectId,
+              key,
+            );
+        }
+        if (decision) {
+          if (decision.blocks.length !== 1 || decision.blocks[0] !== taskId)
+            throw new Error('QA decision must block its task');
+          this.decisionTask(task, 'WAITING_HUMAN', 'qa', decision.id);
+          this.db
+            .prepare(
+              'INSERT INTO human_decisions (project_id,key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?)',
+            )
+            .run(
+              this.projectId,
+              decision.id,
+              decision.context,
+              '',
+              'qa',
+              '',
+              JSON.stringify(decision),
+              JSON.stringify({ [taskId]: 'QA' }),
+            );
+        } else {
+          this.change(taskId, task.version, 'READY', 'QA requested changes', owner);
+          this.db
+            .prepare('UPDATE tasks SET review_ref = NULL WHERE project_id = ? AND key = ?')
+            .run(this.projectId, taskId);
+        }
       }
     });
   }

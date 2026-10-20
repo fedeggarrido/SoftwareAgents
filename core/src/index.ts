@@ -27,3 +27,4 @@ export type {
 export type { DagTask, DagTaskType, TaskDag, TaskDagAnalysis, TaskDagIssue } from './taskDag.js';
 export type { TeamProvider } from './teamProvider.js';
 export type { TechnicalDesign } from './technicalDesign.js';
+export type { TestReport } from './testReport.js';

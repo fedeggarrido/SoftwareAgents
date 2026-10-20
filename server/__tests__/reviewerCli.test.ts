@@ -11,11 +11,13 @@ import { runFeatureCommand } from '../src/commands/feature.js';
 import { runTaskCommand } from '../src/commands/task.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { lastReviewFailure } from '../src/reviewAttempts.js';
 import { type ReviewerRequest, validateReview } from '../src/reviewer.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+// Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
+vi.setConfig({ testTimeout: 90_000 });
 vi.mock('../src/constants.js', async (original) => ({
   ...(await original<typeof import('../src/constants.js')>()),
   CLAUDE_OAUTH_REFRESH_WAIT_MS: 1,
@@ -340,24 +342,26 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
       store.close();
     }
   });
-  it('retains REVIEW after two invalid reports and allows another review', async () => {
-    await prepare();
-    await review('invalid');
-    const store = await storeFor();
-    try {
-      expect(store.getTask(task)!).toMatchObject({
-        status: 'REVIEW',
-        attempt: 0,
-        review_reports: [],
-      });
-      expect(store.listDecisions()).toHaveLength(0);
-      expect(store.listDomainEvents(task).at(-1)?.reason).toContain('category=invalid_report');
-      await review();
-      expect(store.getTask(task)!.status).toBe('QA');
-    } finally {
-      store.close();
-    }
-    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(3);
+  describe('invalid report recovery', () => {
+    beforeEach(prepare, 30_000);
+    it('retains REVIEW after two invalid reports and allows another review', async () => {
+      await review('invalid');
+      const store = await storeFor();
+      try {
+        expect(store.getTask(task)!).toMatchObject({
+          status: 'REVIEW',
+          attempt: 0,
+          review_reports: [],
+        });
+        expect(store.listDecisions()).toHaveLength(0);
+        expect(store.listDomainEvents(task).at(-1)?.reason).toContain('category=invalid_report');
+        await review();
+        expect(store.getTask(task)!.status).toBe('QA');
+      } finally {
+        store.close();
+      }
+      expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(3);
+    });
   });
   it.each(['oauth', 'auth', 'spawn', 'timeout', 'quota'])(
     'preserves the Developer result after Reviewer infrastructure failure: %s',
@@ -400,6 +404,7 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
         expect(audit).not.toContain('SECRET_OUTPUT');
         await review();
         expect(store.getTask(task)!).toMatchObject({ status: 'QA', attempt: before.attempt });
+        expect(lastReviewFailure(store, store.getTask(task)!)).toBeNull();
       } finally {
         store.close();
       }

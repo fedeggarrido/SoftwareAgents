@@ -11,7 +11,7 @@ const validate = compileSchema<ModelPolicy>({
   type: 'object',
   additionalProperties: false,
   properties: Object.fromEntries(
-    ['high_reasoning', 'standard_coding', 'fast_cheap', 'review'].map((key) => [
+    ['high_reasoning', 'standard_coding', 'fast_cheap', 'review', 'test_analysis'].map((key) => [
       key,
       {
         type: 'array',
@@ -51,7 +51,10 @@ export function loadModelPolicy(root: string): ModelPolicy {
   const raw = readPolicy(root);
   const { tierRule, ...legacy } = raw;
   if (tierRule !== undefined) validateTierRule(tierRule);
-  return validateSchema(validate, legacy);
+  const policy = validateSchema(validate, legacy);
+  // Older Projects predate QA preferences; reuse review order without widening Operator authority.
+  if (!policy.test_analysis && policy.review) policy.test_analysis = policy.review;
+  return policy;
 }
 export function loadTierRule(root: string): TierRule {
   const raw = readPolicy(root);

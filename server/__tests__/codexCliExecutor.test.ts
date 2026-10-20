@@ -38,13 +38,13 @@ beforeEach(() => {
     executionId: 'run',
     projectId: 'project',
     taskKey: 'SA-034',
-    role: 'reviewer',
+    role: 'architect',
     prompt: 'untrusted task',
     flags: [],
     worktreePath: path.join(root, 'worktree'),
     timeoutMin: 1,
     agentSpec: parse(
-      fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '../../agents/templates/architect.yaml'), 'utf8'),
     ),
   };
 });
@@ -65,6 +65,10 @@ async function collect(mode?: string) {
   for await (const event of executor(mode).start(req).events) events.push(event);
   return events;
 }
+it.each(['qa', 'reviewer'])('refuses %s before creating a process or runtime directory', (role) => {
+  expect(() => executor().start({ ...req, role })).toThrow('code_execution_not_mediated');
+  expect(fs.existsSync(path.join(root, 'runtime'))).toBe(false);
+});
 it('resolves explicit Operator config before PATH and desktop discovery', () => {
   expect(resolveCodexBinary({ binaryPaths: { codex: process.execPath } }, { PATH: root })).toBe(
     process.execPath,

@@ -33,6 +33,16 @@ export function reviewerRequest(
   owner?: string,
   phase: 'review' | 'qa' = 'review',
 ): ReviewerRequest {
+  const availabilityWaiting = (task: { key: string; status: string }) => {
+    const gates = store
+      .listDecisions()
+      .filter((d) => d.status !== 'answered' && d.blocks.includes(task.key));
+    return (
+      task.status === 'WAITING_HUMAN' &&
+      gates.length > 0 &&
+      gates.every((d) => d.context.startsWith('executor-availability/'))
+    );
+  };
   const record = taskKey
     ? store.getTask(taskKey)
     : store
@@ -41,17 +51,12 @@ export function reviewerRequest(
           (t) =>
             t.feature_key === key &&
             t.review_ref &&
-            (phase === 'qa'
-              ? t.status === 'QA'
-              : ['REVIEW', 'WAITING_QUOTA'].includes(t.status) || isFailedReview(store, t)),
+            (availabilityWaiting(t) ||
+              (phase === 'qa'
+                ? t.status === 'QA'
+                : ['REVIEW', 'WAITING_QUOTA'].includes(t.status) || isFailedReview(store, t))),
         );
-  const gates = record
-    ? store.listDecisions().filter((d) => d.status !== 'answered' && d.blocks.includes(record.key))
-    : [];
-  const availabilityWait =
-    record?.status === 'WAITING_HUMAN' &&
-    gates.length > 0 &&
-    gates.every((d) => d.context.startsWith('executor-availability/'));
+  const availabilityWait = record ? availabilityWaiting(record) : false;
   if (
     !record?.review_ref ||
     record.feature_key !== key ||
@@ -59,7 +64,7 @@ export function reviewerRequest(
       ? true
       : !record.lease_owner &&
         (phase === 'qa'
-          ? record.status === 'QA'
+          ? record.status === 'QA' || availabilityWait
           : availabilityWait ||
             ['REVIEW', 'WAITING_QUOTA'].includes(record.status) ||
             isFailedReview(store, record)))

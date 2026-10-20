@@ -12,7 +12,12 @@ import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import type { TestReport } from '../../core/src/testReport.js';
-import { compileAgent, ROLE_PROFILES, TOOL_POLICY_VERSION } from './agentCompiler.js';
+import {
+  compileAgent,
+  executorSupportsRole,
+  ROLE_PROFILES,
+  TOOL_POLICY_VERSION,
+} from './agentCompiler.js';
 import { extractJsonObject } from './agentOutput.js';
 import {
   architectArtifacts,
@@ -414,7 +419,7 @@ export async function runWorker(
         options.reviewer ? (options.qa ? 'qa' : 'review') : false,
       );
     const result = await runWorkerExecution(args, options, lifecycle, config);
-    if (result.quotaDecision?.status === 'wait') {
+    if (result.quotaDecision?.status === 'wait' && !result.availabilityBlock) {
       if (options.reviewer)
         await lifecycle.finish(
           options.qa ? 'QA' : 'REVIEW',
@@ -602,7 +607,7 @@ async function runWorkerExecution(
     let decisionId: string | null = null;
     const cause = blockedCause(gate, found);
     audit('availability_blocked', { blockedCause: cause });
-    if (options.reviewer) {
+    if (options.reviewer && found.code !== 'code_execution_not_mediated') {
       await lifecycle?.finish(
         options.qa ? 'QA' : 'REVIEW',
         `${REVIEW_FAILURE_PREFIX}category=${found.code}; exit_code=unknown`,
@@ -631,7 +636,8 @@ async function runWorkerExecution(
       const store =
         open ?? (await openWorkStore({ repositoryPath: cwd, projectId: config.project.id }));
       try {
-        await lifecycle?.idleForDecision(found.code);
+        if (options.reviewer) await lifecycle?.finish(options.qa ? 'QA' : 'REVIEW', found.code);
+        else await lifecycle?.idleForDecision(found.code);
         const result = await escalateUnavailable(
           store,
           config.operator.autonomyLevel,
@@ -768,7 +774,7 @@ async function runWorkerExecution(
   const authorityBlock = () => executorAuthorityBlock(config.project.id, config.operator);
   const probe = options.probe ?? runProbe;
   // SA-090: the server's probe cache lives in another process; probe what may launch.
-  const probed: ('claude' | 'codex')[] =
+  const probed: ('claude' | 'codex')[] = (
     options.evaluation && !options.evaluation.cascadeTask
       ? [options.evaluation.executor]
       : tierPolicy || modelPolicy
@@ -777,7 +783,8 @@ async function runWorkerExecution(
           )
         : config.operator.allowedExecutors.includes(args.executor ?? 'claude')
           ? [args.executor ?? 'claude']
-          : [];
+          : []
+  ).filter((id) => executorSupportsRole(id, role));
   let scope = modelPolicy
     ? `capability:${spec.modelPolicy.capabilityClass}`
     : `executor:${args.executor ?? 'claude'}`;
@@ -954,7 +961,7 @@ async function runWorkerExecution(
             // Legacy manual runs retain conservative defaults for pre-quota configs.
             if (!modelPolicy) {
               legacyMachinePolicy(snapshot, selectedExecutor);
-              const excluded = excludeCandidate(selectedExecutor, snapshot);
+              const excluded = excludeCandidate(selectedExecutor, snapshot, undefined, role);
               if (excluded) {
                 legacyBlock = selectionBlock(1, false, [
                   { executor: selectedExecutor, code: excluded },
@@ -1065,7 +1072,7 @@ async function runWorkerExecution(
           executor: selectedExecutor,
           detail: JSON.stringify(reviewSelection),
         });
-      const selectionReason = `${reviewSelection ? `Reviewer ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
+      const selectionReason = `${options.reviewer ? `${role}: excluded codex: code_execution_not_mediated; ` : ''}${reviewSelection ? `Reviewer ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
       if (tierSelection && reviewSelection) tierSelection.reason = selectionReason;
       if (selection && reviewSelection) selection.reason = selectionReason;
       telemetry = new ExecutionTelemetry(

@@ -72,6 +72,16 @@ process.stdin.on('end', () => {
     require('./codex-rollout.cjs')('fake-qa-codex');
     emit({ type: 'thread.started', thread_id: 'fake-qa-codex' });
     emit({ type: 'turn.started' });
+    if (mode === 'command-execution')
+      emit({
+        type: 'item.completed',
+        item: {
+          id: 'shell',
+          type: 'command_execution',
+          command: 'node -e "process.exit(0)"',
+          exit_code: 0,
+        },
+      });
     emit({ type: 'item.completed', item: { id: 'output', type: 'agent_message', text: output } });
     emit({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
   }

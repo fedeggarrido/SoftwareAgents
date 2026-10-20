@@ -243,7 +243,13 @@ describe('type × size × capabilityClass × quota table', () => {
             if (state === 'unknown') observation.capacities = {};
             const expectedTier =
               requested === 'deep' && state === 'claude-low' ? 'standard' : requested;
-            const waiting = state === 'both-low' || (state === 'codex-low' && requested !== 'deep');
+            const readerOnly = capability === 'review' || capability === 'test_analysis';
+            // This fixture offers only Codex below deep; shell-free roles must wait there.
+            const readerBlocked = readerOnly && (requested !== 'deep' || state === 'claude-low');
+            const waiting =
+              readerBlocked ||
+              state === 'both-low' ||
+              (state === 'codex-low' && requested !== 'deep');
             const selected = selectModelTier(
               spec(capability),
               rule,
@@ -255,6 +261,16 @@ describe('type × size × capabilityClass × quota table', () => {
             expect(selected.gate.status).toBe(
               waiting ? 'wait' : state === 'unknown' ? 'probe' : 'go',
             );
+            if (readerOnly) {
+              expect(selected.choice?.executor).not.toBe('codex');
+              if (waiting)
+                expect(selected.exclusions).toContainEqual(
+                  expect.objectContaining({
+                    executor: 'codex',
+                    code: 'code_execution_not_mediated',
+                  }),
+                );
+            }
             if (waiting) expect(selected.choice).toBeNull();
             else {
               expect(selected.tier).toBe(expectedTier);

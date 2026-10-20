@@ -39,6 +39,11 @@ export const ROLE_PROFILES = {
   qa: 'read_only',
 } as const;
 export type CompilerRole = keyof typeof ROLE_PROFILES;
+/** Codex read-only still exposes arbitrary shell; these roles require read tools only.
+ * Post-execution stream detection cannot mediate code before it runs. */
+export function executorSupportsRole(executor: string, role: string): boolean {
+  return !['qa', 'reviewer'].includes(role) || executor === 'claude';
+}
 const PROFILE_FLAGS = {
   read_only: { tools: ['Read', 'Glob', 'Grep'], sandbox: 'read-only' },
   // Brain changes are proposals: neither CLI can restrict native edits to Brain paths.

@@ -55,17 +55,25 @@ export function assertEvalIntegrity(
     expectedHead?: string;
   },
   tree: string,
+  phase: 'before' | 'during' = 'before',
 ): void {
-  if (fs.lstatSync(tree).isSymbolicLink()) throw new EvalIntegrityError('Linked eval root');
+  const failure = (message: string, file?: string) =>
+    new EvalIntegrityError(
+      (phase === 'before' ? 'residuo previo a la verificación' : 'cambio durante la verificación') +
+        ': ' +
+        message +
+        (file === undefined ? '' : ': ' + JSON.stringify(file)),
+    );
+  if (fs.lstatSync(tree).isSymbolicLink()) throw failure('Linked eval root');
   if (evalGit(tree, ['rev-parse', 'HEAD']) !== (task.expectedHead ?? task.baseCommit))
-    throw new EvalIntegrityError('Eval HEAD changed');
+    throw failure('Eval HEAD changed');
   // These index flags hide worktree edits from diff; a normal checkout has only H entries.
   if (
     evalGit(tree, ['ls-files', '-v', '-z'])
       .split('\0')
       .some((entry) => entry && !entry.startsWith('H '))
   )
-    throw new EvalIntegrityError('Eval index hides changes');
+    throw failure('Eval index hides changes');
   // Git reports a submodule as a single gitlink, hiding its protected descendants.
   // Check both views: staged-only changes can disappear from the worktree diff.
   for (const staged of [false, true]) {
@@ -84,7 +92,7 @@ export function assertEvalIntegrity(
     for (let i = 0; i < entries.length - 1; i += 2) {
       const [before, after] = entries[i].slice(1).split(' ');
       if (before === '160000' || after === '160000')
-        throw new EvalIntegrityError('Eval changed a Git submodule');
+        throw failure('Eval changed a Git submodule', entries[i + 1]);
     }
   }
   const changed = evalChangedFiles(tree, task.baseCommit);
@@ -103,19 +111,20 @@ export function assertEvalIntegrity(
       isProtectedEvalPath(file, task.allowTestChanges) ||
       protectedPaths.some((pattern) => matchesProtectedPath(file, pattern))
     )
-      throw new EvalIntegrityError('Eval modified a forbidden path');
+      throw failure('Eval modified a forbidden path', file);
   const inspect = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
       if (name === '.git' && dir !== tree)
-        throw new EvalIntegrityError('Unexpected nested .git in eval');
+        throw failure('Unexpected nested .git in eval', path.relative(tree, path.join(dir, name)));
       const child = path.join(dir, name);
       const stat = fs.lstatSync(child);
-      if (stat.isSymbolicLink()) throw new EvalIntegrityError('Eval contains a link');
+      if (stat.isSymbolicLink()) throw failure('Eval contains a link', path.relative(tree, child));
       if (stat.isDirectory()) {
-        if (name === '.git') throw new EvalIntegrityError('Unexpected Git directory in eval');
+        if (name === '.git')
+          throw failure('Unexpected Git directory in eval', path.relative(tree, child));
         inspect(child);
       } else if (!stat.isFile() || stat.nlink > 1)
-        throw new EvalIntegrityError('Eval contains a special file');
+        throw failure('Eval contains a special file', path.relative(tree, child));
     }
   };
   inspect(tree);

@@ -34,6 +34,11 @@ it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? '
         'server/__tests__/audit.test.ts',
         "import { it } from 'vitest'; it('empty', () => {});\n",
       );
+    if (mode === 'unexecuted-assertion')
+      fs.writeFileSync(
+        'server/__tests__/audit.test.ts',
+        "import { it, expect } from 'vitest'; it('unexecuted assertion', () => { if (false) expect(true).toBe(true); });\n",
+      );
     if (mode === 'skip-suite')
       fs.writeFileSync(
         'server/__tests__/audit.test.ts',

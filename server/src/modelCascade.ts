@@ -152,6 +152,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
             cacheDir: path.join(home, 'cache'),
             test: {
               globals: true,
+              expect: { requireAssertions: true },
               ...(directTests ? { reporters: ['json'], outputFile: report, allowOnly: false } : {}),
               setupFiles: [setup],
               pool: 'threads',
@@ -217,7 +218,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
         throw new EvalIntegrityError('Cascade dependency link changed');
       fs.unlinkSync(link);
       fs.rmSync(temporary, { recursive: true, force: true });
-      assertEvalIntegrity(integrity, tree);
+      assertEvalIntegrity(integrity, tree, 'during');
     }
   }
 }

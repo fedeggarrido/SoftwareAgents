@@ -208,7 +208,7 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
     });
   });
   it.each(['claude', 'codex'])(
-    'selects the other executor after Developer %s and records it in trace/audit',
+    'selects only a reader after Developer %s and records it in trace/audit',
     async (developer) => {
       if (developer === 'codex') configure(['codex']);
       if (developer === 'codex') {
@@ -224,7 +224,9 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
         fs.writeFileSync(launches, '');
       } else await prepare();
       configure(['claude', 'codex']);
-      const other = developer === 'claude' ? 'codex' : 'claude';
+      const other = 'claude';
+      const outcome =
+        developer === 'codex' ? 'cross_executor' : 'same_executor_no_available_alternative';
       const sha = git(tree(), 'rev-parse', 'HEAD');
       await review('approve', other);
       const store = await storeFor();
@@ -235,26 +237,47 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
         });
         expect(
           store.listExecutions().find((e) => e.agent_role === 'reviewer')?.selection_reason,
-        ).toContain('cross_executor');
+        ).toContain(outcome);
         expect(git(tree(), 'rev-parse', 'HEAD')).toBe(sha);
         expect(git(tree(), 'status', '--porcelain')).toBe('');
         const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim());
         expect(launch.data.diff).toContain('export const implemented');
         expect(launch.data.reviewRef.sha).toBe(sha);
-        if (other === 'codex')
-          expect(launch.args[launch.args.indexOf('--sandbox') + 1]).toBe('read-only');
-        else expect(launch.args[launch.args.indexOf('--tools') + 1]).not.toMatch(/Write|Edit|Bash/);
+        expect(launch.args[launch.args.indexOf('--tools') + 1]).not.toMatch(/Write|Edit|Bash/);
         const common = path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir'));
         const telemetry = fs.readFileSync(
           path.join(common, 'softwareagents/telemetry/test/spans.jsonl'),
           'utf8',
         );
         expect(telemetry).toContain('softwareagents.review.selection');
-        expect(telemetry).toContain('cross_executor');
+        expect(telemetry).toContain(outcome);
         const audit = fs.readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8');
         expect(audit).toContain('review_executor_selected');
-        expect(audit).toContain('cross_executor');
+        expect(audit).toContain(outcome);
         expect(audit).toContain('review_report_persisted');
+      } finally {
+        store.close();
+      }
+    },
+  );
+  it.each([false, true])(
+    'waits for a reader when only Codex is enabled (tiers=%s)',
+    async (tiers) => {
+      await prepare();
+      configure(['codex'], tiers);
+      await review('approve', 'codex');
+      const store = await storeFor();
+      try {
+        expect(store.getTask(task)).toMatchObject({
+          status: 'WAITING_HUMAN',
+          attempt: 0,
+          review_reports: [],
+        });
+        expect(store.listDecisions()[0].context).toContain('code_execution_not_mediated');
+        expect(fs.readFileSync(launches, 'utf8')).toBe('');
+        configure(['claude'], tiers);
+        await review();
+        expect(store.getTask(task)!.status).toBe('QA');
       } finally {
         store.close();
       }
@@ -279,16 +302,16 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
       store.close();
     }
   });
-  it('uses the cross executor from the Operator tier catalog without running implementation verifiers', async () => {
+  it('excludes shell-capable Codex from the Operator tier catalog without running implementation verifiers', async () => {
     await prepare();
     configure(['claude', 'codex'], true);
-    await review('approve', 'codex');
+    await review('approve', 'claude');
     const store = await storeFor();
     try {
       const execution = store.listExecutions().find((e) => e.agent_role === 'reviewer')!;
-      expect(execution.executor).toBe('codex');
+      expect(execution.executor).toBe('claude');
       expect(execution.model_tier).toBe('deep');
-      expect(execution.selection_reason).toContain('cross_executor');
+      expect(execution.selection_reason).toContain('code_execution_not_mediated');
       expect(store.getTask(task)!.status).toBe('QA');
     } finally {
       store.close();

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QA_MAX_TEST_FILES } from '../src/constants.js';
 import { runIsolatedVitest } from '../src/evalCriteria.js';
 import { loadModelPolicy } from '../src/modelPolicy.js';
-import { qaRequestedCommands, qaTestFiles } from '../src/qa.js';
+import { qaCommands, qaRequestedCommands, qaTestFiles } from '../src/qa.js';
 import { reviewReworkRounds } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
@@ -99,7 +99,7 @@ describe('Shared isolated QA verifier', () => {
   });
   it('isolates environment and Windows os.homedir, runs only selected files and returns JSON counts', async () => {
     source(
-      "import { it, expect } from 'vitest'; import os from 'os'; it('isolates', () => { expect(process.env.QA_SECRET_SENTINEL).toBeUndefined(); expect(os.homedir()).toBe(process.env.HOME); expect(process.env.USERPROFILE).toBe(process.env.HOME); expect(process.env.HOME).not.toBe(" +
+      "import { it, expect } from 'vitest'; import os from 'os'; import fs from 'fs'; import path from 'path'; it('isolates', () => { const runtime = path.dirname(process.env.HOME); expect(fs.existsSync(path.join(runtime, 'vitest.config.mjs'))).toBe(true); expect(fs.existsSync(path.join(runtime, 'isolated-home.mjs'))).toBe(true); fs.writeFileSync(path.join(process.env.HOME, 'runtime-output'), 'isolated'); expect(fs.existsSync(path.join(process.env.HOME, 'runtime-output'))).toBe(true); expect(process.env.QA_SECRET_SENTINEL).toBeUndefined(); expect(os.homedir()).toBe(process.env.HOME); expect(process.env.USERPROFILE).toBe(process.env.HOME); expect(process.env.HOME).not.toBe(" +
         JSON.stringify(root) +
         '); });',
     );
@@ -118,8 +118,74 @@ describe('Shared isolated QA verifier', () => {
     source("import {it} from 'vitest'; it.skip('unverified', () => {});");
     await expect(verify()).rejects.toThrow(/infrastructure/);
   });
+  it.each(['', 'if (false) expect(true).toBe(true);'])(
+    'fails QA when a test executes no assertion (%s)',
+    async (body) => {
+      // qaCommands owns the junction and validates its removal and the unchanged tree.
+      fs.unlinkSync(link);
+      git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+      source("import { it, expect } from 'vitest'; it('no assertion', () => { " + body + ' });');
+      git('add', 'server');
+      git(
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        'commit',
+        '-m',
+        'fixture',
+      );
+      const input = {
+        worktree: tree,
+        reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
+        files: ['server/__tests__/check.test.ts'],
+        task: { changeZones: [], testZones: [] },
+      } as unknown as ReviewerRequest;
+      expect(await qaCommands(input, scratch, new AbortController().signal)).toEqual([
+        { command: 'vitest:server/__tests__/check.test.ts', result: 'fail', passed: 0, failed: 1 },
+      ]);
+      expect(fs.readdirSync(scratch)).toEqual([]);
+      expect(fs.existsSync(link)).toBe(false);
+      expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
+    },
+  );
+  it.each(['allure-results/output.json', '.vite/output.json'])(
+    'reports a forbidden runtime write %s with escaped path and verification phase',
+    async (file) => {
+      fs.unlinkSync(link);
+      git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+      source(
+        "import { it, expect } from 'vitest'; import fs from 'fs'; it('writes', () => { fs.mkdirSync(" +
+          JSON.stringify(path.dirname(file)) +
+          ', { recursive: true }); fs.writeFileSync(' +
+          JSON.stringify(file) +
+          ", 'output'); expect(true).toBe(true); });",
+      );
+      git('add', 'server');
+      git(
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        'commit',
+        '-m',
+        'fixture',
+      );
+      const input = {
+        worktree: tree,
+        reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
+        files: ['server/__tests__/check.test.ts'],
+        task: { changeZones: [], testZones: [] },
+      } as unknown as ReviewerRequest;
+      await expect(qaCommands(input, scratch, new AbortController().signal)).rejects.toThrow(
+        'cambio durante la verificación: Eval modified a forbidden path: ' + JSON.stringify(file),
+      );
+      expect(fs.existsSync(link)).toBe(false);
+      expect(fs.readdirSync(scratch)).toEqual([]);
+    },
+  );
   it('selects changed, mirror and declared tests only, and rejects unbounded sets', () => {
-    git('init', '-b', 'main');
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
     source('// fixture');
     source('// fixture', 'server/__tests__/unrelated.test.ts');
     source('// fixture', 'server/__tests__/declared.test.ts');

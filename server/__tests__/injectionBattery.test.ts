@@ -71,12 +71,12 @@ async function run(executor: Executor, attack: InjectionCase) {
     executionId: attack.id,
     projectId: 'project',
     taskKey: attack.task,
-    role: 'reviewer',
+    role: 'architect',
     prompt: attack.payload,
     flags: [],
     worktreePath: path.join(root, 'worktree'),
     timeoutMin: 1,
-    agentSpec: template('reviewer'),
+    agentSpec: template('architect'),
   };
   const events: ExecutionEvent[] = [];
   for await (const event of executor.start(req).events) events.push(event);

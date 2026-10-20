@@ -191,10 +191,11 @@ describe('TestReport contract', () => {
 
 describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () => {
   beforeEach(prepare, 30_000);
-  it.each(['claude', 'codex'])(
-    'passes via %s, persists report, keeps approved SHA and promotes T02',
-    async (executor) => {
-      configure([executor]);
+  it.each([false, true])(
+    'passes via a safe reader (Codex enabled=%s), persists report, keeps approved SHA and promotes T02',
+    async (codexEnabled) => {
+      const executor = 'claude';
+      configure(codexEnabled ? ['claude', 'codex'] : ['claude']);
       const store = await storeFor();
       try {
         const before = store.getTask(task)!;
@@ -223,9 +224,8 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
         const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim());
         expect(launch.data.commandAllowlist).toEqual(record.report.commands.map((c) => c.command));
         expect(launch.data.commands).toEqual(record.report.commands);
-        if (executor === 'codex')
-          expect(launch.args[launch.args.indexOf('--sandbox') + 1]).toBe('read-only');
-        else expect(launch.args[launch.args.indexOf('--tools') + 1]).not.toMatch(/Write|Edit|Bash/);
+        expect(launch.args[launch.args.indexOf('--tools') + 1]).not.toMatch(/Write|Edit|Bash/);
+        expect(store.listExecutions().find((e) => e.agent_role === 'qa')!.executor).toBe('claude');
         const log = vi.fn();
         await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
         expect(
@@ -237,6 +237,34 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
       }
     },
   );
+  it.each([false, true])('never launches shell-capable Codex for QA (tiers=%s)', async (tiers) => {
+    configure(['codex'], tiers);
+    await qa('command-execution', 'codex');
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)).toMatchObject({
+        status: 'WAITING_HUMAN',
+        attempt: 0,
+        test_reports: [],
+      });
+      expect(store.getTask(task)!.review_ref).toBeTruthy();
+      expect(store.listExecutions().filter((e) => e.agent_role === 'qa')).toEqual([]);
+      expect(store.listDecisions()[0].context).toContain('code_execution_not_mediated');
+      expect(fs.readFileSync(launches, 'utf8')).toBe('');
+      // Repeated selection joins the existing decision, then a safe executor restores QA.
+      await qa('command-execution', 'codex');
+      expect(store.listDecisions()).toHaveLength(1);
+      configure(['claude'], tiers);
+      await qa();
+      expect(store.getTask(task)!.status).toBe('DONE');
+      expect(store.listDecisions()[0].status).toBe('answered');
+      expect(store.listExecutions().find((e) => e.agent_role === 'qa')!.selection_reason).toContain(
+        'code_execution_not_mediated',
+      );
+    } finally {
+      store.close();
+    }
+  });
   it('creates traceable defects, shares rounds and supplies them to Developer rework', async () => {
     await qa('fail');
     const store = await storeFor();
@@ -292,6 +320,32 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
       }
     },
   );
+  it.each(['allure-results/stale.json', '.vite/stale.json'])(
+    'rejects previous residue %s as infrastructure and preserves QA before model launch',
+    async (file) => {
+      const common = path.resolve(repo, git(repo, 'rev-parse', '--git-common-dir'));
+      fs.mkdirSync(path.join(common, 'info'), { recursive: true });
+      fs.appendFileSync(path.join(common, 'info/exclude'), '\nallure-results/\n.vite/\n');
+      fs.mkdirSync(path.dirname(path.join(tree(), file)), { recursive: true });
+      fs.writeFileSync(path.join(tree(), file), 'residue');
+      await expect(qa()).rejects.toThrow(
+        'residuo previo a la verificación: Eval modified a forbidden path: ' + JSON.stringify(file),
+      );
+      const store = await storeFor();
+      try {
+        expect(store.getTask(task)).toMatchObject({
+          status: 'QA',
+          attempt: 0,
+          test_reports: [],
+          lease_owner: null,
+        });
+        expect(store.getTask(task)!.review_ref).toBeTruthy();
+        expect(fs.readFileSync(launches, 'utf8')).toBe('');
+      } finally {
+        store.close();
+      }
+    },
+  );
   it('retains QA on runtime verifier infrastructure failure before model launch', async () => {
     vi.spyOn(verifier, 'runIsolatedVitest').mockRejectedValueOnce(
       new Error('Vitest infrastructure failed: missing report'),
@@ -341,6 +395,33 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
       expect(store.getTask(task)!.test_reports).toHaveLength(1);
       expect(store.getTask(task + '-D1')!.defect_context!.ac).toBe('AC-001');
       expect(store.listDecisions()[0].context).toContain('rework_limit');
+      const first = store.getTask(task)!.test_reports![0];
+      const defect = store.getTask(task + '-D1')!;
+      await store.resolveDecision(store.listDecisions()[0].id, 'inspect', 'human', () => {});
+      // Whitespace-only content changes retain the same defect identity at the same SHA.
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      db.prepare('UPDATE tasks SET defect_context = ? WHERE key = ?').run(
+        JSON.stringify({
+          ...defect.defect_context,
+          summary: '  Missing  edge case\n',
+          reproduction: ' Open audit with no entries  ',
+        }),
+        task + '-D1',
+      );
+      db.close();
+      await qa('fail');
+      expect(store.getTask(task)).toMatchObject({
+        status: 'WAITING_HUMAN',
+        attempt: REVIEW_MAX_REWORK_ROUNDS,
+      });
+      const reports = store.getTask(task)!.test_reports!;
+      expect(reports).toHaveLength(2);
+      expect(reports[0]).toEqual(first);
+      expect(reports[1].execution_id).not.toBe(first.execution_id);
+      for (const report of reports)
+        expect(JSON.parse(fs.readFileSync(report.artifact_path, 'utf8'))).toEqual(report);
+      expect(store.listTasks().filter((t) => t.defect_context?.task === task)).toHaveLength(1);
+      expect(store.getTask(task + '-D2')).toBeUndefined();
     } finally {
       store.close();
     }

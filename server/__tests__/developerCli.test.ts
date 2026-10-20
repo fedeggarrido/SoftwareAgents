@@ -369,7 +369,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       store.close();
     }
   });
-  it.each(['outside', 'no-test', 'bad-test', 'empty-test', 'skip-suite'])(
+  it.each(['outside', 'no-test', 'bad-test', 'empty-test', 'unexecuted-assertion', 'skip-suite'])(
     'rejects %s without committing',
     async (mode) => {
       await prepare();

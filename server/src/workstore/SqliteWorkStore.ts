@@ -649,7 +649,29 @@ class SqliteWorkStore implements WorkStore {
             );
       } else if (record.report.verdict === 'fail') {
         let ordinal = 1;
+        // Reports remain append-only evidence. Match historical contexts too, without migration.
+        const normalize = (text: string) => text.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+        const identity = (context: {
+          task: string;
+          review_ref: ReviewRef;
+          ac: string;
+          summary: string;
+          reproduction: string;
+        }) =>
+          JSON.stringify([
+            context.task,
+            context.review_ref.sha,
+            context.ac,
+            normalize(context.summary),
+            normalize(context.reproduction),
+          ]);
+        const existing = new Set(
+          this.listTasks().flatMap((t) => (t.defect_context ? [identity(t.defect_context)] : [])),
+        );
         for (const defect of record.report.defects) {
+          const id = identity({ task: taskId, review_ref: record.review_ref, ...defect });
+          if (existing.has(id)) continue;
+          existing.add(id);
           while (this.getTask(taskId + '-D' + ordinal)) ordinal++;
           const key = taskId + '-D' + ordinal++;
           this.createTask({ key, type: 'bug', feature_key: task.feature_key, status: 'DRAFT' });

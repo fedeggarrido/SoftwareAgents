@@ -161,6 +161,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
       test: {
         include: [file],
         allowOnly: false,
+        expect: { requireAssertions: true },
         setupFiles: [setup],
         globals: true,
         reporters: ['json'],

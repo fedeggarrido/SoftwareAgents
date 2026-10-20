@@ -393,8 +393,14 @@ El Reviewer recibe el diff, los archivos afectados, el FeatureSpec aprobado,
 el diseño y la tarea con sus AC y changeZones como datos no confiables. Reutiliza
 el worker, leases/recuperación, selección SA-036/090/092, cuota, slots,
 revalidación, `agentCompiler` y contención. El rol es `reviewer`, perfil
-`read_only`: Claude solo Read/Glob/Grep y Codex sandbox `read-only`, sin
-conectores, red ni delegación. La guardia de hashes de Requirements detecta
+`read_only`: solo executors con herramientas de lectura sin ejecución de código,
+hoy Claude con Read/Glob/Grep, sin Bash, conectores, red ni delegación. Codex queda
+excluido también de Reviewer: su sandbox `read-only` conserva shell general y no
+hay mediación previa que limite sus comandos a lectura. Detectar `command_execution`
+en el stream después de iniciarlo no impide ejecutar código. La exclusión
+`code_execution_not_mediated` queda en la selección y su traza; sin candidato
+admisible se abre la Human Decision de selección en WAITING_HUMAN, conservando
+`review_ref` y la fase anterior para reevaluar. La guardia de hashes de Requirements detecta
 escrituras incluso en ignorados; falla conservando evidencia. No acredita un
 sandbox de SO para Claude ni evita escrituras transitorias de procesos ajenos.
 
@@ -443,8 +449,9 @@ todos los escritores antes de abrir v11 según
 comparten transacción con SQLite: si falta la confirmación de auditoría,
 inspeccionar WorkStore antes de reintentar. No se usa `gh`, ni PR, push o merge.
 
-Claude comprueba en real el cambio de executor si ambos están autorizados y
-disponibles, flags de solo lectura, informe y traza, QA tras aprobación y, ante
+Claude comprueba en real la exclusión de Codex para Reviewer, la selección de
+Claude (cruzada cuando Developer usó Codex), flags de solo lectura, informe y
+traza, QA tras aprobación y, ante
 rechazo, los findings en el siguiente `feature develop`. La prueba automatizada
 solo usa CLIs falsas y repositorios Git desechables; la prueba real corresponde
 a Claude antes de integrar.
@@ -468,7 +475,10 @@ revalida antes del spawn y al persistir. No ejecuta Developer ni hace merge o pu
 Reutiliza el ciclo de Reviewer/worker, admisión, selección, cuota, lease, reintento
 único de informe, compilador y contención. `test_analysis` admite preferencias
 propias; los Projects históricos reutilizan el orden `review` si no la declaran. El rol es `qa`, perfil `read_only`:
-Claude Read/Glob/Grep; Codex sandbox read-only, sin conectores, red ni delegación.
+solo Claude Read/Glob/Grep, sin Bash, conectores, red ni delegación. Se excluye
+Codex antes del lanzamiento por `code_execution_not_mediated`, igual que Reviewer:
+`read-only` no elimina su shell general. Sin executor admisible, la selección
+abre WAITING_HUMAN conservando el SHA aprobado y la fase QA para reevaluar.
 El agente intenta romper cada AC asignado mediante lectura y razonamiento sobre
 código, diff y resultados; nunca recibe Bash ni autoridad para ejecutar tests.
 
@@ -483,6 +493,15 @@ y después. Solo enlaza las dependencias existentes durante la verificación y
 retira su propio enlace sin recorrerlo; no instala dependencias. Un cierre sin
 confirmar conserva temporales, enlace, lease y slot para inspección.
 Los límites de aislamiento de SO siguen siendo los de [evals](evals.md#límites-de-seguridad).
+
+Las configuraciones neutrales exigen `test.expect.requireAssertions: true` en QA,
+evals, Developer test-first y la cascada `vitestRelated`: un test vacío o con su
+única aserción en una rama no ejecutada falla. Configuración, perfiles, cachés e
+informes del runtime se crean en scratch y se retiran tras confirmar el cierre.
+La integridad nunca excluye nombres como `allure-results` o `.vite`; el diagnóstico
+incluye la ruta relativa escapada y distingue «residuo previo a la verificación»
+de «cambio durante la verificación». Un residuo previo es fallo de infraestructura:
+conserva QA y no consume rondas.
 
 Los resúmenes `commands[{command,result,passed,failed}]` llegan al agente como datos,
 sin stdout/stderr. Ejecuta todo el conjunto declarado antes del agente. QA puede
@@ -511,6 +530,10 @@ Un pass válido deja DONE, con `review_ref` aprobado (lista para merge humano), 
 promueve a READY las tareas DRAFT del DAG cuyas dependencias estén todas DONE.
 Los bugs son registros de seguimiento del rework de la tarea original; no se
 introducen como nodos ejecutables del DAG ni se cierran sin verificación humana.
+Repetir un defecto para la misma tarea, SHA y AC con el mismo resumen y reproducción
+normalizados (Unicode NFKC y espacios) reutiliza el bug existente. La severidad no
+crea una identidad distinta; cada TestReport y su artefacto permanecen como evidencia
+independiente en el histórico de la tarea original.
 
 WorkStore v12 persiste `tasks.test_reports` y `defect_context`; antes de abrirla,
 actualizar/reiniciar los escritores como indica [task CLI](task-cli.md#migraciones-de-la-base-compartida).

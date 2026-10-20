@@ -516,6 +516,8 @@ export function availabilityDecisionKey(scope: string, code: string): string {
 }
 
 const BLOCK_TEXT: Record<SelectionBlock['code'], string> = {
+  code_execution_not_mediated:
+    'el rol requiere herramientas de lectura sin shell; habilita Claude para QA/Reviewer',
   no_enabled_executor: 'ningún executor que la política admite para ella está habilitado',
   no_allowed_level:
     'ni la política ni los niveles que el operador permite ofrecen ningún executor para su nivel',

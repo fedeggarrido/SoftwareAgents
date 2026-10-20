@@ -199,10 +199,10 @@ it('persists the real Codex thread before delivering started for office role res
   const registry = new ExecutionRegistry(root);
   req.worktreePath = path.join(root, 'worktree');
   fs.mkdirSync(req.worktreePath);
-  req.role = 'reviewer';
+  req.role = 'architect';
   req.taskKey = 'SA-034';
   req.agentSpec = parse(
-    fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '../../agents/templates/architect.yaml'), 'utf8'),
   );
   const executor = new CodexCliExecutor({
     operator: { binaryPaths: { codex: process.execPath } },
@@ -215,7 +215,7 @@ it('persists the real Codex thread before delivering started for office role res
     if (event.type === 'started')
       expect(registry.sessionMap().get(event.sessionId)).toEqual({
         executionId: req.executionId,
-        role: 'reviewer',
+        role: 'architect',
         taskKey: 'SA-034',
       });
     if (event.type === 'finished') expect(event.exitCode).toBe(0);

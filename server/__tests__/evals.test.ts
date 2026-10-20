@@ -195,7 +195,7 @@ describe('default cascade integrity and related tests', () => {
       const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
       for (const allowedPaths of [undefined, ['module', 'module/source.ts']]) {
         expect(() => assertEvalIntegrity({ baseCommit: base, allowedPaths }, repo)).toThrow(
-          'criteria_tampered: Eval changed a Git submodule',
+          'criteria_tampered: residuo previo a la verificación: Eval changed a Git submodule: "module"',
         );
         await expect(
           checkCascadeCriteria(
@@ -419,6 +419,18 @@ describe('default cascade integrity and related tests', () => {
     expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
   });
 
+  it('escapes the relative forbidden path in integrity diagnostics', () => {
+    detachCascadeMetadata();
+    const file =
+      process.platform === 'win32' ? 'allure-results/stale.json' : 'allure-results/stale\n.json';
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo, file), 'residue');
+    expect(() =>
+      assertEvalIntegrity({ baseCommit: task.fixCommit, allowedPaths: [] }, repo),
+    ).toThrow(
+      'residuo previo a la verificación: Eval modified a forbidden path: ' + JSON.stringify(file),
+    );
+  });
   it('allows ordinary source files but rejects links without an allowedPaths ceiling', () => {
     detachCascadeMetadata();
     fs.writeFileSync(path.join(repo, 'server/clock.ts'), 'export {};');
@@ -627,6 +639,42 @@ async function verifyFixture(code: string, names = ['isolates criterion']) {
 }
 
 describe('verifier isolation and integrity', () => {
+  it.each(['', 'if (false) expect(true).toBe(true);'])(
+    'fails evals when a test executes no assertion (%s)',
+    async (body) => {
+      expect(
+        await verifyFixture(
+          "import { it, expect } from 'vitest'; it('isolates criterion', () => { " + body + ' });',
+        ),
+      ).toEqual([false]);
+    },
+  );
+  it.each(['', 'if (false) expect(true).toBe(true);'])(
+    'fails vitestRelated when a related test executes no assertion (%s)',
+    async (body) => {
+      fs.writeFileSync(
+        path.join(repo, task.criteria[0].file),
+        "import '../poison.js'; import { it, expect } from 'vitest'; it('related', () => { " +
+          body +
+          ' });',
+      );
+      evalGit(repo, ['add', task.criteria[0].file]);
+      evalGit(repo, ['commit', '-m', 'no assertion fixture']);
+      const base = evalGit(repo, ['rev-parse', 'HEAD']);
+      detachCascadeMetadata();
+      fs.writeFileSync(path.join(repo, 'server/poison.ts'), 'export const changed = true;');
+      expect(
+        await checkCascadeCriteria(
+          { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
+          base,
+          repo,
+          root,
+          new AbortController().signal,
+        ),
+      ).toEqual(['fail']);
+      expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
+    },
+  );
   it('excludes seeded credentials, CI and Node flags and uses a fresh home for every criterion', async () => {
     const secrets = [
       'CLICKUP_TOKEN',

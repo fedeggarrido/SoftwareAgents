@@ -100,7 +100,7 @@ export async function qaCommands(
       )
         throw new Error('QA dependency link changed');
       fs.unlinkSync(link);
-      assertEvalIntegrity(integrity, tree);
+      assertEvalIntegrity(integrity, tree, 'during');
       guardRequirementsWrites(tree, before);
     }
   }

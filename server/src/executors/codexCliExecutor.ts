@@ -10,6 +10,7 @@ import {
   CODEX_WEB_EVENT_TYPES,
   codexCompilerFlags,
   compileAgent,
+  executorSupportsRole,
   validateAgentOutput,
 } from '../agentCompiler.js';
 import {
@@ -108,6 +109,10 @@ export class CodexCliExecutor implements Executor {
   readonly id = 'codex' as const;
   constructor(private readonly options: CodexCliExecutorOptions) {}
   start(req: ExecutionRequest): ExecutionHandle {
+    if (!executorSupportsRole('codex', req.role))
+      throw new Error(
+        'code_execution_not_mediated: Codex cannot run QA/Reviewer without shell mediation',
+      );
     validateModelChoice(req, 'codex');
     if (req.flags.length) throw new Error('Caller flags are forbidden');
     if (!req.agentSpec) throw new Error('Codex requires an AgentSpec');

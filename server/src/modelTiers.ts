@@ -435,7 +435,7 @@ export function selectModelTier(
       candidates++;
       // An Operator exclusion is not a quota wait: it never triggers fallback, so a
       // disallowed level cannot push a Task down to a lower tier (SA-092).
-      const excluded = excludeCandidate(choice.executor, snapshot, current);
+      const excluded = excludeCandidate(choice.executor, snapshot, current, agent.identity.role);
       if (excluded) {
         exclusions.push({ executor: choice.executor, tier: current, code: excluded });
         reasons.push(

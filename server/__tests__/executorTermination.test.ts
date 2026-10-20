@@ -69,13 +69,13 @@ function start(id: string, timeoutMin = 1) {
     executionId: 'run',
     projectId: 'project',
     taskKey: 'SA-999',
-    role: 'reviewer',
+    role: 'architect',
     prompt: 'test',
     flags: [],
     worktreePath: path.join(root, 'worktree'),
     timeoutMin,
     agentSpec: parse(
-      fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '../../agents/templates/architect.yaml'), 'utf8'),
     ),
   });
 }
@@ -230,13 +230,13 @@ it.each(
       throw new Error('termination failed');
     });
     const spec = parse(
-      fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '../../agents/templates/architect.yaml'), 'utf8'),
     );
     const req: ExecutionRequest = {
       executionId: 'run',
       projectId: 'project',
       taskKey: 'SA-999',
-      role: 'reviewer',
+      role: 'architect',
       agentSpec: spec,
       prompt: 'test',
       flags: [],
@@ -323,7 +323,7 @@ it.each([false, true])(
       throw Object.assign(new Error('busy'), { code: 'EBUSY' });
     });
     const spec = parse(
-      fs.readFileSync(path.join(__dirname, '../../agents/templates/reviewer.yaml'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '../../agents/templates/architect.yaml'), 'utf8'),
     );
     const handle = new CodexCliExecutor({
       runtimeDirectory: path.join(root, 'runtime'),
@@ -333,7 +333,7 @@ it.each([false, true])(
       executionId: 'run',
       projectId: 'project',
       taskKey: 'SA-999',
-      role: 'reviewer',
+      role: 'architect',
       agentSpec: spec,
       prompt: 'test',
       flags: [],

@@ -1,6 +1,7 @@
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { CapacitySnapshot } from '../../core/src/capacity.js';
 import type { ModelTier } from '../../core/src/modelTier.js';
+import { executorSupportsRole } from './agentCompiler.js';
 import type { ExecutorObservation } from './executorProbes.js';
 import type { ExecutorId } from './executors/executor.js';
 import {
@@ -78,6 +79,7 @@ export interface CandidateExclusion {
   executor: ExecutorId;
   tier?: ModelTier;
   code:
+    | 'code_execution_not_mediated'
     | 'operator_disabled'
     /** SA-092: the Operator does not allow this Executor at this tier. */
     | 'level_disabled'
@@ -90,6 +92,7 @@ export interface CandidateExclusion {
  */
 export interface SelectionBlock {
   code:
+    | 'code_execution_not_mediated'
     | 'no_enabled_executor'
     | 'no_allowed_level'
     | 'not_installed'
@@ -119,7 +122,9 @@ export function excludeCandidate(
   executor: ExecutorId,
   snapshot: SelectionSnapshot,
   tier?: ModelTier,
+  role?: string,
 ): CandidateExclusion['code'] | undefined {
+  if (role && !executorSupportsRole(executor, role)) return 'code_execution_not_mediated';
   if (!snapshot.allowedExecutors.includes(executor)) return 'operator_disabled';
   const levels = snapshot.executorLevels?.[executor];
   if (tier && levels && !levels.includes(tier)) return 'level_disabled';
@@ -169,7 +174,7 @@ export function selectExecutor(agent: AgentSpec, policy: ModelPolicy, snapshot: 
   const preferences = Object.hasOwn(policy, capability) ? policy[capability] : [];
   const exclusions: CandidateExclusion[] = [];
   const alternatives = preferences.filter((p) => {
-    const code = excludeCandidate(p.executor, snapshot);
+    const code = excludeCandidate(p.executor, snapshot, undefined, agent.identity.role);
     if (code) exclusions.push({ executor: p.executor, code });
     return !code;
   });

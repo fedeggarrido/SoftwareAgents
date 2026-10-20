@@ -168,6 +168,7 @@ export class ExecutionTelemetry {
       tier?: string;
       effort?: string;
       cascade?: { attempt: number; escalatedFrom?: string };
+      review?: { developer: string; outcome: string };
     },
     private start = Date.now(),
   ) {
@@ -190,6 +191,8 @@ export class ExecutionTelemetry {
       'gen_ai.request.model': input.model,
       'softwareagents.model.tier': input.tier,
       'softwareagents.model.effort': input.effort,
+      'softwareagents.review.developer_executor': input.review?.developer,
+      'softwareagents.review.selection': input.review?.outcome,
     })) {
       const name = telemetryName(value);
       if (name) this.attrs[key] = name;

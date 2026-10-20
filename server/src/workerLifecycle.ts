@@ -36,14 +36,14 @@ export class WorkerLifecycle {
     );
   }
 
-  async claim(revision?: { gitSha: string; decisionId: string }): Promise<void> {
+  async claim(revision?: { gitSha: string; decisionId: string }, reviewing = false): Promise<void> {
     if (this.claimed) return;
     let task = this.store.getTask(this.task);
     if (!task) {
       this.store.createTask({ key: this.task, type: 'unknown', status: 'DRAFT' });
       task = this.store.getTask(this.task)!;
     }
-    if (!revision && ['DRAFT', 'WAITING_QUOTA'].includes(task.status))
+    if (!revision && !reviewing && ['DRAFT', 'WAITING_QUOTA'].includes(task.status))
       task = await this.store.transition(
         task.key,
         task.version,
@@ -51,7 +51,8 @@ export class WorkerLifecycle {
         'Explicit worker run',
         this.owner,
       );
-    if (revision)
+    if (reviewing) await this.store.claimReview(task.key, task.version, this.owner);
+    else if (revision)
       await this.store.claimRequirementsRevision(
         task.key,
         revision.gitSha,
@@ -146,6 +147,14 @@ export class WorkerLifecycle {
   async stopHeartbeat(): Promise<void> {
     clearInterval(this.timer);
     await this.pending;
+  }
+
+  async completeReview(operation: () => Promise<void>): Promise<void> {
+    await this.stopHeartbeat();
+    this.assertOwned();
+    await operation();
+    this.active = false;
+    this.audit('lease_released', 'ReviewReport and task outcome persisted');
   }
 
   async retainForRecovery(): Promise<void> {

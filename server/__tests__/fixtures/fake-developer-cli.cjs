@@ -10,7 +10,11 @@ process.stdin.on('end', () => {
   );
   fs.appendFileSync(log, JSON.stringify({ args, context, cwd: process.cwd() }) + '\n');
   fs.mkdirSync('server/src', { recursive: true });
-  fs.writeFileSync('server/src/audit.ts', 'export const implemented = true;\n');
+  const { reviewFindings: findings, reworkAttempt } = JSON.parse(context.task.brief);
+  fs.writeFileSync(
+    'server/src/audit.ts',
+    `export const implemented = true;\n${findings?.length ? `// Reworked ${reworkAttempt}: bounded pagination\n` : ''}`,
+  );
   if (mode !== 'no-test') {
     fs.mkdirSync('server/__tests__', { recursive: true });
     fs.writeFileSync(
@@ -19,6 +23,11 @@ process.stdin.on('end', () => {
 import { implemented } from '../src/audit';
 it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? 'false' : 'true'}));\n`,
     );
+    if (findings?.length)
+      fs.appendFileSync(
+        'server/__tests__/audit.test.ts',
+        `it('addresses reviewer pagination ${reworkAttempt}', () => expect(implemented).toBe(true));\n`,
+      );
     if (mode === 'empty-test')
       fs.writeFileSync(
         'server/__tests__/audit.test.ts',

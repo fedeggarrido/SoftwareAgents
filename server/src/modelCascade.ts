@@ -85,9 +85,11 @@ export async function checkCascadeCriteria(
   signal: AbortSignal,
   protectedPaths?: readonly string[],
   developerTests?: string[],
+  expectedHead = base,
 ): Promise<CriterionResult[]> {
   const integrity = {
     baseCommit: base,
+    expectedHead,
     allowedPaths:
       verifier.allowedPaths && developerTests
         ? [...verifier.allowedPaths, ...developerTests]
@@ -228,10 +230,12 @@ export function resetCascadeWorktree(
   base: string,
   protectedPaths?: readonly string[],
   developerTests?: string[],
+  expectedHead = base,
 ): void {
   assertEvalIntegrity(
     {
       baseCommit: base,
+      expectedHead,
       allowedPaths:
         verifier.allowedPaths && developerTests
           ? [...verifier.allowedPaths, ...developerTests]
@@ -241,7 +245,7 @@ export function resetCascadeWorktree(
     },
     tree,
   );
-  evalGit(tree, ['reset', '--hard', base]);
+  evalGit(tree, ['reset', '--hard', expectedHead]);
   evalGit(tree, ['clean', '-fdx']);
   if (evalGit(tree, ['status', '--porcelain', '--untracked-files=all']))
     throw new Error('Cascade reset left changes');

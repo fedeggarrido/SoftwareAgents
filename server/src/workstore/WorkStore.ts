@@ -1,5 +1,6 @@
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
+import type { ReviewReport } from '../../../core/src/reviewReport.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
@@ -49,6 +50,7 @@ export interface TaskRecord {
   worktree_ref: string | null;
   pr_ref: string | null;
   review_ref?: ReviewRef | null;
+  review_reports?: ReviewRecord[];
   blocked_reason: string | null;
   created_at: string;
   updated_at: string;
@@ -59,6 +61,14 @@ export interface ReviewRef {
   branch: string;
   sha: string;
   base: string;
+}
+
+export interface ReviewRecord {
+  execution_id: string;
+  review_ref: ReviewRef;
+  developer_executor: string;
+  reviewer_executor: string;
+  report: ReviewReport;
 }
 
 export interface TaskDependencyRecord {
@@ -73,6 +83,7 @@ export interface ExecutionRecord {
   task_key: string;
   agent_template_version: string;
   executor: string;
+  agent_role?: string | null;
   model_id: string;
   model_tier?: ModelTier | null;
   model_effort?: string | null;
@@ -180,6 +191,14 @@ export interface WorkStore {
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
   setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void>;
+  claimReview(taskId: string, expectedVersion: number, owner: string): Promise<TaskRecord>;
+  completeReview(
+    taskId: string,
+    owner: string,
+    review: ReviewRecord,
+    beforeCommit: () => void,
+    decision?: NewHumanDecision,
+  ): Promise<void>;
   release(taskId: string, owner: string): Promise<TaskRecord>;
   recoverExpiredLeases(): Promise<TaskRecord[]>;
   listLeaseRecoveries(): LeaseRecoveryRecord[];

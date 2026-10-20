@@ -51,11 +51,13 @@ export function assertEvalIntegrity(
     protectedPaths?: readonly string[];
     /** Trusted Developer ingress only. Evals continue pinning tests. */
     allowTestChanges?: boolean;
+    /** Runtime-pinned HEAD of a Developer rework; diff scope remains baseCommit. */
+    expectedHead?: string;
   },
   tree: string,
 ): void {
   if (fs.lstatSync(tree).isSymbolicLink()) throw new EvalIntegrityError('Linked eval root');
-  if (evalGit(tree, ['rev-parse', 'HEAD']) !== task.baseCommit)
+  if (evalGit(tree, ['rev-parse', 'HEAD']) !== (task.expectedHead ?? task.baseCommit))
     throw new EvalIntegrityError('Eval HEAD changed');
   // These index flags hide worktree edits from diff; a normal checkout has only H entries.
   if (

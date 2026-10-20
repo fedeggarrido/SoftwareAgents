@@ -34,6 +34,7 @@ import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
   CLAUDE_OAUTH_REFRESH_RETRIES,
   CLAUDE_OAUTH_REFRESH_WAIT_MS,
+  REVIEW_MAX_REWORK_ROUNDS,
   VALIDATION_AUDIT_MAX_ERROR_CHARS,
   VALIDATION_AUDIT_MAX_ERRORS,
 } from './constants.js';
@@ -106,6 +107,14 @@ import {
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
+import {
+  preferCrossExecutor,
+  reviewerBrief,
+  reviewerDecision,
+  type ReviewerRequest,
+  reviewerRequest,
+  validateReview,
+} from './reviewer.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { taskModelInputs } from './taskModelInputs.js';
@@ -223,6 +232,7 @@ export interface WorkerOptions {
   requirements?: RequirementsRequest;
   architect?: ArchitectRequest;
   developer?: DeveloperRequest;
+  reviewer?: ReviewerRequest;
   /** Injection for protocol tests only; CLI obtains binary exclusively from Operator config. */
   binaryArgs?: readonly string[];
   log?: (message: string) => void;
@@ -328,9 +338,11 @@ export async function runWorker(
       ? args.task !== architectTaskKey(options.architect.key)
       : options.requirements
         ? !/^FEAT-\d{3}$/.test(args.task) || options.requirements.key !== args.task
-        : options.developer
-          ? args.task !== options.developer.task.key || !/^FEAT-\d{3}-T\d{2}$/.test(args.task)
-          : !/^SA-\d{3,}$/.test(args.task)
+        : options.reviewer
+          ? args.task !== options.reviewer.task.key || !/^FEAT-\d{3}-T\d{2}$/.test(args.task)
+          : options.developer
+            ? args.task !== options.developer.task.key || !/^FEAT-\d{3}-T\d{2}$/.test(args.task)
+            : !/^SA-\d{3,}$/.test(args.task)
   )
     throw new CliUsageError('Invalid task key');
   const common = path.resolve(cwd, git(cwd, ['rev-parse', '--git-common-dir']));
@@ -342,6 +354,13 @@ export async function runWorker(
   const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
   const lifecycle = new WorkerLifecycle(store, args.task);
   try {
+    if (options.reviewer) {
+      if (
+        JSON.stringify(reviewerRequest(store, config, options.reviewer.key, args.task)) !==
+        JSON.stringify(options.reviewer)
+      )
+        throw new Error('Reviewer context changed');
+    }
     if (options.developer) {
       const current = developerRequest(store, config, options.developer.key, args.task);
       if (JSON.stringify(current) !== JSON.stringify(options.developer))
@@ -377,7 +396,10 @@ export async function runWorker(
       options.architect?.revision ||
       store.getTask(args.task)?.status !== 'WAITING_HUMAN'
     )
-      await lifecycle.claim(options.requirements?.revision ?? options.architect?.revision);
+      await lifecycle.claim(
+        options.requirements?.revision ?? options.architect?.revision,
+        !!options.reviewer,
+      );
     const result = await runWorkerExecution(args, options, lifecycle, config);
     if (result.quotaDecision?.status === 'wait') await lifecycle.wait(result.quotaDecision);
     else if (!result.availabilityBlock && !result.policyDecision)
@@ -464,6 +486,7 @@ async function runWorkerExecution(
   audit('policy_allowed');
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief =
+    (options.reviewer ? reviewerBrief(options.reviewer) : undefined) ??
     (options.developer ? JSON.stringify(options.developer) : undefined) ??
     (options.architect ? architectBrief(options.architect, {}) : undefined) ??
     (options.requirements ? requirementsBrief(options.requirements) : undefined) ??
@@ -472,6 +495,7 @@ async function runWorkerExecution(
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
+    (options.reviewer ? 'reviewer' : undefined) ??
     (options.developer ? 'developer' : undefined) ??
     (options.architect ? 'architect' : undefined) ??
     (options.requirements ? 'requirements-analyst' : undefined) ??
@@ -494,7 +518,7 @@ async function runWorkerExecution(
   };
   let compiled = compileAgent(spec, role, taskData);
   // Explicit selection only narrows the Operator catalog.
-  const tierPolicy =
+  let tierPolicy =
     config.operator.modelTiers && args.executor
       ? ({
           ...config.operator.modelTiers,
@@ -513,7 +537,7 @@ async function runWorkerExecution(
     throw new CliUsageError('eval run requires an Operator modelTiers catalog');
   const tierRule = tierPolicy ? (tierPolicy.rule ?? loadTierRule(cwd)) : undefined;
   const loadedPolicy = !tierPolicy && args.selectExecutor ? loadModelPolicy(cwd) : undefined;
-  const modelPolicy =
+  let modelPolicy =
     loadedPolicy && args.executor
       ? Object.fromEntries(
           Object.entries(loadedPolicy).map(([key, choices]) => [
@@ -573,7 +597,8 @@ async function runWorkerExecution(
       const store =
         open ?? (await openWorkStore({ repositoryPath: cwd, projectId: config.project.id }));
       try {
-        await lifecycle?.idleForDecision(found.code);
+        if (options.reviewer) await lifecycle?.finish('REVIEW', found.code);
+        else await lifecycle?.idleForDecision(found.code);
         const result = await escalateUnavailable(
           store,
           config.operator.autonomyLevel,
@@ -639,6 +664,7 @@ async function runWorkerExecution(
   let levels: ModelTier[] = [];
   let tree: { path: string; branch: string };
   let base: string;
+  let startingHead: string;
   let attemptRecorded = false;
   let exitCode: number | undefined;
   let executionDiagnostic: string | undefined;
@@ -751,6 +777,7 @@ async function runWorkerExecution(
     if (
       !options.requirements &&
       !options.architect &&
+      !options.reviewer &&
       cascade?.enabled &&
       tierPolicy &&
       tierRule &&
@@ -798,8 +825,28 @@ async function runWorkerExecution(
         tierPolicy && tierRule
           ? await (async () => {
               availability = await observeExecutors(probed, config.operator, probe);
+              if (options.reviewer) {
+                const snapshot = { ...readSelectionSnapshot(config.operator), availability };
+                tierPolicy = {
+                  ...tierPolicy!,
+                  tiers: Object.fromEntries(
+                    Object.entries(tierPolicy!.tiers).map(([tier, value]) => [
+                      tier,
+                      {
+                        ...value!,
+                        candidates: preferCrossExecutor(
+                          value!.candidates,
+                          options.reviewer!.developerExecutor,
+                          snapshot,
+                          tier as ModelTier,
+                        ),
+                      },
+                    ]),
+                  ),
+                };
+              }
               validateModelTierSupport(
-                tierPolicy,
+                tierPolicy!,
                 config.operator.binaryPaths?.claude,
                 spec,
                 tierRule,
@@ -810,7 +857,7 @@ async function runWorkerExecution(
               return admitModelTier(
                 spec,
                 tierRule,
-                tierPolicy,
+                tierPolicy!,
                 inputs,
                 config.operator,
                 executionId,
@@ -856,6 +903,13 @@ async function runWorkerExecution(
             const snapshot = readSelectionSnapshot(config.operator);
             snapshot.availability = availability;
             if (modelPolicy) {
+              if (options.reviewer)
+                modelPolicy = Object.fromEntries(
+                  Object.entries(modelPolicy).map(([capability, choices]) => [
+                    capability,
+                    preferCrossExecutor(choices, options.reviewer!.developerExecutor, snapshot),
+                  ]),
+                );
               selection = selectExecutor(spec, modelPolicy, snapshot);
               // The fresh decision, not the pre-admission preview, owns the slot.
               if (selection.choice) selectedExecutor = selection.choice.executor;
@@ -961,6 +1015,23 @@ async function runWorkerExecution(
       } catch (error) {
         log(`Availability decisions for ${scope} not closed: ${(error as Error).message}`);
       }
+      const reviewSelection = options.reviewer
+        ? {
+            developer: options.reviewer.developerExecutor,
+            outcome:
+              selectedExecutor !== options.reviewer.developerExecutor
+                ? 'cross_executor'
+                : 'same_executor_no_available_alternative',
+          }
+        : undefined;
+      if (reviewSelection)
+        audit('review_executor_selected', {
+          executor: selectedExecutor,
+          detail: JSON.stringify(reviewSelection),
+        });
+      const selectionReason = `${reviewSelection ? `Reviewer ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
+      if (tierSelection && reviewSelection) tierSelection.reason = selectionReason;
+      if (selection && reviewSelection) selection.reason = selectionReason;
       telemetry = new ExecutionTelemetry(
         new TelemetrySink(common, config.project.id, config.operator.telemetry),
         {
@@ -969,6 +1040,7 @@ async function runWorkerExecution(
           executor: selectedExecutor,
           agent: spec.metadata.id,
           role,
+          ...(reviewSelection ? { review: reviewSelection } : {}),
           model: tierSelection?.choice?.model ?? selection?.choice?.model,
           tier: tierSelection?.tier ?? undefined,
           effort: tierSelection?.choice?.effort,
@@ -976,7 +1048,7 @@ async function runWorkerExecution(
         },
         attempt ? Date.now() : telemetryStart,
       );
-      await lifecycle?.claim();
+      await lifecycle?.claim(undefined, !!options.reviewer);
       if (workStore) {
         if (!workStore.getTask(args.task))
           workStore.createTask({ key: args.task, type: 'unknown', status: 'DRAFT' });
@@ -985,11 +1057,11 @@ async function runWorkerExecution(
           task_key: args.task,
           agent_template_version: spec.metadata.version,
           executor: selectedExecutor,
+          agent_role: role,
           model_id: tierSelection?.choice?.model ?? selection?.choice?.model ?? '',
           model_tier: tierSelection?.tier,
           model_effort: tierSelection?.choice?.effort ?? null,
-          selection_reason:
-            tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`,
+          selection_reason: selectionReason,
           session_id: null,
           // Supervisor registration is fenced before ACK, after preparation.
           pid: null,
@@ -1026,22 +1098,32 @@ async function runWorkerExecution(
             reason: tierSelection.reason,
           },
         });
-      tree ??= options.evaluation
-        ? { path: options.evaluation.worktreePath, branch: '' }
-        : await new WorktreeManager({
-            repositoryPath: cwd,
-            defaultBranch: config.project.repo.defaultBranch,
-            manualPreparation: true,
-            trustedBase: !!options.developer,
-          }).create(
-            options.architect?.key ?? args.task,
-            options.developer ? 'developer' : 'worker',
-          );
+      tree ??= options.reviewer
+        ? { path: options.reviewer.worktree, branch: options.reviewer.reviewRef.branch }
+        : options.evaluation
+          ? { path: options.evaluation.worktreePath, branch: '' }
+          : await new WorktreeManager({
+              repositoryPath: cwd,
+              defaultBranch: config.project.repo.defaultBranch,
+              manualPreparation: true,
+              trustedBase: !!options.developer,
+            }).create(
+              options.architect?.key ?? args.task,
+              options.developer ? 'developer' : 'worker',
+            );
       if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= options.developer
         ? taskBranchBase(cwd, tree.branch, config.project.repo.defaultBranch)
         : git(tree.path, ['rev-parse', 'HEAD']);
+      startingHead ??= git(tree.path, ['rev-parse', 'HEAD']);
+      if (
+        options.reviewer &&
+        JSON.stringify(
+          reviewerRequest(workStore!, config, options.reviewer.key, args.task, lifecycle!.owner),
+        ) !== JSON.stringify(options.reviewer)
+      )
+        throw new Error('Reviewer context changed before launch');
       if (options.developer) {
         const current = developerRequest(
           workStore!,
@@ -1086,7 +1168,7 @@ async function runWorkerExecution(
         if (requirementsAttempt === 0) taskData.task.brief = architectBrief(input, designContext);
         compiled = compileAgent(spec, role, taskData);
       }
-      if (options.requirements || options.architect)
+      if (options.requirements || options.architect || options.reviewer)
         requirementsBefore ??= requirementsSnapshot(tree.path);
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);
@@ -1252,7 +1334,7 @@ async function runWorkerExecution(
         }
         if (event.type === 'finished') {
           exitCode = event.exitCode;
-          if ((options.requirements || options.architect) && exitCode === 0)
+          if ((options.requirements || options.architect || options.reviewer) && exitCode === 0)
             requirementsOutput = extractJsonObject(event.resultSummary);
           if (exitCode !== 0)
             executionDiagnostic = failureDiagnostic(event.resultSummary, exitCode);
@@ -1267,7 +1349,7 @@ async function runWorkerExecution(
         /category=(executor|auth);/.test(executionDiagnostic ?? '')
       )
         executionDiagnostic = failureDiagnostic(CLAUDE_OAUTH_REFRESH_CONTENTION, exitCode);
-      if (options.requirements || options.architect)
+      if (options.requirements || options.architect || options.reviewer)
         guardRequirementsWrites(tree.path, requirementsBefore!);
       if (runtimeQuota) {
         process.exitCode = 3;
@@ -1285,7 +1367,7 @@ async function runWorkerExecution(
       ) {
         // A credential failure must leave a pristine workspace before any relaunch.
         if (
-          git(tree.path, ['rev-parse', 'HEAD']) !== base ||
+          git(tree.path, ['rev-parse', 'HEAD']) !== startingHead ||
           (tree.branch && git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch) ||
           git(tree.path, ['status', '--porcelain', '--untracked-files=all'])
         )
@@ -1315,7 +1397,7 @@ async function runWorkerExecution(
         executionId = randomUUID();
         continue;
       }
-      if (options.requirements || options.architect) {
+      if (options.requirements || options.architect || options.reviewer) {
         guardRequirementsWrites(tree.path, requirementsBefore!);
         if (
           git(tree.path, ['rev-parse', 'HEAD']) !== base ||
@@ -1324,7 +1406,52 @@ async function runWorkerExecution(
           throw new Error('Requirements containment: Git HEAD changed');
         if (!interrupted && exitCode === 0) {
           try {
-            if (options.architect) {
+            if (options.reviewer) {
+              const report = validateReview(requirementsOutput, options.reviewer);
+              const rounds =
+                workStore!
+                  .getTask(args.task)!
+                  .review_reports?.filter((r) => r.report.verdict === 'request_changes').length ??
+                0;
+              const capped =
+                report.verdict === 'request_changes' && rounds >= REVIEW_MAX_REWORK_ROUNDS;
+              const review = {
+                execution_id: executionId,
+                review_ref: options.reviewer.reviewRef,
+                developer_executor: options.reviewer.developerExecutor,
+                reviewer_executor: selectedExecutor,
+                report,
+              };
+              await lifecycle!.completeReview(() =>
+                workStore!.completeReview(
+                  args.task,
+                  lifecycle!.owner,
+                  review,
+                  () => {
+                    guardRequirementsWrites(tree.path, requirementsBefore!);
+                    if (
+                      JSON.stringify(
+                        reviewerRequest(
+                          workStore!,
+                          config,
+                          options.reviewer!.key,
+                          args.task,
+                          lifecycle!.owner,
+                        ),
+                      ) !== JSON.stringify(options.reviewer)
+                    )
+                      throw new Error('Reviewer SHA/context changed before report persistence');
+                    audit('review_report_pending', { detail: JSON.stringify(review) });
+                  },
+                  capped ? reviewerDecision(args.task, 'rework_limit') : undefined,
+                ),
+              );
+              audit('review_report_persisted', { detail: JSON.stringify(review) });
+              telemetryStatus = capped ? 'require_human' : 'ok';
+              if (capped) process.exitCode = 3;
+              log(`${args.task}: ${report.verdict} → ${workStore!.getTask(args.task)!.status}`);
+              return { branch: tree.branch, commit: null, stat: '' };
+            } else if (options.architect) {
               designProposal = validateArchitect(requirementsOutput, options.architect.spec, {
                 cwd: tree.path,
                 protectedPaths: config.operator.protectedPaths,
@@ -1349,7 +1476,11 @@ async function runWorkerExecution(
           } catch (error) {
             if (!(error instanceof SchemaValidationError)) throw error;
             audit(
-              options.architect ? 'design_validation_failed' : 'featurespec_validation_failed',
+              options.reviewer
+                ? 'review_validation_failed'
+                : options.architect
+                  ? 'design_validation_failed'
+                  : 'featurespec_validation_failed',
               {
                 attempt: requirementsAttempt + 1,
                 // The open decision keeps its first text; the latest errors live here.
@@ -1359,9 +1490,11 @@ async function runWorkerExecution(
               },
             );
             if (requirementsAttempt++ === 0) {
-              taskData.task.brief = options.architect
-                ? architectBrief(options.architect, designContext, error.errors)
-                : requirementsBrief(options.requirements!, error.errors);
+              taskData.task.brief = options.reviewer
+                ? reviewerBrief(options.reviewer, error.errors)
+                : options.architect
+                  ? architectBrief(options.architect, designContext, error.errors)
+                  : requirementsBrief(options.requirements!, error.errors);
               compiled = compileAgent(spec, role, taskData);
               await telemetry.finish('error');
               slot.release();
@@ -1372,6 +1505,16 @@ async function runWorkerExecution(
               executionFinished = false;
               telemetry = undefined;
               continue;
+            }
+            if (options.reviewer) {
+              // Preserve the reviewed SHA and release the lease before opening the existing human gate.
+              await lifecycle!.finish('REVIEW', 'ReviewReport invalid after two attempts');
+              await workStore!.openOrJoinIdleDecision(
+                reviewerDecision(args.task, 'invalid_report'),
+              );
+              telemetryStatus = 'require_human';
+              process.exitCode = 3;
+              return { branch: tree.branch, commit: null, stat: '' };
             }
             if (options.architect)
               return { branch: tree.branch, commit: null, stat: '', designErrors: error.errors };
@@ -1399,7 +1542,7 @@ async function runWorkerExecution(
         let results: CriterionResult[] = [];
         if (!interrupted && exitCode === 0) {
           const developerTests = options.developer
-            ? guardDeveloperChanges(options.developer, config, tree.path, base)
+            ? guardDeveloperChanges(options.developer, config, tree.path, base, startingHead)
             : undefined;
           const scratch = resolveInside(common, 'softwareagents/runtime/verifiers');
           fs.mkdirSync(scratch, { recursive: true });
@@ -1412,9 +1555,10 @@ async function runWorkerExecution(
               verifierAbort.signal,
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
               developerTests,
+              startingHead,
             );
             if (options.developer)
-              guardDeveloperChanges(options.developer, config, tree.path, base);
+              guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
           } catch (error) {
             if (error instanceof EvalIntegrityError) await recordAttempt([], 'criteria_tampered');
             if (error instanceof EvalCriterionTerminationError) {
@@ -1446,8 +1590,9 @@ async function runWorkerExecution(
               base,
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
               options.developer
-                ? guardDeveloperChanges(options.developer, config, tree.path, base)
+                ? guardDeveloperChanges(options.developer, config, tree.path, base, startingHead)
                 : undefined,
+              startingHead,
             );
             escalatedFrom = tierSelection!.tier!;
             attempt++;
@@ -1491,11 +1636,16 @@ async function runWorkerExecution(
       );
     if (
       git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch ||
-      git(tree.path, ['rev-parse', 'HEAD']) !== base
+      git(tree.path, ['rev-parse', 'HEAD']) !== startingHead
     )
       throw new Error('Execution changed Git HEAD; refusing runtime commit');
-    if (options.developer) guardDeveloperChanges(options.developer, config, tree.path, base);
+    if (options.developer)
+      guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
     if (!git(tree.path, ['status', '--porcelain', '--untracked-files=all'])) {
+      if (options.developer && workStore!.getTask(args.task)!.review_reports?.length)
+        throw new WorkerExecutionError(
+          'Developer rework produced no changes; findings remain unresolved',
+        );
       audit('protected_paths_checked', { detail: 'No changes' });
       telemetryStatus = 'ok';
       audit('no_changes');
@@ -1503,7 +1653,8 @@ async function runWorkerExecution(
       return { branch: tree.branch, commit: null, stat: '' };
     }
     git(tree.path, ['add', '--all']);
-    if (options.developer) guardDeveloperChanges(options.developer, config, tree.path, base);
+    if (options.developer)
+      guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
     if (options.requirements || options.architect) {
       const allowed = designFiles ? [...designFiles.keys()] : [featureDoc!];
       guardRequirementsWrites(tree.path, requirementsBefore!, allowed);
@@ -1567,7 +1718,7 @@ async function runWorkerExecution(
     try {
       commit = options.developer
         ? await workStore!.withIdempotency(
-            `developer-commit/${args.task}/${options.developer.designSha}`,
+            `developer-commit/${args.task}/${options.developer.designSha}${workStore!.getTask(args.task)!.review_reports?.length ? `/rework-${workStore!.getTask(args.task)!.attempt}` : ''}`,
             async () => {
               lifecycle!.assertOwned();
               const sha = commitChanges();

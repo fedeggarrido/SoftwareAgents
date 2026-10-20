@@ -115,6 +115,8 @@ const migrations = [
     FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
   ) STRICT;`,
   `ALTER TABLE tasks ADD COLUMN review_ref TEXT;`,
+  `ALTER TABLE tasks ADD COLUMN review_reports TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE executions ADD COLUMN agent_role TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

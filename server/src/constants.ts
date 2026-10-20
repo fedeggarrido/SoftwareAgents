@@ -244,3 +244,5 @@ export const CLAUDE_OAUTH_REFRESH_CONTENTION = 'another Claude Code process is r
 /** Validation errors kept in an Architect/Requirements audit entry (count, chars each). */
 export const VALIDATION_AUDIT_MAX_ERRORS = 20;
 export const VALIDATION_AUDIT_MAX_ERROR_CHARS = 300;
+/** Maximum automatic Developer reworks requested by Reviewer. */
+export const REVIEW_MAX_REWORK_ROUNDS = 3;

@@ -26,6 +26,8 @@ export interface DeveloperRequest {
   designSha: string;
   design: string;
   task: DagTask;
+  reviewFindings?: import('../../core/src/reviewReport.js').ReviewReport['findings'];
+  reworkAttempt?: number;
 }
 
 /** Re-read registered artifacts and immutable declarations, never trust caller-supplied scope. */
@@ -35,6 +37,7 @@ export function developerRequest(
   key: string,
   taskKey?: string,
   owner?: string,
+  reviewing = false,
 ): DeveloperRequest {
   const feature = store.getFeature(key);
   if (feature?.status !== 'approved') throw new Error('Developer requires an approved FeatureSpec');
@@ -83,6 +86,7 @@ export function developerRequest(
     );
   const record = store.getTask(task.key)!;
   if (
+    !reviewing &&
     record.review_ref &&
     (record.lease_owner || !['REVIEW', 'QA', 'DONE'].includes(record.status))
   )
@@ -98,6 +102,12 @@ export function developerRequest(
     designSha: design.git_sha,
     design: readTaskInput(source, design.doc_path),
     task,
+    ...(record.review_reports?.length
+      ? {
+          reviewFindings: record.review_reports.at(-1)!.report.findings,
+          reworkAttempt: record.attempt,
+        }
+      : {}),
   };
 }
 
@@ -112,9 +122,15 @@ export function guardDeveloperChanges(
   config: ProjectConfig,
   tree: string,
   base: string,
+  expectedHead = base,
 ): string[] {
   assertEvalIntegrity(
-    { baseCommit: base, protectedPaths: config.operator.protectedPaths, allowTestChanges: true },
+    {
+      baseCommit: base,
+      expectedHead,
+      protectedPaths: config.operator.protectedPaths,
+      allowTestChanges: true,
+    },
     tree,
   );
   const files = evalChangedFiles(tree, base);

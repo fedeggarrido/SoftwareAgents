@@ -12,7 +12,7 @@ export const TASK_TRANSITIONS = {
     'WAITING_QUOTA',
     'CANCELLED',
   ],
-  REVIEW: ['QA', 'RUNNING', 'BLOCKED', 'FAILED_FINAL', 'WAITING_HUMAN', 'CANCELLED'],
+  REVIEW: ['QA', 'READY', 'RUNNING', 'BLOCKED', 'FAILED_FINAL', 'WAITING_HUMAN', 'CANCELLED'],
   QA: ['DONE', 'RUNNING', 'BLOCKED', 'FAILED_FINAL', 'WAITING_HUMAN', 'CANCELLED'],
   BLOCKED: ['READY', 'FAILED_FINAL', 'CANCELLED'],
   FAILED_RETRYABLE: ['READY', 'FAILED_FINAL', 'CANCELLED'],
@@ -41,7 +41,7 @@ export function canStart(task: {
 }
 
 export function attemptIncrement(from: TaskStatus, to: TaskStatus): number {
-  return (from === 'REVIEW' || from === 'QA') && to === 'RUNNING' ? 1 : 0;
+  return (from === 'REVIEW' || from === 'QA') && (to === 'RUNNING' || to === 'READY') ? 1 : 0;
 }
 
 export class TaskVersionConflictError extends Error {

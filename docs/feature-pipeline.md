@@ -1,4 +1,4 @@
-# Feature pipeline: Requirements, Architect y Developer (SA-041–043)
+# Feature pipeline: Requirements, Architect, Developer y Reviewer (SA-041–044)
 
 El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
@@ -370,6 +370,77 @@ main intacto y ausencia de push por defecto; repite el mismo comando y confirma
 el mismo SHA y número de Executions. La QA automática solo usa CLIs falsas y
 repositorios/remotos Git desechables.
 
+## Reviewer: revisión cruzada → QA o rework (SA-044)
+
+Desde el checkout principal actualizado, construir `node esbuild.js`. Claude hace
+la prueba real sobre la tarea y rama de Developer ya registradas:
+
+```powershell
+node dist/cli.mjs feature review FEAT-001 --task FEAT-001-T01
+node dist/cli.mjs feature show FEAT-001 --json
+```
+
+Equivalente instalado: `pixel-agents feature review FEAT-001 --task FEAT-001-T01`.
+La rama esperada es `sa/FEAT-001-T01-developer`. Sin `--task`, toma la primera
+tarea del Feature en REVIEW con `review_ref`. Requiere FeatureSpec aprobado,
+diseño y declaración inmutables, base confiable, rama y HEAD iguales al SHA
+registrado y worktree limpio. Revalida antes de lanzar y antes de persistir.
+Un SHA cambiado se rechaza; nunca se revisa silenciosamente otro commit.
+
+El runtime calcula `review_ref.base..review_ref.sha`, sin external diff ni
+textconv, con un máximo de 1 MiB; si lo excede, falla sin truncar el contexto.
+El Reviewer recibe el diff, los archivos afectados, el FeatureSpec aprobado,
+el diseño y la tarea con sus AC y changeZones como datos no confiables. Reutiliza
+el worker, leases/recuperación, selección SA-036/090/092, cuota, slots,
+revalidación, `agentCompiler` y contención. El rol es `reviewer`, perfil
+`read_only`: Claude solo Read/Glob/Grep y Codex sandbox `read-only`, sin
+conectores, red ni delegación. La guardia de hashes de Requirements detecta
+escrituras incluso en ignorados; falla conservando evidencia. No acredita un
+sandbox de SO para Claude ni evita escrituras transitorias de procesos ajenos.
+
+Agent ≠ Model: entre candidatos permitidos del nivel/capacidad seleccionado,
+prefiere un **executor distinto** al del último intento del Developer cuando
+su sonda está disponible. Si no hay alternativa disponible y autorizada, usa
+el mismo; la razón `cross_executor` o
+`same_executor_no_available_alternative`, ambos executors y el rol quedan en
+auditoría, `executions.selection_reason` y telemetría sin contenido. Los gates
+normales de cuota/concurrencia se mantienen; una espera no habilita un fallback
+por cuota. No aplica la cascada SA-103 al Reviewer: sus verificadores de
+implementación no validan un informe. El Developer conserva su cascada durante
+el rework, preservando los commits anteriores y la base original del diff.
+
+La salida pasa por `extractJsonObject` y el esquema
+`core/schemas/review-report.schema.json`. `request_changes` exige un finding
+`blocker` o `major`; `approve` no los admite. Cada finding incluye fichero del
+diff, severidad, resumen, sugerencia y línea positiva opcional. `acCoverage`
+opcional solo admite AC de esa tarea y sin duplicados. Un informe inválido
+recibe exactamente un reintento con errores y nueva Execution/admisión; el
+segundo fallo abre una Human Decision y conserva `review_ref`.
+
+Un rechazo válido guarda el informe, limpia `review_ref` y pasa a READY con
+`attempt + 1`. El siguiente `feature develop` recibe `reviewFindings` y
+`reworkAttempt`, reutiliza la misma rama/worktree y registra un nuevo commit y
+SHA. `REVIEW_MAX_REWORK_ROUNDS = 3`: permite tres reworks automáticos; el cuarto
+rechazo guarda el informe y abre una Human Decision en WAITING_HUMAN sin otro
+incremento. Informe, transición y decisión por tope son una transacción SQLite.
+Una aprobación pasa a **QA**, estado existente; la ejecución automática de QA
+sigue pendiente. Nunca declara DONE ni integra.
+
+WorkStore v11 añade `tasks.review_reports` (histórico con informe, `review_ref`,
+Execution y ambos executors) y `executions.agent_role`. El histórico aparece en
+`feature show` tanto en texto como JSON; sustituye el comentario de PR con
+auditoría `review_report_pending`/`review_report_persisted`. Actualizar y reiniciar
+todos los escritores antes de abrir v11 según
+[task CLI](task-cli.md#migraciones-de-la-base-compartida). Git y auditoría no
+comparten transacción con SQLite: si falta la confirmación de auditoría,
+inspeccionar WorkStore antes de reintentar. No se usa `gh`, ni PR, push o merge.
+
+Claude comprueba en real el cambio de executor si ambos están autorizados y
+disponibles, flags de solo lectura, informe y traza, QA tras aprobación y, ante
+rechazo, los findings en el siguiente `feature develop`. La prueba automatizada
+solo usa CLIs falsas y repositorios Git desechables; la prueba real corresponde
+a Claude antes de integrar.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |
@@ -377,7 +448,7 @@ repositorios/remotos Git desechables.
 | Requirements Analyst | SA-041: petición → FeatureSpec validado → aprobación humana                     |
 | Architect            | SA-042: FeatureSpec aprobado → TechnicalDesign y TaskDAG validados e importados |
 | Developer            | SA-043: una tarea READY → rama y commits con tests y `review_ref`               |
-| Reviewer             | Pendiente: revisión cruzada de los cambios                                      |
+| Reviewer             | SA-044: ReviewReport persistido, executor cruzado y rework acotado              |
 | QA                   | Pendiente: verificar criterios y pruebas reales antes de integrar               |
 
 El importador [task CLI](task-cli.md) usa `features/<FEAT-ID>.yaml` si existe;

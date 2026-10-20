@@ -13,6 +13,7 @@ import type {
   WorkSize,
   WorkType,
 } from '../../core/src/modelTier.js';
+import { claudeConfigEnvironment } from './claudeConfig.js';
 import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
 import { isProtectedEvalPath } from './evalTasks.js';
 import {
@@ -228,14 +229,18 @@ export function resolveClaudeBinary(binary = 'claude'): string {
 }
 const effortSupport = new Map<string, readonly string[]>();
 /** No prompt, no shell, no repository cwd; cache successes and failures per resolved binary. */
-export function claudeEffortSupported(binary = 'claude'): readonly string[] {
+export function claudeEffortSupported(binary = 'claude', configDir?: string): readonly string[] {
   binary = resolveClaudeBinary(binary);
-  const cached = effortSupport.get(binary);
+  const environment = claudeConfigEnvironment(configDir);
+  const cacheKey =
+    configDir === undefined ? binary : `${binary}\0${environment!.CLAUDE_CONFIG_DIR}`;
+  const cached = effortSupport.get(cacheKey);
   if (cached) return cached;
   let supported: readonly string[] = [];
   try {
     const help = execFileSync(binary, ['--help'], {
       cwd: os.tmpdir(),
+      ...(environment ? { env: { ...process.env, ...environment } } : {}),
       encoding: 'utf8',
       timeout: 3000,
       maxBuffer: 128 * 1024,
@@ -251,7 +256,7 @@ export function claudeEffortSupported(binary = 'claude'): readonly string[] {
   } catch {
     /* Unknown support fails closed, including on subsequent uses. */
   }
-  effortSupport.set(binary, supported);
+  effortSupport.set(cacheKey, supported);
   return supported;
 }
 export function validateModelChoice(
@@ -310,6 +315,7 @@ export function validateModelTierSupport(
   input: TierInputs = {},
   allowed: readonly string[] = ['claude', 'codex'],
   executorLevels?: SelectionSnapshot['executorLevels'],
+  configDir?: string,
 ): void {
   const reachable = new Set<ModelTier>();
   if (agent && rule) {
@@ -336,7 +342,7 @@ export function validateModelTierSupport(
         candidate.effort !== undefined
       )
         try {
-          validateModelChoice(candidate, 'claude', claudeEffortSupported(binary));
+          validateModelChoice(candidate, 'claude', claudeEffortSupported(binary, configDir));
         } catch (error) {
           throw new ModelTierConfigError(
             `Invalid Operator modelTiers: ${(error as Error).message} (${resolveClaudeBinary(binary)})`,

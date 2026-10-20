@@ -1,5 +1,25 @@
 # Selección, niveles de modelo y quota gate (SA-036, SA-084, SA-QA-5)
 
+## Perfil opcional de Claude para el worker
+
+Por defecto se mantiene el perfil habitual. Para aislar el refresco OAuth de las
+sesiones interactivas, el Operator puede definir en
+`projects.<id>.executors.claude.configDir` de `~/.pixel-agents/config.json` una
+ruta absoluta a un directorio existente dentro de su perfil de usuario. Las
+rutas relativas, inexistentes, el propio home y los enlaces que escapan de él
+rechazan ese Project con diagnóstico; se validan con `pathGuard`.
+
+Ejemplo: `"executors": { "claude": { "configDir": "C:/Users/operador/.claude-worker" } }`.
+El operador crea ese directorio y hace login una vez:
+
+```powershell
+$env:CLAUDE_CONFIG_DIR="<ruta>"; claude auth login
+```
+
+El worker pasa `CLAUDE_CONFIG_DIR` al proceso supervisado y a todas las sondas
+Claude SA-089, incluido `claude auth status --json`. La caché de disponibilidad
+distingue perfiles. El runtime no crea el directorio ni copia credenciales.
+
 ## Ciclo de `worker run` (SA-039)
 
 `pixel-agents worker run --task SA-### [--executor claude|codex] [--brief archivo]`

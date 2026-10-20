@@ -48,6 +48,8 @@ export interface ProjectOperatorConfig {
   /** Additive protected paths/globs from Operator config only. */
   protectedPaths?: string[];
   binaryPaths?: Record<string, string>;
+  /** Optional Operator-owned Claude profile shared by worker launches and probes. */
+  executors?: { claude?: { configDir?: string } };
   /** Minimum remaining quota percentages, by executor. */
   quotaThresholds?: Record<string, number>;
   concurrency?: { maxExecutions?: number; perExecutor?: Record<string, number> };

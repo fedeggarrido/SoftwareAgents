@@ -9,7 +9,11 @@ process.stdin.on('end', () => {
     executor === 'codex' ? prompt.split('UNTRUSTED_CONTEXT_JSON\n')[1] : prompt,
   );
   const data = JSON.parse(context.task.brief);
-  fs.appendFileSync(log, JSON.stringify({ args, data, cwd: process.cwd() }) + '\n');
+  fs.appendFileSync(
+    log,
+    JSON.stringify({ args, data, cwd: process.cwd(), configDir: process.env.CLAUDE_CONFIG_DIR }) +
+      '\n',
+  );
   const report = {
     verdict: mode === 'reject' ? 'request_changes' : 'approve',
     findings:
@@ -37,6 +41,20 @@ process.stdin.on('end', () => {
     );
   const output = '```json\n' + JSON.stringify(report) + '\n```';
   const emit = (value) => console.log(JSON.stringify(value));
+  if (mode.startsWith('fail-')) {
+    const reason = {
+      'fail-oauth': 'another Claude Code process is refreshing it',
+      'fail-auth': 'not logged in',
+      'fail-spawn': 'spawn ENOENT',
+      'fail-timeout': 'timeout',
+      'fail-quota': 'usage limit reached',
+    }[mode];
+    if (mode === 'fail-quota')
+      emit({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } });
+    emit({ type: 'result', subtype: 'error', result: reason + ' SECRET_OUTPUT', is_error: true });
+    process.exitCode = 1;
+    return;
+  }
   if (executor === 'claude') {
     emit({ type: 'system', subtype: 'init', session_id: 'fake-reviewer', tools: ['Read'] });
     emit({ type: 'result', subtype: 'success', result: output, is_error: false });

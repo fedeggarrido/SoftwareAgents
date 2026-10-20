@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { claudeConfigEnvironment } from './claudeConfig.js';
 import {
   CONFIG_FILE_MODE,
   CONFIG_FILE_NAME,
@@ -175,6 +176,17 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     },
     protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
     binaryPaths: numberMap(nonEmptyString),
+    executors: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        claude: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { configDir: nonEmptyString },
+        },
+      },
+    },
     quotaThresholds: numberMap({ ...nonNegativeNumber, maximum: 100 }),
     concurrency: {
       type: 'object',
@@ -260,6 +272,7 @@ export function parseProjects(raw: unknown): Record<string, ProjectOperatorConfi
         throw new ModelTierConfigError(
           'Invalid Operator executorLevels: modelTiers catalog is required',
         );
+      claudeConfigEnvironment(policy.executors?.claude?.configDir);
       out[id] = structuredClone(policy);
     } catch (error) {
       const diagnostic = error as Error;

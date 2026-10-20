@@ -310,6 +310,7 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
         args,
         snapshot.allowedExecutors,
         snapshot.executorLevels,
+        config.operator.executors?.claude?.configDir,
       );
     const selected = tierPolicy
       ? selectModelTier(agent, tierPolicy.rule ?? loadTierRule(cwd), tierPolicy, args, snapshot)

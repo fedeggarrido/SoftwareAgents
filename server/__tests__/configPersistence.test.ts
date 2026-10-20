@@ -48,6 +48,45 @@ describe('configPersistence: areas', () => {
   });
 
   // ── parseAreaMappings ────────────────────────────────────────
+  it('validates the optional Claude worker profile and preserves rejected Projects on save', () => {
+    const profile = path.join(tempHome, 'worker-claude');
+    fs.mkdirSync(profile);
+    const policy = { autonomyLevel: 'A1', allowedExecutors: ['claude'] };
+    expect(parseProjects({ test: policy }).test).toEqual(policy);
+    const configured = { ...policy, executors: { claude: { configDir: profile } } };
+    expect(parseProjects({ test: configured }).test).toEqual(configured);
+    const plainFile = path.join(tempHome, 'plain-file');
+    fs.writeFileSync(plainFile, 'not a directory');
+    const file = path.join(tempHome, '.pixel-agents/config.json');
+    for (const configDir of [
+      'relative',
+      tempHome,
+      path.dirname(tempHome),
+      path.join(tempHome, 'missing'),
+      plainFile,
+    ]) {
+      const rejected = { ...policy, executors: { claude: { configDir } } };
+      const projects = parseProjects({ test: rejected, other: policy });
+      expect(projects.test).toBeUndefined();
+      expect(projects.other).toEqual(policy);
+      expect(projectConfigError(projects, 'test')?.message).toContain('executors.claude.configDir');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ projects: { test: rejected } }));
+      setHooksEnabled('claude', false);
+      expect(JSON.parse(fs.readFileSync(file, 'utf8')).projects.test).toEqual(rejected);
+    }
+    const junction = path.join(tempHome, 'escape');
+    fs.symlinkSync(os.tmpdir(), junction, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const rejected = parseProjects({
+        test: { ...policy, executors: { claude: { configDir: junction } } },
+      });
+      expect(rejected.test).toBeUndefined();
+      expect(projectConfigError(rejected, 'test')?.message).toContain('executors.claude.configDir');
+    } finally {
+      fs.unlinkSync(junction);
+    }
+  });
   it('rejects only the invalid project, retains its error and preserves it on settings writes', () => {
     fs.mkdirSync(path.join(tempHome, '.pixel-agents'));
     fs.writeFileSync(

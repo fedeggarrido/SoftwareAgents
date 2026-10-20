@@ -14,6 +14,7 @@ import {
   WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
 import { resolveInside } from '../pathGuard.js';
+import { isFailedReview, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
 import { taskDagDeclaration, taskDeclaration } from '../taskDag.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
@@ -266,6 +267,19 @@ class SqliteWorkStore implements WorkStore {
   }
 
   private failLease(task: TaskRecord, reason: string, actor: string, token: string): TaskRecord {
+    // A registered Developer result survives loss of the read-only Reviewer lease.
+    // terminate() has confirmed closure before this transaction can release it.
+    if (task.review_ref)
+      return this.change(
+        task.key,
+        task.version,
+        'REVIEW',
+        `${REVIEW_FAILURE_PREFIX}category=lease; exit_code=unknown`,
+        actor,
+        task.attempt,
+        undefined,
+        token,
+      );
     if (this.requirementsGate(task.key)) {
       this.decisionTask(task, 'WAITING_HUMAN', actor, reason, token);
       return this.getTask(task.key)!;
@@ -403,7 +417,8 @@ class SqliteWorkStore implements WorkStore {
       if (revision) this.assertRequirementsRevision(taskId, revision.gitSha, revision.decisionId);
       if (
         reviewOnly &&
-        (!task.review_ref || !['REVIEW', 'WAITING_QUOTA', 'FAILED_RETRYABLE'].includes(task.status))
+        (!task.review_ref ||
+          !(['REVIEW', 'WAITING_QUOTA'].includes(task.status) || isFailedReview(this, task)))
       )
         throw new Error('Reviewer requires a registered review_ref');
       this.assertNoDecisionGate(taskId, revision?.decisionId);

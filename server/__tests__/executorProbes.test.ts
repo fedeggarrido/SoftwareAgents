@@ -23,6 +23,12 @@ import {
 } from '../src/executorProbes.js';
 import { buildExecutorState } from '../src/executorState.js';
 
+vi.setConfig({ testTimeout: 30_000 });
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));
+
 // Fixed CLI help fixtures: independent of the catalog being checked.
 const claudeHelp = `Usage: claude [options]
 Options:
@@ -278,6 +284,14 @@ describe('probeExecutor', () => {
 });
 
 describe('runProbe (real processes)', () => {
+  it('passes the configured environment into the child', async () => {
+    const run = await runProbe(
+      process.execPath,
+      ['-e', 'process.stdout.write(process.env.CLAUDE_CONFIG_DIR)'],
+      { CLAUDE_CONFIG_DIR: 'isolated-test-profile' },
+    );
+    expect(run).toEqual({ code: 0, output: 'isolated-test-profile' });
+  });
   it('reports an executable that does not exist as missing', async () => {
     expect(await runProbe('/nonexistent/pixel-agents-probe', ['--version'])).toEqual({
       code: 'missing',
@@ -357,6 +371,45 @@ describe('ExecutorMonitor', () => {
   const operator = {
     binaryPaths: { claude: process.execPath, codex: process.execPath },
   } satisfies Pick<ProjectOperatorConfig, 'binaryPaths'>;
+  it('isolates auth probes and cache entries by Claude profile, leaving Codex unchanged', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-profile-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    const a = path.join(home, 'a');
+    const b = path.join(home, 'b');
+    fs.mkdirSync(a);
+    fs.mkdirSync(b);
+    const run = vi.fn(async (_file: string, args: readonly string[], _env?: NodeJS.ProcessEnv) =>
+      ok(
+        args[0] === '--version'
+          ? '2.1.300'
+          : args[0] === '--help'
+            ? claudeHelp
+            : '{"loggedIn":true}',
+      ),
+    );
+    const monitor = new ExecutorMonitor(run);
+    try {
+      for (const configDir of [a, b]) {
+        const configured = { ...operator, executors: { claude: { configDir } } };
+        expect(monitor.observation('claude', configured)).toBeUndefined();
+        await monitor.refresh('claude', configured);
+        expect(monitor.observation('claude', configured)?.authentication).toBe('ready');
+      }
+      expect(run).toHaveBeenCalledTimes(6);
+      expect(run.mock.calls[2]).toEqual([
+        process.execPath,
+        ['auth', 'status', '--json'],
+        { CLAUDE_CONFIG_DIR: fs.realpathSync.native(a) },
+      ]);
+      expect(run.mock.calls[5][2]).toEqual({ CLAUDE_CONFIG_DIR: fs.realpathSync.native(b) });
+      run.mockClear();
+      await monitor.refresh('claude', operator);
+      expect(run.mock.calls.every((call) => call[2] === undefined)).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 
   it('dedupes concurrent probes per binary and backs off on failure up to the cap', async () => {
     let now = 1_000_000;

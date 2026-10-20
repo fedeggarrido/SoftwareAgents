@@ -107,6 +107,7 @@ import {
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
+import { REVIEW_FAILURE_PREFIX } from './reviewAttempts.js';
 import {
   preferCrossExecutor,
   reviewerBrief,
@@ -401,8 +402,14 @@ export async function runWorker(
         !!options.reviewer,
       );
     const result = await runWorkerExecution(args, options, lifecycle, config);
-    if (result.quotaDecision?.status === 'wait') await lifecycle.wait(result.quotaDecision);
-    else if (!result.availabilityBlock && !result.policyDecision)
+    if (result.quotaDecision?.status === 'wait') {
+      if (options.reviewer)
+        await lifecycle.finish(
+          'REVIEW',
+          `${REVIEW_FAILURE_PREFIX}category=${result.quotaDecision.cause ?? 'quota'}; exit_code=unknown`,
+        );
+      else await lifecycle.wait(result.quotaDecision);
+    } else if (!result.availabilityBlock && !result.policyDecision)
       await lifecycle.finish(
         'REVIEW',
         result.commit ? `Runtime commit ${result.commit}` : 'Execution finished without changes',
@@ -421,10 +428,11 @@ export async function runWorker(
     return result;
   } catch (error) {
     await lifecycle.finish(
-      'FAILED_RETRYABLE',
-      error instanceof WorkerExecutionError
-        ? error.message
-        : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`,
+      options.reviewer ? 'REVIEW' : 'FAILED_RETRYABLE',
+      (options.reviewer ? REVIEW_FAILURE_PREFIX : '') +
+        (error instanceof WorkerExecutionError
+          ? error.message
+          : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
     );
     throw error;
   } finally {
@@ -582,6 +590,20 @@ async function runWorkerExecution(
     let decisionId: string | null = null;
     const cause = blockedCause(gate, found);
     audit('availability_blocked', { blockedCause: cause });
+    if (options.reviewer) {
+      await lifecycle?.finish(
+        'REVIEW',
+        `${REVIEW_FAILURE_PREFIX}category=${found.code}; exit_code=unknown`,
+      );
+      process.exitCode = 3;
+      return {
+        branch: '',
+        commit: null,
+        stat: '',
+        availabilityBlock: { code: found.code, decisionId },
+        blockedCause: cause,
+      };
+    }
     if (options.evaluation) {
       return {
         branch: '',
@@ -597,8 +619,7 @@ async function runWorkerExecution(
       const store =
         open ?? (await openWorkStore({ repositoryPath: cwd, projectId: config.project.id }));
       try {
-        if (options.reviewer) await lifecycle?.finish('REVIEW', found.code);
-        else await lifecycle?.idleForDecision(found.code);
+        await lifecycle?.idleForDecision(found.code);
         const result = await escalateUnavailable(
           store,
           config.operator.autonomyLevel,
@@ -853,6 +874,7 @@ async function runWorkerExecution(
                 inputs,
                 probed.filter((id) => !launchBlock(availability?.[id], nowSeconds())),
                 config.operator.executorLevels,
+                config.operator.executors?.claude?.configDir,
               );
               return admitModelTier(
                 spec,
@@ -1218,6 +1240,7 @@ async function runWorkerExecution(
               runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
             })
           : new ClaudeCliExecutor({
+              configDir: config.operator.executors?.claude?.configDir,
               binary: config.operator.binaryPaths?.claude ?? 'claude',
               binaryArgs: options.binaryArgs,
               runtimeDirectory: resolveInside(common, 'softwareagents/runtime'),
@@ -1508,11 +1531,11 @@ async function runWorkerExecution(
             }
             if (options.reviewer) {
               // Preserve the reviewed SHA and release the lease before opening the existing human gate.
-              await lifecycle!.finish('REVIEW', 'ReviewReport invalid after two attempts');
-              await workStore!.openOrJoinIdleDecision(
-                reviewerDecision(args.task, 'invalid_report'),
+              await lifecycle!.finish(
+                'REVIEW',
+                `${REVIEW_FAILURE_PREFIX}category=invalid_report; exit_code=0`,
               );
-              telemetryStatus = 'require_human';
+              telemetryStatus = 'error';
               process.exitCode = 3;
               return { branch: tree.branch, commit: null, stat: '' };
             }

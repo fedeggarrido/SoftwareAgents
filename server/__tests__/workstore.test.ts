@@ -40,6 +40,58 @@ describe('WorkStore (real SQLite)', () => {
     const { DatabaseSync } = await import('node:sqlite');
     return new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
   }
+  it('does not adopt a FAILED_RETRYABLE Developer as a failed Reviewer', async () => {
+    const store = await open();
+    store.createTask({ key: 'developer-failed', type: 'code', status: 'FAILED_RETRYABLE' });
+    const db = await inspect();
+    db.prepare('UPDATE tasks SET review_ref = ? WHERE key = ?').run(
+      JSON.stringify({ branch: 'branch', sha: 'a'.repeat(40), base: 'b'.repeat(40) }),
+      'developer-failed',
+    );
+    db.close();
+    await expect(
+      store.claimReview('developer-failed', store.getTask('developer-failed')!.version, 'reviewer'),
+    ).rejects.toThrow('review_ref');
+    expect(store.getTask('developer-failed')!.status).toBe('FAILED_RETRYABLE');
+  });
+  it.each([0, 2, 3])(
+    'recovers an expired Reviewer lease without consuming attempt %i',
+    async (attempt) => {
+      const store = await open();
+      store.createTask({ key: 'review-task', type: 'code', status: 'READY', attempt });
+      const claimed = await store.claim('review-task', 'developer');
+      await store.setTaskWorktree('review-task', 'developer', 'sa/review-task-developer', root);
+      const ref = { branch: 'sa/review-task-developer', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+      await store.setTaskReview('review-task', 'developer', ref);
+      const running = await store.transition(
+        'review-task',
+        claimed.version,
+        'RUNNING',
+        '',
+        'developer',
+      );
+      const ready = await store.transition(
+        'review-task',
+        running.version,
+        'REVIEW',
+        '',
+        'developer',
+      );
+      await store.claimReview('review-task', ready.version, 'reviewer');
+      const db = await inspect();
+      db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+        '2000-01-01T00:00:00.000Z',
+        'review-task',
+      );
+      db.close();
+      expect(await store.recoverExpiredLeases()).toMatchObject([
+        { status: 'REVIEW', attempt, review_ref: ref, lease_owner: null },
+      ]);
+      expect(store.listDomainEvents('review-task').at(-1)?.reason).toContain('category=lease');
+      await store.claimReview('review-task', store.getTask('review-task')!.version, 'retry');
+      expect(store.getTask('review-task')!.attempt).toBe(attempt);
+    },
+  );
   it('rolls back Architect registration, DAG import and decision closure together', async () => {
     const store = await open();
     store.createFeature({

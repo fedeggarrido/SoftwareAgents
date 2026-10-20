@@ -21,6 +21,11 @@ import {
 import { quotaGate } from '../src/quotaGate.js';
 
 vi.mock('child_process', () => ({ execFileSync: vi.fn() }));
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));
+vi.setConfig({ testTimeout: 30_000 });
 
 export const rule: TierRule = parse(
   fs.readFileSync(
@@ -392,6 +397,36 @@ it('detects installed Claude effort support with bounded help only; missing flag
     throw new Error('test timeout');
   });
   expect(claudeEffortSupported('failed-cli')).toEqual([]);
+});
+
+it('uses the optional worker profile for effort probes and isolates its cache', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'effort-profile-'));
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+  vi.mocked(execFileSync).mockReturnValue('--effort <level> Effort level (low, high)');
+  try {
+    for (const name of ['a', 'b']) {
+      const configDir = path.join(home, name);
+      fs.mkdirSync(configDir);
+      expect(claudeEffortSupported('profile-test-cli', configDir)).toEqual(['low', 'high']);
+      expect(execFileSync).toHaveBeenLastCalledWith(
+        'profile-test-cli',
+        ['--help'],
+        expect.objectContaining({
+          env: expect.objectContaining({ CLAUDE_CONFIG_DIR: fs.realpathSync.native(configDir) }),
+        }),
+      );
+    }
+    vi.mocked(execFileSync).mockClear();
+    expect(claudeEffortSupported('profile-test-cli', path.join(home, 'a'))).toEqual([
+      'low',
+      'high',
+    ]);
+    expect(execFileSync).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 it('defaults absent fallback to implementation/M and validates declared fallback', () => {

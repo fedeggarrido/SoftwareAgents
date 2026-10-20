@@ -14,6 +14,7 @@ import {
   requirementsDecisionContext,
   requirementsDocPath,
 } from '../requirements.js';
+import { lastReviewFailure } from '../reviewAttempts.js';
 import { reviewerRequest } from '../reviewer.js';
 import { runWorker, type WorkerOptions } from '../worker.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
@@ -280,7 +281,10 @@ export async function runFeatureCommand(
         ...feature,
         ...document,
         design: store.getDesign(key) ?? null,
-        tasks: store.listTasks().filter((task) => task.feature_key === key),
+        tasks: store
+          .listTasks()
+          .filter((task) => task.feature_key === key)
+          .map((task) => ({ ...task, last_review_failure: lastReviewFailure(store!, task) })),
         decisions: store
           .listDecisions()
           .filter(
@@ -293,7 +297,7 @@ export async function runFeatureCommand(
       log(
         rest[0] === '--json'
           ? JSON.stringify(result, null, 2)
-          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports }) => ({ key, status, review_ref, review_reports })))}`,
+          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports, last_review_failure }) => ({ key, status, review_ref, review_reports, last_review_failure })))}`,
       );
     }
   } catch (error) {

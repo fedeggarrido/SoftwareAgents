@@ -9,6 +9,7 @@ import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { type DeveloperRequest, developerRequest } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executorSelection.js';
+import { isFailedReview } from './reviewAttempts.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
@@ -37,7 +38,9 @@ export function reviewerRequest(
         .listTasks()
         .find(
           (t) =>
-            t.feature_key === key && ['REVIEW', 'WAITING_QUOTA'].includes(t.status) && t.review_ref,
+            t.feature_key === key &&
+            t.review_ref &&
+            (['REVIEW', 'WAITING_QUOTA'].includes(t.status) || isFailedReview(store, t)),
         );
   const gates = record
     ? store.listDecisions().filter((d) => d.status !== 'answered' && d.blocks.includes(record.key))
@@ -53,7 +56,8 @@ export function reviewerRequest(
       ? true
       : !record.lease_owner &&
         (availabilityWait ||
-          ['REVIEW', 'WAITING_QUOTA', 'FAILED_RETRYABLE'].includes(record.status)))
+          ['REVIEW', 'WAITING_QUOTA'].includes(record.status) ||
+          isFailedReview(store, record)))
   )
     throw new Error('Reviewer requires a REVIEW task with a valid review_ref');
   // Same artifact/declaration validation as Developer; reviewer-owned runs may retain review_ref.

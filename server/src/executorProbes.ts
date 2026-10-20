@@ -5,6 +5,7 @@ import * as path from 'path';
 
 import type { ExecutorId } from '../../core/src/executorCatalog.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { claudeConfigEnvironment } from './claudeConfig.js';
 import {
   EXECUTOR_PROBE_MAX_BACKOFF_MS,
   EXECUTOR_PROBE_MAX_OUTPUT,
@@ -37,7 +38,11 @@ export interface ProbeRun {
   code: number | null | 'missing';
   output: string;
 }
-export type ProbeRunner = (file: string, args: readonly string[]) => Promise<ProbeRun>;
+export type ProbeRunner = (
+  file: string,
+  args: readonly string[],
+  environment?: NodeJS.ProcessEnv,
+) => Promise<ProbeRun>;
 
 /**
  * What each Executor must offer for its executor to launch it. Minimum versions are
@@ -87,7 +92,7 @@ export const EXECUTOR_PROBE_CATALOG: Record<
 };
 
 /** Default runner: spawn without a shell, nothing inherited on stdin, hard limits. */
-export const runProbe: ProbeRunner = (file, args) =>
+export const runProbe: ProbeRunner = (file, args, environment) =>
   new Promise((resolve) => {
     let output = '';
     let settled = false;
@@ -102,6 +107,7 @@ export const runProbe: ProbeRunner = (file, args) =>
     try {
       child = spawn(file, [...args], {
         cwd: os.tmpdir(),
+        env: environment ? { ...process.env, ...environment } : undefined,
         shell: false,
         windowsHide: true,
         detached: process.platform !== 'win32',
@@ -259,7 +265,7 @@ export async function probeExecutor(
  */
 export async function observeExecutors(
   executors: readonly ExecutorId[],
-  operator: Pick<ProjectOperatorConfig, 'binaryPaths'>,
+  operator: Pick<ProjectOperatorConfig, 'binaryPaths' | 'executors'>,
   run: ProbeRunner = runProbe,
   now: () => number = Date.now,
 ): Promise<Partial<Record<ExecutorId, ExecutorObservation>>> {
@@ -318,18 +324,24 @@ export class ExecutorMonitor {
     private readonly now: () => number = Date.now,
   ) {}
 
-  private key(executor: ExecutorId, operator: Pick<ProjectOperatorConfig, 'binaryPaths'>) {
-    return `${executor}\0${resolveExecutorBinary(executor, operator) ?? '<missing>'}`;
+  private key(
+    executor: ExecutorId,
+    operator: Pick<ProjectOperatorConfig, 'binaryPaths' | 'executors'>,
+  ) {
+    return `${executor}\0${resolveExecutorBinary(executor, operator) ?? '<missing>'}\0${executor === 'claude' ? (operator.executors?.claude?.configDir ?? '') : ''}`;
   }
 
   observation(
     executor: ExecutorId,
-    operator: Pick<ProjectOperatorConfig, 'binaryPaths'>,
+    operator: Pick<ProjectOperatorConfig, 'binaryPaths' | 'executors'>,
   ): ExecutorObservation | undefined {
     return this.entries.get(this.key(executor, operator))?.observation;
   }
 
-  isDue(executor: ExecutorId, operator: Pick<ProjectOperatorConfig, 'binaryPaths'>): boolean {
+  isDue(
+    executor: ExecutorId,
+    operator: Pick<ProjectOperatorConfig, 'binaryPaths' | 'executors'>,
+  ): boolean {
     const entry = this.entries.get(this.key(executor, operator));
     return !entry || (!entry.inflight && entry.nextAt <= this.now());
   }
@@ -337,7 +349,7 @@ export class ExecutorMonitor {
   /** Probe now; resolves true when the published observation changed. */
   refresh(
     executor: ExecutorId,
-    operator: Pick<ProjectOperatorConfig, 'binaryPaths'>,
+    operator: Pick<ProjectOperatorConfig, 'binaryPaths' | 'executors'>,
   ): Promise<boolean> {
     const key = this.key(executor, operator);
     const entry = this.entries.get(key) ?? { nextAt: 0, failures: 0 };
@@ -346,7 +358,13 @@ export class ExecutorMonitor {
     const binary = resolveExecutorBinary(executor, operator);
     entry.inflight = (async () => {
       const result: ProbeResult = binary
-        ? await probeExecutor(executor, binary, this.run).catch(() => ({
+        ? await probeExecutor(executor, binary, (file, args) => {
+            const environment =
+              executor === 'claude'
+                ? claudeConfigEnvironment(operator.executors?.claude?.configDir)
+                : undefined;
+            return environment ? this.run(file, args, environment) : this.run(file, args);
+          }).catch(() => ({
             installation: 'unknown' as const,
             version: null,
             authentication: 'unknown' as const,

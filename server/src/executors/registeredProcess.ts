@@ -42,18 +42,19 @@ export function spawnRegisteredProcess(
   cwd: string,
   register?: (pid: number) => void | Promise<void>,
   persistClose?: () => void | Promise<void>,
+  environment?: NodeJS.ProcessEnv,
 ): ChildProcess {
   if (!register)
     return spawn(binary, args, {
       cwd,
-      env: { ...process.env, [MANAGED_EXECUTION_ENV]: 'worker' },
+      env: { ...process.env, ...environment, [MANAGED_EXECUTION_ENV]: 'worker' },
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   const child = spawn(process.execPath, ['-e', supervisor, binary, ...args], {
     cwd,
-    env: { ...process.env, [MANAGED_EXECUTION_ENV]: 'worker' },
+    env: { ...process.env, ...environment, [MANAGED_EXECUTION_ENV]: 'worker' },
     windowsHide: true,
     // UV_PROCESS_DETACHED keeps Windows out of libuv's worker-owned
     // KILL_ON_JOB_CLOSE job. Keep windowsHide as well: no console window.

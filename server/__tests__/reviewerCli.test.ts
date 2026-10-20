@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { runFeatureCommand } from '../src/commands/feature.js';
+import { runTaskCommand } from '../src/commands/task.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { type ReviewerRequest, validateReview } from '../src/reviewer.js';
@@ -15,6 +16,10 @@ import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 vi.setConfig({ testTimeout: 30_000 });
+vi.mock('../src/constants.js', async (original) => ({
+  ...(await original<typeof import('../src/constants.js')>()),
+  CLAUDE_OAUTH_REFRESH_WAIT_MS: 1,
+}));
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
@@ -335,18 +340,141 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
       store.close();
     }
   });
-  it('opens a HumanDecision after two invalid reports without repeating on another call', async () => {
+  it('retains REVIEW after two invalid reports and allows another review', async () => {
     await prepare();
     await review('invalid');
-    await expect(review()).rejects.toThrow(/REVIEW/);
     const store = await storeFor();
     try {
-      expect(store.getTask(task)!.status).toBe('WAITING_HUMAN');
-      expect(store.listDecisions()).toHaveLength(1);
+      expect(store.getTask(task)!).toMatchObject({
+        status: 'REVIEW',
+        attempt: 0,
+        review_reports: [],
+      });
+      expect(store.listDecisions()).toHaveLength(0);
+      expect(store.listDomainEvents(task).at(-1)?.reason).toContain('category=invalid_report');
+      await review();
+      expect(store.getTask(task)!.status).toBe('QA');
     } finally {
       store.close();
     }
-    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(3);
+  });
+  it.each(['oauth', 'auth', 'spawn', 'timeout', 'quota'])(
+    'preserves the Developer result after Reviewer infrastructure failure: %s',
+    async (cause) => {
+      await prepare();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        if (cause === 'quota') await review(`fail-${cause}`);
+        else await expect(review(`fail-${cause}`)).rejects.toThrow();
+        expect(store.getTask(task)!).toMatchObject({
+          status: 'REVIEW',
+          attempt: before.attempt,
+          review_ref: before.review_ref,
+          review_reports: [],
+          lease_owner: null,
+        });
+        expect(store.listDecisions()).toHaveLength(0);
+        const category = cause === 'oauth' ? 'oauth_refresh_contention' : cause;
+        const log = vi.fn();
+        await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
+        const failed = JSON.parse(log.mock.calls[0][0]).tasks.find(
+          (t: { key: string }) => t.key === task,
+        ).last_review_failure;
+        expect(failed.reason).toContain(`category=${category}`);
+        log.mockClear();
+        await runTaskCommand(['list', '--json'], repo, log);
+        expect(
+          JSON.parse(log.mock.calls[0][0]).find((t: { key: string }) => t.key === task)
+            .last_review_failure,
+        ).toEqual(failed);
+        for (const command of [['list'], ['show', 'FEAT-001']]) {
+          log.mockClear();
+          if (command[0] === 'list') await runTaskCommand(command, repo, log);
+          else await runFeatureCommand(command, repo, log);
+          expect(log.mock.calls[0][0]).toContain(`category=${category}`);
+        }
+        const audit = fs.readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8');
+        expect(audit).toContain(`category=${category}`);
+        expect(audit).not.toContain('SECRET_OUTPUT');
+        await review();
+        expect(store.getTask(task)!).toMatchObject({ status: 'QA', attempt: before.attempt });
+      } finally {
+        store.close();
+      }
+    },
+    // oauth retries launch the fake CLI three times (~10 s each on Windows).
+    60_000,
+  );
+  it('resumes a legacy FAILED_RETRYABLE Reviewer by implicit feature review', async () => {
+    await prepare();
+    await expect(review('fail-auth')).rejects.toThrow();
+    const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+    db.prepare("UPDATE tasks SET status = 'FAILED_RETRYABLE', attempt = 2 WHERE key = ?").run(task);
+    db.close();
+    await run(['review', 'FEAT-001'], 'reviewer', 'approve');
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)!).toMatchObject({ status: 'QA', attempt: 2 });
+      expect(store.listDomainEvents(task)).toContainEqual(
+        expect.objectContaining({ from_status: 'FAILED_RETRYABLE', to_status: 'REVIEW' }),
+      );
+    } finally {
+      store.close();
+    }
+  });
+  it('leaves REVIEW without opening a Human Decision when auth probes block Reviewer', async () => {
+    await prepare();
+    const ready = readyProbeFor(EXECUTOR_PROBE_CATALOG);
+    await runFeatureCommand(['review', 'FEAT-001'], repo, () => {}, {
+      probe: (file, args) =>
+        args[0] === 'auth'
+          ? Promise.resolve({ code: 1, output: '{"loggedIn":false}' })
+          : ready(file, args),
+    });
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)!).toMatchObject({
+        status: 'REVIEW',
+        attempt: 0,
+        review_reports: [],
+      });
+      expect(store.getTask(task)!.review_ref).toBeTruthy();
+      expect(store.listDecisions()).toEqual([]);
+      expect(store.listDomainEvents(task).at(-1)?.reason).toContain('auth_required');
+      expect(fs.readFileSync(launches, 'utf8')).toBe('');
+      await review();
+      expect(store.getTask(task)!.status).toBe('QA');
+    } finally {
+      store.close();
+    }
+  });
+  it('passes the optional Claude profile to the supervised spawn and all worker probes', async () => {
+    await prepare();
+    const configDir = path.join(root, 'worker-profile');
+    fs.mkdirSync(configDir);
+    const file = path.join(root, '.pixel-agents/config.json');
+    const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+    config.projects.test.executors = { claude: { configDir } };
+    fs.writeFileSync(file, JSON.stringify(config));
+    const probe = vi.fn(readyProbeFor(EXECUTOR_PROBE_CATALOG));
+    await runFeatureCommand(['review', 'FEAT-001'], repo, () => {}, {
+      binaryArgs: [
+        path.join(__dirname, 'fixtures/fake-reviewer-cli.cjs'),
+        'claude',
+        'approve',
+        launches,
+      ],
+      probe,
+    });
+    expect(JSON.parse(fs.readFileSync(launches, 'utf8').trim()).configDir).toBe(
+      fs.realpathSync.native(configDir),
+    );
+    expect(probe.mock.calls.length).toBeGreaterThan(0);
+    for (const call of probe.mock.calls)
+      expect(call[2]).toEqual({ CLAUDE_CONFIG_DIR: fs.realpathSync.native(configDir) });
+    expect(probe.mock.calls.some((call) => call[1].join(' ') === 'auth status --json')).toBe(true);
   });
   it('persists the last report and opens an atomic HumanDecision beyond the rework round limit', async () => {
     await prepare();

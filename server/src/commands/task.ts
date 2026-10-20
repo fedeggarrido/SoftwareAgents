@@ -15,6 +15,7 @@ import {
 } from '../constants.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
+import { lastReviewFailure } from '../reviewAttempts.js';
 import { analyzeTaskDag, parseTaskDag, taskDagDeclaration } from '../taskDag.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import { isTaskStatus, type TaskStatus } from '../workstore/taskStateMachine.js';
@@ -109,6 +110,7 @@ function list(store: WorkStore, status?: TaskStatus) {
         task.status === 'WAITING_HUMAN' ? store.listDomainEvents(task.key).at(-1) : undefined;
       return {
         ...task,
+        last_review_failure: lastReviewFailure(store, task),
         pendingDependencies,
         resetsAt,
         blockingReasons: [
@@ -315,7 +317,7 @@ export async function runTaskCommand(
             tasks
               .map(
                 (task) =>
-                  `${textField(task.key)}\t${textField(task.status)}\towner=${textField(task.lease_owner ?? '-')}\texpires=${textField(task.lease_expires_at ?? '-')}\t${textField(task.blockingReasons.join('; '))}`,
+                  `${textField(task.key)}\t${textField(task.status)}\towner=${textField(task.lease_owner ?? '-')}\texpires=${textField(task.lease_expires_at ?? '-')}\t${textField(task.blockingReasons.join('; '))}${task.last_review_failure ? `\t${textField(task.last_review_failure.reason)}` : ''}`,
               )
               .join('\n') || 'No tasks',
           );

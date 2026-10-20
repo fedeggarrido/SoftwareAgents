@@ -415,7 +415,16 @@ La salida pasa por `extractJsonObject` y el esquema
 diff, severidad, resumen, sugerencia y línea positiva opcional. `acCoverage`
 opcional solo admite AC de esa tarea y sin duplicados. Un informe inválido
 recibe exactamente un reintento con errores y nueva Execution/admisión; el
-segundo fallo abre una Human Decision y conserva `review_ref`.
+segundo fallo devuelve la tarea a REVIEW y conserva `review_ref`.
+
+Un fallo de infraestructura del Reviewer (OAuth, auth, spawn, timeout, cuota o
+lease expirado) también conserva REVIEW, `review_ref` y `attempt`, sin consumir
+rondas de rework. Solo un ReviewReport válido puede rechazar o aprobar el trabajo.
+`task list` y `feature show` exponen `last_review_failure`, con motivo saneado y
+fecha del último intento fallido, persistido en los eventos y en auditoría del
+worker. `feature review` recupera también tareas históricas en FAILED_RETRYABLE
+con `review_ref` válido cuyo último intento era Reviewer; las devuelve a REVIEW
+al adquirir el claim, conservando las validaciones de SHA, base y worktree.
 
 Un rechazo válido guarda el informe, limpia `review_ref` y pasa a READY con
 `attempt + 1`. El siguiente `feature develop` recibe `reviewFindings` y

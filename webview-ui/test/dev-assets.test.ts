@@ -9,6 +9,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +25,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 async function startDevServer(base: string, port: number): Promise<ViteDevServer> {
   const server = await createServer({
     configFile: path.resolve(root, 'vite.config.ts'),
+    // Keep Vite's dependency cache out of the repo (QA integrity checks the tree).
+    cacheDir: mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-vite-cache-')),
     base,
     server: { port, strictPort: false },
     logLevel: 'silent',

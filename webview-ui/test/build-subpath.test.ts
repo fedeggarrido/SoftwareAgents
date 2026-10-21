@@ -23,6 +23,8 @@ async function buildSubpathPreview(base: string): Promise<string> {
   const outDir = mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-webview-build-'));
   await build({
     configFile: path.resolve(root, 'vite.config.ts'),
+    // Keep Vite's dependency cache out of the repo (QA integrity checks the tree).
+    cacheDir: mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-vite-cache-')),
     logLevel: 'silent',
     base,
     build: {

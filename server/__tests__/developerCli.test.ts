@@ -4,10 +4,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AuditLog } from '../src/auditLog.js';
 import { matchesChangeZone, validateChangeZone } from '../src/changeZones.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
+import { runTaskCommand } from '../src/commands/task.js';
 import {
+  ChangeZonesExceededError,
   type DeveloperRequest,
+  developerScope,
   guardDeveloperChanges,
   pushDeveloperBranch,
 } from '../src/developer.js';
@@ -102,7 +106,7 @@ beforeEach(() => {
   );
   fs.writeFileSync(
     path.join(repo, '.softwareagents/agents/model-policy.yaml'),
-    'high_reasoning:\n  - executor: claude\n  - executor: codex\nstandard_coding:\n  - executor: claude\n  - executor: codex\n',
+    'high_reasoning:\n  - executor: claude\n  - executor: codex\nstandard_coding:\n  - executor: claude\n  - executor: codex\nreview:\n  - executor: claude\n  - executor: codex\n',
   );
   fs.writeFileSync(path.join(repo, 'request.md'), 'Audit view');
   fs.writeFileSync(
@@ -120,6 +124,42 @@ afterEach(() => {
 });
 
 describe('Developer diff guard', () => {
+  it('documents exact mirror variants for literal source zones and reports all foreign paths escaped', () => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    const input = {
+      task: { changeZones: ['server/src/clientMessageHandler.ts'] },
+    } as DeveloperRequest;
+    expect(developerScope(input.task, repo).mirroredTestZones).toEqual([
+      'server/__tests__/clientMessageHandler*.test.ts',
+      'server/__tests__/clientMessageHandler*.spec.ts',
+    ]);
+    fs.mkdirSync(path.join(directory, 'server/__tests__'), { recursive: true });
+    const allowed = 'server/__tests__/clientMessageHandlerWs.test.ts';
+    fs.writeFileSync(
+      path.join(directory, allowed),
+      "it('mirror', () => expect(true).toBe(true));\n",
+    );
+    expect(guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base)).toEqual([
+      allowed,
+    ]);
+    const foreign = ['server/__tests__/auditLogWs.test.ts', 'other.txt'];
+    for (const file of foreign) fs.writeFileSync(path.join(directory, file), 'foreign');
+    try {
+      guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base);
+      expect.fail('foreign paths accepted');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ChangeZonesExceededError);
+      expect(
+        JSON.parse(
+          (error as ChangeZonesExceededError).diagnostic().slice('Developer failed: '.length),
+        ),
+      ).toEqual({ category: 'change_zones_exceeded', paths: [...foreign].sort() });
+    }
+    const error = new ChangeZonesExceededError(['server/__tests__/evil\n\u001b.test.ts']);
+    expect(error.diagnostic()).not.toContain('\n');
+    expect(error.diagnostic()).not.toContain('\u001b');
+  });
   it('matches literal zones, directories and zero or more globstar directories', () => {
     expect(matchesChangeZone('src/a.ts', 'src/**/*.ts')).toBe(true);
     expect(matchesChangeZone('src/nested/a.ts', 'src/**/*.ts')).toBe(true);
@@ -303,6 +343,158 @@ describe('Developer diff guard', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)', () => {
+  it('retries failed rework from its last valid commit, preserving review findings and the original base', async () => {
+    await prepare();
+    await develop();
+    const head = git(tree(), 'rev-parse', 'HEAD');
+    await run(['review', 'FEAT-001', '--task', task], 'reviewer', 'reject');
+    await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+    const store = await storeFor();
+    try {
+      const before = store.getTask(task)!;
+      expect(before.attempt).toBe(1);
+      expect(git(tree(), 'rev-parse', 'HEAD')).toBe(head);
+      await develop();
+      expect(store.getTask(task)).toMatchObject({
+        status: 'REVIEW',
+        attempt: 2,
+        review_ref: { base: git(repo, 'rev-parse', 'main') },
+      });
+      expect(git(tree(), 'rev-parse', 'HEAD^')).toBe(head);
+      const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim().split('\n').at(-1)!);
+      expect(JSON.parse(launch.context.task.brief)).toMatchObject({
+        reworkAttempt: 2,
+        reviewFindings: [{ summary: 'Missing pagination' }],
+        previousFailure: { category: 'change_zones_exceeded' },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each(['feature', 'design', 'dependencies'])(
+    'revalidates %s before discarding a failed attempt',
+    async (mode) => {
+      await prepare();
+      await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+      const store = await storeFor();
+      try {
+        if (mode === 'dependencies') store.addTaskDependency(task, 'FEAT-001-T02');
+        else {
+          const relative =
+            mode === 'feature' ? 'features/FEAT-001.yaml' : 'technical-designs/FEAT-001.md';
+          fs.appendFileSync(
+            path.join(repo, '.worktrees/FEAT-001/.softwareagents/brain', relative),
+            '\nchanged',
+          );
+        }
+        const executions = store.listExecutions();
+        await expect(develop()).rejects.toThrow(/SHA|declaration/);
+        expect(store.getTask(task)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+        expect(store.listExecutions()).toEqual(executions);
+        expect(fs.existsSync(path.join(tree(), 'outside.txt'))).toBe(true);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it('records scope failures and retries only explicitly, discarding dirty edits without following junctions', async () => {
+    await prepare();
+    const base = git(repo, 'rev-parse', 'main');
+    await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+    const store = await storeFor();
+    try {
+      const failed = store.getTask(task)!;
+      expect(failed.status).toBe('FAILED_RETRYABLE');
+      const paths = ['outside.txt', 'server/__tests__/foreign.test.ts'];
+      expect(JSON.parse(failed.blocked_reason!.slice('Developer failed: '.length))).toEqual({
+        category: 'change_zones_exceeded',
+        paths,
+      });
+      expect(
+        new AuditLog()
+          .read('test')
+          .some((row) => !row.corrupt && row.entry.outcome.reason === failed.blocked_reason),
+      ).toBe(true);
+      for (const args of [
+        ['show', 'FEAT-001'],
+        ['show', 'FEAT-001', '--json'],
+      ]) {
+        const log = vi.fn();
+        await runFeatureCommand(args, repo, log);
+        expect(log.mock.calls[0][0]).toContain('change_zones_exceeded');
+        expect(log.mock.calls[0][0]).toContain('server/__tests__/foreign.test.ts');
+      }
+      const log = vi.fn();
+      await runTaskCommand(['list', '--json'], repo, log);
+      expect(
+        JSON.parse(log.mock.calls[0][0]).find((t: { key: string }) => t.key === task)
+          .last_developer_failure,
+      ).toMatchObject({ category: 'change_zones_exceeded', paths });
+      await expect(develop('valid', false)).rejects.toThrow('eligible READY');
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(1);
+      expect(fs.existsSync(path.join(tree(), 'outside.txt'))).toBe(true);
+      // Both a nested link and node_modules point outside the tree; their targets must survive.
+      const target = path.join(root, 'link-target');
+      fs.mkdirSync(target);
+      fs.writeFileSync(path.join(target, 'sentinel'), 'preserve');
+      for (const link of ['node_modules', 'server/linked'])
+        fs.symlinkSync(target, path.join(tree(), link), 'junction');
+      git(tree(), 'add', 'outside.txt');
+      fs.mkdirSync(path.join(tree(), 'ignored-retry'));
+      fs.writeFileSync(path.join(tree(), 'ignored-retry/junk'), 'discard');
+      fs.appendFileSync(path.join(repo, '.git/info/exclude'), '\nignored-retry/\n');
+      await develop();
+      const retried = store.getTask(task)!;
+      expect(retried).toMatchObject({
+        status: 'REVIEW',
+        attempt: failed.attempt + 1,
+        branch: failed.branch,
+        worktree_ref: failed.worktree_ref,
+        review_ref: { base },
+      });
+      expect(fs.readFileSync(path.join(target, 'sentinel'), 'utf8')).toBe('preserve');
+      for (const discarded of [...paths, 'node_modules', 'server/linked', 'ignored-retry'])
+        expect(fs.existsSync(path.join(tree(), discarded))).toBe(false);
+      expect(git(tree(), 'status', '--porcelain')).toBe('');
+      expect(taskBranchBase(repo, retried.branch!, 'main')).toBe(base);
+      const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim().split('\n').at(-1)!);
+      expect(launch.context.kind).toBe('untrusted-context-data');
+      const context = JSON.parse(launch.context.task.brief);
+      expect(context.previousFailure).toMatchObject({ category: 'change_zones_exceeded', paths });
+      expect(context.allowedScope).toMatchObject({
+        changeZones: ['server/src/audit*.ts'],
+        testZones: [],
+        mirroredTestZones: ['server/__tests__/audit*.test.ts', 'server/__tests__/audit*.spec.ts'],
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('caps explicit failed Developer retries at max_attempts and preserves the evidence for humans', async () => {
+    await prepare();
+    const store = await storeFor();
+    try {
+      const max = store.getTask(task)!.max_attempts;
+      for (let attempt = 0; attempt < max; attempt++) {
+        await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+        expect(store.getTask(task)!.attempt).toBe(attempt);
+      }
+      await expect(develop()).rejects.toThrow('max_attempts exhausted');
+      expect(store.getTask(task)).toMatchObject({
+        status: 'FAILED_FINAL',
+        attempt: max - 1,
+        review_ref: null,
+        lease_owner: null,
+      });
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(max);
+      expect(fs.existsSync(path.join(tree(), 'outside.txt'))).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
   it.each(['claude', 'codex'] as const)(
     'commits one eligible task via %s, records review_ref and retries without duplicate executions',
     async (selected) => {

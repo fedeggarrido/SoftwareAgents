@@ -13,6 +13,7 @@ import {
   TASK_CLI_INPUT_BYTES,
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
+import { lastDeveloperFailure } from '../developer.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
@@ -111,6 +112,7 @@ function list(store: WorkStore, status?: TaskStatus) {
       return {
         ...task,
         last_review_failure: lastReviewFailure(store, task),
+        last_developer_failure: lastDeveloperFailure(store, task),
         pendingDependencies,
         resetsAt,
         blockingReasons: [
@@ -317,7 +319,7 @@ export async function runTaskCommand(
             tasks
               .map(
                 (task) =>
-                  `${textField(task.key)}\t${textField(task.status)}\towner=${textField(task.lease_owner ?? '-')}\texpires=${textField(task.lease_expires_at ?? '-')}\t${textField(task.blockingReasons.join('; '))}${task.last_review_failure ? `\t${textField(task.last_review_failure.reason)}` : ''}`,
+                  `${textField(task.key)}\t${textField(task.status)}\towner=${textField(task.lease_owner ?? '-')}\texpires=${textField(task.lease_expires_at ?? '-')}\t${textField(task.blockingReasons.join('; '))}${task.last_review_failure ? `\t${textField(task.last_review_failure.reason)}` : ''}${task.last_developer_failure ? `\t${textField(task.last_developer_failure.reason)}` : ''}`,
               )
               .join('\n') || 'No tasks',
           );

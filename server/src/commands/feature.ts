@@ -5,7 +5,7 @@ import type { ProjectConfig } from '../../../core/src/project.js';
 import { architectTaskKey } from '../architect.js';
 import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
-import { developerRequest, pushDeveloperBranch } from '../developer.js';
+import { developerRequest, lastDeveloperFailure, pushDeveloperBranch } from '../developer.js';
 import { featureDocument } from '../featureArtifacts.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -292,7 +292,11 @@ export async function runFeatureCommand(
         tasks: store
           .listTasks()
           .filter((task) => task.feature_key === key)
-          .map((task) => ({ ...task, last_review_failure: lastReviewFailure(store!, task) })),
+          .map((task) => ({
+            ...task,
+            last_review_failure: lastReviewFailure(store!, task),
+            last_developer_failure: lastDeveloperFailure(store!, task),
+          })),
         decisions: store
           .listDecisions()
           .filter(
@@ -305,7 +309,7 @@ export async function runFeatureCommand(
       log(
         rest[0] === '--json'
           ? JSON.stringify(result, null, 2)
-          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure }) => ({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure })))}`,
+          : `${key}: ${feature.status}\n${JSON.stringify(document.spec.title)}\nBranch: ${document.branch}\nDocument: ${feature.doc_path}\nSHA: ${feature.git_sha}${result.design ? `\nDesign: ${result.design.doc_path}\nDesign SHA: ${result.design.git_sha}` : ''}\nTasks: ${JSON.stringify(result.tasks.map(({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure, last_developer_failure }) => ({ key, status, review_ref, review_reports, test_reports, defect_context, last_review_failure, last_developer_failure })))}`,
       );
     }
   } catch (error) {

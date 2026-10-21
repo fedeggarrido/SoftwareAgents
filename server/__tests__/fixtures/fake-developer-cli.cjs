@@ -45,7 +45,10 @@ it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? '
         "import { it, expect, describe } from 'vitest'; describe.skip('skip', () => { it('test', () => expect(true).toBe(true)); });\n",
       );
   }
-  if (mode === 'outside') fs.writeFileSync('outside.txt', 'outside changeZones');
+  if (mode === 'outside') {
+    fs.writeFileSync('outside.txt', 'outside changeZones');
+    fs.writeFileSync('server/__tests__/foreign.test.ts', 'outside changeZones');
+  }
   const emit = (value) => console.log(JSON.stringify(value));
   if (executor === 'claude') {
     emit({

@@ -45,10 +45,12 @@ import {
   VALIDATION_AUDIT_MAX_ERRORS,
 } from './constants.js';
 import {
+  ChangeZonesExceededError,
   type DeveloperRequest,
   developerRequest,
   developerVerifier,
   guardDeveloperChanges,
+  resetDeveloperWorktree,
 } from './developer.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
@@ -363,6 +365,8 @@ export async function runWorker(
     );
   const store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
   const lifecycle = new WorkerLifecycle(store, args.task);
+  const developerRetry =
+    !!options.developer && store.getTask(args.task)?.status === 'FAILED_RETRYABLE';
   try {
     if (options.reviewer) {
       if (
@@ -385,6 +389,17 @@ export async function runWorker(
         throw new Error('Developer context changed');
       if (store.getTask(args.task)?.review_ref)
         throw new Error('Developer task already has a review_ref');
+      const record = store.getTask(args.task)!;
+      if (developerRetry && record.attempt + 1 >= record.max_attempts) {
+        await store.transition(
+          record.key,
+          record.version,
+          'FAILED_FINAL',
+          record.blocked_reason ?? 'Developer max_attempts exhausted',
+          'operator',
+        );
+        throw new Error('Developer max_attempts exhausted; FAILED_FINAL requires human review');
+      }
     }
     if (options.architect) {
       const existing = store.getTask(args.task);
@@ -418,7 +433,7 @@ export async function runWorker(
         options.requirements?.revision ?? options.architect?.revision,
         options.reviewer ? (options.qa ? 'qa' : 'review') : false,
       );
-    const result = await runWorkerExecution(args, options, lifecycle, config);
+    const result = await runWorkerExecution(args, options, lifecycle, config, developerRetry);
     if (result.quotaDecision?.status === 'wait' && !result.availabilityBlock) {
       if (options.reviewer)
         await lifecycle.finish(
@@ -447,9 +462,11 @@ export async function runWorker(
     await lifecycle.finish(
       options.reviewer ? (options.qa ? 'QA' : 'REVIEW') : 'FAILED_RETRYABLE',
       (options.reviewer ? REVIEW_FAILURE_PREFIX : '') +
-        (error instanceof WorkerExecutionError
-          ? error.message
-          : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
+        (error instanceof ChangeZonesExceededError
+          ? error.diagnostic()
+          : error instanceof WorkerExecutionError
+            ? error.message
+            : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
     );
     throw error;
   } finally {
@@ -463,6 +480,7 @@ async function runWorkerExecution(
   options: WorkerOptions,
   lifecycle?: WorkerLifecycle,
   initialConfig?: ProjectConfig,
+  developerRetry = false,
 ): Promise<WorkerResult> {
   if (options.evaluation) assertEvalRunAllowed();
   const telemetryStart = Date.now();
@@ -704,6 +722,7 @@ async function runWorkerExecution(
   let tree: { path: string; branch: string };
   let base: string;
   let startingHead: string;
+  let retryPrepared = false;
   let attemptRecorded = false;
   let exitCode: number | undefined;
   let executionDiagnostic: string | undefined;
@@ -1154,11 +1173,24 @@ async function runWorkerExecution(
               options.architect?.key ?? args.task,
               options.developer ? 'developer' : 'worker',
             );
-      if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
-        throw new Error('Existing task worktree is dirty; review it before retrying');
       base ??= options.developer
         ? taskBranchBase(cwd, tree.branch, config.project.repo.defaultBranch)
         : git(tree.path, ['rev-parse', 'HEAD']);
+      if (developerRetry && !retryPrepared && workStore!.getTask(args.task)!.worktree_ref) {
+        lifecycle!.assertOwned();
+        resetDeveloperWorktree(
+          workStore!,
+          workStore!.getTask(args.task)!,
+          config,
+          tree.path,
+          tree.branch,
+          base,
+        );
+        audit('developer_retry_reset');
+      }
+      retryPrepared = true;
+      if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
+        throw new Error('Existing task worktree is dirty; review it before retrying');
       startingHead ??= git(tree.path, ['rev-parse', 'HEAD']);
       if (
         options.reviewer &&
@@ -1982,7 +2014,10 @@ async function runWorkerExecution(
   } catch (error) {
     if (error instanceof EvalCriterionTerminationError) verifierClosed = false;
     telemetryStatus = 'error';
-    audit(interrupted ? 'interrupted' : 'failed');
+    audit(
+      interrupted ? 'interrupted' : 'failed',
+      error instanceof ChangeZonesExceededError ? { reason: error.diagnostic() } : undefined,
+    );
     throw error;
   } finally {
     try {

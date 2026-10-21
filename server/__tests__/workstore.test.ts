@@ -40,6 +40,38 @@ describe('WorkStore (real SQLite)', () => {
     const { DatabaseSync } = await import('node:sqlite');
     return new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
   }
+  it('increments a failed Developer retry atomically and refuses an exhausted claim', async () => {
+    const store = await open();
+    store.createTask({
+      key: 'developer',
+      type: 'code',
+      agent_role: 'developer',
+      status: 'FAILED_RETRYABLE',
+      attempt: 0,
+      max_attempts: 2,
+    });
+    const results = await Promise.allSettled([
+      store.claim('developer', 'first'),
+      store.claim('developer', 'second'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const claimed = store.getTask('developer')!;
+    expect(claimed).toMatchObject({ status: 'LEASED', attempt: 1 });
+    await store.transition(
+      'developer',
+      claimed.version,
+      'FAILED_RETRYABLE',
+      'failure',
+      claimed.lease_owner!,
+    );
+    await expect(store.claim('developer', 'third')).rejects.toThrow('max_attempts exhausted');
+    expect(store.getTask('developer')).toMatchObject({
+      status: 'FAILED_RETRYABLE',
+      attempt: 1,
+      lease_owner: null,
+    });
+    expect(store.listLeaseRecoveries()).toEqual([]);
+  });
   it('does not adopt a FAILED_RETRYABLE Developer as a failed Reviewer', async () => {
     const store = await open();
     store.createTask({ key: 'developer-failed', type: 'code', status: 'FAILED_RETRYABLE' });

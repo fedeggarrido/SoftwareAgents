@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as path from 'path';
 import { parse } from 'yaml';
 
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
@@ -17,7 +18,153 @@ import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { analyzeTaskDag, parseTaskDag, taskDeclaration } from './taskDag.js';
-import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
+import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
+
+export class ChangeZonesExceededError extends Error {
+  readonly category = 'change_zones_exceeded';
+  readonly paths: string[];
+
+  constructor(paths: string[]) {
+    // JSON escaping preserves exact relative names without terminal/control injection.
+    const safe = [...new Set(paths)].sort();
+    super(`Developer changeZones exceeded: ${JSON.stringify(safe)}; human review required`);
+    this.paths = safe;
+  }
+
+  diagnostic(): string {
+    return `Developer failed: ${JSON.stringify({ category: this.category, paths: this.paths })}`;
+  }
+}
+
+/** Durable failure data survives the retry claim (which clears blocked_reason). */
+export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
+  if (task.type !== 'code' || task.agent_role !== 'developer') return null;
+  const event = store
+    .listDomainEvents(task.key)
+    .filter(
+      (e) =>
+        (e.to_status === 'FAILED_RETRYABLE' || e.to_status === 'FAILED_FINAL') &&
+        !e.reason.startsWith('Reviewer failed: '),
+    )
+    .at(-1);
+  if (!event) return null;
+  if (event.reason.startsWith('Developer failed: ')) {
+    try {
+      const data = JSON.parse(event.reason.slice('Developer failed: '.length)) as {
+        category: string;
+        paths: string[];
+      };
+      if (
+        data.category === 'change_zones_exceeded' &&
+        Array.isArray(data.paths) &&
+        data.paths.every((file) => typeof file === 'string')
+      )
+        return {
+          category: data.category,
+          paths: data.paths,
+          reason: event.reason,
+          created_at: event.created_at,
+        };
+    } catch {
+      /* Historical malformed diagnostics remain visible as a reason. */
+    }
+  }
+  return { reason: event.reason, created_at: event.created_at };
+}
+
+/** Mirror suffix variants stay in the same relative directory and source extension. */
+export function developerScope(task: DagTask, root: string) {
+  const directories = (task.changeZones ?? []).filter((zone) => {
+    const literal = zone.replace(/\/$/, '');
+    return (
+      zone.endsWith('/') ||
+      (!zone.includes('*') &&
+        fs.statSync(taskPath(root, literal), { throwIfNoEntry: false })?.isDirectory())
+    );
+  });
+  const mirroredTestZones = (task.changeZones ?? []).flatMap((zone) => {
+    if (!zone.startsWith('server/src/')) return [];
+    const mirror = zone.replace('server/src/', 'server/__tests__/');
+    if (directories.includes(zone)) return [mirror.replace(/\/$/, '') + '/'];
+    const match = /^(.*)(\.[cm]?[jt]sx?)$/i.exec(mirror);
+    return match
+      ? ['test', 'spec'].map((kind) => `${match[1].replace(/\*+$/, '')}*.${kind}${match[2]}`)
+      : [mirror];
+  });
+  return {
+    changeZones: task.changeZones ?? [],
+    testZones: task.testZones ?? [],
+    directoryChangeZones: directories,
+    mirroredTestZones,
+    colocatedTestRule: 'Remove .test/.spec before the extension and match a changeZone.',
+  };
+}
+
+/** Only an explicit failed-task retry, after claim/closure, may discard the failed edits.
+ * Unlink junctions first; Git must never traverse them while resetting/cleaning. */
+export function resetDeveloperWorktree(
+  store: WorkStore,
+  record: TaskRecord,
+  config: ProjectConfig,
+  tree: string,
+  branch: string,
+  base: string,
+): void {
+  const expectedTree = taskPath(config.repoRoot, `.worktrees/${record.key}`);
+  if (
+    path.resolve(tree) !== expectedTree ||
+    record.branch !== branch ||
+    path.resolve(record.worktree_ref ?? '') !== expectedTree ||
+    branch !== `sa/${record.key}-developer` ||
+    evalGit(tree, ['symbolic-ref', '--short', 'HEAD']) !== branch
+  )
+    throw new Error('Developer retry worktree changed; human reconciliation required');
+  const refs = [...(record.review_reports ?? []), ...(record.test_reports ?? [])].map(
+    (entry) => entry.review_ref,
+  );
+  // A prior reviewed/QA commit is valid rework input; otherwise only the pinned base is trusted.
+  const lastCommit = store
+    .listDomainEvents(record.key)
+    .map((event) => /^Runtime commit ([a-f0-9]{40,64})$/.exec(event.reason)?.[1])
+    .filter((sha) => sha !== undefined)
+    .at(-1);
+  const head = lastCommit ?? base;
+  if (
+    refs.some((ref) => ref.branch !== branch || ref.base !== base) ||
+    (lastCommit && !refs.some((ref) => ref.sha === lastCommit)) ||
+    evalGit(tree, ['rev-parse', 'HEAD']) !== head
+  )
+    throw new Error('Developer retry HEAD changed; human reconciliation required');
+  const links: string[] = [];
+  const inspect = (directory: string) => {
+    for (const name of fs.readdirSync(directory)) {
+      const child = path.join(directory, name);
+      const stat = fs.lstatSync(child);
+      if (name === '.git') {
+        if (directory !== tree || !stat.isFile() || stat.nlink !== 1)
+          throw new Error('Developer retry contains unexpected Git metadata');
+      } else if (stat.isSymbolicLink()) links.push(child);
+      else if (stat.isDirectory()) inspect(child);
+      else if (!stat.isFile() || stat.nlink !== 1)
+        throw new Error('Developer retry contains a special file');
+    }
+  };
+  inspect(tree);
+  for (const link of links) fs.unlinkSync(link);
+  evalGit(tree, ['reset', '--hard', head]);
+  evalGit(tree, ['clean', '-fdx']);
+  assertEvalIntegrity(
+    {
+      baseCommit: base,
+      expectedHead: head,
+      allowTestChanges: true,
+      protectedPaths: config.operator.protectedPaths,
+    },
+    tree,
+  );
+  if (evalGit(tree, ['status', '--porcelain', '--untracked-files=all']))
+    throw new Error('Developer retry reset left changes');
+}
 
 export interface DeveloperRequest {
   key: string;
@@ -29,6 +176,8 @@ export interface DeveloperRequest {
   reviewFindings?: import('../../core/src/reviewReport.js').ReviewReport['findings'];
   reworkAttempt?: number;
   qaDefects?: import('./workstore/WorkStore.js').DefectContext[];
+  previousFailure?: ReturnType<typeof lastDeveloperFailure>;
+  allowedScope?: ReturnType<typeof developerScope>;
 }
 
 /** Re-read registered artifacts and immutable declarations, never trust caller-supplied scope. */
@@ -72,6 +221,7 @@ export function developerRequest(
       task.type === 'code' &&
       task.agentRole === 'developer' &&
       (['READY', 'WAITING_QUOTA'].includes(record.status) ||
+        (taskKey === task.key && record.status === 'FAILED_RETRYABLE' && !record.review_ref) ||
         (owner && record.lease_owner === owner && ['LEASED', 'RUNNING'].includes(record.status))) &&
       store.canStart(task.key)
     );
@@ -103,18 +253,20 @@ export function developerRequest(
     designSha: design.git_sha,
     design: readTaskInput(source, design.doc_path),
     task,
+    previousFailure: lastDeveloperFailure(store, record),
+    allowedScope: developerScope(task, config.repoRoot),
     ...(record.test_reports?.some((r) => r.report.verdict === 'fail')
       ? {
           qaDefects: store
             .listTasks()
             .flatMap((t) => (t.defect_context?.task === record.key ? [t.defect_context] : [])),
-          reworkAttempt: record.attempt,
+          reworkAttempt: record.attempt + (record.status === 'FAILED_RETRYABLE' ? 1 : 0),
         }
       : {}),
     ...(record.review_reports?.length
       ? {
           reviewFindings: record.review_reports.at(-1)!.report.findings,
-          reworkAttempt: record.attempt,
+          reworkAttempt: record.attempt + (record.status === 'FAILED_RETRYABLE' ? 1 : 0),
         }
       : {}),
   };
@@ -149,6 +301,8 @@ export function guardDeveloperChanges(
   const committable = new Set(
     evalGit(tree, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']).split('\0'),
   );
+  const scope = developerScope(input.task, config.repoRoot);
+  const offending: string[] = [];
   for (const file of files) {
     taskPath(tree, file);
     if (!committable.has(file) && fs.existsSync(taskPath(tree, file)))
@@ -157,6 +311,7 @@ export function guardDeveloperChanges(
       ![
         ...input.task.changeZones!,
         ...(isDeveloperTest(file) ? (input.task.testZones ?? []) : []),
+        ...(isDeveloperTest(file) ? scope.mirroredTestZones : []),
       ].some((zone) => {
         const literal = zone.replace(/\/$/, '');
         const directory =
@@ -174,8 +329,9 @@ export function guardDeveloperChanges(
         return candidates.some((candidate) => matchesChangeZone(candidate, zone, directory));
       })
     )
-      throw new Error(`Developer changeZones exceeded: ${file}; human review required`);
+      offending.push(file);
   }
+  if (offending.length) throw new ChangeZonesExceededError(offending);
   const tests = files.filter(
     (file) =>
       isDeveloperTest(file) &&

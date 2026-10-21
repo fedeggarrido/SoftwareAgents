@@ -287,8 +287,8 @@ Equivalente instalado: `pixel-agents feature develop FEAT-001 --task FEAT-001-T0
 Sin `--task`, selecciona la primera tarea `code`/`developer` del DAG en READY o WAITING_QUOTA
 que cumple `canStart` (dependencias DONE). Ejecuta **una sola tarea**; no promueve
 dependientes ni integra. Si no hay otra elegible, devuelve la referencia de revisión
-ya existente. Con `--task`, un reintento devuelve la misma referencia sin volver
-a lanzar al agente. Una tarea bloqueada, ajena al Feature o sin zonas se rechaza.
+ya existente. Con `--task` y `review_ref` ya registrado, devuelve la misma referencia
+sin volver a lanzar al agente. Una tarea bloqueada, ajena al Feature o sin zonas se rechaza.
 WAITING_QUOTA conserva las mismas validaciones de feature, diseño y dependencias;
 WorkerLifecycle la devuelve a READY y reevalúa selección y disponibilidad.
 
@@ -306,6 +306,23 @@ El contexto incluye el FeatureSpec aprobado, el diseño registrado, la tarea,
 sus referencias AC y `changeZones`, siempre como datos no confiables. Se comprueban
 SHA, disco, índice, rama y declaraciones importadas antes de admitir y de lanzar.
 
+`feature develop <FEAT-ID> --task <KEY>` permite reintentar explícitamente una tarea
+de código en FAILED_RETRYABLE, sin `review_ref`, con las mismas validaciones de
+feature, diseño y dependencias. Sin `--task` no selecciona fallos para reintentar.
+El claim incrementa `attempt` de forma atómica; si el siguiente intento alcanza
+`max_attempts`, queda en FAILED_FINAL para revisión humana sin lanzar el executor.
+Reutiliza rama, worktree y base registrada. Tras confirmar el cierre de procesos y
+adquirir el claim, descarta los cambios fallidos hasta el último commit registrado
+en ReviewReport/TestReport o la base si no hay uno. Un HEAD distinto exige
+reconciliación humana. Antes de reset/clean inspecciona con lstat y retira cada enlace
+sin recorrerlo (incluidas junctions); conserva sus destinos.
+
+Una infracción de zonas registra `change_zones_exceeded` y todas las rutas relativas
+ofensivas, escapadas en JSON, en auditoría y en el motivo de la tarea.
+`task list` y `feature show` exponen `last_developer_failure`. El siguiente contexto
+incluye `previousFailure` y `allowedScope`: zonas exactas, directorios efectivos,
+`testZones` y patrones de espejo permitidos. Son datos no confiables, sin autoridad.
+
 El rol pide un test de aceptación o reproducción antes de implementar. Antes de
 verificar, después de verificar y antes del commit, el runtime comprueba el diff
 completo contra la base (índice, disco, archivos nuevos e ignorados): solo admite
@@ -320,6 +337,16 @@ Las rutas protegidas/configuración/dependencias, enlaces y cambios ignorados se
 rechazan. Exige al menos un test no vacío con líneas añadidas; eliminar un test
 o modificar únicamente fixtures no satisface el contrato. Cualquier rechazo
 conserva el trabajo para inspección y no crea un commit.
+
+Regla efectiva de espejo: se conserva el subdirectorio relativo de `server/src/`
+en `server/__tests__/`, la extensión JS/TS de la fuente y el prefijo completo del
+nombre; se admiten sufijos de variante antes de `.test` o `.spec`.
+Por ejemplo, `server/src/clientMessageHandler.ts` permite
+`server/__tests__/clientMessageHandler*.test.ts` y
+`server/__tests__/clientMessageHandler*.spec.ts`, sin incluir subdirectorios nuevos.
+Los globs de fuente conservan su alcance al transformarse; una zona de directorio
+permite sus tests espejo descendientes. Los tests co-ubicados siguen quitando
+únicamente `.test`/`.spec` para comprobar su fuente contra `changeZones`.
 
 Los verificadores usan los comandos del binding SA-103 de la tarea, o
 `defaultVerifier`; sin ninguno, `tsc --noEmit --incremental false`. Se ejecutan

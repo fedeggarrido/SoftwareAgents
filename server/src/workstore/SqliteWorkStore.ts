@@ -471,6 +471,14 @@ class SqliteWorkStore implements WorkStore {
       )
         throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
       if (!this.canStart(taskId)) throw new TaskTransitionError(taskId, 'DEPENDENCIES_NOT_DONE');
+      if (
+        !reviewOnly &&
+        task.type === 'code' &&
+        task.agent_role === 'developer' &&
+        task.status === 'FAILED_RETRYABLE' &&
+        task.attempt + 1 >= task.max_attempts
+      )
+        throw new Error('Developer max_attempts exhausted');
       return { task, token: this.reserve(task, 'Claim cleanup', owner) };
     });
     const { task: candidate, token } = reservation;
@@ -495,7 +503,7 @@ class SqliteWorkStore implements WorkStore {
             'READY',
             'Retry lease',
             owner,
-            undefined,
+            task.type === 'code' && task.agent_role === 'developer' ? task.attempt + 1 : undefined,
             undefined,
             token,
           );

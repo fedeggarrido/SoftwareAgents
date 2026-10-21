@@ -4,6 +4,7 @@ import * as path from 'path';
 import type { CascadeVerifier, ModelTier, ModelTierPolicy } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
+import { developerStyleCommands } from './developer.js';
 import {
   type CriterionResult,
   EvalCriterionTerminationError,
@@ -17,6 +18,7 @@ import { MODEL_TIERS } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
 import { runTaskTest, validateTaskTest } from './taskTestRunner.js';
 import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
+import { type VerifierFailure, verifierFailure, verifierKind } from './verifierFeedback.js';
 
 export interface CascadeAttempt {
   attempt: number;
@@ -89,6 +91,10 @@ export async function checkCascadeCriteria(
   protectedPaths?: readonly string[],
   developerTests?: string[],
   expectedHead = base,
+  feedback?: {
+    failures: VerifierFailure[];
+    autoFix?: () => void;
+  },
 ): Promise<CriterionResult[]> {
   const integrity = {
     baseCommit: base,
@@ -101,8 +107,12 @@ export async function checkCascadeCriteria(
     allowTestChanges: !!developerTests,
   };
   assertEvalIntegrity(integrity, tree);
+  // Freeze task paths before our temporary dependency junction exists. Git's
+  // untracked enumeration can otherwise walk that junction in disposable repos.
+  const changedFiles = evalChangedFiles(tree, base);
+  const fixCommands = feedback?.autoFix ? developerStyleCommands(tree, base, true).reverse() : [];
   const normalizedRoot = normalize(path.resolve(tree));
-  const related = evalChangedFiles(tree, base)
+  const related = changedFiles
     .filter((file) => /\.[cm]?[jt]sx?$/i.test(file))
     .map((file) => {
       // Validate the exact normalization Vitest applies, including deleted paths.
@@ -131,10 +141,54 @@ export async function checkCascadeCriteria(
   const link = resolveInside(tree, 'node_modules');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+  let linked = true;
+  const unlinkDependencies = () => {
+    const stat = fs.lstatSync(link, { throwIfNoEntry: false });
+    if (
+      !stat?.isSymbolicLink() ||
+      fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
+    )
+      throw new EvalIntegrityError('Cascade dependency link changed');
+    fs.unlinkSync(link);
+    linked = false;
+  };
   const temporary = fs.mkdtempSync(path.join(scratch, 'cascade-'));
   let safe = true;
   try {
     const results: CriterionResult[] = [];
+    if (feedback?.autoFix) {
+      // The caller has validated all changed paths against the task's zones. ESLint
+      // may reorder imports; format its result before running any final verifier.
+      for (const command of fixCommands) {
+        if (signal.aborted) throw new Error('Cascade interrupted');
+        if (!('argv' in command)) continue;
+        const home = fs.mkdtempSync(path.join(temporary, 'fix-'));
+        await runVerifierCommand(command.argv, tree, home, command.timeoutMs, signal);
+      }
+      // Integrity/zone guards inspect every link; remove only ours while checking.
+      unlinkDependencies();
+      feedback.autoFix();
+      assertEvalIntegrity(integrity, tree, 'during');
+      fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+      linked = true;
+    }
+    const report = (
+      kind: VerifierFailure['verifier'],
+      argv: string[],
+      files: string[],
+      result: CriterionResult,
+      output: string,
+    ) => {
+      if (result === 'pass' || result === 'not_tested') return;
+      feedback?.failures.push(
+        verifierFailure(kind, argv, files, result, output, [
+          tree,
+          scratch,
+          process.env.HOME ?? '',
+          process.env.USERPROFILE ?? '',
+        ]),
+      );
+    };
     const commands = developerTests
       ? [...verifier.commands, { developerTests, timeoutMs: EVAL_CRITERION_TIMEOUT_MS }]
       : verifier.commands;
@@ -142,7 +196,22 @@ export async function checkCascadeCriteria(
       if (signal.aborted) throw new Error('Cascade interrupted');
       if ('argv' in command) {
         const home = fs.mkdtempSync(path.join(temporary, 'home-'));
-        results.push(await runVerifierCommand(command.argv, tree, home, command.timeoutMs, signal));
+        let output = '';
+        const result = await runVerifierCommand(
+          command.argv,
+          tree,
+          home,
+          command.timeoutMs,
+          signal,
+          (value) => {
+            output = value;
+          },
+        );
+        results.push(result);
+        const files = command.argv.includes('--')
+          ? command.argv.slice(command.argv.indexOf('--') + 1)
+          : changedFiles;
+        report(verifierKind(command.argv), command.argv, files, result, output);
         continue;
       }
       const checks: CriterionResult[] = [];
@@ -153,13 +222,40 @@ export async function checkCascadeCriteria(
           const remaining = deadline - Date.now();
           if (remaining <= 0) {
             checks.push('timeout');
+            report(
+              file.startsWith('e2e/') ? 'e2e' : 'tests',
+              ['test', file],
+              [file],
+              'timeout',
+              'Verifier batch deadline exceeded.',
+            );
             break;
           }
+          let output = '';
           try {
-            checks.push((await runTaskTest(tree, temporary, file, signal, remaining)).result);
+            const result = (
+              await runTaskTest(tree, temporary, file, signal, remaining, (value) => {
+                output = value;
+              })
+            ).result;
+            checks.push(result);
+            report(
+              file.startsWith('e2e/') ? 'e2e' : 'tests',
+              [file.startsWith('e2e/') ? 'playwright' : 'vitest', 'run', file],
+              [file],
+              result,
+              output,
+            );
           } catch (error) {
             if (error instanceof EvalCriterionTerminationError) throw error;
             checks.push('fail');
+            report(
+              file.startsWith('e2e/') ? 'e2e' : 'tests',
+              ['test', file],
+              [file],
+              'fail',
+              `${String(error)}\n${output}`,
+            );
           }
         }
       } else {
@@ -168,13 +264,34 @@ export async function checkCascadeCriteria(
           const remaining = deadline - Date.now();
           if (remaining <= 0) {
             checks.push('timeout');
+            report(
+              'tests',
+              ['vitest', 'related', ...files],
+              files,
+              'timeout',
+              'Verifier batch deadline exceeded.',
+            );
             break;
           }
+          let output = '';
           try {
-            checks.push((await runRelatedVitest(tree, temporary, files, remaining, signal)).result);
+            const result = (
+              await runRelatedVitest(tree, temporary, files, remaining, signal, (value) => {
+                output = value;
+              })
+            ).result;
+            checks.push(result);
+            report('tests', ['vitest', 'related', ...files], files, result, output);
           } catch (error) {
             if (error instanceof EvalCriterionTerminationError) throw error;
             checks.push('fail');
+            report(
+              'tests',
+              ['vitest', 'related', ...files],
+              files,
+              'fail',
+              `${String(error)}\n${output}`,
+            );
           }
         }
       }
@@ -197,13 +314,7 @@ export async function checkCascadeCriteria(
   } finally {
     if (safe) {
       // Unlink only our junction, never recursively delete its target.
-      const stat = fs.lstatSync(link, { throwIfNoEntry: false });
-      if (
-        !stat?.isSymbolicLink() ||
-        fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
-      )
-        throw new EvalIntegrityError('Cascade dependency link changed');
-      fs.unlinkSync(link);
+      if (linked) unlinkDependencies();
       fs.rmSync(temporary, { recursive: true, force: true });
       assertEvalIntegrity(integrity, tree, 'during');
     }

@@ -12,6 +12,7 @@ export function developerVerifierConfig(repo: string): void {
   fs.writeFileSync(
     path.join(repo, 'eslint.config.mjs'),
     `import ts from 'typescript-eslint';
-export default [{ files: ['**/*.ts'], languageOptions: { parser: ts.parser }, rules: { 'no-debugger': 'error' } }];\n`,
+import sort from 'eslint-plugin-simple-import-sort';
+export default [{ files: ['**/*.ts'], languageOptions: { parser: ts.parser }, plugins: { 'simple-import-sort': sort }, rules: { 'no-debugger': 'error', 'simple-import-sort/imports': 'error' } }];\n`,
   );
 }

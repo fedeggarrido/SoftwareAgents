@@ -36,9 +36,11 @@ export async function runTaskTest(
   file: string,
   signal: AbortSignal,
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
+  onOutput?: (output: string) => void,
 ): Promise<TestResult> {
   validateTaskTest(tree, file);
-  if (!isE2eTest(file)) return runIsolatedVitest(tree, scratch, file, undefined, signal, timeoutMs);
+  if (!isE2eTest(file))
+    return runIsolatedVitest(tree, scratch, file, undefined, signal, timeoutMs, onOutput);
   const unavailable = (reason: string): TestResult => ({
     result: 'not_tested',
     passed: 0,
@@ -78,7 +80,7 @@ export async function runTaskTest(
   const run = (argv: string[], cwd: string) =>
     Date.now() >= deadline
       ? Promise.resolve('timeout' as const)
-      : runVerifierCommand(argv, cwd, home, deadline - Date.now(), signal);
+      : runVerifierCommand(argv, cwd, home, deadline - Date.now(), signal, onOutput);
   try {
     fs.mkdirSync(home);
     fs.cpSync(tree, snapshot, {
@@ -114,7 +116,7 @@ export async function runTaskTest(
   onStepEnd(test, result, step) { if (step.category === 'expect') this.assertions.add(test.id); }
   onTestEnd(test, result) {
     const status = result.status === 'passed' && !this.assertions.has(test.id) ? 'unasserted' : result.status;
-    this.tests.push({ file: test.location.file, status });
+    this.tests.push({ file: test.location.file, status, errors: result.errors });
   }
   onEnd(result) { require('fs').writeFileSync(${JSON.stringify(report)}, JSON.stringify({ status: result.status, tests: this.tests })); }
 };`,
@@ -145,8 +147,18 @@ export async function runTaskTest(
       return unavailable('Playwright timed out or produced no bounded execution report.');
     const evidence = JSON.parse(fs.readFileSync(report, 'utf8')) as {
       status: string;
-      tests: { file: string; status: string }[];
+      tests: { file: string; status: string; errors?: { message?: string; stack?: string }[] }[];
     };
+    onOutput?.(
+      evidence.tests
+        .filter((test) => test.status !== 'passed')
+        .flatMap((test) => [
+          test.file,
+          test.status,
+          ...(test.errors ?? []).map((error) => error.message ?? error.stack ?? ''),
+        ])
+        .join('\n'),
+    );
     const tests = evidence.tests;
     if (
       !Array.isArray(tests) ||

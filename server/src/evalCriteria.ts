@@ -49,6 +49,7 @@ export async function runVerifierCommand(
   home: string,
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
   signal?: AbortSignal,
+  onOutput?: (output: string) => void,
 ): Promise<CriterionResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
@@ -62,6 +63,7 @@ export async function runVerifierCommand(
     let stopped = false;
     let timedOut = false;
     let bytes = 0;
+    const output: Buffer[] = [];
     let grace: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
       if (stopped) return;
@@ -83,20 +85,25 @@ export async function runVerifierCommand(
     signal?.addEventListener('abort', stop, { once: true });
     if (signal?.aborted) stop();
     const drain = (chunk: Buffer) => {
+      const previousBytes = bytes;
       bytes += chunk.length;
+      if (onOutput && previousBytes < EVAL_CRITERION_MAX_OUTPUT_BYTES)
+        output.push(chunk.subarray(0, EVAL_CRITERION_MAX_OUTPUT_BYTES - previousBytes));
       if (bytes > EVAL_CRITERION_MAX_OUTPUT_BYTES) stop();
     };
     child.stdout.on('data', drain);
     child.stderr.on('data', drain);
-    child.once('error', () => {
+    child.once('error', (error) => {
       // A failed spawn also emits close; only that event permits cleanup.
       stopped = true;
+      if (onOutput) output.push(Buffer.from(error.message));
     });
     child.once('close', (code) => {
       clearTimeout(timer);
       if (grace) clearTimeout(grace);
       cancellation.confirmClose();
       signal?.removeEventListener('abort', stop);
+      onOutput?.(Buffer.concat(output).toString('utf8'));
       resolve(timedOut ? 'timeout' : !stopped && code === 0 ? 'pass' : 'fail');
     });
   });
@@ -158,9 +165,10 @@ export async function runIsolatedVitest(
   testName?: string,
   signal?: AbortSignal,
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
+  onOutput?: (output: string) => void,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
   vitestWorkspace(tree, file, true);
-  return runWorkspaceVitest(tree, scratch, [file], false, timeoutMs, signal, testName);
+  return runWorkspaceVitest(tree, scratch, [file], false, timeoutMs, signal, testName, onOutput);
 }
 
 export async function runRelatedVitest(
@@ -169,8 +177,9 @@ export async function runRelatedVitest(
   files: string[],
   timeoutMs: number,
   signal: AbortSignal,
+  onOutput?: (output: string) => void,
 ) {
-  return runWorkspaceVitest(tree, scratch, files, true, timeoutMs, signal);
+  return runWorkspaceVitest(tree, scratch, files, true, timeoutMs, signal, undefined, onOutput);
 }
 
 async function runWorkspaceVitest(
@@ -181,6 +190,7 @@ async function runWorkspaceVitest(
   timeoutMs: number,
   signal?: AbortSignal,
   testName?: string,
+  onOutput?: (output: string) => void,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
   const workspace = vitestWorkspace(tree, files[0]);
   if (files.some((file) => vitestWorkspace(tree, file).root !== workspace.root))
@@ -274,6 +284,7 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
       home,
       timeoutMs,
       signal,
+      onOutput,
     );
     if (
       passed === 'timeout' ||
@@ -283,6 +294,22 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
     )
       throw new Error('Vitest infrastructure failed: timeout or missing/oversized JSON report');
     const result = JSON.parse(fs.readFileSync(report, 'utf8'));
+    onOutput?.(
+      result.testResults
+        ?.flatMap(
+          (suite: {
+            name: string;
+            message?: string;
+            assertionResults?: { status: string; fullName: string; failureMessages?: string[] }[];
+          }) => [
+            ...(suite.message ? [suite.name, suite.message] : []),
+            ...(suite.assertionResults ?? [])
+              .filter((test) => test.status === 'failed')
+              .flatMap((test) => [test.fullName, ...(test.failureMessages ?? [])]),
+          ],
+        )
+        .join('\n') ?? '',
+    );
     const suites = result.testResults?.filter(
       (suite: { name: string }) =>
         related || path.resolve(suite.name) === path.resolve(tree, files[0]),

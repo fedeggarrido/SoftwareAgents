@@ -230,6 +230,12 @@ export const TELEMETRY_PRICE_TOKENS = 1_000_000;
 export const EVAL_MAX_REPETITIONS = 20;
 export const EVAL_CRITERION_TIMEOUT_MS = 60_000;
 export const EVAL_CRITERION_MAX_OUTPUT_BYTES = 1024 * 1024;
+/** Verifier feedback is untrusted prompt data, never audit/telemetry content. */
+export const VERIFIER_FEEDBACK_MAX_CHARS = 4000;
+export const VERIFIER_FEEDBACK_MAX_LINES = 32;
+export const VERIFIER_FEEDBACK_MAX_FILES = 32;
+export const VERIFIER_FEEDBACK_FIELD_CHARS = 256;
+export const VERIFIER_STYLE_RETRIES = 1;
 // SA-027: bounded TaskDAG/FeatureSpec input and fixed-memory backup copying.
 export const TASK_CLI_INPUT_BYTES = 1024 * 1024;
 export const TASK_CLI_COPY_BUFFER_BYTES = 64 * 1024;

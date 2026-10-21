@@ -676,11 +676,24 @@ Un cambio fuera de ellas produce `change_zones_exceeded`. No añadir/ajustar un
 test ejecutable produce `missing_test`, visible en `last_developer_failure` y en
 el contexto del siguiente reintento. Los helpers solos no satisfacen ese requisito.
 
-Developer y QA author ejecutan además `prettier --check --ignore-unknown` y
+Antes de verificar, Developer y QA author aplican `eslint --fix --no-cache` y
+`prettier --write --ignore-unknown` solo a los ficheros tocados, tras validar las
+zonas y la integridad. Las correcciones forman parte del commit del runtime.
+Los comandos usan la raíz del checkout y su configuración/ignore de estilo;
+Prettier normaliza también CRLF introducido por escrituras del agente en Windows.
+Después ejecutan `prettier --check --ignore-unknown` y
 `eslint --no-cache` sobre los archivos tocados existentes (ESLint sobre JS/TS),
 también con cascada o verificadores del Operator. Un fallo impide REVIEW.
 Los tests Vitest escritos se ejecutan por fichero con el runner neutral aislado;
 se conservan las comprobaciones de aserciones y de integridad.
+
+Un fallo exclusivamente de Prettier/ESLint recibe un único reintento en el mismo
+nivel; si persiste se detiene sin escalar. Los fallos de tipos/tests permiten la
+cascada. Cada siguiente intento recibe `task.verifierFailures` como datos JSON no
+confiables: comando, ficheros y primeras 32 líneas (máximo 4000 caracteres) por
+fallo, saneados y con secretos redactados. La salida no se guarda en auditoría ni
+telemetría; el motivo persistido identifica `verifier_failed: prettier|eslint|tsc|tests|e2e`
+con los verificadores que fallaron.
 
 Para e2e, el runtime deriva el spec concreto del diff/zonas. En specs de
 `e2e/tests/standalone/`, usa Playwright directamente, equivalente a

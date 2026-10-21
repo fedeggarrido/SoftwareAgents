@@ -12,6 +12,7 @@ import {
   ChangeZonesExceededError,
   type DeveloperRequest,
   developerScope,
+  developerStyleCommands,
   guardDeveloperChanges,
   lastDeveloperFailure,
   pushDeveloperBranch,
@@ -22,6 +23,8 @@ import { WorktreeManager } from '../src/executors/worktreeManager.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { taskBranchBase } from '../src/taskBranchBase.js';
+import * as taskTests from '../src/taskTestRunner.js';
+import type { VerifierFailure } from '../src/verifierFeedback.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
@@ -127,6 +130,93 @@ afterEach(() => {
 });
 
 describe('Developer diff guard', () => {
+  it('autofixes unsorted imports and CRLF using the real repository config, scoped to touched files', async () => {
+    // A real e2e source, without launching Playwright or any executor.
+    const realRepo = path.resolve(__dirname, '../..');
+    for (const name of [
+      '.prettierrc.json',
+      '.prettierignore',
+      '.editorconfig',
+      'eslint.config.mjs',
+    ])
+      fs.copyFileSync(path.join(realRepo, name), path.join(repo, name));
+    fs.cpSync(path.join(realRepo, 'eslint-rules'), path.join(repo, 'eslint-rules'), {
+      recursive: true,
+    });
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'real style configuration');
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    const file = 'e2e/tests/standalone/hooks.spec.ts';
+    vi.spyOn(taskTests, 'runTaskTest').mockResolvedValue({
+      result: 'not_tested',
+      passed: 0,
+      failed: 0,
+    });
+    fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    const source = fs.readFileSync(path.join(realRepo, file), 'utf8');
+    fs.writeFileSync(path.join(directory, file), source);
+    const failures: VerifierFailure[] = [];
+    // The isolated command must agree with a normal root invocation on the same real spec.
+    const normal = execFileSync(
+      process.execPath,
+      [require.resolve('prettier/bin/prettier.cjs'), '--check', '--ignore-unknown', file],
+      { cwd: realRepo, encoding: 'utf8', windowsHide: true },
+    );
+    expect(normal).toContain('All matched files');
+    expect(
+      await checkCascadeCriteria(
+        { commands: developerStyleCommands(directory, base).slice(0, 1) },
+        base,
+        directory,
+        root,
+        new AbortController().signal,
+        undefined,
+        [file],
+        base,
+        { failures },
+      ),
+    ).toEqual(['pass', 'not_tested']);
+    // Runtime/agent writes can introduce CRLF even though the checkout uses eol=lf.
+    fs.writeFileSync(path.join(directory, file), source.replace(/\r?\n/g, '\r\n'));
+    expect(
+      await checkCascadeCriteria(
+        { commands: developerStyleCommands(directory, base).slice(0, 1) },
+        base,
+        directory,
+        root,
+        new AbortController().signal,
+        undefined,
+        [file],
+        base,
+        { failures },
+      ),
+    ).toEqual(['fail', 'not_tested']);
+    expect(failures[0]).toMatchObject({ verifier: 'prettier', files: [file] });
+    const untouched = path.join(directory, 'server/src/baseline.ts');
+    const before = fs.readFileSync(untouched);
+    fs.writeFileSync(
+      path.join(directory, file),
+      "import z from 'z';\r\nimport a from 'a';\r\nexport const answer=1\r\n",
+    );
+    expect(
+      await checkCascadeCriteria(
+        { commands: developerStyleCommands(directory, base) },
+        base,
+        directory,
+        root,
+        new AbortController().signal,
+        undefined,
+        [file],
+        base,
+        { failures: [], autoFix: () => {} },
+      ),
+    ).toEqual(['pass', 'pass', 'not_tested']);
+    expect(fs.readFileSync(path.join(directory, file), 'utf8')).toBe(
+      "import a from 'a';\nimport z from 'z';\nexport const answer = 1;\n",
+    );
+    expect(fs.readFileSync(untouched)).toEqual(before);
+  });
   it('documents exact mirror variants for literal source zones and reports all foreign paths escaped', () => {
     const base = git(repo, 'rev-parse', 'HEAD');
     const directory = detachedTree();
@@ -305,6 +395,7 @@ describe('Developer diff guard', () => {
         path.join(directory, relative),
         "it.skip('omitted', () => expect(true).toBe(true));",
       );
+    const failures: VerifierFailure[] = [];
     const result = await checkCascadeCriteria(
       { commands: [] },
       base,
@@ -313,8 +404,14 @@ describe('Developer diff guard', () => {
       new AbortController().signal,
       undefined,
       mode === 'missing' ? [relative, 'server/__tests__/missing.test.ts'] : [relative],
+      base,
+      { failures },
     );
     expect(result).toEqual([mode === 'passed' ? 'pass' : 'fail']);
+    if (mode === 'failed') {
+      expect(failures[0]).toMatchObject({ verifier: 'tests', files: [relative], result: 'fail' });
+      expect(failures[0].detail).toContain('expected');
+    }
   });
 
   it.each([true, false])(
@@ -503,7 +600,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
 
   it.each(
     ['valid', 'qa-author'].flatMap((designMode) =>
-      ['bad-format', 'bad-lint', 'bad-test'].map((mode) => ({ designMode, mode })),
+      ['bad-lint', 'bad-test'].map((mode) => ({ designMode, mode })),
     ),
   )('fails $mode in $designMode before registering review', async ({ designMode, mode }) => {
     await prepare(true, true, designMode);
@@ -513,10 +610,39 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
     try {
       expect(store.getTask(task)?.review_ref).toBeNull();
       expect(git(tree(), 'rev-parse', 'HEAD')).toBe(base);
+      expect(store.getTask(task)?.blocked_reason).toContain(
+        `verifier_failed: ${mode === 'bad-lint' ? 'eslint' : 'tests'}`,
+      );
+      if (mode === 'bad-lint') {
+        const launchesData = fs
+          .readFileSync(launches, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(launchesData).toHaveLength(2);
+        expect(launchesData[1].context.task.verifierFailures[0].detail).toContain('no-debugger');
+      }
     } finally {
       store.close();
     }
   });
+
+  it.each(
+    ['valid', 'qa-author'].flatMap((designMode) =>
+      ['bad-format', 'bad-imports'].map((mode) => ({ designMode, mode })),
+    ),
+  )(
+    'commits automatic $mode fixes in $designMode without another model attempt',
+    async ({ designMode, mode }) => {
+      await prepare(true, true, designMode);
+      await develop(mode);
+      const lines = fs.readFileSync(launches, 'utf8').trim().split('\n');
+      expect(lines).toHaveLength(1);
+      expect(git(tree(), 'show', 'HEAD:server/__tests__/audit.test.ts')).toContain(
+        mode === 'bad-format' ? 'const brokenFormat = 1;' : "import { expect, it } from 'vitest';",
+      );
+    },
+  );
 
   it('keeps unavailable e2e execution as not_tested in QA with its runtime reason', async () => {
     await prepare(true, true, 'qa-author-e2e');

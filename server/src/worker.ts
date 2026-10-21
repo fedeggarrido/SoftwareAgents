@@ -43,6 +43,7 @@ import {
   REVIEW_MAX_REWORK_ROUNDS,
   VALIDATION_AUDIT_MAX_ERROR_CHARS,
   VALIDATION_AUDIT_MAX_ERRORS,
+  VERIFIER_STYLE_RETRIES,
 } from './constants.js';
 import {
   ChangeZonesExceededError,
@@ -132,6 +133,11 @@ import { compileSchema, SchemaValidationError, validateSchema } from './schemaVa
 import { taskBranchBase } from './taskBranchBase.js';
 import { taskModelInputs } from './taskModelInputs.js';
 import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
+import {
+  styleOnlyFailures,
+  type VerifierFailure,
+  verifierFailureReason,
+} from './verifierFeedback.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
 import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -559,7 +565,7 @@ async function runWorkerExecution(
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
   );
   const taskData = {
-    task: { key: args.task, brief },
+    task: { key: args.task, brief, verifierFailures: [] as VerifierFailure[] },
     brainContents: {} as Record<string, string>,
     repository: {
       projectId: config.project.id,
@@ -723,6 +729,8 @@ async function runWorkerExecution(
   const verifierAbort = new AbortController();
   let verifierClosed = true;
   let attempt = 0;
+  let tierIndex = 0;
+  let styleRetries = 0;
   let escalatedFrom: ModelTier | undefined;
   let cascade: NonNullable<typeof tierPolicy>['cascade'];
   let verifier: CascadeVerifier | undefined;
@@ -881,7 +889,7 @@ async function runWorkerExecution(
       );
     for (;;) {
       const inputs: TierInputs =
-        verifier && levels.length ? { cascadeTier: levels[attempt] } : normalInputs;
+        verifier && levels.length ? { cascadeTier: levels[tierIndex] } : normalInputs;
       tierSelection = undefined;
       admissionTier =
         tierPolicy && tierRule
@@ -1723,6 +1731,7 @@ async function runWorkerExecution(
       }
       if (verifier) {
         let results: CriterionResult[] = [];
+        const failures: VerifierFailure[] = [];
         if (!interrupted && exitCode === 0) {
           const developerTests = options.developer
             ? guardDeveloperChanges(options.developer, config, tree.path, base, startingHead)
@@ -1744,6 +1753,22 @@ async function runWorkerExecution(
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
               developerTests,
               startingHead,
+              {
+                failures,
+                ...(options.developer
+                  ? {
+                      autoFix: () => {
+                        guardDeveloperChanges(
+                          options.developer!,
+                          config,
+                          tree.path,
+                          base,
+                          startingHead,
+                        );
+                      },
+                    }
+                  : {}),
+              },
             );
             if (options.developer)
               guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
@@ -1771,7 +1796,10 @@ async function runWorkerExecution(
         );
         if (!passed) {
           // Only deterministic verifier failures permit another admitted attempt.
-          if (!interrupted && exitCode === 0 && attempt + 1 < levels.length) {
+          const styleOnly = styleOnlyFailures(failures);
+          const retryStyle = styleOnly && styleRetries < VERIFIER_STYLE_RETRIES;
+          const escalateModel = !styleOnly && failures.length > 0 && tierIndex + 1 < levels.length;
+          if (!interrupted && exitCode === 0 && (retryStyle || escalateModel)) {
             await telemetry!.finish('error');
             options.evaluation?.settled(telemetry.rootSpan, true);
             slot.release();
@@ -1786,7 +1814,13 @@ async function runWorkerExecution(
                 : undefined,
               startingHead,
             );
-            escalatedFrom = tierSelection!.tier!;
+            escalatedFrom = escalateModel ? tierSelection!.tier! : undefined;
+            if (escalateModel) {
+              tierIndex++;
+              styleRetries = 0;
+            } else styleRetries++;
+            taskData.task.verifierFailures = failures;
+            compiled = compileAgent(spec, role, taskData);
             attempt++;
             executionId = randomUUID();
             handle = undefined;
@@ -1804,10 +1838,11 @@ async function runWorkerExecution(
               evaluationSuccess: false,
               evaluationVerifierFailed: !interrupted && exitCode === 0,
             };
-          throw new Error(
-            options.developer
+          throw new WorkerExecutionError(
+            (options.developer
               ? 'Developer verifier failed; changes retained for review'
-              : 'Cascade failed; changes retained for review',
+              : 'Cascade failed; changes retained for review') +
+              (failures.length ? ` (${verifierFailureReason(failures)})` : ''),
           );
         }
       }

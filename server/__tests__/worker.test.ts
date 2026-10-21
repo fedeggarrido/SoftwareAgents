@@ -31,7 +31,7 @@ import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 90_000 });
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
@@ -605,6 +605,57 @@ describe('Operator verifier cascade SA-103', () => {
     await run();
     expect(attempts().map((r) => r.verifiers)).toEqual([['pass']]);
   });
+  it.each(['prettier', 'eslint', 'tsc', 'tests'])(
+    'supplies bounded failure detail and retries the correct tier for %s',
+    async (kind) => {
+      const raw = configure();
+      const command = path.join(root, kind === 'tests' ? 'vitest.cjs' : `${kind}.js`);
+      fs.writeFileSync(
+        command,
+        `console.error('worker-result.md:1 rule/example: expected value, token=private-value'); process.exit(1);`,
+      );
+      raw.projects.test.modelTiers.cascade.verifiers['SA-999'].commands = [
+        { argv: [process.execPath, command], timeoutMs: 5000 },
+      ];
+      save(raw);
+      const log = path.join(root, 'feedback.jsonl');
+      await expect(
+        runWorker(
+          { task: 'SA-999', brief: 'brief.md' },
+          {
+            cwd: repo,
+            binaryArgs: [fixture, 'claude', '--solve-at=economy', '--feedback-log', log],
+            log: () => {},
+          },
+        ),
+      ).rejects.toThrow(`verifier_failed: ${kind}`);
+      const style = ['prettier', 'eslint'].includes(kind);
+      expect(attempts().map((r) => r.tier)).toEqual(
+        style ? ['economy', 'economy'] : ['economy', 'standard', 'deep'],
+      );
+      const feedback = fs
+        .readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(feedback[0]).toEqual([]);
+      expect(feedback[1][0]).toMatchObject({
+        verifier: kind,
+        result: 'fail',
+        files: ['worker-result.md'],
+      });
+      expect(feedback[1][0].detail).toContain('rule/example: expected value');
+      expect(feedback[1][0].detail).not.toContain('private-value');
+      expect(feedback[1][0].command[1]).toContain('<runtime>');
+      expect(JSON.stringify(attempts())).not.toContain('rule/example');
+      const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+      try {
+        expect(store.getTask('SA-999')?.blocked_reason).toContain(`verifier_failed: ${kind}`);
+      } finally {
+        store.close();
+      }
+    },
+  );
   it('skips vitestRelated without TS/JS changes and accepts the attempt', async () => {
     const raw = configure();
     raw.projects.test.modelTiers.cascade.verifiers = {};

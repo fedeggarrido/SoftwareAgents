@@ -437,9 +437,30 @@ export function developerVerifier(config: ProjectConfig, key: string): CascadeVe
 }
 
 /** Mandatory for every Developer/cascade attempt, regardless of Operator verifier overrides. */
-export function developerStyleCommands(tree: string, base: string): CascadeVerifier['commands'] {
+export function developerStyleCommands(
+  tree: string,
+  base: string,
+  fix = false,
+): CascadeVerifier['commands'] {
   const files = evalChangedFiles(tree, base).filter((file) => fs.existsSync(taskPath(tree, file)));
   const scripts = files.filter((file) => /\.[cm]?[jt]sx?$/i.test(file));
+  const eslintConfig = ['eslint.config.mjs', 'eslint.config.js', 'eslint.config.cjs'].find((file) =>
+    fs.existsSync(taskPath(tree, file)),
+  );
+  // Preserve ESLint's per-file lookup for nested workspaces (e.g. webview-ui).
+  const hasNestedConfig = scripts.some((file) => {
+    let directory = path.posix.dirname(file);
+    while (directory !== '.') {
+      if (
+        ['eslint.config.mjs', 'eslint.config.js', 'eslint.config.cjs'].some((name) =>
+          fs.existsSync(taskPath(tree, `${directory}/${name}`)),
+        )
+      )
+        return true;
+      directory = path.posix.dirname(directory);
+    }
+    return false;
+  });
   return [
     ...(files.length
       ? [
@@ -447,8 +468,15 @@ export function developerStyleCommands(tree: string, base: string): CascadeVerif
             argv: [
               process.execPath,
               'node_modules/prettier/bin/prettier.cjs',
-              '--check',
+              fix ? '--write' : '--check',
               '--ignore-unknown',
+              // Pin root configuration/ignore to the task checkout, never the linked CLI's repo.
+              ...(fs.existsSync(taskPath(tree, '.prettierrc.json'))
+                ? ['--config', '.prettierrc.json']
+                : []),
+              ...(fs.existsSync(taskPath(tree, '.prettierignore'))
+                ? ['--ignore-path', '.prettierignore']
+                : []),
               '--',
               ...files,
             ],
@@ -463,6 +491,8 @@ export function developerStyleCommands(tree: string, base: string): CascadeVerif
               process.execPath,
               'node_modules/eslint/bin/eslint.js',
               '--no-cache',
+              ...(eslintConfig && !hasNestedConfig ? ['--config', eslintConfig] : []),
+              ...(fix ? ['--fix'] : []),
               '--',
               ...scripts,
             ],

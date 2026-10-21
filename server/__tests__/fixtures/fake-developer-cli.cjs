@@ -58,6 +58,13 @@ test('audit is visible', async ({ page }) => {
     }
     if (mode === 'bad-format')
       fs.appendFileSync('server/__tests__/audit.test.ts', 'const brokenFormat=  1\n');
+    if (mode === 'bad-imports')
+      fs.writeFileSync(
+        'server/__tests__/audit.test.ts',
+        fs
+          .readFileSync('server/__tests__/audit.test.ts', 'utf8')
+          .replace('{ expect, it }', '{ it, expect }'),
+      );
     if (mode === 'bad-lint') fs.appendFileSync('server/__tests__/audit.test.ts', 'debugger;\n');
     if (findings?.length)
       fs.appendFileSync(

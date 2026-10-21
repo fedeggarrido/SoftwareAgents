@@ -24,6 +24,7 @@ import {
   parseTaskDag,
   taskDeclaration,
 } from './taskDag.js';
+import { TASK_REBASE_REASON, taskRebaseHistory } from './taskRebaseHistory.js';
 import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export class ChangeZonesExceededError extends Error {
@@ -126,19 +127,31 @@ export function resetDeveloperWorktree(
     evalGit(tree, ['symbolic-ref', '--short', 'HEAD']) !== branch
   )
     throw new Error('Developer retry worktree changed; human reconciliation required');
+  const rebases = taskRebaseHistory(store, record.key);
   const refs = [...(record.review_reports ?? []), ...(record.test_reports ?? [])].map(
     (entry) => entry.review_ref,
   );
+  // Rebased tips are runtime-authored rework inputs, even when their patch needs a fresh review.
+  refs.push(...rebases.map((rebase) => rebase.after));
   // A prior reviewed/QA commit is valid rework input; otherwise only the pinned base is trusted.
   const lastCommit = store
     .listDomainEvents(record.key)
-    .map((event) => /^Runtime commit ([a-f0-9]{40,64})$/.exec(event.reason)?.[1])
+    .map((event) =>
+      event.actor === 'operator' && event.reason.startsWith(TASK_REBASE_REASON)
+        ? (JSON.parse(event.reason.slice(TASK_REBASE_REASON.length)) as { after: ReviewRef }).after
+            .sha
+        : /^Runtime commit ([a-f0-9]{40,64})$/.exec(event.reason)?.[1],
+    )
     .filter((sha) => sha !== undefined)
     .at(-1);
   const head = lastCommit ?? base;
   if (
-    refs.some((ref) => ref.branch !== branch || ref.base !== base) ||
-    (lastCommit && !refs.some((ref) => ref.sha === lastCommit)) ||
+    refs.some(
+      (ref) =>
+        ref.branch !== branch ||
+        (ref.base !== base && !rebases.some((rebase) => rebase.before.base === ref.base)),
+    ) ||
+    (lastCommit && !refs.some((ref) => ref.sha === lastCommit && ref.base === base)) ||
     evalGit(tree, ['rev-parse', 'HEAD']) !== head
   )
     throw new Error('Developer retry HEAD changed; human reconciliation required');

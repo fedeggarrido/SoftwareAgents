@@ -17,6 +17,12 @@ import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
 import { taskDagDeclaration, taskDeclaration } from '../taskDag.js';
+import {
+  hasCurrentApproval,
+  sameReviewRef,
+  TASK_REBASE_REASON,
+  type TaskRebase,
+} from '../taskRebaseHistory.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
 import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
@@ -151,7 +157,7 @@ class SqliteWorkStore implements WorkStore {
   private readonly sweeper: ReturnType<typeof setInterval>;
   private closed = false;
 
-  private write<T>(operation: () => T): Promise<T> {
+  private write<T>(operation: () => T, rollback?: () => void): Promise<T> {
     if (this.closed) return Promise.reject(new Error('WorkStore is closed'));
     return retryBusy(this.db, performance.now() + WORKSTORE_BUSY_TIMEOUT_MS, () => {
       this.db.exec('BEGIN IMMEDIATE');
@@ -161,7 +167,12 @@ class SqliteWorkStore implements WorkStore {
         this.db.exec('COMMIT');
         return result;
       } catch (error) {
-        this.db.exec('ROLLBACK');
+        // Retain the writer fence until external publication has been compensated.
+        try {
+          rollback?.();
+        } finally {
+          this.db.exec('ROLLBACK');
+        }
         throw error;
       }
     });
@@ -558,6 +569,38 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
+  rebaseTask(
+    taskId: string,
+    version: number,
+    rebase: TaskRebase,
+    publish: () => void,
+    rollback: () => void,
+  ): Promise<void> {
+    return this.write(() => {
+      this.assertNotRecovering(taskId);
+      this.assertNoDecisionGate(taskId);
+      const task = this.getTask(taskId);
+      if (
+        !task ||
+        task.version !== version ||
+        task.lease_owner ||
+        !['REVIEW', 'QA'].includes(task.status) ||
+        !sameReviewRef(task.review_ref, rebase.before)
+      )
+        throw new Error('Task changed before rebase publication');
+      publish();
+      this.db
+        .prepare('UPDATE tasks SET review_ref = ? WHERE project_id = ? AND key = ?')
+        .run(JSON.stringify(rebase.after), this.projectId, taskId);
+      this.decisionTask(
+        task,
+        rebase.oldPatchId === rebase.newPatchId ? task.status : 'REVIEW',
+        'operator',
+        TASK_REBASE_REASON + JSON.stringify(rebase),
+      );
+    }, rollback);
+  }
+
   completeReview(
     taskId: string,
     owner: string,
@@ -625,7 +668,7 @@ class SqliteWorkStore implements WorkStore {
       const execution = this.getExecution(record.execution_id);
       if (
         JSON.stringify(task.review_ref) !== JSON.stringify(record.review_ref) ||
-        task.review_reports?.at(-1)?.report.verdict !== 'approve' ||
+        !hasCurrentApproval(this, taskId) ||
         !execution ||
         execution.task_key !== taskId ||
         execution.agent_role !== 'qa' ||

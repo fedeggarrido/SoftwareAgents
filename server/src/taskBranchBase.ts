@@ -4,6 +4,11 @@ import * as path from 'path';
 import { evalGit } from './evalTasks.js';
 import { resolveInside } from './pathGuard.js';
 
+export function taskBranchBaseFile(repository: string, branch: string): string {
+  const common = path.resolve(repository, evalGit(repository, ['rev-parse', '--git-common-dir']));
+  return resolveInside(common, `softwareagents/task-bases/${encodeURIComponent(branch)}.json`);
+}
+
 /** Runtime-owned metadata in the common Git directory, outside the agent's writable tree. */
 export function taskBranchBase(
   repository: string,
@@ -11,11 +16,9 @@ export function taskBranchBase(
   defaultBranch: string,
   create = false,
 ): string {
-  const common = path.resolve(repository, evalGit(repository, ['rev-parse', '--git-common-dir']));
-  const file = resolveInside(
-    common,
-    `softwareagents/task-bases/${encodeURIComponent(branch)}.json`,
-  );
+  const file = taskBranchBaseFile(repository, branch);
+  if (fs.existsSync(file + '.rebase'))
+    throw new Error('Task rebase pending; human reconciliation required');
   const exists = evalGit(repository, [
     'for-each-ref',
     '--format=%(refname)',

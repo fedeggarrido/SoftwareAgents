@@ -7,12 +7,16 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
+import { AuditLog } from '../src/auditLog.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
 import { runTaskCommand } from '../src/commands/task.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { loadProjectConfig } from '../src/projectConfig.js';
 import { lastReviewFailure } from '../src/reviewAttempts.js';
-import { type ReviewerRequest, validateReview } from '../src/reviewer.js';
+import { type ReviewerRequest, reviewerRequest, validateReview } from '../src/reviewer.js';
+import { taskBranchBase, taskBranchBaseFile } from '../src/taskBranchBase.js';
+import { hasCurrentApproval, taskRebaseHistory } from '../src/taskRebaseHistory.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
@@ -163,6 +167,287 @@ describe('ReviewReport contract', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)', () => {
+  describe('human task rebase', () => {
+    const rebase = () => runFeatureCommand(['rebase', 'FEAT-001', '--task', task], repo, () => {});
+    const advance = (file = 'base-fix.txt', contents = 'new Project base\n') => {
+      fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+      fs.writeFileSync(path.join(repo, file), contents);
+      git(repo, 'add', file);
+      git(repo, 'commit', '-m', 'advance main');
+      return git(repo, 'rev-parse', 'main');
+    };
+    it('keeps QA and immutable reports for identical patches; all subsequent commands accept the base', async () => {
+      await prepare();
+      await review();
+      await run(['qa', 'FEAT-001', '--task', task], 'qa', 'not_tested');
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        const base = advance();
+        await rebase();
+        const after = store.getTask(task)!;
+        expect(after.status).toBe('QA');
+        expect(after.attempt).toBe(before.attempt);
+        expect(after.review_reports).toEqual(before.review_reports);
+        expect(after.test_reports).toEqual(before.test_reports);
+        expect(after.review_ref).toEqual({
+          branch: before.branch,
+          base,
+          sha: git(tree(), 'rev-parse', 'HEAD'),
+        });
+        expect(after.review_ref!.sha).not.toBe(before.review_ref!.sha);
+        expect(git(repo, 'rev-parse', after.branch!)).toBe(after.review_ref!.sha);
+        expect(taskBranchBase(repo, after.branch!, 'main')).toBe(base);
+        expect(hasCurrentApproval(store, task)).toBe(true);
+        const config = loadProjectConfig(repo, true)!;
+        expect(reviewerRequest(store, config, 'FEAT-001', task, undefined, 'qa').reviewRef).toEqual(
+          after.review_ref,
+        );
+        const count = store.listExecutions().length;
+        await develop();
+        expect(store.listExecutions()).toHaveLength(count);
+        const log = vi.fn();
+        await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
+        expect(
+          JSON.parse(log.mock.calls[0][0]).tasks.find((t: { key: string }) => t.key === task)
+            .review_ref.base,
+        ).toBe(base);
+        const history = taskRebaseHistory(store, task);
+        expect(history.at(-1)!.oldPatchId).toBe(history.at(-1)!.newPatchId);
+        expect(
+          new AuditLog()
+            .read('test')
+            .some(
+              (row) =>
+                !row.corrupt &&
+                row.entry.action === 'feature_rebase' &&
+                row.entry.outcome.status === 'persisted' &&
+                row.entry.outcome.detail?.includes(after.review_ref!.sha),
+            ),
+        ).toBe(true);
+        // A second equivalent rebase must carry the original approval through the full chain.
+        advance('second-fix.txt');
+        await rebase();
+        expect(hasCurrentApproval(store, task)).toBe(true);
+        await run(['qa', 'FEAT-001', '--task', task], 'qa', 'pass');
+        expect(store.getTask(task)!.status).toBe('DONE');
+      } finally {
+        store.close();
+      }
+    });
+
+    it('returns a changed patch to REVIEW and requires a new approval on the new base', async () => {
+      await prepare();
+      await review();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        // Main now includes the source change, leaving only the test in the task's patch.
+        let base = advance(
+          'server/src/audit.ts',
+          fs.readFileSync(path.join(tree(), 'server/src/audit.ts'), 'utf8'),
+        );
+        await rebase();
+        const after = store.getTask(task)!;
+        expect(after.status).toBe('REVIEW');
+        expect(after.review_reports).toEqual(before.review_reports);
+        expect(after.review_ref!.base).toBe(base);
+        const history = taskRebaseHistory(store, task).at(-1)!;
+        expect(history.oldPatchId).not.toBe(history.newPatchId);
+        expect(hasCurrentApproval(store, task)).toBe(false);
+        await expect(run(['qa', 'FEAT-001', '--task', task], 'qa')).rejects.toThrow('QA requires');
+        expect(
+          reviewerRequest(store, loadProjectConfig(repo, true)!, 'FEAT-001', task).reviewRef,
+        ).toEqual(after.review_ref);
+        // A later equivalent rebase must not revive approval invalidated by this one.
+        base = advance('later-fix.txt');
+        await rebase();
+        expect(store.getTask(task)!.status).toBe('REVIEW');
+        expect(hasCurrentApproval(store, task)).toBe(false);
+        await review('reject');
+        await expect(
+          run(['develop', 'FEAT-001', '--task', task], 'developer', 'bad-test'),
+        ).rejects.toThrow();
+        expect(store.getTask(task)!.status).toBe('FAILED_RETRYABLE');
+        await develop();
+        expect(store.getTask(task)!.review_ref!.base).toBe(base);
+        await review();
+        expect(hasCurrentApproval(store, task)).toBe(true);
+        await run(['qa', 'FEAT-001', '--task', task], 'qa', 'pass');
+        expect(store.getTask(task)!.status).toBe('DONE');
+      } finally {
+        store.close();
+      }
+    });
+
+    it('aborts conflicts without changing branch, task worktree, registry or WorkStore', async () => {
+      await prepare();
+      const store = await storeFor();
+      try {
+        advance('server/src/audit.ts', 'export const implemented = false;\n');
+        const before = store.getTask(task)!;
+        const registry = taskBranchBaseFile(repo, before.branch!);
+        const metadata = fs.readFileSync(registry, 'utf8');
+        const worktrees = git(repo, 'worktree', 'list', '--porcelain');
+        await expect(rebase()).rejects.toThrow('conflict');
+        expect(store.getTask(task)).toEqual(before);
+        expect(fs.readFileSync(registry, 'utf8')).toBe(metadata);
+        expect(fs.existsSync(registry + '.rebase')).toBe(false);
+        expect(git(tree(), 'rev-parse', 'HEAD')).toBe(before.review_ref!.sha);
+        expect(git(tree(), 'status', '--porcelain')).toBe('');
+        expect(git(repo, 'worktree', 'list', '--porcelain')).toBe(worktrees);
+        expect(taskRebaseHistory(store, task)).toEqual([]);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('names ignored and untracked residues and rejects a moved HEAD before staging', async () => {
+      advance('.gitignore', 'ignored.txt\n');
+      await prepare();
+      advance();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        for (const file of ['ignored.txt', 'untracked.txt']) {
+          fs.writeFileSync(path.join(tree(), file), 'retain this evidence');
+          await expect(rebase()).rejects.toThrow(file);
+          expect(fs.readFileSync(path.join(tree(), file), 'utf8')).toBe('retain this evidence');
+          expect(store.getTask(task)).toEqual(before);
+          fs.unlinkSync(path.join(tree(), file));
+        }
+        const empty = path.join(tree(), 'empty-residue');
+        fs.mkdirSync(empty);
+        await expect(rebase()).rejects.toThrow('empty-residue');
+        fs.rmdirSync(empty);
+        const linked = path.join(tree(), 'node_modules');
+        const evidence = path.join(root, 'linked-evidence.txt');
+        fs.writeFileSync(evidence, 'outside the task worktree');
+        fs.symlinkSync(root, linked, 'junction');
+        try {
+          await expect(rebase()).rejects.toThrow('node_modules');
+          expect(fs.readFileSync(evidence, 'utf8')).toBe('outside the task worktree');
+          expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
+          expect(store.getTask(task)).toEqual(before);
+        } finally {
+          fs.unlinkSync(linked);
+        }
+        git(tree(), 'commit', '--allow-empty', '-m', 'moved head');
+        await expect(rebase()).rejects.toThrow('SHA/base/branch');
+        expect(store.getTask(task)).toEqual(before);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('rejects every managed ingress marker, including an empty marker', async () => {
+      await prepare();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        for (const marker of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE']) {
+          vi.stubEnv(marker, '');
+          await expect(rebase()).rejects.toThrow('human operator');
+          vi.stubEnv(marker, undefined);
+          expect(store.getTask(task)).toEqual(before);
+        }
+      } finally {
+        store.close();
+      }
+    });
+
+    it('rolls back Git and registry when publication fails inside the SQLite transaction', async () => {
+      await prepare();
+      advance();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        const registry = taskBranchBaseFile(repo, before.branch!);
+        const metadata = fs.readFileSync(registry, 'utf8');
+        const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+        try {
+          db.exec(`CREATE TRIGGER fail_rebase BEFORE UPDATE OF review_ref ON tasks
+            BEGIN SELECT RAISE(ABORT, 'injected SQLite publication failure'); END`);
+        } finally {
+          db.close();
+        }
+        await expect(rebase()).rejects.toThrow('injected SQLite publication failure');
+        expect(store.getTask(task)).toEqual(before);
+        expect(git(tree(), 'rev-parse', 'HEAD')).toBe(before.review_ref!.sha);
+        expect(git(tree(), 'status', '--porcelain')).toBe('');
+        expect(fs.readFileSync(registry, 'utf8')).toBe(metadata);
+        expect(fs.existsSync(registry + '.rebase')).toBe(false);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('fails closed on an interrupted publication instead of guessing the base', async () => {
+      await prepare();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        const journal = taskBranchBaseFile(repo, before.branch!) + '.rebase';
+        fs.writeFileSync(journal, '{}');
+        await expect(rebase()).rejects.toThrow('reconciliation');
+        expect(() =>
+          reviewerRequest(store, loadProjectConfig(repo, true)!, 'FEAT-001', task),
+        ).toThrow('reconciliation');
+        await expect(develop()).rejects.toThrow('reconciliation');
+        expect(store.getTask(task)).toEqual(before);
+        expect(fs.existsSync(journal)).toBe(true);
+      } finally {
+        store.close();
+      }
+    });
+
+    it('requires audit intent and reports an already persisted rebase if confirmation fails', async () => {
+      await prepare();
+      const base = advance();
+      const store = await storeFor();
+      try {
+        const before = store.getTask(task)!;
+        const registry = taskBranchBaseFile(repo, before.branch!);
+        const metadata = fs.readFileSync(registry, 'utf8');
+        const worktrees = git(repo, 'worktree', 'list', '--porcelain');
+        const append = AuditLog.prototype.append;
+        const spy = vi.spyOn(AuditLog.prototype, 'append').mockImplementation(function (
+          this: AuditLog,
+          entry,
+        ) {
+          if (entry.action === 'feature_rebase' && entry.outcome.status === 'pending')
+            throw new Error('rebase audit intent unavailable');
+          return append.call(this, entry);
+        });
+        await expect(rebase()).rejects.toThrow('rebase audit intent unavailable');
+        expect(store.getTask(task)).toEqual(before);
+        expect(fs.readFileSync(registry, 'utf8')).toBe(metadata);
+        expect(fs.existsSync(registry + '.rebase')).toBe(false);
+        expect(git(tree(), 'rev-parse', 'HEAD')).toBe(before.review_ref!.sha);
+        expect(git(tree(), 'status', '--porcelain')).toBe('');
+        expect(git(repo, 'worktree', 'list', '--porcelain')).toBe(worktrees);
+        spy.mockImplementation(function (this: AuditLog, entry) {
+          if (entry.action === 'feature_rebase' && entry.outcome.status === 'persisted')
+            throw new Error('rebase audit confirmation unavailable');
+          return append.call(this, entry);
+        });
+        await expect(rebase()).rejects.toThrow('Rebase persisted; audit confirmation pending');
+        const after = store.getTask(task)!;
+        expect(after.review_ref!.base).toBe(base);
+        expect(after.review_ref!.sha).not.toBe(before.review_ref!.sha);
+        expect(git(tree(), 'rev-parse', 'HEAD')).toBe(after.review_ref!.sha);
+        expect(git(repo, 'rev-parse', after.branch!)).toBe(after.review_ref!.sha);
+        expect(taskBranchBase(repo, after.branch!, 'main')).toBe(base);
+        expect(taskRebaseHistory(store, task)).toHaveLength(1);
+        expect(fs.existsSync(registry + '.rebase')).toBe(false);
+        expect(git(repo, 'worktree', 'list', '--porcelain')).toBe(
+          worktrees.replace(before.review_ref!.sha, after.review_ref!.sha),
+        );
+      } finally {
+        store.close();
+      }
+    });
+  });
   describe('Developer rework', () => {
     beforeEach(prepare, 30_000);
     it('rejects, passes findings into actual Developer rework and then approves into QA', async () => {

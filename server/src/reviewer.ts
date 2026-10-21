@@ -12,6 +12,7 @@ import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executo
 import { isFailedReview } from './reviewAttempts.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
+import { hasCurrentApproval } from './taskRebaseHistory.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
 
 const validateReport = compileSchema<ReviewReport>(contract);
@@ -76,12 +77,7 @@ export function reviewerRequest(
         : 'Reviewer requires a REVIEW task with a valid review_ref',
     );
   if (phase === 'qa') {
-    const approved = record.review_reports?.at(-1);
-    if (
-      !approved ||
-      approved.report.verdict !== 'approve' ||
-      JSON.stringify(approved.review_ref) !== JSON.stringify(record.review_ref)
-    )
+    if (!hasCurrentApproval(store, record.key))
       throw new Error('QA requires an approved review for the matching SHA');
   }
   // Same artifact/declaration validation as Developer; reviewer-owned runs may retain review_ref.

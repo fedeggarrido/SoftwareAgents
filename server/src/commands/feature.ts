@@ -7,6 +7,7 @@ import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import { developerRequest, lastDeveloperFailure, pushDeveloperBranch } from '../developer.js';
 import { featureDocument } from '../featureArtifacts.js';
+import { featureIngressActor } from '../featureIngress.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import {
@@ -16,21 +17,16 @@ import {
 } from '../requirements.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
 import { reviewerRequest } from '../reviewer.js';
+import { rebaseFeatureTask } from '../taskRebase.js';
 import { runWorker, type WorkerOptions } from '../worker.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
 import { readTaskInput, taskPath } from './taskFiles.js';
 
 const USAGE =
-  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | approve <FEAT-ID> | show <FEAT-ID> [--json]';
+  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
 
-export function featureIngressActor(actor: PolicyActor = 'human'): PolicyActor {
-  return ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'].some(
-    (key) => process.env[key] !== undefined,
-  )
-    ? 'agent'
-    : actor;
-}
+export { featureIngressActor } from '../featureIngress.js';
 
 /** Actor identity is supplied by trusted ingress. No CLI flag, board or agent data can set it. */
 export async function approveFeature(
@@ -99,6 +95,10 @@ export async function runFeatureCommand(
         ['--request', '--answers'].includes(rest[0]) &&
         !rest[1].startsWith('-')) ||
       (command === 'approve' && rest.length === 0) ||
+      (command === 'rebase' &&
+        rest.length === 2 &&
+        rest[0] === '--task' &&
+        /^FEAT-\d{3}-T\d{2}$/.test(rest[1])) ||
       (['develop', 'review', 'qa'].includes(command) &&
         (rest.length === 0 ||
           (rest.length === 2 && rest[0] === '--task' && /^FEAT-\d{3}-T\d{2}$/.test(rest[1])))) ||
@@ -236,6 +236,9 @@ export async function runFeatureCommand(
       );
       const design = store.getDesign(key);
       if (design) log(`${key}: design registered (${design.git_sha})`);
+    } else if (command === 'rebase') {
+      const result = await rebaseFeatureTask(store, config, key, rest[1]);
+      log(`${rest[1]}: ${store.getTask(rest[1])!.status} ${JSON.stringify(result)}`);
     } else if (command === 'review' || command === 'qa') {
       const input = reviewerRequest(
         store,

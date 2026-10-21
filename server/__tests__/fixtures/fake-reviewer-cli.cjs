@@ -21,7 +21,9 @@ process.stdin.on('end', () => {
         ? [
             {
               severity: 'major',
-              file: 'server/src/audit.ts',
+              file: data.files.includes('server/src/audit.ts')
+                ? 'server/src/audit.ts'
+                : data.files[0],
               line: 1,
               summary: 'Missing pagination',
               suggestion: 'Add bounded pagination',

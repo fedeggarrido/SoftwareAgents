@@ -316,6 +316,8 @@ adquirir el claim, descarta los cambios fallidos hasta el último commit registr
 en ReviewReport/TestReport o la base si no hay uno. Un HEAD distinto exige
 reconciliación humana. Antes de reset/clean inspecciona con lstat y retira cada enlace
 sin recorrerlo (incluidas junctions); conserva sus destinos.
+Tras un `feature rebase`, el nuevo tip registrado también es una entrada válida
+para ese reintento; el historial conserva las referencias a las bases anteriores.
 
 Una infracción de zonas registra `change_zones_exceeded` y todas las rutas relativas
 ofensivas, escapadas en JSON, en auditoría y en el motivo de la tarea.
@@ -401,6 +403,44 @@ Claude comprueba en real el contexto/flags, tests, commit/trailer, `review_ref`,
 main intacto y ausencia de push por defecto; repite el mismo comando y confirma
 el mismo SHA y número de Executions. La QA automática solo usa CLIs falsas y
 repositorios/remotos Git desechables.
+
+## Actualizar la base de una tarea (SA-QA-36)
+
+Cuando avanza la rama base del Project, el operador humano puede actualizar una
+tarea desarrollada sin editar manualmente `task-bases` ni `review_ref`:
+
+```powershell
+pixel-agents feature rebase FEAT-001 --task FEAT-001-T03
+pixel-agents feature show FEAT-001 --json
+```
+
+El comando exige una tarea sin lease en REVIEW o QA, con `review_ref` válido,
+rama y HEAD iguales al SHA registrado y su worktree limpio. Incluye archivos
+ignorados y no versionados: rechaza los residuos nombrando sus rutas, sin
+eliminarlos. Los mismos marcadores de ingreso gestionado que bloquean `approve`
+y `--answers` impiden `rebase`; no existe una opción para eludir ese gate.
+
+Toma el tip local actual de `project.repo.defaultBranch`, sin fetch implícito.
+Prepara el rebase en un worktree separado, sin executors, hooks ni instalaciones.
+Un conflicto aborta allí y conserva la rama, el worktree y los registros originales.
+Compara `git patch-id --stable` del diff completo `base..sha` antes y después.
+Si coincide, mantiene el estado y la vigencia de las aprobaciones de revisión/QA;
+los informes y artefactos originales permanecen inmutables y la cadena de rebases
+equivalentes vincula su referencia con la actual. Si cambia, vuelve a REVIEW y
+las aprobaciones anteriores solo cuentan como historial: exige una nueva revisión.
+La equivalencia del patch no sustituye la prueba real sobre la base actual.
+
+Publica rama, índice/archivos del worktree, base confiable y `review_ref`
+`{branch, sha, base}` bajo el bloqueo de escritura de WorkStore y compara la
+versión de la tarea. Un fallo de publicación revierte Git y el registro y hace
+rollback SQLite. Git, filesystem, SQLite y auditoría no tienen una transacción
+distribuida: un marcador persistente `.rebase` junto al registro bloquea todos
+los consumidores de la base durante la publicación. Si el proceso se interrumpe,
+se conserva para reconciliación humana; nunca se reintenta una publicación incierta
+silenciosamente. Los eventos de WorkStore y auditoría `feature_rebase` conservan
+SHA/base anteriores y nuevos y ambos patch-id. `feature show` expone la base nueva
+en `review_ref`; Developer, Reviewer y QA reutilizan ese registro actualizado.
+No integra ni publica ramas.
 
 ## Reviewer: revisión cruzada → QA o rework (SA-044)
 

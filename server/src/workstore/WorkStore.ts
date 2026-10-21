@@ -3,6 +3,7 @@ import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { ReviewReport } from '../../../core/src/reviewReport.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
 import type { TestReport } from '../../../core/src/testReport.js';
+import type { TaskRebase } from '../taskRebaseHistory.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
@@ -210,6 +211,14 @@ export interface WorkStore {
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
   setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void>;
+  /** Human ingress: fence all writers while publishing a prepared Git rebase. */
+  rebaseTask(
+    taskId: string,
+    version: number,
+    rebase: TaskRebase,
+    publish: () => void,
+    rollback: () => void,
+  ): Promise<void>;
   claimReview(
     taskId: string,
     expectedVersion: number,

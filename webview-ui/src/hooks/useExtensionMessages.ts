@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
-import { applyAuditLog, emptyAuditStore, getAuditStore, setAuditStore } from '../office/auditStore.js';
+import {
+  applyAuditLog,
+  emptyAuditStore,
+  getAuditStore,
+  setAuditStore,
+} from '../office/auditStore.js';
 import { setBoardState, setCompanyNotice } from '../office/boardStore.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';

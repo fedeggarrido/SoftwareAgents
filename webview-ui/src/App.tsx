@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
+import { AuditPanel } from './components/AuditPanel.js';
 import { BacklogPanel } from './components/BacklogPanel.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
@@ -110,6 +111,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [isDecisionsOpen, setIsDecisionsOpen] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -524,6 +526,8 @@ function App() {
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         isBacklogOpen={isBacklogOpen}
+        isAuditOpen={isAuditOpen}
+        onToggleAudit={() => setIsAuditOpen((v) => !v)}
         onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
       />
@@ -535,6 +539,7 @@ function App() {
         onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
       />
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
+      <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
       <MeetingPanel />
 
       <BacklogPanel

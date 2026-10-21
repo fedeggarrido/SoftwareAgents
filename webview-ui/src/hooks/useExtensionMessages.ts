@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
+import { applyAuditLog, emptyAuditStore, getAuditStore, setAuditStore } from '../office/auditStore.js';
 import { setBoardState, setCompanyNotice } from '../office/boardStore.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
@@ -356,7 +357,13 @@ export function useExtensionMessages(
       } else if (msg.type === 'companyNotice') {
         setCompanyNotice(msg.text);
       } else if (msg.type === 'executorState') {
-        setExecutorStore(applyExecutorState(getExecutorStore(), msg));
+        const next = applyExecutorState(getExecutorStore(), msg);
+        if (next.state?.projectId !== getExecutorStore().state?.projectId) {
+          setAuditStore(emptyAuditStore());
+        }
+        setExecutorStore(next);
+      } else if (msg.type === 'auditLog') {
+        setAuditStore(applyAuditLog(getAuditStore(), msg));
       } else if (msg.type === 'executorToggleResult') {
         const settled = applyToggleResult(getExecutorStore(), msg);
         setExecutorStore(settled.store);
@@ -838,7 +845,11 @@ export function useExtensionMessages(
     };
     const unsubscribe = transport.onMessage(handler);
     const stopLifecycle = bindExtensionTransportLifecycle(transport);
+    const stopAuditLifecycle = transport.onStateChange((state) => {
+      if (state !== 'connected') setAuditStore(emptyAuditStore());
+    });
     return () => {
+      stopAuditLifecycle();
       stopLifecycle();
       unsubscribe();
     };

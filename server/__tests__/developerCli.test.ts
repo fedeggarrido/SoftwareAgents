@@ -278,31 +278,106 @@ describe('Developer diff guard', () => {
     ).toThrow(/assertion|skip\/todo\/only/);
   });
 
-  it.each(['empty', 'skipped', 'missing', 'passed'])(
-    'requires structured execution evidence per file: %s',
-    async (mode) => {
+  it.each(
+    ['empty', 'skipped', 'partial-skip', 'missing', 'passed', 'failed'].flatMap((mode) =>
+      ['server/__tests__', 'webview-ui/test', ...(mode === 'passed' ? ['server/src'] : [])].map(
+        (zone) => ({ mode, zone }),
+      ),
+    ),
+  )('requires Developer execution evidence per file: $zone $mode', async ({ mode, zone }) => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    fs.mkdirSync(path.join(directory, zone), { recursive: true });
+    const relative = zone + '/audit.test.ts';
+    fs.writeFileSync(
+      path.join(directory, relative),
+      `import { it, expect, describe } from 'vitest';\n${
+        mode === 'empty'
+          ? "describe('empty', () => {});"
+          : `it${mode === 'skipped' ? '.skip' : ''}('evidence', () => { expect(process.cwd()).toBe(${JSON.stringify(path.join(directory, zone.split('/')[0]))}); expect(true).toBe(${mode !== 'failed'}); });`
+      }`,
+    );
+    if (mode === 'partial-skip')
+      fs.appendFileSync(
+        path.join(directory, relative),
+        "it.skip('omitted', () => expect(true).toBe(true));",
+      );
+    const result = await checkCascadeCriteria(
+      { commands: [] },
+      base,
+      directory,
+      root,
+      new AbortController().signal,
+      undefined,
+      mode === 'missing' ? [relative, 'server/__tests__/missing.test.ts'] : [relative],
+    );
+    expect(result).toEqual([mode === 'passed' ? 'pass' : 'fail']);
+  });
+
+  it.each([true, false])(
+    'runs related tests separately for both workspaces (webview passes=%s)',
+    async (pass) => {
+      const directory = detachedTree();
+      for (const workspace of ['server', 'webview-ui']) {
+        const testDir = workspace === 'server' ? '__tests__' : 'test';
+        fs.mkdirSync(path.join(directory, workspace, testDir), { recursive: true });
+        fs.writeFileSync(
+          path.join(directory, workspace, 'answer.ts'),
+          'export const answer = false;',
+        );
+        fs.writeFileSync(
+          path.join(directory, workspace, testDir, 'answer.test.ts'),
+          `
+import { it, expect } from 'vitest'; import { answer } from '../answer';
+it('related workspace', () => {
+  expect(process.cwd()).toBe(${JSON.stringify(path.join(directory, workspace))});
+  expect(answer).toBe(${workspace === 'server' || pass});
+});`,
+        );
+      }
+      git(directory, 'add', '.');
+      git(directory, 'commit', '-m', 'related fixture');
+      const base = git(directory, 'rev-parse', 'HEAD');
+      for (const workspace of ['server', 'webview-ui'])
+        fs.writeFileSync(
+          path.join(directory, workspace, 'answer.ts'),
+          'export const answer = true;',
+        );
+      expect(
+        await checkCascadeCriteria(
+          { commands: [{ vitestRelated: true, timeoutMs: 10_000 }] },
+          base,
+          directory,
+          root,
+          new AbortController().signal,
+        ),
+      ).toEqual([pass ? 'pass' : 'fail']);
+      expect(fs.existsSync(path.join(directory, 'node_modules'))).toBe(false);
+    },
+  );
+
+  it.each([false, true])(
+    'rejects unknown roots in Developer/cascade (related=%s)',
+    async (related) => {
       const base = git(repo, 'rev-parse', 'HEAD');
       const directory = detachedTree();
-      fs.mkdirSync(path.join(directory, 'server/__tests__'), { recursive: true });
-      const relative = 'server/__tests__/audit.test.ts';
+      fs.mkdirSync(path.join(directory, 'integration'));
       fs.writeFileSync(
-        path.join(directory, relative),
-        `import { it, expect, describe } from 'vitest';\n${
-          mode === 'empty'
-            ? "describe('empty', () => {});"
-            : `it${mode === 'skipped' ? '.skip' : ''}('evidence', () => expect(true).toBe(true));`
-        }`,
+        path.join(directory, related ? 'integration/audit.ts' : 'integration/audit.test.ts'),
+        "it('outside', () => expect(true).toBe(true));",
       );
-      const result = await checkCascadeCriteria(
-        { commands: [] },
-        base,
-        directory,
-        root,
-        new AbortController().signal,
-        undefined,
-        mode === 'missing' ? [relative, 'server/__tests__/missing.test.ts'] : [relative],
-      );
-      expect(result).toEqual([mode === 'passed' ? 'pass' : 'fail']);
+      await expect(
+        checkCascadeCriteria(
+          { commands: related ? [{ vitestRelated: true, timeoutMs: 5000 }] : [] },
+          base,
+          directory,
+          root,
+          new AbortController().signal,
+          undefined,
+          related ? undefined : ['integration/audit.test.ts'],
+        ),
+      ).rejects.toThrow(/Unsupported Vitest .*root/);
+      expect(fs.existsSync(path.join(directory, 'node_modules'))).toBe(false);
     },
   );
 

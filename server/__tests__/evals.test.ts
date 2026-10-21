@@ -317,9 +317,14 @@ describe('default cascade integrity and related tests', () => {
     expect(fs.existsSync(path.join(repo, 'node_modules'))).toBe(false);
   });
 
-  it('passes only normalized, contained absolute filenames in the final related argv', async () => {
+  it('passes only normalized, contained filenames to the related workspace verifier', async () => {
     detachCascadeMetadata();
-    const files = [' leading.ts', '--config.mjs', 'server/deleted.ts', 'ordinary.jsx'];
+    const files = [
+      'server/ leading.ts',
+      'server/--config.mjs',
+      'server/deleted.ts',
+      'server/ordinary.jsx',
+    ];
     fs.writeFileSync(path.join(repo, 'server/deleted.ts'), 'export {};');
     evalGit(repo, ['add', 'server/deleted.ts']);
     evalGit(repo, ['commit', '-m', 'deleted source fixture']);
@@ -327,7 +332,9 @@ describe('default cascade integrity and related tests', () => {
     fs.unlinkSync(path.join(repo, 'server/deleted.ts'));
     for (const file of files.filter((file) => file !== 'server/deleted.ts'))
       fs.writeFileSync(path.join(repo, file), 'export {};');
-    const command = vi.spyOn(evalCriteria, 'runVerifierCommand').mockResolvedValue('pass');
+    const command = vi
+      .spyOn(evalCriteria, 'runRelatedVitest')
+      .mockResolvedValue({ result: 'pass', passed: 0, failed: 0 });
     expect(
       await checkCascadeCriteria(
         { commands: [{ vitestRelated: true, timeoutMs: 5000 }] },
@@ -337,15 +344,13 @@ describe('default cascade integrity and related tests', () => {
         new AbortController().signal,
       ),
     ).toEqual(['pass']);
-    const argv = command.mock.calls[0][0];
-    const related = argv.slice(argv.indexOf('native') + 1);
+    const related = command.mock.calls[0][2];
     expect(related).toHaveLength(files.length);
-    expect([...related].sort()).toEqual(
-      files.map((file) => path.resolve(repo, file).replace(/\\/g, '/')).sort(),
-    );
+    expect([...related].sort()).toEqual([...files].sort());
     for (const file of related) {
       expect(file).toBe(path.posix.normalize(file));
-      expect(path.posix.relative(repo.replace(/\\/g, '/'), file)).not.toMatch(/^\.\.(?:\/|$)/);
+      expect(file).not.toMatch(/^\.\.(?:\/|$)/);
+      expect(file).toMatch(/^server\//);
     }
   });
 

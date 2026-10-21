@@ -134,6 +134,22 @@ export async function checkEvalCriteria(
   return results;
 }
 
+/** Runtime-owned profiles mirror the workspace configs without executing untrusted plugins/reporters. */
+export function vitestWorkspace(tree: string, file: string, test = false) {
+  const workspace = file.split('/')[0];
+  if (!['server', 'webview-ui'].includes(workspace))
+    throw new Error(
+      `Unsupported Vitest ${test ? 'test ' : ''}root: ${JSON.stringify(file)}; expected server/ or webview-ui/`,
+    );
+  resolveInside(tree, file);
+  return {
+    root: resolveInside(tree, workspace),
+    environment: 'node',
+    globals: workspace === 'server',
+    include: workspace === 'server' ? ['__tests__/**/*.test.ts'] : ['test/*.test.ts'],
+  };
+}
+
 /** Shared neutral Vitest JSON verifier. Missing/empty reports are infrastructure, not test failures. */
 export async function runIsolatedVitest(
   tree: string,
@@ -141,7 +157,34 @@ export async function runIsolatedVitest(
   file: string,
   testName?: string,
   signal?: AbortSignal,
+  timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
+  vitestWorkspace(tree, file, true);
+  return runWorkspaceVitest(tree, scratch, [file], false, timeoutMs, signal, testName);
+}
+
+export async function runRelatedVitest(
+  tree: string,
+  scratch: string,
+  files: string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  return runWorkspaceVitest(tree, scratch, files, true, timeoutMs, signal);
+}
+
+async function runWorkspaceVitest(
+  tree: string,
+  scratch: string,
+  files: string[],
+  related: boolean,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  testName?: string,
+): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
+  const workspace = vitestWorkspace(tree, files[0]);
+  if (files.some((file) => vitestWorkspace(tree, file).root !== workspace.root))
+    throw new Error('Vitest command must use a single workspace');
   const temporary = fs.mkdtempSync(path.join(scratch, 'criterion-'));
   const home = resolveInside(temporary, 'home');
   fs.mkdirSync(home);
@@ -159,16 +202,22 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
     `export default ${JSON.stringify({
       cacheDir: resolveInside(temporary, 'cache'),
       test: {
-        include: [file],
+        include: related
+          ? workspace.include
+          : files.map((file) =>
+              path.relative(workspace.root, resolveInside(tree, file)).replaceAll('\\', '/'),
+            ),
+        environment: workspace.environment,
         allowOnly: false,
         expect: { requireAssertions: true },
         setupFiles: [setup],
-        globals: true,
+        globals: workspace.globals,
+        fileParallelism: false,
         reporters: ['json'],
         outputFile: report,
         pool: 'threads',
         maxWorkers: 1,
-        testTimeout: EVAL_CRITERION_TIMEOUT_MS / 2,
+        testTimeout: timeoutMs / 2,
       },
     })};`,
   );
@@ -178,20 +227,22 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
       [
         process.execPath,
         path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
-        'run',
+        related ? 'related' : 'run',
+        '--run',
+        ...(related ? ['--passWithNoTests'] : []),
         '--root',
-        tree,
+        workspace.root,
         '--config',
         config,
         '--configLoader',
         'native',
         '--no-cache',
-        file,
+        ...files.map((file) => resolveInside(tree, file)),
         ...(testName === undefined ? [] : ['--testNamePattern', testName]),
       ],
-      tree,
+      workspace.root,
       home,
-      EVAL_CRITERION_TIMEOUT_MS,
+      timeoutMs,
       signal,
     );
     if (
@@ -203,14 +254,15 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
       throw new Error('Vitest infrastructure failed: timeout or missing/oversized JSON report');
     const result = JSON.parse(fs.readFileSync(report, 'utf8'));
     const suites = result.testResults?.filter(
-      (suite: { name: string }) => path.resolve(suite.name) === path.resolve(tree, file),
+      (suite: { name: string }) =>
+        related || path.resolve(suite.name) === path.resolve(tree, files[0]),
     );
     const assertions = suites?.flatMap(
       (suite: { assertionResults: { status: string }[] }) => suite.assertionResults,
     );
     if (
-      suites?.length !== 1 ||
-      !assertions?.length ||
+      !Array.isArray(suites) ||
+      (!related && (suites.length !== 1 || !assertions?.length)) ||
       (testName === undefined &&
         assertions.some((test: { status: string }) => !['passed', 'failed'].includes(test.status)))
     )
@@ -220,7 +272,7 @@ vi.mock('os', async (original) => ({ ...(await original()), homedir: () => proce
       failed: assertions.filter((test: { status: string }) => test.status === 'failed').length,
     };
     if (
-      (!counts.passed && !counts.failed) ||
+      (!related && !counts.passed && !counts.failed) ||
       (!counts.failed && (passed !== 'pass' || result.success !== true))
     )
       throw new Error('Vitest infrastructure failed without assertion failures');

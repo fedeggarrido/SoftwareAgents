@@ -7,7 +7,10 @@ import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
 import {
   type CriterionResult,
   EvalCriterionTerminationError,
+  runIsolatedVitest,
+  runRelatedVitest,
   runVerifierCommand,
+  vitestWorkspace,
 } from './evalCriteria.js';
 import { assertEvalIntegrity, evalChangedFiles, EvalIntegrityError } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
@@ -114,6 +117,15 @@ export async function checkCascadeCriteria(
         throw new EvalIntegrityError('Related test path escaped the eval tree');
       return normalized;
     });
+  // Resolve all roots before linking dependencies or executing a verifier.
+  for (const file of developerTests ?? []) vitestWorkspace(tree, file, true);
+  const relatedGroups = new Map<string, string[]>();
+  if (verifier.commands.some((command) => 'vitestRelated' in command))
+    for (const absolute of related) {
+      const file = path.relative(tree, absolute).replaceAll('\\', '/');
+      const { root } = vitestWorkspace(tree, file);
+      relatedGroups.set(root, [...(relatedGroups.get(root) ?? []), file]);
+    }
   const link = resolveInside(tree, 'node_modules');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
@@ -126,81 +138,52 @@ export async function checkCascadeCriteria(
       : verifier.commands;
     for (const command of commands) {
       if (signal.aborted) throw new Error('Cascade interrupted');
-      if ('vitestRelated' in command && !related.length) {
-        results.push('pass');
+      if ('argv' in command) {
+        const home = fs.mkdtempSync(path.join(temporary, 'home-'));
+        results.push(await runVerifierCommand(command.argv, tree, home, command.timeoutMs, signal));
         continue;
       }
-      const home = fs.mkdtempSync(path.join(temporary, 'home-'));
-      const directTests = 'developerTests' in command ? command.developerTests : undefined;
-      const report = path.join(home, 'tests.json');
-      let argv: string[];
-      if ('argv' in command) argv = command.argv;
-      else {
-        // Neutral external config avoids repo plugins/reporters/caches. os.homedir on
-        // Windows ignores HOME, so isolate it inside the test workers as evals do.
-        const setup = path.join(home, 'isolated-home.mjs');
-        fs.writeFileSync(
-          setup,
-          `import { vi } from 'vitest';
-vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
-`,
-        );
-        const config = path.join(home, 'vitest.config.mjs');
-        fs.writeFileSync(
-          config,
-          `export default ${JSON.stringify({
-            cacheDir: path.join(home, 'cache'),
-            test: {
-              globals: true,
-              expect: { requireAssertions: true },
-              ...(directTests ? { reporters: ['json'], outputFile: report, allowOnly: false } : {}),
-              setupFiles: [setup],
-              pool: 'threads',
-              maxWorkers: 1,
-              testTimeout: command.timeoutMs / 2,
-            },
-          })};`,
-        );
-        argv = [
-          process.execPath,
-          path.join(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs'),
-          ...(directTests ? ['run'] : ['related']),
-          '--run',
-          ...(directTests ? [] : ['--passWithNoTests']),
-          '--no-cache',
-          '--root',
-          tree,
-          '--config',
-          config,
-          '--configLoader',
-          'native',
-          ...(directTests ? directTests.map((file) => path.resolve(tree, file)) : related),
-        ];
-      }
-      let result = await runVerifierCommand(argv, tree, home, command.timeoutMs, signal);
-      if (directTests && result === 'pass') {
-        // An exit code of zero includes empty/skipped suites; require evidence per file.
-        try {
-          const data = JSON.parse(fs.readFileSync(report, 'utf8')) as {
-            testResults: { name: string; assertionResults: { status: string }[] }[];
-          };
-          if (
-            !directTests.every((file) => {
-              const suites = data.testResults.filter(
-                (suite) =>
-                  normalize(path.resolve(suite.name)) === normalize(path.resolve(tree, file)),
-              );
-              return (
-                suites.length === 1 &&
-                suites[0].assertionResults.some((test) => test.status === 'passed')
-              );
-            })
-          )
-            result = 'fail';
-        } catch {
-          result = 'fail';
+      const checks: CriterionResult[] = [];
+      const deadline = Date.now() + command.timeoutMs;
+      if ('developerTests' in command) {
+        for (const file of command.developerTests) {
+          if (signal.aborted) throw new Error('Cascade interrupted');
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+            checks.push('timeout');
+            break;
+          }
+          try {
+            checks.push(
+              (await runIsolatedVitest(tree, temporary, file, undefined, signal, remaining)).result,
+            );
+          } catch (error) {
+            if (error instanceof EvalCriterionTerminationError) throw error;
+            checks.push('fail');
+          }
+        }
+      } else {
+        for (const files of relatedGroups.values()) {
+          if (signal.aborted) throw new Error('Cascade interrupted');
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+            checks.push('timeout');
+            break;
+          }
+          try {
+            checks.push((await runRelatedVitest(tree, temporary, files, remaining, signal)).result);
+          } catch (error) {
+            if (error instanceof EvalCriterionTerminationError) throw error;
+            checks.push('fail');
+          }
         }
       }
+      const result = checks.includes('timeout')
+        ? 'timeout'
+        : checks.every((check) => check === 'pass') &&
+            (!('developerTests' in command) || checks.length > 0)
+          ? 'pass'
+          : 'fail';
       results.push(result);
     }
     return results;

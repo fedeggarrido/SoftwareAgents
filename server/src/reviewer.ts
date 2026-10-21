@@ -33,6 +33,7 @@ export function reviewerRequest(
   owner?: string,
   phase: 'review' | 'qa' = 'review',
 ): ReviewerRequest {
+  const label = phase === 'qa' ? 'QA' : 'Reviewer';
   const availabilityWaiting = (task: { key: string; status: string }) => {
     const gates = store
       .listDecisions()
@@ -98,7 +99,7 @@ export function reviewerRequest(
     evalGit(tree, ['symbolic-ref', '--short', 'HEAD']) !== ref.branch ||
     evalGit(tree, ['status', '--porcelain', '--untracked-files=all'])
   )
-    throw new Error('Reviewer review_ref SHA/base/branch changed or worktree is dirty');
+    throw new Error(`${label} review_ref SHA/base/branch changed or worktree is dirty`);
   const readDiff = (args: string[]) =>
     execFileSync(
       'git',
@@ -121,7 +122,7 @@ export function reviewerRequest(
   const files = readDiff(['--name-only', '--no-renames', '-z']).split('\0').filter(Boolean);
   const diff = readDiff(['--no-renames', '--unified=3']);
   if (!files.length || Buffer.byteLength(diff) > TASK_CLI_INPUT_BYTES)
-    throw new Error('Reviewer requires a nonempty diff of at most 1 MiB');
+    throw new Error(`${label} requires a nonempty diff of at most 1 MiB`);
   const execution = store
     .listExecutions()
     .filter(
@@ -130,7 +131,7 @@ export function reviewerRequest(
     .sort((a, b) => a.task_version - b.task_version || a.started_at.localeCompare(b.started_at))
     .at(-1);
   if (!execution || !['claude', 'codex'].includes(execution.executor))
-    throw new Error('Reviewer requires the last Developer executor');
+    throw new Error(`${label} requires the last Developer executor`);
   return {
     ...input,
     reviewRef: ref,

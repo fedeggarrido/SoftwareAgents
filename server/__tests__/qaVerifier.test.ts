@@ -52,6 +52,76 @@ const source = (text: string, file = 'server/__tests__/check.test.ts') =>
 const verify = () => runIsolatedVitest(tree, scratch, 'server/__tests__/check.test.ts');
 
 describe('Shared isolated QA verifier', () => {
+  it.each([true, false])(
+    'executes QA webview tests with the Node workspace profile: %s',
+    async (pass) => {
+      fs.unlinkSync(link);
+      git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+      const file = 'webview-ui/test/auditStore.test.ts';
+      fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
+      source(
+        `import { it, expect } from 'vitest'; import os from 'os';
+it('webview runtime', () => {
+  expect(process.cwd()).toBe(${JSON.stringify(path.join(tree, 'webview-ui'))});
+  expect(typeof window).toBe('undefined');
+  expect(typeof globalThis.it).toBe('undefined');
+  expect(os.homedir()).toBe(process.env.HOME);
+  expect(process.env.QA_SECRET_SENTINEL).toBeUndefined();
+  expect(true).toBe(${pass});
+});`,
+        file,
+      );
+      // Repository configuration/reporters must never execute in the verifier.
+      fs.writeFileSync(
+        path.join(tree, 'webview-ui/vitest.config.ts'),
+        "throw new Error('untrusted config');",
+      );
+      git('add', 'webview-ui');
+      git(
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.invalid',
+        'commit',
+        '-m',
+        'fixture',
+      );
+      const input = {
+        worktree: tree,
+        reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
+        files: [],
+        task: { changeZones: [], testZones: [file] },
+      } as unknown as ReviewerRequest;
+      expect(qaTestFiles(input)).toEqual([file]);
+      expect(await qaCommands(input, scratch, new AbortController().signal)).toEqual([
+        {
+          command: 'vitest:' + file,
+          result: pass ? 'pass' : 'fail',
+          passed: pass ? 1 : 0,
+          failed: pass ? 0 : 1,
+        },
+      ]);
+      expect(fs.existsSync(link)).toBe(false);
+      expect(fs.readdirSync(scratch)).toEqual([]);
+      expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
+    },
+  );
+
+  it('rejects unsupported test roots before creating verifier scratch', async () => {
+    await expect(runIsolatedVitest(tree, scratch, 'integration/check.test.ts')).rejects.toThrow(
+      /Unsupported Vitest test root/,
+    );
+    expect(fs.readdirSync(scratch)).toEqual([]);
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    const file = 'integration/check.test.ts';
+    fs.mkdirSync(path.join(tree, 'integration'));
+    source("it('outside', () => expect(true).toBe(true));", file);
+    git('add', 'integration');
+    expect(() =>
+      qaTestFiles({ worktree: tree, files: [file], task: {} } as unknown as ReviewerRequest),
+    ).toThrow(/Unsupported Vitest test root/);
+  });
+
   it.each(['Runtime commit abc', 'Reviewer report persisted', 'QA report persisted'])(
     'clears visible failures after %s while retaining history and showing newer failures',
     (reason) => {
@@ -89,13 +159,14 @@ describe('Shared isolated QA verifier', () => {
       });
       events.push({
         to_status: 'QA',
-        reason: 'Reviewer failed: category=auth',
+        reason: 'QA failed: category=auth',
         created_at: 'newer',
       } as DomainEventRecord);
       expect(lastReviewFailure(store, task)).toEqual({
-        reason: 'Reviewer failed: category=auth',
+        reason: 'QA failed: category=auth',
         created_at: 'newer',
       });
+      expect(lastDeveloperFailure(store, task)?.reason).toBe('Worker failed again');
     },
   );
   it('counts valid Reviewer and QA rejections, excluding historical infrastructure attempts', () => {
@@ -203,9 +274,9 @@ describe('Shared isolated QA verifier', () => {
       git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
       source(
         "import { it, expect } from 'vitest'; import fs from 'fs'; it('writes', () => { fs.mkdirSync(" +
-          JSON.stringify(path.dirname(file)) +
+          JSON.stringify(path.join(tree, path.dirname(file))) +
           ', { recursive: true }); fs.writeFileSync(' +
-          JSON.stringify(file) +
+          JSON.stringify(path.join(tree, file)) +
           ", 'output'); expect(true).toBe(true); });",
       );
       git('add', 'server');

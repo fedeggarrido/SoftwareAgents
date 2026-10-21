@@ -7,7 +7,11 @@ import { matchesChangeZone } from './changeZones.js';
 import { taskPath } from './commands/taskFiles.js';
 import { QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
 import { isDeveloperTest } from './developer.js';
-import { EvalCriterionTerminationError, runIsolatedVitest } from './evalCriteria.js';
+import {
+  EvalCriterionTerminationError,
+  runIsolatedVitest,
+  vitestWorkspace,
+} from './evalCriteria.js';
 import { assertEvalIntegrity } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardRequirementsWrites, requirementsSnapshot } from './requirements.js';
@@ -22,11 +26,7 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
   const zones = [...(input.task.changeZones ?? []), ...(input.task.testZones ?? [])];
   const selected = files
     .filter((file) => {
-      if (
-        !isDeveloperTest(file) ||
-        !['server/__tests__/', 'webview-ui/test/'].some((root) => file.startsWith(root))
-      )
-        return false;
+      if (!isDeveloperTest(file)) return false;
       const source = file
         .replace(/\.(test|spec)(?=\.[cm]?[jt]sx?$)/i, '')
         .replace('server/__tests__/', 'server/src/');
@@ -47,7 +47,11 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
     .sort();
   if (!selected.length || selected.length > QA_MAX_TEST_FILES)
     throw new Error('QA requires a bounded set of task tests (1-' + QA_MAX_TEST_FILES + ')');
-  for (const file of selected) taskPath(input.worktree, file);
+  for (const file of selected) {
+    vitestWorkspace(input.worktree, file, true);
+    if (!['server/__tests__/', 'webview-ui/test/'].some((root) => file.startsWith(root)))
+      throw new Error('Unsupported QA test root: ' + JSON.stringify(file));
+  }
   return selected;
 }
 

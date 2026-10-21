@@ -310,7 +310,10 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
         expect(launch.data.commandAllowlist).toEqual(record.report.commands.map((c) => c.command));
         expect(launch.data.commands).toEqual(record.report.commands);
         expect(launch.args[launch.args.indexOf('--tools') + 1]).not.toMatch(/Write|Edit|Bash/);
-        expect(store.listExecutions().find((e) => e.agent_role === 'qa')!.executor).toBe('claude');
+        const execution = store.listExecutions().find((e) => e.agent_role === 'qa')!;
+        expect(execution.executor).toBe('claude');
+        expect(execution.selection_reason).toContain('QA same_executor_no_available_alternative');
+        expect(execution.selection_reason).not.toContain('Reviewer');
         const log = vi.fn();
         await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
         expect(
@@ -393,7 +396,21 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
           test_reports: [],
           lease_owner: null,
         });
-        expect(lastReviewFailure(store, store.getTask(task)!)).not.toBeNull();
+        expect(lastReviewFailure(store, store.getTask(task)!)?.reason).toMatch(/^QA failed: /);
+        if (['invalid', 'invent-command'].includes(mode)) {
+          const audit = fs
+            .readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+          const validation = audit.filter((entry) =>
+            entry.outcome.status.endsWith('validation_failed'),
+          );
+          expect(validation).toHaveLength(2);
+          expect(validation.every((entry) => entry.outcome.status === 'qa_validation_failed')).toBe(
+            true,
+          );
+        }
         expect(store.getTask(task + '-D1')).toBeUndefined();
         if (mode !== 'outside') {
           await qa();

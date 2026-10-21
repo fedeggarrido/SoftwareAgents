@@ -116,7 +116,7 @@ import {
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
-import { REVIEW_FAILURE_PREFIX, reviewReworkRounds } from './reviewAttempts.js';
+import { QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX, reviewReworkRounds } from './reviewAttempts.js';
 import {
   preferCrossExecutor,
   reviewerBrief,
@@ -381,7 +381,7 @@ export async function runWorker(
           ),
         ) !== JSON.stringify(options.reviewer)
       )
-        throw new Error('Reviewer context changed');
+        throw new Error(`${options.qa ? 'QA' : 'Reviewer'} context changed`);
     }
     if (options.developer) {
       const current = developerRequest(store, config, options.developer.key, args.task);
@@ -438,7 +438,7 @@ export async function runWorker(
       if (options.reviewer)
         await lifecycle.finish(
           options.qa ? 'QA' : 'REVIEW',
-          `${REVIEW_FAILURE_PREFIX}category=${result.quotaDecision.cause ?? 'quota'}; exit_code=unknown`,
+          `${options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX}category=${result.quotaDecision.cause ?? 'quota'}; exit_code=unknown`,
         );
       else await lifecycle.wait(result.quotaDecision);
     } else if (!result.availabilityBlock && !result.policyDecision)
@@ -461,7 +461,7 @@ export async function runWorker(
   } catch (error) {
     await lifecycle.finish(
       options.reviewer ? (options.qa ? 'QA' : 'REVIEW') : 'FAILED_RETRYABLE',
-      (options.reviewer ? REVIEW_FAILURE_PREFIX : '') +
+      (options.reviewer ? (options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX) : '') +
         (error instanceof ChangeZonesExceededError
           ? error.diagnostic()
           : error instanceof WorkerExecutionError
@@ -628,7 +628,7 @@ async function runWorkerExecution(
     if (options.reviewer && found.code !== 'code_execution_not_mediated') {
       await lifecycle?.finish(
         options.qa ? 'QA' : 'REVIEW',
-        `${REVIEW_FAILURE_PREFIX}category=${found.code}; exit_code=unknown`,
+        `${options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX}category=${found.code}; exit_code=unknown`,
       );
       process.exitCode = 3;
       return {
@@ -1091,7 +1091,7 @@ async function runWorkerExecution(
           executor: selectedExecutor,
           detail: JSON.stringify(reviewSelection),
         });
-      const selectionReason = `${options.reviewer ? `${role}: excluded codex: code_execution_not_mediated; ` : ''}${reviewSelection ? `Reviewer ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
+      const selectionReason = `${options.reviewer ? `${role}: excluded codex: code_execution_not_mediated; ` : ''}${reviewSelection ? `${options.qa ? 'QA' : 'Reviewer'} ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
       if (tierSelection && reviewSelection) tierSelection.reason = selectionReason;
       if (selection && reviewSelection) selection.reason = selectionReason;
       telemetry = new ExecutionTelemetry(
@@ -1205,7 +1205,7 @@ async function runWorkerExecution(
           ),
         ) !== JSON.stringify(options.reviewer)
       )
-        throw new Error('Reviewer context changed before launch');
+        throw new Error(`${options.qa ? 'QA' : 'Reviewer'} context changed before launch`);
       if (options.developer) {
         const current = developerRequest(
           workStore!,
@@ -1646,11 +1646,13 @@ async function runWorkerExecution(
           } catch (error) {
             if (!(error instanceof SchemaValidationError)) throw error;
             audit(
-              options.reviewer
-                ? 'review_validation_failed'
-                : options.architect
-                  ? 'design_validation_failed'
-                  : 'featurespec_validation_failed',
+              options.qa
+                ? 'qa_validation_failed'
+                : options.reviewer
+                  ? 'review_validation_failed'
+                  : options.architect
+                    ? 'design_validation_failed'
+                    : 'featurespec_validation_failed',
               {
                 attempt: requirementsAttempt + 1,
                 // The open decision keeps its first text; the latest errors live here.
@@ -1682,7 +1684,7 @@ async function runWorkerExecution(
               // Preserve the reviewed SHA and release the lease before opening the existing human gate.
               await lifecycle!.finish(
                 options.qa ? 'QA' : 'REVIEW',
-                `${REVIEW_FAILURE_PREFIX}category=invalid_report; exit_code=0`,
+                `${options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX}category=invalid_report; exit_code=0`,
               );
               telemetryStatus = 'error';
               process.exitCode = 3;

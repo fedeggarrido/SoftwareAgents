@@ -358,7 +358,12 @@ tests y suites añadidos no admiten `skip`, `todo` ni `only`; una comprobación
 estática con el parser de TypeScript exige `expect` o `assert` en el cuerpo de
 cada test nuevo o modificado. Un test sin recoger o fallido impide el commit.
 Los tests que requieren aliases/setup especiales necesitan adaptación explícita;
-no se carga configuración del repositorio generada por el agente. Como SA-103,
+no se carga configuración del repositorio generada por el agente. QA, Developer y
+`vitestRelated` resuelven cada fichero en `server/` o `webview-ui/`, con raíz y
+directorio de trabajo del workspace. Los perfiles neutrales reproducen el entorno
+Node y la selección de tests de sus configuraciones: globals en server y imports
+explícitos en webview. Las tandas mixtas se separan por workspace; una raíz distinta
+se rechaza antes de ejecutar comandos. Como SA-103,
 esto valida agentes cooperativos y no confina código adversarial en el SO.
 
 La comprobación roja sobre la base no se automatiza en este slice: aplicar tests
@@ -589,7 +594,9 @@ OAuth/auth, cuota, spawn, timeout, informe inválido tras dos intentos, lease pe
 JSON ausente/vacío o tests omitidos conservan QA y `review_ref`, sin consumir rondas.
 `last_review_failure` conserva el diagnóstico saneado del último fallo de revisión/QA;
 se limpia en cuanto se persiste un informe válido o se completa Developer con
-éxito. El diagnóstico visible `last_developer_failure` también se limpia tras
+éxito. Los fallos nuevos de QA usan `QA failed:` y `qa_validation_failed`. Los lectores
+conservan compatibilidad con los fallos históricos etiquetados como Reviewer.
+El diagnóstico visible `last_developer_failure` también se limpia tras
 completar Developer, Reviewer o QA con éxito. Los eventos y la auditoría conservan
 los fallos originales.
 

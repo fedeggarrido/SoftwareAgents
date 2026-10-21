@@ -1,6 +1,11 @@
 import type { DomainEventRecord, TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export const REVIEW_FAILURE_PREFIX = 'Reviewer failed: ';
+export const QA_FAILURE_PREFIX = 'QA failed: ';
+
+export function isReviewFailure(reason: string): boolean {
+  return [REVIEW_FAILURE_PREFIX, QA_FAILURE_PREFIX].some((prefix) => reason.startsWith(prefix));
+}
 
 /** Success supersedes visible diagnostics; the original events remain in the audit history. */
 export function isSuccessfulTaskStep(event: DomainEventRecord): boolean {
@@ -29,9 +34,9 @@ export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
 export function lastReviewFailure(store: WorkStore, task: TaskRecord) {
   const event = store
     .listDomainEvents(task.key)
-    .filter((e) => e.reason.startsWith(REVIEW_FAILURE_PREFIX) || isSuccessfulTaskStep(e))
+    .filter((e) => isReviewFailure(e.reason) || isSuccessfulTaskStep(e))
     .at(-1);
-  return event?.reason.startsWith(REVIEW_FAILURE_PREFIX)
+  return event && isReviewFailure(event.reason)
     ? { reason: event.reason, created_at: event.created_at }
     : null;
 }

@@ -16,7 +16,7 @@ import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
-import { isSuccessfulTaskStep } from './reviewAttempts.js';
+import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import {
   analyzeTaskDag,
@@ -51,7 +51,7 @@ export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
       (e) =>
         isSuccessfulTaskStep(e) ||
         ((e.to_status === 'FAILED_RETRYABLE' || e.to_status === 'FAILED_FINAL') &&
-          !e.reason.startsWith('Reviewer failed: ')),
+          !isReviewFailure(e.reason)),
     )
     .at(-1);
   if (!event || isSuccessfulTaskStep(event)) return null;

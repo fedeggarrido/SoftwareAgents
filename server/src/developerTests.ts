@@ -1,5 +1,22 @@
 import * as ts from 'typescript';
 
+/** Member calls on test/it that configure or group tests instead of declaring one. */
+const NON_DECLARATION_MODIFIERS = new Set([
+  'use',
+  'describe',
+  'beforeEach',
+  'afterEach',
+  'beforeAll',
+  'afterAll',
+  'step',
+  'extend',
+  'info',
+  'setTimeout',
+  'slow',
+  'configure',
+  'expect',
+]);
+
 /** A conservative syntax check, not a proof of assertion quality or test-first ordering. */
 export function validateDeveloperTests(file: string, source: string, baseline: string): void {
   const parse = (text: string) =>
@@ -58,9 +75,12 @@ export function validateDeveloperTests(file: string, source: string, baseline: s
       modifiers.some((modifier) => ['skip', 'todo', 'only', 'skipIf', 'runIf'].includes(modifier))
     )
       throw new Error(`Developer test contains skip/todo/only: ${file}`);
-    // Intermediate parameterization calls do not declare a test callback themselves.
+    // Intermediate parameterization calls do not declare a test callback themselves,
+    // and Playwright/Vitest configuration or grouping calls (test.use, test.describe,
+    // hooks, test.step) are not test declarations.
     if (
       !['it', 'test'].includes(kind) ||
+      modifiers.some((modifier) => NON_DECLARATION_MODIFIERS.has(modifier)) ||
       (['each', 'for'].some((modifier) => modifiers.includes(modifier)) &&
         node.arguments.length < 2)
     )

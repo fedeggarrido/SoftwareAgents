@@ -50,6 +50,14 @@ process.stdin.on('end', () => {
     },
     adrs: [{ title: 'Read only audit', body: 'Use existing audit reader.' }],
   };
+  if (['qa-author', 'qa-author-e2e', 'test-author', 'qa-author-product'].includes(mode)) {
+    Object.assign(proposal.dag.tasks[0], {
+      type: 'qa',
+      agentRole: mode === 'test-author' ? 'test' : 'qa',
+      changeZones: mode === 'qa-author-e2e' ? ['e2e/**'] : ['server/**'],
+      testZones: ['server/__tests__/helpers/**'],
+    });
+  }
   if (mode === 'deferred-chain')
     Object.assign(proposal.dag.tasks[1], {
       type: 'code',

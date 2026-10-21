@@ -36,7 +36,7 @@ for (const role of Object.keys(ROLE_PROFILES)) {
       '--dangerously-bypass-approvals-and-sandbox',
     ])
       expect(flags).not.toContain(forbidden);
-    if (role !== 'developer') {
+    if (!['developer', 'qa-author'].includes(role)) {
       expect(compiled.claude.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
       expect(compiled.codex.sandbox).toBe('read-only');
     }

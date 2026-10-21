@@ -42,6 +42,7 @@ export type Department =
 
 const SPECIALISTS: Record<string, [string, Department]> = {
   qa: ['QA', 'Calidad'],
+  'qa-author': ['QA Tests', 'Calidad'],
   reviewer: ['Reviewer', 'Calidad'],
   developer: ['DEV', 'Ingeniería'],
   'company-manager': ['Manager', 'Dirección'],

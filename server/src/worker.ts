@@ -48,8 +48,11 @@ import {
   ChangeZonesExceededError,
   type DeveloperRequest,
   developerRequest,
+  developerStyleCommands,
   developerVerifier,
   guardDeveloperChanges,
+  isQaAuthorTask,
+  MissingTestError,
   resetDeveloperWorktree,
 } from './developer.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
@@ -462,7 +465,7 @@ export async function runWorker(
     await lifecycle.finish(
       options.reviewer ? (options.qa ? 'QA' : 'REVIEW') : 'FAILED_RETRYABLE',
       (options.reviewer ? (options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX) : '') +
-        (error instanceof ChangeZonesExceededError
+        (error instanceof ChangeZonesExceededError || error instanceof MissingTestError
           ? error.diagnostic()
           : error instanceof WorkerExecutionError
             ? error.message
@@ -539,12 +542,18 @@ async function runWorkerExecution(
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
   const role =
     (options.reviewer ? (options.qa ? 'qa' : 'reviewer') : undefined) ??
-    (options.developer ? 'developer' : undefined) ??
+    (options.developer
+      ? isQaAuthorTask(options.developer.task)
+        ? 'qa-author'
+        : 'developer'
+      : undefined) ??
     (options.architect ? 'architect' : undefined) ??
     (options.requirements ? 'requirements-analyst' : undefined) ??
     lifecycle?.store.getTask(args.task)?.agent_role ??
     options.evaluation?.agentSpec?.identity.role ??
     'developer';
+  if (role === 'qa-author' && !options.developer)
+    throw new CliUsageError('QA author requires feature develop with a validated task scope');
   const spec = validateSchema(
     compileSchema<AgentSpec>(agentSchema),
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
@@ -1722,7 +1731,12 @@ async function runWorkerExecution(
           fs.mkdirSync(scratch, { recursive: true });
           try {
             results = await checkCascadeCriteria(
-              verifier,
+              options.developer
+                ? {
+                    ...verifier,
+                    commands: [...verifier.commands, ...developerStyleCommands(tree.path, base)],
+                  }
+                : verifier,
               base,
               tree.path,
               scratch,
@@ -1746,7 +1760,11 @@ async function runWorkerExecution(
           !interrupted &&
           exitCode === 0 &&
           results.length > 0 &&
-          results.every((r) => r === 'pass');
+          results.every(
+            (r) =>
+              r === 'pass' ||
+              (r === 'not_tested' && !!options.developer && isQaAuthorTask(options.developer.task)),
+          );
         await recordAttempt(
           results,
           exitCode === 0 ? (passed ? 'pass' : 'fail') : 'executor_error',

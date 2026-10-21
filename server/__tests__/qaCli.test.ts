@@ -17,6 +17,7 @@ import { lastReviewFailure } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { deferredAcceptanceCoverage } from '../src/taskDag.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
@@ -115,6 +116,7 @@ beforeEach(() => {
     vi.stubEnv(`GIT_${role}_EMAIL`, 'test@example.invalid');
   }
   git(repo, 'init', '-b', 'main');
+  developerVerifierConfig(repo);
   fs.writeFileSync(
     path.join(repo, '.softwareagents/project.yaml'),
     'apiVersion: softwareagents.io/v1alpha1\nkind: Project\nid: test\nname: Test\nrepo:\n  remote: https://example.invalid/test.git\n  defaultBranch: main\nbrain:\n  path: .softwareagents/brain\n',

@@ -42,7 +42,7 @@ function criterionEnvironment(home: string): NodeJS.ProcessEnv {
 }
 
 /** Drain a bounded output stream and wait for close after killing the entire process tree. */
-export type CriterionResult = 'pass' | 'fail' | 'timeout';
+export type CriterionResult = 'pass' | 'fail' | 'timeout' | 'not_tested';
 export async function runVerifierCommand(
   argv: readonly string[],
   tree: string,

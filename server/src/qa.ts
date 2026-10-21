@@ -7,16 +7,13 @@ import { matchesChangeZone } from './changeZones.js';
 import { taskPath } from './commands/taskFiles.js';
 import { QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
 import { developerScope, isDeveloperTest } from './developer.js';
-import {
-  EvalCriterionTerminationError,
-  runIsolatedVitest,
-  vitestWorkspace,
-} from './evalCriteria.js';
+import { EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalIntegrity } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardRequirementsWrites, requirementsSnapshot } from './requirements.js';
 import type { ReviewerRequest } from './reviewer.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
+import { runTaskTest, taskTestCommand, validateTaskTest } from './taskTestRunner.js';
 
 const validateReport = compileSchema<TestReport>(contract);
 
@@ -63,8 +60,8 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
   if (!selected.length || selected.length > QA_MAX_TEST_FILES)
     throw new Error('QA requires a bounded set of task tests (1-' + QA_MAX_TEST_FILES + ')');
   for (const file of selected) {
-    vitestWorkspace(input.worktree, file, true);
-    if (!['server/__tests__/', 'webview-ui/test/'].some((root) => file.startsWith(root)))
+    validateTaskTest(input.worktree, file);
+    if (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)))
       throw new Error('Unsupported QA test root: ' + JSON.stringify(file));
   }
   return selected;
@@ -87,7 +84,7 @@ export async function qaCommands(
   const before = requirementsSnapshot(tree);
   const allowed = qaTestFiles(input);
   const files = requested
-    ? allowed.filter((file) => requested.includes('vitest:' + file))
+    ? allowed.filter((file) => requested.includes(taskTestCommand(file)))
     : allowed;
   if (requested && (!files.length || files.length !== requested.length))
     throw new Error('QA command outside runtime allowlist');
@@ -103,8 +100,8 @@ export async function qaCommands(
     for (const file of files) {
       if (signal.aborted) throw new Error('QA verifier interrupted');
       results.push({
-        command: 'vitest:' + file,
-        ...(await runIsolatedVitest(tree, scratch, file, undefined, signal)),
+        command: taskTestCommand(file),
+        ...(await runTaskTest(tree, scratch, file, signal)),
       });
     }
     return results;
@@ -203,6 +200,22 @@ export function validateTestReport(
       errors.push('Defect requires a failed assigned AC');
   const proposedPass = report.verdict === 'pass';
   let downgraded = false;
+  const unavailable = commands.filter((command) => command.result === 'not_tested');
+  if (unavailable.length) {
+    for (const ac of report.acceptance) {
+      if (ac.status === 'pass') ac.status = 'not_tested';
+      if (ac.status === 'not_tested')
+        ac.evidence +=
+          '\n' +
+          unavailable
+            .map(
+              (command) =>
+                `${command.command}: ${command.reason ?? 'Runtime execution unavailable'}`,
+            )
+            .join('\n');
+    }
+    downgraded = true;
+  }
   for (const ac of report.acceptance)
     if (ac.status === 'deferred' && !input.deferredCoverage?.[ac.ac]?.length) {
       ac.status = 'not_tested';
@@ -215,10 +228,16 @@ export function validateTestReport(
       : 'pass';
   if (downgraded && proposedPass && verdict === 'not_tested') report.verdict = verdict;
   else if (verdict !== report.verdict) errors.push('Contradictory verdict');
-  if (proposedPass && (!commands.length || commands.some((c) => c.result !== 'pass')))
+  if (report.verdict === 'pass' && (!commands.length || commands.some((c) => c.result !== 'pass')))
     errors.push('Cannot pass with missing/failed runtime commands');
   const evidence = (rows: TestReport['commands']) =>
-    rows.map(({ command, result, passed, failed }) => ({ command, result, passed, failed }));
+    rows.map(({ command, result, passed, failed, reason }) => ({
+      command,
+      result,
+      passed,
+      failed,
+      ...(reason ? { reason } : {}),
+    }));
   if (JSON.stringify(evidence(report.commands)) !== JSON.stringify(evidence(commands)))
     errors.push('Commands must exactly match runtime evidence; model commands are forbidden');
   if (errors.length) throw new SchemaValidationError(errors);

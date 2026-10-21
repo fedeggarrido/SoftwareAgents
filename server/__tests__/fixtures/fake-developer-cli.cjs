@@ -10,12 +10,19 @@ process.stdin.on('end', () => {
   );
   fs.appendFileSync(log, JSON.stringify({ args, context, cwd: process.cwd() }) + '\n');
   fs.mkdirSync('server/src', { recursive: true });
-  const { reviewFindings = [], qaDefects = [], reworkAttempt } = JSON.parse(context.task.brief);
+  const {
+    reviewFindings = [],
+    qaDefects = [],
+    reworkAttempt,
+    task,
+  } = JSON.parse(context.task.brief);
+  const author = ['qa', 'test', 'qa-author'].includes(task.agentRole);
   const findings = [...reviewFindings, ...qaDefects];
-  fs.writeFileSync(
-    'server/src/audit.ts',
-    `export const implemented = true;\n${findings?.length ? `// Reworked ${reworkAttempt}: bounded pagination\n` : ''}`,
-  );
+  if (!author || mode === 'product')
+    fs.writeFileSync(
+      'server/src/audit.ts',
+      `export const implemented = true;\n${findings?.length ? `// Reworked ${reworkAttempt}: bounded pagination\n` : ''}`,
+    );
   if (mode !== 'no-test') {
     fs.mkdirSync('server/__tests__', { recursive: true });
     fs.writeFileSync(
@@ -24,6 +31,34 @@ process.stdin.on('end', () => {
 import { implemented } from '../src/audit';
 it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? 'false' : 'true'}));\n`,
     );
+    if (author) {
+      fs.mkdirSync('server/__tests__/helpers', { recursive: true });
+      fs.writeFileSync('server/__tests__/helpers/answer.ts', 'export const answer = 42;\n');
+      fs.writeFileSync(
+        'server/__tests__/audit.test.ts',
+        `import { expect, it } from 'vitest';
+
+import { answer } from './helpers/answer';
+
+it('implements AC-001', () => expect(answer).toBe(${mode === 'bad-test' ? 0 : 42}));\n`,
+      );
+      if (task.changeZones.includes('e2e/**')) {
+        fs.rmSync('server/__tests__', { recursive: true });
+        fs.mkdirSync('e2e/tests/standalone', { recursive: true });
+        fs.writeFileSync(
+          'e2e/tests/standalone/audit.spec.ts',
+          `import { expect, test } from '@playwright/test';
+
+test('audit is visible', async ({ page }) => {
+  await page.setContent('<h1>Audit</h1>');
+  await expect(page.getByRole('heading')).toHaveText('Audit');
+});\n`,
+        );
+      }
+    }
+    if (mode === 'bad-format')
+      fs.appendFileSync('server/__tests__/audit.test.ts', 'const brokenFormat=  1\n');
+    if (mode === 'bad-lint') fs.appendFileSync('server/__tests__/audit.test.ts', 'debugger;\n');
     if (findings?.length)
       fs.appendFileSync(
         'server/__tests__/audit.test.ts',

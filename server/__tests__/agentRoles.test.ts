@@ -27,6 +27,10 @@ function codexUser(text: string): string {
 }
 
 describe('specialistRole', () => {
+  it('distinguishes test authoring from read-only QA', () => {
+    expect(specialistRole('qa-author')).toMatchObject({ label: 'QA Tests', department: 'Calidad' });
+    expect(specialistRole('qa')?.label).toBe('QA');
+  });
   it('drops any project prefix', () => {
     expect(specialistRole('fundtrinsic-code-reviewer')?.label).toBe('QA Código');
     expect(specialistRole('nemesis-code-reviewer')?.label).toBe('QA Código');

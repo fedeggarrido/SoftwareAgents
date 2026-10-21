@@ -7,7 +7,13 @@ export interface TestReport {
     status: 'pass' | 'fail' | 'not_tested' | 'deferred';
     evidence: string;
   }[];
-  commands: { command: string; result: 'pass' | 'fail'; passed: number; failed: number }[];
+  commands: {
+    command: string;
+    result: 'pass' | 'fail' | 'not_tested';
+    passed: number;
+    failed: number;
+    reason?: string;
+  }[];
   defects: {
     ac: string;
     severity: 'blocker' | 'major' | 'minor' | 'nit';

@@ -43,9 +43,37 @@ export class ChangeZonesExceededError extends Error {
   }
 }
 
+export class MissingTestError extends Error {
+  readonly category = 'missing_test';
+
+  constructor() {
+    super('Developer requires an added or adjusted acceptance/reproduction test');
+  }
+
+  diagnostic(): string {
+    return `Developer failed: ${JSON.stringify({ category: this.category, paths: [] })}`;
+  }
+}
+
+/** DAG declarations remain immutable; only the execution role is routed. */
+export function isQaAuthorTask(task: Pick<DagTask, 'agentRole'>): boolean {
+  return ['qa', 'test', 'qa-author'].includes(task.agentRole);
+}
+
+function isDevelopableTask(task: DagTask): boolean {
+  return (task.type === 'code' && task.agentRole === 'developer') || isQaAuthorTask(task);
+}
+
+/** Fixtures/helpers belong under these test roots, never under product source directories. */
+export const QA_AUTHOR_TEST_ROOTS = ['e2e/', 'server/__tests__/', 'webview-ui/test/'] as const;
+
+export function isQaAuthorPath(file: string): boolean {
+  return QA_AUTHOR_TEST_ROOTS.some((root) => file.startsWith(root));
+}
+
 /** Durable failure data survives the retry claim (which clears blocked_reason). */
 export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
-  if (task.type !== 'code' || task.agent_role !== 'developer') return null;
+  if (!isDevelopableTask({ type: task.type, agentRole: task.agent_role } as DagTask)) return null;
   const event = store
     .listDomainEvents(task.key)
     .filter(
@@ -63,7 +91,7 @@ export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
         paths: string[];
       };
       if (
-        data.category === 'change_zones_exceeded' &&
+        ['change_zones_exceeded', 'missing_test'].includes(data.category) &&
         Array.isArray(data.paths) &&
         data.paths.every((file) => typeof file === 'string')
       )
@@ -104,6 +132,7 @@ export function developerScope(task: DagTask, root: string) {
     testZones: task.testZones ?? [],
     directoryChangeZones: directories,
     mirroredTestZones,
+    ...(isQaAuthorTask(task) ? { testRoots: QA_AUTHOR_TEST_ROOTS } : {}),
     colocatedTestRule: 'Remove .test/.spec before the extension and match a changeZone.',
   };
 }
@@ -239,8 +268,7 @@ export function developerRequest(
   const eligible = (task: DagTask) => {
     const record = store.getTask(task.key)!;
     return (
-      task.type === 'code' &&
-      task.agentRole === 'developer' &&
+      isDevelopableTask(task) &&
       (['READY', 'WAITING_QUOTA'].includes(record.status) ||
         (taskKey === task.key && record.status === 'FAILED_RETRYABLE' && !record.review_ref) ||
         (owner && record.lease_owner === owner && ['LEASED', 'RUNNING'].includes(record.status))) &&
@@ -251,10 +279,10 @@ export function developerRequest(
   const task = taskKey
     ? dag.tasks.find((t) => t.key === taskKey)
     : (dag.tasks.find(eligible) ??
-      dag.tasks.find((t) => t.type === 'code' && !!store.getTask(t.key)?.review_ref));
+      dag.tasks.find((t) => isDevelopableTask(t) && !!store.getTask(t.key)?.review_ref));
   if (!task || (!eligible(task) && !store.getTask(task.key)?.review_ref))
     throw new Error(
-      'No eligible READY code task; use --task to inspect a previously developed task',
+      'No eligible READY code or test task; use --task to inspect a previously developed task',
     );
   const record = store.getTask(task.key)!;
   if (
@@ -263,8 +291,8 @@ export function developerRequest(
     (record.lease_owner || !['REVIEW', 'QA', 'DONE'].includes(record.status))
   )
     throw new Error('Developer review registration requires human reconciliation before retrying');
-  if (task.type !== 'code' || task.agentRole !== 'developer' || !task.changeZones?.length)
-    throw new Error('Developer task requires code, developer role and changeZones');
+  if (!isDevelopableTask(task) || !task.changeZones?.length)
+    throw new Error('Developer task requires a code/developer or qa/test role and changeZones');
   for (const zone of [...task.changeZones, ...(task.testZones ?? [])])
     validateChangeZone(config.repoRoot, zone, config.operator.protectedPaths ?? []);
   return {
@@ -332,16 +360,21 @@ export function guardDeveloperChanges(
     evalGit(tree, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']).split('\0'),
   );
   const scope = developerScope(input.task, config.repoRoot);
+  const qaAuthor = isQaAuthorTask(input.task);
   const offending: string[] = [];
   for (const file of files) {
     taskPath(tree, file);
     if (!committable.has(file) && fs.existsSync(taskPath(tree, file)))
       throw new Error('Developer changed an ignored file; human review required');
+    if (qaAuthor && !isQaAuthorPath(file)) {
+      offending.push(file);
+      continue;
+    }
     if (
       ![
         ...input.task.changeZones!,
-        ...(isDeveloperTest(file) ? (input.task.testZones ?? []) : []),
-        ...(isDeveloperTest(file) ? scope.mirroredTestZones : []),
+        ...(qaAuthor || isDeveloperTest(file) ? (input.task.testZones ?? []) : []),
+        ...(!qaAuthor && isDeveloperTest(file) ? scope.mirroredTestZones : []),
       ].some((zone) => {
         const literal = zone.replace(/\/$/, '');
         const directory =
@@ -350,7 +383,7 @@ export function guardDeveloperChanges(
             fs.existsSync(taskPath(config.repoRoot, literal)) &&
             fs.statSync(taskPath(config.repoRoot, literal)).isDirectory());
         const candidates = [file];
-        if (isDeveloperTest(file)) {
+        if (!qaAuthor && isDeveloperTest(file)) {
           const source = file.replace(/\.(test|spec)(?=\.[cm]?[jt]sx?$)/i, '');
           candidates.push(source);
           if (source.startsWith('server/__tests__/'))
@@ -371,8 +404,7 @@ export function guardDeveloperChanges(
       (!baseFiles.has(file) ||
         Number(evalGit(tree, ['diff', '--numstat', base, '--', file]).split('\t')[0]) > 0),
   );
-  if (!tests.length)
-    throw new Error('Developer requires an added or adjusted acceptance/reproduction test');
+  if (!tests.length) throw new MissingTestError();
   for (const file of tests)
     validateDeveloperTests(
       file,
@@ -402,6 +434,43 @@ export function developerVerifier(config: ProjectConfig, key: string): CascadeVe
       ],
     }
   );
+}
+
+/** Mandatory for every Developer/cascade attempt, regardless of Operator verifier overrides. */
+export function developerStyleCommands(tree: string, base: string): CascadeVerifier['commands'] {
+  const files = evalChangedFiles(tree, base).filter((file) => fs.existsSync(taskPath(tree, file)));
+  const scripts = files.filter((file) => /\.[cm]?[jt]sx?$/i.test(file));
+  return [
+    ...(files.length
+      ? [
+          {
+            argv: [
+              process.execPath,
+              'node_modules/prettier/bin/prettier.cjs',
+              '--check',
+              '--ignore-unknown',
+              '--',
+              ...files,
+            ],
+            timeoutMs: EVAL_CRITERION_TIMEOUT_MS,
+          },
+        ]
+      : []),
+    ...(scripts.length
+      ? [
+          {
+            argv: [
+              process.execPath,
+              'node_modules/eslint/bin/eslint.js',
+              '--no-cache',
+              '--',
+              ...scripts,
+            ],
+            timeoutMs: EVAL_CRITERION_TIMEOUT_MS,
+          },
+        ]
+      : []),
+  ];
 }
 
 /** Push has a fixed task destination. Neither defaultBranch nor a configured remote name is a refspec. */

@@ -7,7 +7,6 @@ import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
 import {
   type CriterionResult,
   EvalCriterionTerminationError,
-  runIsolatedVitest,
   runRelatedVitest,
   runVerifierCommand,
   vitestWorkspace,
@@ -16,6 +15,7 @@ import { assertEvalIntegrity, evalChangedFiles, EvalIntegrityError } from './eva
 import { evalGit } from './evalTasks.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
+import { runTaskTest, validateTaskTest } from './taskTestRunner.js';
 import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
 
 export interface CascadeAttempt {
@@ -118,11 +118,13 @@ export async function checkCascadeCriteria(
       return normalized;
     });
   // Resolve all roots before linking dependencies or executing a verifier.
-  for (const file of developerTests ?? []) vitestWorkspace(tree, file, true);
+  for (const file of developerTests ?? []) validateTaskTest(tree, file);
   const relatedGroups = new Map<string, string[]>();
   if (verifier.commands.some((command) => 'vitestRelated' in command))
     for (const absolute of related) {
       const file = path.relative(tree, absolute).replaceAll('\\', '/');
+      // Authored e2e specs use the explicit Playwright runner below, never Vitest related.
+      if (developerTests && file.startsWith('e2e/')) continue;
       const { root } = vitestWorkspace(tree, file);
       relatedGroups.set(root, [...(relatedGroups.get(root) ?? []), file]);
     }
@@ -154,9 +156,7 @@ export async function checkCascadeCriteria(
             break;
           }
           try {
-            checks.push(
-              (await runIsolatedVitest(tree, temporary, file, undefined, signal, remaining)).result,
-            );
+            checks.push((await runTaskTest(tree, temporary, file, signal, remaining)).result);
           } catch (error) {
             if (error instanceof EvalCriterionTerminationError) throw error;
             checks.push('fail');
@@ -180,10 +180,14 @@ export async function checkCascadeCriteria(
       }
       const result = checks.includes('timeout')
         ? 'timeout'
-        : checks.every((check) => check === 'pass') &&
-            (!('developerTests' in command) || checks.length > 0)
-          ? 'pass'
-          : 'fail';
+        : checks.includes('fail')
+          ? 'fail'
+          : checks.includes('not_tested')
+            ? 'not_tested'
+            : checks.every((check) => check === 'pass') &&
+                (!('developerTests' in command) || checks.length > 0)
+              ? 'pass'
+              : 'fail';
       results.push(result);
     }
     return results;

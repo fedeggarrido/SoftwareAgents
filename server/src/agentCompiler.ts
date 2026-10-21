@@ -35,6 +35,7 @@ export const ROLE_PROFILES = {
   'requirements-analyst': 'brain_write',
   architect: 'brain_write',
   developer: 'branch_write',
+  'qa-author': 'branch_write',
   reviewer: 'read_only',
   qa: 'read_only',
 } as const;
@@ -118,6 +119,11 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       ...(role === 'developer'
         ? [
             'Implement only the assigned task in its changeZones plus focused tests. Test-first: add or adjust an acceptance or reproduction test before implementation, tied to its acceptanceRefs. The runtime requires test changes and passing final verifiers. Do not commit, push, merge or change Git configuration; the runtime owns commits and optional branch publication. Report test evidence, limitations and whether the new test fails on the base; never claim a command ran without evidence.',
+          ]
+        : []),
+      ...(role === 'qa-author'
+        ? [
+            'Author acceptance/reproduction tests only. Write only inside e2e/, server/__tests__/ or webview-ui/test/ AND the assigned changeZones/testZones, including test fixtures/helpers there. Product code changes are forbidden even if a zone includes them. Reuse the Developer branch, trusted base, rework and review lifecycle. Do not commit, push, merge, install dependencies or change Git configuration. Read e2e/README.md (Mocking model & rules) before authoring e2e: use the mock-claude process boundary and scenario builder, append-only transcripts and assertions on Playwright-visible outcomes; direct hook POSTs are allowed only for the standalone server path. The runtime runs formatting, lint, type checks and the authored tests. Report limitations and whether the test fails on the base; document why a base run is unreasonable when applicable. Never fabricate test execution evidence.',
           ]
         : []),
       ...(role === 'reviewer'

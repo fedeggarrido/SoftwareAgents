@@ -13,6 +13,7 @@ import {
   type DeveloperRequest,
   developerScope,
   guardDeveloperChanges,
+  lastDeveloperFailure,
   pushDeveloperBranch,
 } from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
@@ -22,6 +23,7 @@ import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { taskBranchBase } from '../src/taskBranchBase.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
@@ -100,6 +102,7 @@ beforeEach(() => {
     vi.stubEnv(`GIT_${role}_EMAIL`, 'test@example.invalid');
   }
   git(repo, 'init', '-b', 'main');
+  developerVerifierConfig(repo);
   fs.writeFileSync(
     path.join(repo, '.softwareagents/project.yaml'),
     'apiVersion: softwareagents.io/v1alpha1\nkind: Project\nid: test\nname: Test\nrepo:\n  remote: https://example.invalid/test.git\n  defaultBranch: main\nbrain:\n  path: .softwareagents/brain\n',
@@ -418,6 +421,128 @@ it('related workspace', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)', () => {
+  it.each(['qa-author', 'test-author'])(
+    'routes %s through the Developer lifecycle, review and QA without changing its declaration',
+    async (designMode) => {
+      await prepare(true, true, designMode);
+      await develop('valid', false);
+      const store = await storeFor();
+      try {
+        const record = store.getTask(task)!;
+        expect(record.status).toBe('REVIEW');
+        expect(record.agent_role).toBe(designMode === 'test-author' ? 'test' : 'qa');
+        expect(
+          store
+            .listExecutions()
+            .filter((e) => e.task_key === task)
+            .at(-1)?.agent_role,
+        ).toBe('qa-author');
+        const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim());
+        expect(launch.args.join(' ')).toContain('Role: qa-author');
+        expect(git(tree(), 'diff', '--name-only', record.review_ref!.base)).not.toContain(
+          'server/src/',
+        );
+        const executions = store.listExecutions().length;
+        await develop();
+        expect(store.listExecutions()).toHaveLength(executions);
+        await run(['review', 'FEAT-001', '--task', task], 'reviewer', 'approve');
+        expect(store.getTask(task)?.status).toBe('QA');
+        await run(['qa', 'FEAT-001', '--task', task], 'qa');
+        expect(store.getTask(task)?.status).toBe('DONE');
+        expect(store.getTask(task)?.test_reports?.at(-1)?.report.commands).toEqual([
+          {
+            command: 'vitest:server/__tests__/audit.test.ts',
+            result: 'pass',
+            passed: 1,
+            failed: 0,
+          },
+        ]);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it('rejects product edits by QA author even inside a declared broad changeZone', async () => {
+    await prepare(true, true, 'qa-author');
+    const base = git(repo, 'rev-parse', 'main');
+    await expect(develop('product')).rejects.toThrow('changeZones exceeded');
+    const store = await storeFor();
+    try {
+      expect(lastDeveloperFailure(store, store.getTask(task)!)).toMatchObject({
+        category: 'change_zones_exceeded',
+        paths: ['server/src/audit.ts'],
+      });
+      expect(store.getTask(task)?.review_ref).toBeNull();
+      expect(git(tree(), 'rev-parse', 'HEAD')).toBe(base);
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each(['valid', 'qa-author'])(
+    'categorizes missing_test for %s, exposes it and supplies it on explicit retry',
+    async (designMode) => {
+      await prepare(true, true, designMode);
+      await expect(develop('no-test')).rejects.toThrow('requires an added or adjusted');
+      const store = await storeFor();
+      try {
+        expect(lastDeveloperFailure(store, store.getTask(task)!)).toMatchObject({
+          category: 'missing_test',
+          paths: [],
+        });
+        await develop();
+        const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim().split('\n').at(-1)!);
+        expect(JSON.parse(launch.context.task.brief).previousFailure.category).toBe('missing_test');
+        expect(store.getTask(task)?.status).toBe('REVIEW');
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it.each(
+    ['valid', 'qa-author'].flatMap((designMode) =>
+      ['bad-format', 'bad-lint', 'bad-test'].map((mode) => ({ designMode, mode })),
+    ),
+  )('fails $mode in $designMode before registering review', async ({ designMode, mode }) => {
+    await prepare(true, true, designMode);
+    const base = git(repo, 'rev-parse', 'main');
+    await expect(develop(mode)).rejects.toThrow('verifier failed');
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)?.review_ref).toBeNull();
+      expect(git(tree(), 'rev-parse', 'HEAD')).toBe(base);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('keeps unavailable e2e execution as not_tested in QA with its runtime reason', async () => {
+    await prepare(true, true, 'qa-author-e2e');
+    await develop();
+    await run(['review', 'FEAT-001', '--task', task], 'reviewer', 'approve');
+    await run(['qa', 'FEAT-001', '--task', task], 'qa');
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)?.status).toBe('QA');
+      const report = store.getTask(task)?.test_reports?.at(-1)?.report;
+      expect(report?.verdict).toBe('not_tested');
+      expect(report?.commands[0]).toMatchObject({
+        command: 'playwright:e2e/tests/standalone/audit.spec.ts',
+        result: 'not_tested',
+        passed: 0,
+        failed: 0,
+        reason: expect.any(String),
+      });
+      expect(report?.acceptance[0]).toMatchObject({
+        status: 'not_tested',
+        evidence: expect.stringContaining(report!.commands[0].reason!),
+      });
+    } finally {
+      store.close();
+    }
+  });
   it('retries failed rework from its last valid commit, preserving review findings and the original base', async () => {
     await prepare();
     await develop();

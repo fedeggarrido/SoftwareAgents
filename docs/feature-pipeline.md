@@ -284,7 +284,8 @@ node dist/cli.js feature show FEAT-001 --json
 ```
 
 Equivalente instalado: `pixel-agents feature develop FEAT-001 --task FEAT-001-T01`.
-Sin `--task`, selecciona la primera tarea `code`/`developer` del DAG en READY o WAITING_QUOTA
+Sin `--task`, selecciona la primera tarea `code`/`developer` o con rol `qa`, `test`
+o `qa-author` del DAG en READY o WAITING_QUOTA
 que cumple `canStart` (dependencias DONE). Ejecuta **una sola tarea**; no promueve
 dependientes ni integra. Si no hay otra elegible, devuelve la referencia de revisión
 ya existente. Con `--task` y `review_ref` ya registrado, devuelve la misma referencia
@@ -555,7 +556,7 @@ El agente intenta romper cada AC asignado mediante lectura y razonamiento sobre
 código, diff y resultados; nunca recibe Bash ni autoridad para ejecutar tests.
 
 El runtime deriva un conjunto cerrado de 1–32 tests versionados de
-`server/__tests__/` y `webview-ui/test/`: tests del diff, de `testZones` y de
+`server/__tests__/`, `webview-ui/test/` y `e2e/`: tests del diff, de `testZones` y de
 `changeZones`, incluidos los espejos `server/src/` → `server/__tests__/`
 (mismo directorio relativo y variantes con sufijo) y
 `webview-ui/src/<ruta>/<nombre>.ts` → `webview-ui/test/<nombre>*.test.ts`.
@@ -592,7 +593,8 @@ del runtime, sin duplicados; después la allowlist queda vacía y exige el infor
 final. Cada tanda usa nueva Execution/admisión y se añade a la evidencia. No acepta
 argv, shell ni comandos nuevos propuestos por el modelo o por el Brain. Fuera de esas
 raíces o por encima del límite, requiere acotar/declarar tests compatibles antes
-de reintentar. No lanza un e2e ni una suite completa de forma implícita.
+de reintentar. Los e2e se acotan al spec concreto con las condiciones de
+[QA author](#qa-author-tareas-de-tests-del-dag-sa-107); nunca lanza una suite completa.
 
 La salida pasa por `extractJsonObject` y `test-report.schema.json`. Exige exactamente
 una entrada por AC asignado con `pass|fail|not_tested|deferred` y evidencia no vacía,
@@ -653,6 +655,75 @@ Claude comprueba en real los flags, resumen de tests del runtime, TestReport y
 artefacto, DONE con review_ref aprobado y T02 READY. Las pruebas automatizadas
 solo usan CLIs falsas y repositorios/perfiles desechables. La revisión cruzada,
 QA real e integración siguen pendientes hasta que Claude las valide.
+
+## QA author: tareas de tests del DAG (SA-107)
+
+`feature develop` enruta los roles declarados `qa`, `test` y `qa-author` al
+AgentSpec `qa-author`, perfil `branch_write`. La declaración del DAG no cambia.
+Reutiliza Developer: rama `sa/<TASK>-developer`, base registrada, idempotencia,
+reintento explícito `--task`, contexto de fallos/rework, cascada y `review_ref`.
+El ciclo sigue siendo **READY → REVIEW → QA → DONE**, con Reviewer cruzado y
+`feature qa` explícitos. El rol `qa` de ejecución sigue siendo de solo lectura;
+es distinto del autor de tests.
+El worker rechaza `qa-author` fuera de `feature develop`, para exigir siempre
+el contexto validado y las guardias de zonas de Developer.
+
+La guardia exige simultáneamente las `changeZones`/`testZones` declaradas y las
+raíces cerradas `e2e/`, `server/__tests__/`, `webview-ui/test/`. Admite fixtures y
+helpers dentro de esas raíces y zonas. Ni siquiera una zona amplia autoriza
+cambiar producto, ni se aplican los espejos/co-ubicaciones de Developer al autor.
+Un cambio fuera de ellas produce `change_zones_exceeded`. No añadir/ajustar un
+test ejecutable produce `missing_test`, visible en `last_developer_failure` y en
+el contexto del siguiente reintento. Los helpers solos no satisfacen ese requisito.
+
+Developer y QA author ejecutan además `prettier --check --ignore-unknown` y
+`eslint --no-cache` sobre los archivos tocados existentes (ESLint sobre JS/TS),
+también con cascada o verificadores del Operator. Un fallo impide REVIEW.
+Los tests Vitest escritos se ejecutan por fichero con el runner neutral aislado;
+se conservan las comprobaciones de aserciones y de integridad.
+
+Para e2e, el runtime deriva el spec concreto del diff/zonas. En specs de
+`e2e/tests/standalone/`, usa Playwright directamente, equivalente a
+`npm run e2e -- e2e/tests/standalone/audit.spec.ts --workers=1`, con configuración
+neutral, `testMatch` exacto, un worker, sin retries ni global setup/reporters del
+repositorio. Copia el checkout a scratch, enlaza solo dependencias existentes,
+construye CLI (`node esbuild.js`) y webview (`vite build`) allí y usa Chromium ya
+cacheado. No instala ni descarga nada. HOME/USERPROFILE/TEMP, build e informes
+quedan aislados, con el mismo límite de tiempo/salida y terminación de árbol que
+Vitest. Electron/VS Code requiere QA del operador y queda `not_tested` en runtime.
+Un spec que termina en verde sin ejecutar ningún paso `expect` falla el verificador.
+
+Si faltan Playwright, Chromium o entradas de build, falla la preparación o no hay
+evidencia completa, devuelve `not_tested` con motivo. Eso permite entregar la
+autoría a REVIEW, pero QA conserva **QA**, sin consumir reworks ni permitir DONE:
+el informe incluye el comando y el motivo, y nunca convierte esa omisión en pass.
+La evidencia de comando admite `result: not_tested` con `reason` del runtime.
+Los fallos de tests ejecutados sí bloquean el verificador del autor. Los comandos
+de QA siguen siendo IDs del runtime, nunca argv propuesto por el agente.
+
+Antes de escribir e2e es normativo leer [Mocking model & rules](../e2e/README.md#mocking-model--rules):
+frontera de proceso, scenario builder/mock-claude, JSONL append-only y aserciones
+visibles; POST directo de hooks solo para standalone. Al añadir specs se regenera
+el inventario. El autor debe documentar si el test falla sobre la base y su motivo
+si no es razonable comprobarlo: una tarea de cobertura posterior puede tener ya
+la feature en su base; no se retira producto para fabricar un fallo.
+
+Prueba real de **FEAT-001-T05**, por Claude desde el checkout principal con build
+actualizado y dependencias T01–T04 ya integradas/reconciliadas:
+
+```powershell
+node esbuild.js
+node dist/cli.js feature develop FEAT-001 --task FEAT-001-T05
+node dist/cli.js feature review FEAT-001 --task FEAT-001-T05
+node dist/cli.js feature qa FEAT-001 --task FEAT-001-T05
+node dist/cli.js feature show FEAT-001 --json
+```
+
+Si el runtime no pudo ejecutar el spec, Claude valida desde un checkout construido:
+`npm run e2e -- e2e/tests/standalone/audit.spec.ts --workers=1`.
+Esa ejecución manual es evidencia para revisión humana; no convierte por sí sola
+un `not_tested` persistido en DONE. Esta implementación se prueba con CLIs falsas;
+la prueba real y la integración corresponden a Claude.
 
 ## Próximos pasos
 

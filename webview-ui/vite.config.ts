@@ -32,6 +32,8 @@ function browserMockAssetsPlugin(): Plugin {
   // track the actual build.outDir, so vite build calls that override outDir
   // (e.g. the build-subpath integration test) still receive the JSON sidecars.
   let distAssetsDir = path.resolve(__dirname, '../dist/webview/assets');
+  // Vite also runs closeBundle when a dev server closes; only builds own dist/.
+  let isBuild = true;
 
   const cache: DecodedCache = {
     characters: null,
@@ -53,6 +55,7 @@ function browserMockAssetsPlugin(): Plugin {
     name: 'browser-mock-assets',
     configResolved(config) {
       distAssetsDir = path.resolve(config.root, config.build.outDir, 'assets');
+      isBuild = config.command === 'build';
     },
     configureServer(server) {
       // Strip trailing slash: '/' → '', '/sub/' → '/sub'
@@ -107,6 +110,7 @@ function browserMockAssetsPlugin(): Plugin {
     },
     // Build output includes lightweight metadata consumed by browser runtime.
     closeBundle() {
+      if (!isBuild) return;
       fs.mkdirSync(distAssetsDir, { recursive: true });
 
       const catalog = buildFurnitureCatalog(assetsDir);

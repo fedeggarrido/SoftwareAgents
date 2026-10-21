@@ -1,5 +1,14 @@
 # AsyncAPI protocol contract
 
+FEAT-001 adds the read-only audit messages on the existing WebSocket ingress:
+
+- Client: `RequestAuditLog` = `{ type: 'requestAuditLog', projectId: string, requestId: string }`. Malformed requests with non-string or missing identifiers are ignored.
+- Server: `AuditLogSnapshot` = `{ type: 'auditLog', projectId, requestId, status, entries, totalValid, truncated, corruptLines, excludedCount }`. Replies are point-to-point and echo both identifiers; clients must discard stale replies after a Project change or a newer request.
+- Status is `ok`, `empty`, `read_error`, `denied` or `unknown_project`. Existing connection privilege is checked before Project binding. Unprivileged connections receive `denied`; a Project other than the server-bound Project receives `unknown_project`. These responses and `read_error` have `entries: []`, `totalValid: 0`, `truncated: false`, `corruptLines: []` and `excludedCount: 0`, without error details.
+- Only the bound Project log is read, never the machine log. At most 500 entries are returned, newest first with descending line-number ties. `totalValid`, `corruptLines` (1-based line numbers) and `excludedCount` cover the entire file. Blank or missing logs are `empty`; a nonblank log containing only corrupt or excluded entries is `ok`.
+- `AuditViewEntry` includes `line`, `occurredAt`, `actorType`, `actorId`, `action`, `resourceType`, `resourceId`, `policyDecision` (`outcome`, `reason`) or null, `riskLevel`, `outcome` (`status`, `reason`, `detail`, `tier`, `executor`, `model`, `code`), `taskKey` and `executionId`. Optional display values normalize to null; all displayed text uses existing audit redaction. `inputHash` and raw corrupt-line content are never transmitted.
+- No branch records an audit event or writes a log. This adds no permissions, routes, export or mutation operations.
+
 > Read before adding or changing any ServerMessage/ClientMessage. Moved verbatim from CLAUDE.md.
 
 ## AsyncAPI Protocol Contract

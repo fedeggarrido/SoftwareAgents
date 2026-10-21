@@ -1,5 +1,5 @@
 import { EXECUTOR_IDS } from '../../core/src/executorCatalog.js';
-import type { CompanyNotice } from '../../core/src/messages.js';
+import type { AuditLogSnapshot, CompanyNotice } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
@@ -7,6 +7,7 @@ import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import { recordAudit } from './auditLog.js';
+import { readAuditView } from './auditView.js';
 import { answerDecision, companyWorkspaceRoot, setAutopilot } from './companyControl.js';
 import {
   getHooksConsent,
@@ -118,6 +119,38 @@ export function handleClientMessage(
         sendExecutorState(send, ctx);
       }
       break;
+
+    case 'requestAuditLog': {
+      if (typeof msg.projectId !== 'string' || typeof msg.requestId !== 'string') break;
+      const { projectId, requestId } = msg;
+      const reply = (status: AuditLogSnapshot['status']) =>
+        send({
+          type: 'auditLog',
+          projectId,
+          requestId,
+          status,
+          entries: [],
+          totalValid: 0,
+          truncated: false,
+          corruptLines: [],
+          excludedCount: 0,
+        } satisfies AuditLogSnapshot);
+      // Reads reuse the connection privilege and Project binding, without audit writes.
+      if (!ctx.privileged) {
+        reply('denied');
+        break;
+      }
+      if (executorProject()?.id !== projectId) {
+        reply('unknown_project');
+        break;
+      }
+      void readAuditView(projectId)
+        .then((snapshot) =>
+          send({ type: 'auditLog', projectId, requestId, ...snapshot } satisfies AuditLogSnapshot),
+        )
+        .catch(() => reply('read_error'));
+      break;
+    }
 
     case 'requestExecutorState': {
       const request = parseRequestExecutorState(msg);

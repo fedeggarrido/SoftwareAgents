@@ -8,6 +8,7 @@
  */
 
 export type ServerMessage =
+  | AuditLogSnapshot
   | ProviderCapabilities
   | AgentCreated
   | AgentClosed
@@ -49,6 +50,7 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestAuditLog
   | WebviewReady
   | LaunchAgent
   | FocusAgent
@@ -76,6 +78,50 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface AuditLogSnapshot {
+  type: 'auditLog';
+  projectId: string;
+  requestId: string;
+  status: AuditLogStatus;
+  entries: AuditViewEntry[];
+  totalValid: number;
+  truncated: boolean;
+  corruptLines: number[];
+  excludedCount: number;
+}
+
+export type AuditLogStatus = 'ok' | 'empty' | 'read_error' | 'denied' | 'unknown_project';
+
+export interface AuditViewEntry {
+  line: number;
+  occurredAt: string;
+  actorType: string;
+  actorId: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  policyDecision: AuditViewPolicyDecision | null;
+  riskLevel: string;
+  outcome: AuditViewOutcome;
+  taskKey: string | null;
+  executionId: string | null;
+}
+
+export interface AuditViewPolicyDecision {
+  outcome: string;
+  reason: string;
+}
+
+export interface AuditViewOutcome {
+  status: string;
+  reason: string | null;
+  detail: string | null;
+  tier: string | null;
+  executor: string | null;
+  model: string | null;
+  code: string | null;
+}
 
 export interface ProviderCapabilities {
   type: 'providerCapabilities';
@@ -704,6 +750,12 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestAuditLog {
+  type: 'requestAuditLog';
+  projectId: string;
+  requestId: string;
 }
 
 export interface WebviewReady {

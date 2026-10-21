@@ -77,6 +77,7 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/AuditLogSnapshot'
         # Provider capabilities
         - $ref: '#/components/schemas/ProviderCapabilities'
         # Agent lifecycle
@@ -133,6 +134,7 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestAuditLog'
         - $ref: '#/components/schemas/WebviewReady'
         - $ref: '#/components/schemas/LaunchAgent'
         - $ref: '#/components/schemas/FocusAgent'
@@ -163,6 +165,144 @@ components:
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
+
+    RequestAuditLog:
+      description: Pure read of the bound Project audit log; requires existing connection privilege.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId]
+      properties:
+        type:
+          const: requestAuditLog
+        projectId:
+          type: string
+        requestId:
+          type: string
+
+    AuditLogStatus:
+      type: string
+      enum: [ok, empty, read_error, denied, unknown_project]
+
+    AuditLogSnapshot:
+      description: |
+        Point-to-point reply, never broadcast. denied, unknown_project and read_error
+        contain no entries, counts or corrupt line numbers. Echoes both request IDs.
+        Clients discard replies for an obsolete request or selected Project.
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - projectId
+        - requestId
+        - status
+        - entries
+        - totalValid
+        - truncated
+        - corruptLines
+        - excludedCount
+      properties:
+        type:
+          const: auditLog
+        projectId:
+          type: string
+        requestId:
+          type: string
+        status:
+          $ref: '#/components/schemas/AuditLogStatus'
+        entries:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/AuditViewEntry'
+        totalValid:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+        corruptLines:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        excludedCount:
+          type: integer
+          minimum: 0
+
+    AuditViewEntry:
+      description: Redacted display projection; never contains inputHash or raw corrupt content.
+      type: object
+      additionalProperties: false
+      required:
+        - line
+        - occurredAt
+        - actorType
+        - actorId
+        - action
+        - resourceType
+        - resourceId
+        - policyDecision
+        - riskLevel
+        - outcome
+        - taskKey
+        - executionId
+      properties:
+        line:
+          type: integer
+          minimum: 1
+        occurredAt:
+          type: string
+        actorType:
+          type: string
+        actorId:
+          type: [string, 'null']
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: [string, 'null']
+        policyDecision:
+          oneOf:
+            - $ref: '#/components/schemas/AuditViewPolicyDecision'
+            - type: 'null'
+        riskLevel:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/AuditViewOutcome'
+        taskKey:
+          type: [string, 'null']
+        executionId:
+          type: [string, 'null']
+
+    AuditViewPolicyDecision:
+      type: object
+      additionalProperties: false
+      required: [outcome, reason]
+      properties:
+        outcome:
+          type: string
+        reason:
+          type: string
+
+    AuditViewOutcome:
+      type: object
+      additionalProperties: false
+      required: [status, reason, detail, tier, executor, model, code]
+      properties:
+        status:
+          type: string
+        reason:
+          type: [string, 'null']
+        detail:
+          type: [string, 'null']
+        tier:
+          type: [string, 'null']
+        executor:
+          type: [string, 'null']
+        model:
+          type: [string, 'null']
+        code:
+          type: [string, 'null']
 
     ProviderCapabilities:
       description: |

@@ -142,7 +142,11 @@ export function BottomToolbar({
       >
         Backlog
       </Button>
-      <Button variant={isAuditOpen ? 'active' : 'default'} onClick={onToggleAudit} title="Auditoría de solo lectura">
+      <Button
+        variant={isAuditOpen ? 'active' : 'default'}
+        onClick={onToggleAudit}
+        title="Auditoría de solo lectura"
+      >
         Auditoría
       </Button>
       <Button

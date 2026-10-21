@@ -845,8 +845,10 @@ export function useExtensionMessages(
     };
     const unsubscribe = transport.onMessage(handler);
     const stopLifecycle = bindExtensionTransportLifecycle(transport);
-    const stopAuditLifecycle = transport.onStateChange((state) => {
-      if (state !== 'connected') setAuditStore(emptyAuditStore());
+    const stopAuditLifecycle = transport.onStateChange(() => {
+      // Invalidate old responses on disconnect and every new connection. The
+      // panel waits for a connected transport before requesting a fresh log.
+      setAuditStore(emptyAuditStore());
     });
     return () => {
       stopAuditLifecycle();

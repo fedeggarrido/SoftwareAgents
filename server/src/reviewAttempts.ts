@@ -1,6 +1,16 @@
-import type { TaskRecord, WorkStore } from './workstore/WorkStore.js';
+import type { DomainEventRecord, TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export const REVIEW_FAILURE_PREFIX = 'Reviewer failed: ';
+
+/** Success supersedes visible diagnostics; the original events remain in the audit history. */
+export function isSuccessfulTaskStep(event: DomainEventRecord): boolean {
+  return (
+    ['Reviewer report persisted', 'QA report persisted'].includes(event.reason) ||
+    (event.to_status === 'REVIEW' &&
+      (event.reason.startsWith('Runtime commit ') ||
+        event.reason === 'Execution finished without changes'))
+  );
+}
 
 /** Legacy failures are resumable only when the last execution belongs to Reviewer. */
 export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
@@ -19,11 +29,7 @@ export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
 export function lastReviewFailure(store: WorkStore, task: TaskRecord) {
   const event = store
     .listDomainEvents(task.key)
-    .filter(
-      (e) =>
-        e.reason.startsWith(REVIEW_FAILURE_PREFIX) ||
-        ['Reviewer report persisted', 'QA report persisted'].includes(e.reason),
-    )
+    .filter((e) => e.reason.startsWith(REVIEW_FAILURE_PREFIX) || isSuccessfulTaskStep(e))
     .at(-1);
   return event?.reason.startsWith(REVIEW_FAILURE_PREFIX)
     ? { reason: event.reason, created_at: event.created_at }

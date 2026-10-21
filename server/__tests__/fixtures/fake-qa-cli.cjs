@@ -18,8 +18,11 @@ process.stdin.on('end', () => {
     verdict: ['fail', 'not_tested'].includes(mode) ? mode : 'pass',
     acceptance: data.task.acceptanceRefs.map((ac) => ({
       ac,
-      status: ['fail', 'not_tested'].includes(mode) ? mode : 'pass',
-      evidence: 'Runtime assertions and source inspected',
+      status: ['fail', 'not_tested', 'deferred'].includes(mode) ? mode : 'pass',
+      evidence:
+        mode === 'deferred'
+          ? 'UI behavior belongs to the downstream task'
+          : 'Runtime assertions and source inspected',
     })),
     commands: data.commands,
     defects:

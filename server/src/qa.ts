@@ -119,7 +119,7 @@ export function qaBrief(
     commandAllowlist: requestsUsed ? [] : commands.map((c) => c.command),
     validationErrors: errors,
     instruction:
-      'Attempt to break every assigned AC using reading and reasoning, including edge cases. Commands above were executed by the runtime. Do not execute commands or write files. Return the TestReport with exactly this command evidence. You may request one additional bounded batch to reproduce results, returning only {requestCommands: [command IDs from commandAllowlist]}; the runtime executes it. No shell or argv. Once the allowlist is empty return the final TestReport. Mark unverified criteria not_tested; never invent execution evidence.',
+      'Attempt to break every assigned AC using reading and reasoning, including edge cases. Commands above were executed by the runtime. Do not execute commands or write files. Return the TestReport with exactly this command evidence. You may request one additional bounded batch to reproduce results, returning only {requestCommands: [command IDs from commandAllowlist]}; the runtime executes it. No shell or argv. Once the allowlist is empty return the final TestReport. An AC outside this task scope may be deferred only when deferredCoverage lists an unfinished downstream task for it; explain the reason in evidence. All other AC must pass for a pass verdict. Without downstream coverage an unverified AC is not_tested, including AC deferred by earlier tasks; never invent execution evidence.',
   });
 }
 
@@ -182,13 +182,21 @@ export function validateTestReport(
   for (const defect of report.defects)
     if (!report.acceptance.some((ac) => ac.ac === defect.ac && ac.status === 'fail'))
       errors.push('Defect requires a failed assigned AC');
+  const proposedPass = report.verdict === 'pass';
+  let downgraded = false;
+  for (const ac of report.acceptance)
+    if (ac.status === 'deferred' && !input.deferredCoverage?.[ac.ac]?.length) {
+      ac.status = 'not_tested';
+      downgraded = true;
+    }
   const verdict = report.acceptance.some((ac) => ac.status === 'fail')
     ? 'fail'
     : report.acceptance.some((ac) => ac.status === 'not_tested')
       ? 'not_tested'
       : 'pass';
-  if (verdict !== report.verdict) errors.push('Contradictory verdict');
-  if (report.verdict === 'pass' && (!commands.length || commands.some((c) => c.result !== 'pass')))
+  if (downgraded && proposedPass && verdict === 'not_tested') report.verdict = verdict;
+  else if (verdict !== report.verdict) errors.push('Contradictory verdict');
+  if (proposedPass && (!commands.length || commands.some((c) => c.result !== 'pass')))
     errors.push('Cannot pass with missing/failed runtime commands');
   const evidence = (rows: TestReport['commands']) =>
     rows.map(({ command, result, passed, failed }) => ({ command, result, passed, failed }));

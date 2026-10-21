@@ -7,13 +7,14 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { QA_MAX_TEST_FILES } from '../src/constants.js';
+import { lastDeveloperFailure } from '../src/developer.js';
 import { runIsolatedVitest } from '../src/evalCriteria.js';
 import { loadModelPolicy } from '../src/modelPolicy.js';
 import { qaCommands, qaRequestedCommands, qaTestFiles } from '../src/qa.js';
-import { reviewReworkRounds } from '../src/reviewAttempts.js';
+import { lastReviewFailure, reviewReworkRounds } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
-import type { TaskRecord } from '../src/workstore/WorkStore.js';
+import type { DomainEventRecord, TaskRecord, WorkStore } from '../src/workstore/WorkStore.js';
 
 vi.setConfig({ testTimeout: 30_000 });
 vi.mock('os', async (original) => ({
@@ -51,6 +52,52 @@ const source = (text: string, file = 'server/__tests__/check.test.ts') =>
 const verify = () => runIsolatedVitest(tree, scratch, 'server/__tests__/check.test.ts');
 
 describe('Shared isolated QA verifier', () => {
+  it.each(['Runtime commit abc', 'Reviewer report persisted', 'QA report persisted'])(
+    'clears visible failures after %s while retaining history and showing newer failures',
+    (reason) => {
+      const task = { key: 'FEAT-001-T01', type: 'code', agent_role: 'developer' } as TaskRecord;
+      const events = [
+        {
+          to_status: 'FAILED_RETRYABLE',
+          reason: 'Worker failed (category=executor)',
+          created_at: 'first',
+        },
+        {
+          to_status: 'REVIEW',
+          reason: 'Reviewer failed: category=oauth_refresh_contention',
+          created_at: 'second',
+        },
+      ] as DomainEventRecord[];
+      const store = { listDomainEvents: () => events } as unknown as WorkStore;
+      expect(lastDeveloperFailure(store, task)?.reason).toBe(events[0].reason);
+      expect(lastReviewFailure(store, task)?.reason).toBe(events[1].reason);
+      events.push({ to_status: 'RUNNING', reason: 'Claim QA lease' } as DomainEventRecord);
+      expect(lastDeveloperFailure(store, task)).not.toBeNull();
+      expect(lastReviewFailure(store, task)).not.toBeNull();
+      events.push({ to_status: 'REVIEW', reason } as DomainEventRecord);
+      expect(lastDeveloperFailure(store, task)).toBeNull();
+      expect(lastReviewFailure(store, task)).toBeNull();
+      expect(events.slice(0, 2).map((event) => event.created_at)).toEqual(['first', 'second']);
+      events.push({
+        to_status: 'FAILED_RETRYABLE',
+        reason: 'Worker failed again',
+        created_at: 'new',
+      } as DomainEventRecord);
+      expect(lastDeveloperFailure(store, task)).toEqual({
+        reason: 'Worker failed again',
+        created_at: 'new',
+      });
+      events.push({
+        to_status: 'QA',
+        reason: 'Reviewer failed: category=auth',
+        created_at: 'newer',
+      } as DomainEventRecord);
+      expect(lastReviewFailure(store, task)).toEqual({
+        reason: 'Reviewer failed: category=auth',
+        created_at: 'newer',
+      });
+    },
+  );
   it('counts valid Reviewer and QA rejections, excluding historical infrastructure attempts', () => {
     const task = {
       attempt: 99,

@@ -463,6 +463,22 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       expect(launch.context.kind).toBe('untrusted-context-data');
       const context = JSON.parse(launch.context.task.brief);
       expect(context.previousFailure).toMatchObject({ category: 'change_zones_exceeded', paths });
+      for (const command of [runTaskCommand, runFeatureCommand]) {
+        const output = vi.fn();
+        await command(
+          command === runTaskCommand ? ['list', '--json'] : ['show', 'FEAT-001', '--json'],
+          repo,
+          output,
+        );
+        const data = JSON.parse(output.mock.calls[0][0]);
+        expect(
+          (Array.isArray(data) ? data : data.tasks).find((t: { key: string }) => t.key === task)
+            .last_developer_failure,
+        ).toBeNull();
+      }
+      expect(
+        store.listDomainEvents(task).some((event) => event.reason === failed.blocked_reason),
+      ).toBe(true);
       expect(context.allowedScope).toMatchObject({
         changeZones: ['server/src/audit*.ts'],
         testZones: [],

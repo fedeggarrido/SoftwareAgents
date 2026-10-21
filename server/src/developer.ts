@@ -16,8 +16,14 @@ import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
+import { isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
-import { analyzeTaskDag, parseTaskDag, taskDeclaration } from './taskDag.js';
+import {
+  analyzeTaskDag,
+  deferredAcceptanceCoverage,
+  parseTaskDag,
+  taskDeclaration,
+} from './taskDag.js';
 import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export class ChangeZonesExceededError extends Error {
@@ -43,11 +49,12 @@ export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
     .listDomainEvents(task.key)
     .filter(
       (e) =>
-        (e.to_status === 'FAILED_RETRYABLE' || e.to_status === 'FAILED_FINAL') &&
-        !e.reason.startsWith('Reviewer failed: '),
+        isSuccessfulTaskStep(e) ||
+        ((e.to_status === 'FAILED_RETRYABLE' || e.to_status === 'FAILED_FINAL') &&
+          !e.reason.startsWith('Reviewer failed: ')),
     )
     .at(-1);
-  if (!event) return null;
+  if (!event || isSuccessfulTaskStep(event)) return null;
   if (event.reason.startsWith('Developer failed: ')) {
     try {
       const data = JSON.parse(event.reason.slice('Developer failed: '.length)) as {
@@ -177,6 +184,7 @@ export interface DeveloperRequest {
   reworkAttempt?: number;
   qaDefects?: import('./workstore/WorkStore.js').DefectContext[];
   previousFailure?: ReturnType<typeof lastDeveloperFailure>;
+  deferredCoverage?: Record<string, string[]>;
   allowedScope?: ReturnType<typeof developerScope>;
 }
 
@@ -253,6 +261,15 @@ export function developerRequest(
     designSha: design.git_sha,
     design: readTaskInput(source, design.doc_path),
     task,
+    ...(reviewing
+      ? {
+          deferredCoverage: deferredAcceptanceCoverage(
+            dag,
+            task.key,
+            (key) => store.getTask(key)?.status === 'DONE',
+          ),
+        }
+      : {}),
     previousFailure: lastDeveloperFailure(store, record),
     allowedScope: developerScope(task, config.repoRoot),
     ...(record.test_reports?.some((r) => r.report.verdict === 'fail')

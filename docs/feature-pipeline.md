@@ -541,11 +541,22 @@ raíces o por encima del límite, requiere acotar/declarar tests compatibles ant
 de reintentar. No lanza un e2e ni una suite completa de forma implícita.
 
 La salida pasa por `extractJsonObject` y `test-report.schema.json`. Exige exactamente
-una entrada por AC asignado con `pass|fail|not_tested` y evidencia no vacía,
+una entrada por AC asignado con `pass|fail|not_tested|deferred` y evidencia no vacía,
 comandos idénticos a la evidencia del runtime y defectos con AC, severidad,
 resumen y reproducción. Cada AC fallido exige al menos un defecto enlazado.
 No admite pass con tests fallidos o AC no probados. `not_tested` conserva QA
 sin consumir rondas ni desbloquear dependencias.
+
+Un AC compartido fuera del alcance de la tarea puede marcarse `deferred`, usando
+`evidence` para justificarlo. El runtime solo lo acepta si el DAG registrado y
+validado asigna el mismo AC a una tarea descendiente (dependencia transitiva) que
+aún no está DONE. Revalida esa cobertura al persistir; sin ella lo convierte en
+`not_tested` y conserva QA. Con el resto de AC y comandos en pass, un informe con
+deferred permite DONE. El histórico `test_reports`, visible en `feature show`,
+conserva el AC y su justificación. La QA posterior debe cubrirlo: solo puede
+volver a diferirlo si existe otra tarea posterior pendiente que también lo cubra.
+`feature qa --task` permite repetir QA tras `not_tested`, conservando los informes
+anteriores, la referencia aprobada y las rondas de rework.
 
 Un fail válido crea bugs `<TASK>-D<n>` en WorkStore con `defect_context`: tarea
 original, AC, `review_ref` y Execution del informe. Original e informes conservan
@@ -577,7 +588,10 @@ autoritativa y nunca se sobrescribe un huérfano automáticamente.
 OAuth/auth, cuota, spawn, timeout, informe inválido tras dos intentos, lease perdida,
 JSON ausente/vacío o tests omitidos conservan QA y `review_ref`, sin consumir rondas.
 `last_review_failure` conserva el diagnóstico saneado del último fallo de revisión/QA;
-se limpia en cuanto se persiste un informe válido de cualquiera de los dos pasos.
+se limpia en cuanto se persiste un informe válido o se completa Developer con
+éxito. El diagnóstico visible `last_developer_failure` también se limpia tras
+completar Developer, Reviewer o QA con éxito. Los eventos y la auditoría conservan
+los fallos originales.
 
 Claude comprueba en real los flags, resumen de tests del runtime, TestReport y
 artefacto, DONE con review_ref aprobado y T02 READY. Las pruebas automatizadas

@@ -22,7 +22,7 @@
             "pattern": "\\S"
           },
           "status": {
-            "enum": ["pass", "fail", "not_tested"]
+            "enum": ["pass", "fail", "not_tested", "deferred"]
           },
           "evidence": {
             "type": "string",

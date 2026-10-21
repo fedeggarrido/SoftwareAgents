@@ -7,6 +7,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
+import type { TaskDag } from '../../core/src/taskDag.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import * as verifier from '../src/evalCriteria.js';
@@ -14,6 +15,7 @@ import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { validateTestReport } from '../src/qa.js';
 import { lastReviewFailure } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
+import { deferredAcceptanceCoverage } from '../src/taskDag.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
@@ -88,10 +90,10 @@ const run = (command: string[], fixture: string, mode = 'valid', executor = 'cla
 const develop = () => run(['develop', 'FEAT-001', '--task', task], 'developer');
 const review = (mode = 'approve', executor = 'claude') =>
   run(['review', 'FEAT-001', '--task', task], 'reviewer', mode, executor);
-async function prepare() {
+async function prepare(designMode = 'valid') {
   await run(['spec', 'FEAT-001', '--request', 'request.md'], 'requirements');
   await runFeatureCommand(['approve', 'FEAT-001'], repo, () => {});
-  await run(['design', 'FEAT-001'], 'architect');
+  await run(['design', 'FEAT-001'], 'architect', designMode);
   await develop();
   await review();
   fs.writeFileSync(launches, '');
@@ -157,6 +159,89 @@ describe('TestReport contract', () => {
     commands,
     defects: [],
   };
+  it('accepts justified deferred coverage only for unfinished transitive descendants covering the AC', () => {
+    const node = (key: string, dependsOn: string[], acceptanceRefs = ['AC-001']) => ({
+      key,
+      dependsOn,
+      acceptanceRefs,
+    });
+    const dag = {
+      tasks: [
+        node('last', ['middle']),
+        node('middle', ['first'], []),
+        node('first', []),
+        node('unrelated', []),
+        node('done', ['first']),
+      ],
+    } as unknown as TaskDag;
+    const coverage = deferredAcceptanceCoverage(dag, 'first', (key) => key === 'done');
+    expect(coverage).toEqual({ 'AC-001': ['last'] });
+    expect(deferredAcceptanceCoverage(dag, 'first', (key) => key !== 'unrelated')).toEqual({
+      'AC-001': [],
+    });
+    const deferred = {
+      ...report,
+      acceptance: [{ ac: 'AC-001', status: 'deferred', evidence: 'UI checked by last' }],
+    };
+    expect(
+      validateTestReport(
+        JSON.stringify(deferred),
+        { ...input, deferredCoverage: coverage },
+        commands,
+      ),
+    ).toEqual(deferred);
+    const missingCoverage: (Record<string, string[]> | undefined)[] = [
+      undefined,
+      {},
+      { 'AC-001': [] },
+    ];
+    for (const deferredCoverage of missingCoverage)
+      expect(
+        validateTestReport(JSON.stringify(deferred), { ...input, deferredCoverage }, commands),
+      ).toMatchObject({ verdict: 'not_tested', acceptance: [{ status: 'not_tested' }] });
+    const downstream = {
+      ...input,
+      deferredCoverage: deferredAcceptanceCoverage(dag, 'last', () => false),
+    };
+    expect(validateTestReport(JSON.stringify(deferred), downstream, commands).verdict).toBe(
+      'not_tested',
+    );
+    expect(() =>
+      validateTestReport(
+        JSON.stringify({ ...deferred, acceptance: [{ ...deferred.acceptance[0], evidence: ' ' }] }),
+        { ...input, deferredCoverage: coverage },
+        commands,
+      ),
+    ).toThrow();
+  });
+  it('requires all remaining AC and runtime commands to pass alongside a deferred AC', () => {
+    const mixedInput = {
+      ...input,
+      task: { ...input.task, acceptanceRefs: ['AC-001', 'AC-002'] },
+      deferredCoverage: { 'AC-001': ['later'] },
+    };
+    const mixed = {
+      ...report,
+      acceptance: [
+        { ac: 'AC-001', status: 'deferred', evidence: 'UI handled later' },
+        { ac: 'AC-002', status: 'pass', evidence: 'Verified server behavior' },
+      ],
+    };
+    expect(validateTestReport(JSON.stringify(mixed), mixedInput, commands).verdict).toBe('pass');
+    expect(() =>
+      validateTestReport(
+        JSON.stringify({
+          ...mixed,
+          acceptance: [mixed.acceptance[0], { ...mixed.acceptance[1], status: 'not_tested' }],
+        }),
+        mixedInput,
+        commands,
+      ),
+    ).toThrow('Contradictory verdict');
+    expect(() =>
+      validateTestReport(JSON.stringify({ ...mixed, commands: [] }), mixedInput, []),
+    ).toThrow('Cannot pass');
+  });
   it('requires exact AC coverage, runtime evidence, linked failures and consistent verdicts', () => {
     expect(validateTestReport(JSON.stringify(report), input, commands)).toEqual(report);
     for (const value of [
@@ -190,7 +275,7 @@ describe('TestReport contract', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () => {
-  beforeEach(prepare, 30_000);
+  beforeEach(() => prepare(), 30_000);
   it.each([false, true])(
     'passes via a safe reader (Codex enabled=%s), persists report, keeps approved SHA and promotes T02',
     async (codexEnabled) => {
@@ -452,6 +537,15 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
       expect(store.getTask(task)).toMatchObject({ status: 'QA', attempt: 0 });
       expect(store.getTask(task)!.test_reports).toHaveLength(1);
       expect(store.getTask('FEAT-001-T02')!.status).toBe('DRAFT');
+      const before = store.getTask(task)!;
+      await qa();
+      expect(store.getTask(task)).toMatchObject({
+        status: 'DONE',
+        attempt: before.attempt,
+        review_ref: before.review_ref,
+      });
+      expect(store.getTask(task)!.test_reports).toHaveLength(2);
+      expect(store.getTask(task)!.test_reports![0].report.verdict).toBe('not_tested');
     } finally {
       store.close();
     }
@@ -474,5 +568,47 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
     git(tree(), '-c', 'core.hooksPath=', 'commit', '--allow-empty', '-m', 'changed');
     await expect(qa()).rejects.toThrow(/SHA|HEAD/);
     expect(fs.readFileSync(launches, 'utf8')).toBe('');
+  });
+});
+
+describe.skipIf(process.platform !== 'win32')('Deferred QA via worker (fake CLIs)', () => {
+  it('finishes the earlier task, exposes its deferred AC and requires coverage on the last task', async () => {
+    await prepare('deferred-chain');
+    await qa('not_tested');
+    const pending = await storeFor();
+    expect(pending.getTask(task)!.status).toBe('QA');
+    pending.close();
+    await qa('deferred');
+    const store = await storeFor();
+    const next = 'FEAT-001-T02';
+    try {
+      expect(store.getTask(task)!.status).toBe('DONE');
+      expect(store.getTask(next)!.status).toBe('READY');
+      const log = vi.fn();
+      await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
+      expect(
+        JSON.parse(log.mock.calls[0][0])
+          .tasks.find((t: { key: string }) => t.key === task)
+          .test_reports.at(-1).report.acceptance,
+      ).toEqual([
+        {
+          ac: 'AC-001',
+          status: 'deferred',
+          evidence: 'UI behavior belongs to the downstream task',
+        },
+      ]);
+      await run(['develop', 'FEAT-001', '--task', next], 'developer');
+      await run(['review', 'FEAT-001', '--task', next], 'reviewer', 'approve');
+      await run(['qa', 'FEAT-001', '--task', next], 'qa', 'deferred');
+      expect(store.getTask(next)).toMatchObject({ status: 'QA', attempt: 0 });
+      expect(store.getTask(next)!.test_reports![0].report).toMatchObject({
+        verdict: 'not_tested',
+        acceptance: [{ status: 'not_tested' }],
+      });
+      await run(['qa', 'FEAT-001', '--task', next], 'qa', 'pass');
+      expect(store.getTask(next)!.status).toBe('DONE');
+    } finally {
+      store.close();
+    }
   });
 });

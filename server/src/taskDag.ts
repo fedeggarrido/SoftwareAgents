@@ -33,6 +33,39 @@ export function taskDagDeclaration(dag: TaskDag): string {
   return JSON.stringify(dag.tasks.map((task) => taskDeclaration(dag.feature, task)).sort());
 }
 
+/** Only unfinished descendants in the validated, registered DAG can take over an AC. */
+export function deferredAcceptanceCoverage(
+  dag: TaskDag,
+  key: string,
+  isDone: (key: string) => boolean,
+): Record<string, string[]> {
+  const descendants = new Set([key]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const task of dag.tasks)
+      if (!descendants.has(task.key) && task.dependsOn.some((dep) => descendants.has(dep))) {
+        descendants.add(task.key);
+        changed = true;
+      }
+  }
+  return Object.fromEntries(
+    (dag.tasks.find((task) => task.key === key)?.acceptanceRefs ?? []).map((ac) => [
+      ac,
+      dag.tasks
+        .filter(
+          (task) =>
+            task.key !== key &&
+            descendants.has(task.key) &&
+            !isDone(task.key) &&
+            task.acceptanceRefs.includes(ac),
+        )
+        .map((task) => task.key)
+        .sort(),
+    ]),
+  );
+}
+
 /** Shape only; throws SchemaValidationError. Graph rules live in analyzeTaskDag. */
 export function parseTaskDag(value: unknown): TaskDag {
   return validateSchema(validateDag, value);

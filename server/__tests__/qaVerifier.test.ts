@@ -16,7 +16,7 @@ import type { ReviewerRequest } from '../src/reviewer.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { DomainEventRecord, TaskRecord, WorkStore } from '../src/workstore/WorkStore.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 90_000 });
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
@@ -52,6 +52,105 @@ const source = (text: string, file = 'server/__tests__/check.test.ts') =>
 const verify = () => runIsolatedVitest(tree, scratch, 'server/__tests__/check.test.ts');
 
 describe('Shared isolated QA verifier', () => {
+  it('selects only T03 diff tests and webview source mirrors unless a test directory is explicit', () => {
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    const files = [
+      'webview-ui/src/office/auditStore.ts',
+      'webview-ui/test/auditStore.test.ts',
+      'webview-ui/test/auditStoreEdges.test.ts',
+      'webview-ui/test/changed.test.ts',
+      'webview-ui/test/declared.test.ts',
+      'webview-ui/test/unrelated.test.ts',
+      'webview-ui/test/otherAuditStore.test.ts',
+    ];
+    for (const file of files) {
+      fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
+      source('// fixture', file);
+    }
+    git('add', 'webview-ui');
+    const input = {
+      worktree: tree,
+      files: [
+        'webview-ui/src/office/auditStore.ts',
+        'webview-ui/test/auditStore.test.ts',
+        'webview-ui/test/changed.test.ts',
+      ],
+      task: { changeZones: ['webview-ui/src/office/auditStore.ts'], testZones: [] },
+    } as unknown as ReviewerRequest;
+    const mirrors = [
+      'webview-ui/test/auditStore.test.ts',
+      'webview-ui/test/auditStoreEdges.test.ts',
+    ];
+    expect(qaTestFiles(input)).toEqual([...mirrors, 'webview-ui/test/changed.test.ts']);
+    input.files = [];
+    expect(qaTestFiles(input)).toEqual(mirrors);
+    input.task.changeZones = ['webview-ui/src/office/'];
+    expect(qaTestFiles(input)).toEqual(mirrors);
+    input.task.changeZones = ['webview-ui/src/**/audit*.ts'];
+    expect(qaTestFiles(input)).toEqual(mirrors);
+    input.task.testZones = ['webview-ui/test/declared.test.ts'];
+    expect(qaTestFiles(input)).toEqual([...mirrors, 'webview-ui/test/declared.test.ts']);
+    input.task.testZones = ['webview-ui/test/'];
+    expect(qaTestFiles(input)).toEqual(files.filter((file) => file.includes('/test/')).sort());
+  });
+
+  it.each(['node:assert', 'node:assert/strict', 'assert', 'assert/strict'])(
+    'counts only executed assertions from %s, including default, named and callable exports',
+    async (module) => {
+      source(`import assert, { equal } from '${module}'; import { it, expect } from 'vitest';
+it('equal only', () => assert.equal(1, 1));
+it('named equal', () => equal(1, 1));
+it('callable', () => assert(true));
+it('strict alias', () => assert.strict.equal(1, 1));
+it('async assertion', async () => { await assert.rejects(async () => { throw new Error('expected'); }); });
+it('failed assertion', () => assert.equal(1, 2));
+it('empty assert', () => {});
+it('dead assert', () => { if (false) assert.equal(1, 1); });
+it('dead expect', () => { if (false) expect(1).toBe(1); });
+it('utility is not an assertion', () => { new assert.AssertionError({ message: 'unused' }); });`);
+      expect(await verify()).toEqual({ result: 'fail', passed: 5, failed: 5 });
+      expect(fs.readdirSync(scratch)).toEqual([]);
+    },
+  );
+
+  it('runs every real webview test in the isolated runner without changing the checkout', async () => {
+    fs.unlinkSync(link);
+    const repository = path.resolve(__dirname, '../..');
+    const files = execFileSync('git', ['ls-files', '-z', 'webview-ui', 'core'], {
+      cwd: repository,
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+      .split('\0')
+      .filter(Boolean);
+    for (const file of files) {
+      const target = path.join(tree, file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(repository, file), target);
+    }
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    git('add', 'webview-ui', 'core');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+    const tests = files.filter((file) => /^webview-ui\/test\/.*\.test\.ts$/.test(file)).sort();
+    expect(tests.length).toBeGreaterThanOrEqual(18);
+    const commands = await qaCommands(
+      {
+        worktree: tree,
+        reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
+        files: [],
+        task: { changeZones: [], testZones: ['webview-ui/test/'] },
+      } as unknown as ReviewerRequest,
+      scratch,
+      new AbortController().signal,
+    );
+    expect(commands.map((row) => row.command)).toEqual(tests.map((file) => 'vitest:' + file));
+    expect(commands).toEqual(commands.map((row) => ({ ...row, result: 'pass', failed: 0 })));
+    expect(commands.every((row) => row.passed > 0)).toBe(true);
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+    expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
+  });
+
   it.each([true, false])(
     'executes QA webview tests with the Node workspace profile: %s',
     async (pass) => {

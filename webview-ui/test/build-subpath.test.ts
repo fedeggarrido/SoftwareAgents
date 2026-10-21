@@ -3,12 +3,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:f
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { build } from 'vite';
 import { test } from 'vitest';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import viteConfig from '../vite.config.ts';
 
 function contentTypeFor(filePath: string): string {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -22,7 +21,9 @@ function contentTypeFor(filePath: string): string {
 async function buildSubpathPreview(base: string): Promise<string> {
   const outDir = mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-webview-build-'));
   await build({
-    configFile: path.resolve(root, 'vite.config.ts'),
+    ...viteConfig,
+    // Vitest loads the config in memory; Vite's config bundler writes through node_modules.
+    configFile: false,
     // Keep Vite's dependency cache out of the repo (QA integrity checks the tree).
     cacheDir: mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-vite-cache-')),
     logLevel: 'silent',

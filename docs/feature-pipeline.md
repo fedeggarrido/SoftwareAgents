@@ -556,7 +556,12 @@ código, diff y resultados; nunca recibe Bash ni autoridad para ejecutar tests.
 
 El runtime deriva un conjunto cerrado de 1–32 tests versionados de
 `server/__tests__/` y `webview-ui/test/`: tests del diff, de `testZones` y de
-`changeZones`, incluidos los espejos `server/src/` → `server/__tests__/`.
+`changeZones`, incluidos los espejos `server/src/` → `server/__tests__/`
+(mismo directorio relativo y variantes con sufijo) y
+`webview-ui/src/<ruta>/<nombre>.ts` → `webview-ui/test/<nombre>*.test.ts`.
+Para zonas de directorio o glob del webview solo se derivan los espejos de sus
+fuentes versionadas; nunca se amplía implícitamente a todo `webview-ui/test/`.
+Un directorio completo de tests solo se ejecuta si la tarea lo declara en sus zonas.
 Cada fichero se ejecuta con Vitest y JSON reporter neutral, sin cargar configuración
 ni reporters del repositorio. Usa el verificador compartido de evals SA-QA-20:
 entorno por allowlist, perfiles/caché temporales, mock de os.homedir en Windows,
@@ -568,8 +573,12 @@ Los límites de aislamiento de SO siguen siendo los de [evals](evals.md#límites
 
 Las configuraciones neutrales exigen `test.expect.requireAssertions: true` en QA,
 evals, Developer test-first y la cascada `vitestRelated`: un test vacío o con su
-única aserción en una rama no ejecutada falla. Configuración, perfiles, cachés e
-informes del runtime se crean en scratch y se retiran tras confirmar el cierre.
+única aserción en una rama no ejecutada falla.
+El setup neutral cuenta también las llamadas ejecutadas a `node:assert` y
+`node:assert/strict` (incluidos sus alias sin `node:`), delegando en los originales;
+importar el módulo o crear un `AssertionError` no cuenta como aserción.
+Configuración, perfiles, cachés e informes del runtime se crean en scratch y se
+retiran tras confirmar el cierre.
 La integridad nunca excluye nombres como `allure-results` o `.vite`; el diagnóstico
 incluye la ruta relativa escapada y distingue «residuo previo a la verificación»
 de «cambio durante la verificación». Un residuo previo es fallo de infraestructura:

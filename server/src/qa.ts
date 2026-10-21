@@ -6,7 +6,7 @@ import type { TestReport } from '../../core/src/testReport.js';
 import { matchesChangeZone } from './changeZones.js';
 import { taskPath } from './commands/taskFiles.js';
 import { QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
-import { isDeveloperTest } from './developer.js';
+import { developerScope, isDeveloperTest } from './developer.js';
 import {
   EvalCriterionTerminationError,
   runIsolatedVitest,
@@ -24,6 +24,29 @@ const validateReport = compileSchema<TestReport>(contract);
 export function qaTestFiles(input: ReviewerRequest): string[] {
   const files = evalGit(input.worktree, ['ls-files', '-z']).split('\0').filter(Boolean);
   const zones = [...(input.task.changeZones ?? []), ...(input.task.testZones ?? [])];
+  const scope = developerScope(input.task, input.worktree);
+  const matchesZone = (file: string, zone: string) => {
+    const target = taskPath(input.worktree, zone.split('*')[0].replace(/\/$/, '') || '.');
+    const directory =
+      zone.endsWith('/') ||
+      (!zone.includes('*') && fs.statSync(target, { throwIfNoEntry: false })?.isDirectory());
+    return matchesChangeZone(file, zone, !!directory);
+  };
+  // Webview tests are flat: source directories must never imply the entire test directory.
+  const webviewMirrors = [
+    ...files,
+    ...(input.task.changeZones ?? []).filter((zone) => !zone.includes('*')),
+  ]
+    .filter(
+      (file) =>
+        file.startsWith('webview-ui/src/') &&
+        /\.[cm]?[jt]sx?$/i.test(file) &&
+        (input.task.changeZones ?? []).some((zone) => matchesZone(file, zone)),
+    )
+    .map(
+      (file) =>
+        'webview-ui/test/' + path.posix.basename(file).replace(/\.[^.]+$/, '') + '*.test.ts',
+    );
   const selected = files
     .filter((file) => {
       if (!isDeveloperTest(file)) return false;
@@ -32,16 +55,8 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
         .replace('server/__tests__/', 'server/src/');
       return (
         input.files.includes(file) ||
-        zones.some((zone) => {
-          const target = taskPath(input.worktree, zone.split('*')[0].replace(/\/$/, '') || '.');
-          const directory =
-            zone.endsWith('/') ||
-            (!zone.includes('*') && fs.statSync(target, { throwIfNoEntry: false })?.isDirectory());
-          return (
-            matchesChangeZone(file, zone, !!directory) ||
-            matchesChangeZone(source, zone, !!directory)
-          );
-        })
+        zones.some((zone) => matchesZone(file, zone) || matchesZone(source, zone)) ||
+        [...scope.mirroredTestZones, ...webviewMirrors].some((zone) => matchesZone(file, zone))
       );
     })
     .sort();

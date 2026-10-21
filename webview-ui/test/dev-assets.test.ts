@@ -12,19 +12,19 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { ViteDevServer } from 'vite';
 import { createServer } from 'vite';
 import { test } from 'vitest';
 
 import type { AssetIndex, CatalogEntry } from '../../core/src/assets/types.ts';
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import viteConfig from '../vite.config.ts';
 
 async function startDevServer(base: string, port: number): Promise<ViteDevServer> {
   const server = await createServer({
-    configFile: path.resolve(root, 'vite.config.ts'),
+    ...viteConfig,
+    // Vitest loads the config in memory; Vite's config bundler writes through node_modules.
+    configFile: false,
     // Keep Vite's dependency cache out of the repo (QA integrity checks the tree).
     cacheDir: mkdtempSync(path.join(os.tmpdir(), 'pixel-agents-vite-cache-')),
     base,

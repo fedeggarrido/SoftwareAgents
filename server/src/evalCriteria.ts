@@ -191,8 +191,38 @@ async function runWorkspaceVitest(
   const setup = resolveInside(temporary, 'isolated-home.mjs');
   fs.writeFileSync(
     setup,
-    `import { vi } from 'vitest';
+    `import { expect, vi } from 'vitest';
 vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
+// Count executed node:assert calls in Vitest's own per-test state. Keep constructors
+// and Function utilities intact; merely importing or reading an assertion never counts.
+const instrumentAssert = vi.hoisted(() => (module, count) => {
+  const proxies = new WeakMap();
+  const wrap = (value) => {
+    if (typeof value !== 'function') return value;
+    if (proxies.has(value)) return proxies.get(value);
+    const proxy = new Proxy(value, {
+      apply(target, receiver, args) {
+        count();
+        return Reflect.apply(target, receiver, args);
+      },
+      get(target, key, receiver) {
+        const member = Reflect.get(target, key, receiver);
+        return Object.hasOwn(target, key) && !['AssertionError', 'CallTracker'].includes(key)
+          ? wrap(member) : member;
+      },
+    });
+    proxies.set(value, proxy);
+    return proxy;
+  };
+  return Object.fromEntries(Object.entries(module).map(([key, value]) =>
+    [key, ['AssertionError', 'CallTracker'].includes(key) ? value : wrap(value)]));
+});
+vi.mock('node:assert', async (original) => instrumentAssert(await original(), () => {
+  expect.setState({ assertionCalls: expect.getState().assertionCalls + 1 });
+}));
+vi.mock('node:assert/strict', async (original) => instrumentAssert(await original(), () => {
+  expect.setState({ assertionCalls: expect.getState().assertionCalls + 1 });
+}));
 `,
   );
   const config = resolveInside(temporary, 'vitest.config.mjs');

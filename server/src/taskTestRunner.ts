@@ -95,9 +95,9 @@ export async function runTaskTest(
         [
           process.execPath,
           path.join(dependencies, 'vite/bin/vite.js'),
+          // Default (bundle) config loader: vite.config.ts uses __dirname, which the
+          // ESM `runner` loader does not define. The snapshot is a throwaway copy.
           'build',
-          '--configLoader',
-          'runner',
         ],
         path.join(snapshot, 'webview-ui'),
       ],

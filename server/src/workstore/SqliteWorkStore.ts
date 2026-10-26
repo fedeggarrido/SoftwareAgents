@@ -269,12 +269,13 @@ class SqliteWorkStore implements WorkStore {
       // The worker can die between persisting CLI closure and ACKing its retained
       // supervisor. Reap that root too, but never touch a reused PID. Absence is
       // acceptable here ONLY because closure was already durably recorded.
-      if (
-        execution.tree_closed_at &&
-        (!execution.pid_started_at ||
-          (await processStartIdentity(execution.pid!)) !== execution.pid_started_at)
-      )
-        continue;
+      if (execution.tree_closed_at) {
+        if (!execution.pid_started_at) continue;
+        // Closure is durably recorded: a PID whose identity differs or cannot be read
+        // (a reused PID, e.g. a SYSTEM service) is not ours and is never touched.
+        const identity = await processStartIdentity(execution.pid!).catch(() => undefined);
+        if (identity !== execution.pid_started_at) continue;
+      }
       await terminateExecutionTree(execution.pid!, execution.pid_started_at);
       await this.write(() => {
         this.reservedTask(task.key, token);

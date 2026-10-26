@@ -193,7 +193,9 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 - **Descripción:** una propuesta de Agent o tests verdes pueden introducir cambios
   dañinos; tampoco acreditan autorización para integrar.
 - **Mitigación (SA-007, SA-046):** ruleset de `main` y ajustes de cuenta; el
-  orquestador no hace merge. **Aceptación temporal (SA-067):** mantener el Gate humano de
+  orquestador no hace merge a `main`: SA-046 integra únicamente en
+  `sa/<FEAT>-integration` y termina en `ready_to_merge` para revisión e integración
+  humanas. **Aceptación temporal (SA-067):** mantener el Gate humano de
   [AGENTS.md](../../AGENTS.md): revisión cruzada manual, hallazgos resueltos y tests
   verdes; Claude integra tras esa revisión dentro del flujo autorizado por Fede.
   Ningún Agent ejecutado por la Platform recibe autoridad de merge autónomo.

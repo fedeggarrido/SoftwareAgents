@@ -38,7 +38,17 @@ export function taskBranchBase(
   const record = JSON.parse(fs.readFileSync(file, 'utf8')) as { branch: string; base: string };
   if (record.branch !== branch || !/^[a-f0-9]{40,64}$/.test(record.base))
     throw new Error('Invalid registered trusted base; human reconciliation required');
-  if (exists && evalGit(repository, ['merge-base', defaultBranch, branch]) !== record.base)
+  const integrated =
+    /^sa\/FEAT-\d{3}-integration$/.test(defaultBranch) &&
+    exists &&
+    evalGit(repository, ['merge-base', defaultBranch, branch]) ===
+      evalGit(repository, ['rev-parse', branch]) &&
+    evalGit(repository, ['merge-base', record.base, branch]) === record.base;
+  if (
+    exists &&
+    !integrated &&
+    evalGit(repository, ['merge-base', defaultBranch, branch]) !== record.base
+  )
     throw new Error('Developer branch merge-base differs from registered trusted base');
   return record.base;
 }

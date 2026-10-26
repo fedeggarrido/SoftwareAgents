@@ -40,6 +40,8 @@ export interface ProjectOperatorConfig {
   telemetry?: TelemetryConfig;
   /** Runtime-only branch publication. Absent/disabled means no push. */
   developer?: { pushBranch: { enabled: boolean; remote: string } };
+  /** Sequential feature runner; parallel scheduling is reserved for SA-037. */
+  orchestrator?: { maxConcurrentTasks?: number };
   /**
    * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
    * (or no entry) = every catalog tier; an empty list blocks that Executor.

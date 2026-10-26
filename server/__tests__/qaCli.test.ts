@@ -277,7 +277,7 @@ describe('TestReport contract', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () => {
-  beforeEach(() => prepare(), 30_000);
+  beforeEach(() => prepare(), 90_000);
   it.each([false, true])(
     'passes via a safe reader (Codex enabled=%s), persists report, keeps approved SHA and promotes T02',
     async (codexEnabled) => {
@@ -591,8 +591,8 @@ describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () =>
 });
 
 describe.skipIf(process.platform !== 'win32')('Deferred QA via worker (fake CLIs)', () => {
+  beforeEach(() => prepare('deferred-chain'), 90_000);
   it('finishes the earlier task, exposes its deferred AC and requires coverage on the last task', async () => {
-    await prepare('deferred-chain');
     await qa('not_tested');
     const pending = await storeFor();
     expect(pending.getTask(task)!.status).toBe('QA');

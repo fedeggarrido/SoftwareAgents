@@ -255,3 +255,5 @@ export const REVIEW_MAX_REWORK_ROUNDS = 3;
 
 /** Bound total QA command count; each verifier also has its existing timeout/output cap. */
 export const QA_MAX_TEST_FILES = 32;
+/** Recheck SA-026 leases without keeping a runner busy. */
+export const FEATURE_RUN_POLL_MS = 1000;

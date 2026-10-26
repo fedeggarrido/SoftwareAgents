@@ -1,4 +1,4 @@
-# Feature pipeline: Requirements, Architect, Developer, Reviewer y QA (SA-041–045)
+# Feature pipeline: Requirements, Architect, Developer, Reviewer, QA y Orquestador (SA-041–046)
 
 El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
@@ -296,7 +296,8 @@ WorkerLifecycle la devuelve a READY y reevalúa selección y disponibilidad.
 Reutiliza worker, selección/cascada SA-103, leases y recuperación SA-026,
 compilador y contención SA-062 con `branch_write`, guardia SA-063, commit con
 trailer y transición a REVIEW. La rama es `sa/FEAT-001-T01-developer` y el
-worktree `.worktrees/FEAT-001-T01`, desde la base declarada del Project.
+worktree `.worktrees/FEAT-001-T01`, desde la base declarada del Project o desde
+la rama de integración registrada por `feature run` (SA-046).
 Antes de crear la rama, el runtime registra el SHA de esa base en
 `<git-common-dir>/softwareagents/task-bases/<rama-codificada>.json`. En cada
 reintento, incluso al devolver `review_ref`, exige ese registro y que el merge-base
@@ -385,7 +386,8 @@ Un corte entre Git, SQLite y auditoría exige reconciliación humana; no crea un
 rama alternativa ni descarta evidencia. Actualizar/reiniciar todos los escritores
 antes de abrir la base v10, como en [task CLI](task-cli.md#migraciones-de-la-base-compartida).
 
-No hay PRs, `gh`, merge ni integración automática. `push_main = deny` siempre.
+Los subcomandos individuales no crean PRs ni integran. `feature run` puede
+integrar en la rama del feature (SA-046); `push_main = deny` siempre.
 Por defecto no publica ninguna rama. Solo Operator config externo puede activar:
 
 ```json
@@ -419,7 +421,8 @@ El comando exige una tarea sin lease en REVIEW o QA, con `review_ref` válido,
 rama y HEAD iguales al SHA registrado y su worktree limpio. Incluye archivos
 ignorados y no versionados: rechaza los residuos nombrando sus rutas, sin
 eliminarlos. Los mismos marcadores de ingreso gestionado que bloquean `approve`
-y `--answers` impiden `rebase`; no existe una opción para eludir ese gate.
+y `--answers` impiden el `rebase` directo. El run autorizado por el operador
+puede invocar ese mantenimiento dentro del ciclo SA-046; no hay un flag de actor.
 
 Toma el tip local actual de `project.repo.defaultBranch`, sin fetch implícito.
 Prepara el rebase en un worktree separado, sin executors, hooks ni instalaciones.
@@ -437,8 +440,9 @@ versión de la tarea. Un fallo de publicación revierte Git y el registro y hace
 rollback SQLite. Git, filesystem, SQLite y auditoría no tienen una transacción
 distribuida: un marcador persistente `.rebase` junto al registro bloquea todos
 los consumidores de la base durante la publicación. Si el proceso se interrumpe,
-se conserva para reconciliación humana; nunca se reintenta una publicación incierta
-silenciosamente. Los eventos de WorkStore y auditoría `feature_rebase` conservan
+se conserva para reconciliación. SA-046 reconoce los dos estados conocidos del
+journal bajo el bloqueo de WorkStore; cualquier edición ajena exige intervención
+humana. Los eventos de WorkStore y auditoría `feature_rebase` conservan
 SHA/base anteriores y nuevos y ambos patch-id. `feature show` expone la base nueva
 en `review_ref`; Developer, Reviewer y QA reutilizan ese registro actualizado.
 No integra ni publica ramas.
@@ -737,6 +741,117 @@ Si el runtime no pudo ejecutar el spec, Claude valida desde un checkout construi
 Esa ejecución manual es evidencia para revisión humana; no convierte por sí sola
 un `not_tested` persistido en DONE. Esta implementación se prueba con CLIs falsas;
 la prueba real y la integración corresponden a Claude.
+
+## Orquestador secuencial y reanudable (SA-046)
+
+Desde el checkout principal del Managed Project en Windows, con build y Operator
+config preparados:
+
+```powershell
+node esbuild.js
+node dist/cli.js feature run FEAT-001 --json
+node dist/cli.js feature show FEAT-001 --json
+```
+
+Equivalente instalado: `pixel-agents feature run FEAT-001`. Si falta el spec,
+añadir `--request docs/examples/FEAT-001-request.md`; sin esa opción se busca
+`<brain>/features/requests/FEAT-001.md`. El request queda fijado en WorkStore y
+no hace falta repetirlo al continuar. Si ya hay spec aprobado, no hace falta request.
+
+El bucle no usa un LLM para decidir. Lee Feature, diseño y Tasks del WorkStore e
+invoca los mismos pasos `spec`, `design`, `develop`, `review`, `qa` y la función de
+`rebase`. Requirements propone el spec y se detiene para aprobación humana;
+Architect importa el DAG. Selecciona secuencialmente por key entre las tareas que
+cumplen `canStart`, y exige además que sus dependencias DONE estén integradas.
+Developer enruta `qa`/`test`/`qa-author` al autor de tests existente. Una revisión
+`request_changes` o QA con defectos vuelve al desarrollo con el contexto persistido.
+Los reintentos de `FAILED_RETRYABLE` y los fallos de review/QA son acotados por
+`max_attempts`, con contadores persistentes por acción/tarea/referencia; las esperas
+sin Execution no gastan reintentos. `FAILED_FINAL`, cancelación, bloqueo y topes
+detienen el run con exit 1 y diagnóstico. No replanifica ni ejecuta en paralelo.
+
+### Rama de integración y base de tareas
+
+El runtime crea `sa/FEAT-001-integration` desde el tip **local** de `main`, sin
+fetch, checkout ni modificación de main. Cada Task DONE se publica allí mediante
+fast-forward verificado. Si una tarea completada previamente tiene historia
+divergente, prepara un merge con `git merge-tree --write-tree` y un commit de dos
+padres; un conflicto impide mover la ref. Nunca ejecuta hooks ni instala paquetes.
+La rama de integración debe estar libre de checkouts y sus movimientos externos
+requieren reconciliación: el runtime no los adopta silenciosamente.
+
+Las tareas nuevas parten del HEAD integrado en ese momento. Developer, Reviewer,
+QA, publicación de rama y `feature rebase` consultan esa base runtime del WorkStore,
+en lugar de `project.repo.defaultBranch`. `task-bases` registra el SHA exacto y
+`review_ref.base` conserva esa referencia. Si la base avanzó durante REVIEW/QA,
+el run invoca el rebase existente: patch-id idéntico mantiene las aprobaciones;
+un patch diferente vuelve a REVIEW. Un conflicto detiene el run conservando evidencia.
+
+Tras integrar todas las tareas del DAG, `features.status=ready_to_merge` y el
+resumen indica rama y SHA. El merge de esa rama a main sigue siendo humano, tras
+revisión cruzada y QA real de Claude. No hay push de la rama de integración.
+La publicación opcional de ramas Developer sigue su política externa existente.
+
+### Gates, estado y recuperación
+
+Una decisión abierta o expirada, `WAITING_HUMAN`, la aprobación pendiente del spec
+o un QA `not_tested` detienen el bucle con exit 3. El mensaje identifica qué falta,
+remite a `feature show` y da `pixel-agents feature run FEAT-001` para continuar.
+Las respuestas de Requirements/Architect se incorporan mediante sus comandos
+`--answers` existentes, y la aprobación sigue requiriendo `feature approve`.
+El orquestador nunca responde una decisión ni aprueba. `WAITING_QUOTA` también sale
+con 3; relanzar el mismo run reevalúa el gate de cuota y selección.
+
+WorkStore v13 incorpora `feature_runs` y `worker_publications`. Actualizar y
+reiniciar coordinadamente los escritores antes de migrar, como en
+[task CLI](task-cli.md#migraciones-de-la-base-compartida). Guarda progreso,
+intentos, acción activa, rama/HEAD integrado y publicaciones preparadas. Un lock
+SQLite por Project/Feature rechaza un segundo run; solo un PID confirmado muerto
+permite recuperar el lock. No se roba a un runner vivo por antigüedad.
+
+Después de matar el proceso, relanzar el mismo comando espera las leases vigentes
+y usa SA-026 para recuperar las caducadas, verificando el cierre de Executions.
+No duplica ramas ni resultados ya registrados. Los commits preparados y los
+artefactos validados de Requirements/Architect tienen un intent persistente antes
+de escribir/publicar; se completan sin otra propuesta del agente. El registro
+previo de la actualización de la rama de integración permite reconocer tanto el
+SHA anterior como el ya publicado. Un journal de rebase se reconcilia solo contra
+sus dos estados conocidos y WorkStore; cambios ajenos conservan el bloqueo.
+Git, SQLite y filesystem siguen sin transacción distribuida: una identidad de
+proceso no verificable, edición ajena o estado que no coincide exige intervención
+humana. Nunca se interpreta esa incertidumbre como éxito.
+
+Cada acción produce líneas `acción tarea: resultado` y auditoría `feature_run`;
+el worker conserva sus eventos e informes existentes. Con `--json`, el progreso
+va a stderr y stdout contiene únicamente el resumen final, con estado, Tasks,
+rama/SHA de integración, mensaje, comando de continuación y código de salida.
+`feature show --json` incluye `orchestrator` con el checkpoint persistido.
+
+### Configuración del Operator e ingreso
+
+En `~/.pixel-agents/config.json`, bajo `projects.<project-id>`:
+
+```json
+"orchestrator": { "maxConcurrentTasks": 1 }
+```
+
+El valor por defecto es 1. Cualquier valor mayor falla antes de ejecutar y remite
+a SA-037. El repositorio y el DAG no conceden concurrencia ni autoridad.
+
+Los mismos marcadores de ingreso gestionado/agente/autopilot que bloquean
+`approve` bloquean `run`. La excepción opcional para la oficina es la allowlist
+SA-003 `companyAutopilot[<checkout-absoluto>].command`: debe coincidir **todo el argv
+real**, incluido ejecutable, launcher y `feature run FEAT-001` con sus opciones.
+Por ejemplo `["C:/Program Files/nodejs/node.exe", "D:/project/dist/cli.js", "feature", "run", "FEAT-001", "--json"]`,
+usando las rutas efectivas del operador. No hay flags de actor ni comodines. La
+autorización de run permite su mantenimiento/rebase dentro de este ciclo; no
+permite `approve`, respuestas ni merge a main. El board no puede ampliar ese argv.
+
+La batería automatizada usa únicamente CLIs falsas y repositorios/perfiles
+aislados; incluye tres tareas encadenadas, gates, rework, exclusión y recuperación.
+La prueba que mata el runner en RUNNING requiere el helper Windows de SA-026.
+Si el sandbox deniega CIM, usar `SA_SKIP_TASKKILL_TEST=1` y repetir esa prueba fuera
+del sandbox antes de integrar. No acredita QA real con cuentas autenticadas.
 
 ## Próximos pasos
 

@@ -170,6 +170,17 @@ describe('ReviewReport contract', () => {
 
 describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)', () => {
   describe('human task rebase', () => {
+    // Build the approved-task fixture separately; the rebase/rework assertions retain
+    // their 90 s budget even on slow Windows hosts with real nested verifiers.
+    beforeEach(async (context) => {
+      if (
+        context.task.name.startsWith('keeps QA and immutable reports') ||
+        context.task.name.startsWith('returns a changed patch')
+      ) {
+        await prepare();
+        await review();
+      }
+    }, 90_000);
     const rebase = () => runFeatureCommand(['rebase', 'FEAT-001', '--task', task], repo, () => {});
     const advance = (file = 'base-fix.txt', contents = 'new Project base\n') => {
       fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
@@ -179,8 +190,6 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
       return git(repo, 'rev-parse', 'main');
     };
     it('keeps QA and immutable reports for identical patches; all subsequent commands accept the base', async () => {
-      await prepare();
-      await review();
       await run(['qa', 'FEAT-001', '--task', task], 'qa', 'not_tested');
       const store = await storeFor();
       try {
@@ -239,8 +248,6 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
     });
 
     it('returns a changed patch to REVIEW and requires a new approval on the new base', async () => {
-      await prepare();
-      await review();
       const store = await storeFor();
       try {
         const before = store.getTask(task)!;

@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -11,17 +11,146 @@ import { developerRequest } from './developer.js';
 import { evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
+import { featureBaseBranch } from './featureRunBase.js';
 import { taskBranchBase, taskBranchBaseFile } from './taskBranchBase.js';
 import { type TaskRebase } from './taskRebaseHistory.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
-/** Operator-only maintenance. No executor, hooks, dependency installation or publication. */
+/** Reconcile only a runtime-authored rebase journal against its two known Git states. */
+export async function recoverFeatureTaskRebase(
+  store: WorkStore,
+  config: ProjectConfig,
+  key: string,
+): Promise<void> {
+  const task = store.getTask(key);
+  if (!task?.review_ref || task.lease_owner || task.status === 'WAITING_HUMAN') return;
+  const registry = taskBranchBaseFile(config.repoRoot, task.review_ref.branch);
+  const journal = registry + '.rebase';
+  if (!fs.existsSync(journal)) return;
+  const current = task.review_ref;
+  await store.reconcileTaskRebase(key, task.version, current, () => {
+    const entry = JSON.parse(fs.readFileSync(journal, 'utf8')) as TaskRebase;
+    const equal = (ref: typeof current) => JSON.stringify(ref) === JSON.stringify(current);
+    if (
+      (!equal(entry.before) && !equal(entry.after)) ||
+      entry.before.branch !== entry.after.branch ||
+      entry.before.branch !== `sa/${key}-developer`
+    )
+      throw new Error('Rebase journal does not match WorkStore; human reconciliation required');
+    const tree = taskPath(config.repoRoot, `.worktrees/${key}`);
+    const git = (args: string[]) =>
+      evalGit(tree, ['-c', 'core.hooksPath=', '-c', 'core.fsmonitor=false', ...args]);
+    if (
+      task.worktree_ref !== tree ||
+      git(['symbolic-ref', '--short', 'HEAD']) !== current.branch ||
+      ![entry.before.sha, entry.after.sha].includes(git(['rev-parse', 'HEAD']))
+    )
+      throw new Error('Rebase journal branch changed');
+    const files = new Set<string>();
+    const blobs = [entry.before.sha, entry.after.sha].map(
+      (sha) =>
+        new Map(
+          git(['ls-tree', '-r', '-z', sha])
+            .split('\0')
+            .filter(Boolean)
+            .map((line) => {
+              const [metadata, file] = line.split('\t');
+              files.add(file);
+              return [file, metadata.split(' ')[2]] as const;
+            }),
+        ),
+    );
+    const inspect = (directory: string, prefix = '') => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (!prefix && entry.name === '.git') continue;
+        const relative = prefix + entry.name;
+        const target = path.join(directory, entry.name);
+        if (fs.lstatSync(target).isSymbolicLink())
+          throw new Error('Rebase journal worktree has a link');
+        if (entry.isDirectory()) {
+          if (![...files].some((file) => file.startsWith(relative + '/')))
+            throw new Error('Rebase journal worktree has foreign directories');
+          inspect(target, relative + '/');
+        } else if (!files.has(relative))
+          throw new Error('Rebase journal worktree has foreign files');
+      }
+    };
+    inspect(tree);
+    const knownTrees = [entry.before.sha, entry.after.sha].map((sha) =>
+      git(['rev-parse', `${sha}^{tree}`]),
+    );
+    if (
+      !knownTrees.includes(git(['write-tree'])) ||
+      git(['ls-files', '-v', '-z'])
+        .split('\0')
+        .some((line) => line && !line.startsWith('H '))
+    )
+      throw new Error('Rebase journal index changed or hides files');
+    for (const file of files) {
+      const source = taskPath(tree, file);
+      if (!fs.existsSync(source)) {
+        if (blobs.every((map) => map.has(file)))
+          throw new Error('Rebase journal has a missing tracked file');
+        continue;
+      }
+      const stat = fs.lstatSync(source);
+      if (!stat.isFile() || stat.nlink !== 1)
+        throw new Error('Rebase journal worktree contains a special file');
+      const content = fs.readFileSync(source);
+      if (
+        !blobs.some((map) => {
+          if (!map.has(file)) return false;
+          const expected = map.get(file)!;
+          const digest = (bytes: Buffer) =>
+            createHash(expected.length === 64 ? 'sha256' : 'sha1')
+              .update(`blob ${bytes.length}\0`)
+              .update(bytes)
+              .digest('hex');
+          return (
+            digest(content) === expected ||
+            (!content.includes(0) &&
+              digest(Buffer.from(content.toString('latin1').replaceAll('\r\n', '\n'), 'latin1')) ===
+                expected)
+          );
+        })
+      )
+        throw new Error('Rebase journal worktree has foreign edits');
+    }
+    if (git(['ls-files', '--others', '--exclude-standard']))
+      throw new Error('Rebase journal worktree has foreign files');
+    const head = git(['rev-parse', 'HEAD']);
+    git(['update-ref', `refs/heads/${current.branch}`, current.sha, head]);
+    git(['read-tree', '--reset', '-u', current.sha]);
+    const temporary = registry + `.${randomUUID()}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify({ branch: current.branch, base: current.base }), {
+      flag: 'wx',
+    });
+    fs.renameSync(temporary, registry);
+    new AuditLog().append({
+      projectId: store.projectId,
+      action: 'feature_rebase',
+      resourceType: 'task',
+      resourceId: key,
+      actorType: 'system',
+      actorId: 'rebase-recovery',
+      policyDecision: null,
+      riskLevel: 'high',
+      taskKey: key,
+      executionId: null,
+      outcome: { status: 'reconciled', detail: JSON.stringify({ review_ref: current }) },
+    });
+    fs.unlinkSync(journal);
+  });
+}
+
+/** Operator-authorized maintenance, including an admitted feature runner. No executor or push. */
 export async function rebaseFeatureTask(
   store: WorkStore,
   config: ProjectConfig,
   feature: string,
   key: string,
   audit = new AuditLog(),
+  orchestratorOwner?: string,
 ): Promise<TaskRebase> {
   const actor = featureIngressActor();
   let result: TaskRebase | undefined;
@@ -39,10 +168,15 @@ export async function rebaseFeatureTask(
       executionId: null,
       outcome: { status, detail: JSON.stringify(result ?? {}) },
     });
-  if (actor !== 'human') {
+  const orchestrated =
+    orchestratorOwner !== undefined &&
+    store.getFeatureRun(feature)?.owner === orchestratorOwner &&
+    store.getFeatureRun(feature)?.pid === process.pid;
+  if (actor !== 'human' && !orchestrated) {
     append('rejected');
     throw new Error('Feature rebase requires the human operator');
   }
+  await recoverFeatureTaskRebase(store, config, key);
   const task = store.getTask(key);
   if (
     !task?.review_ref ||
@@ -56,7 +190,7 @@ export async function rebaseFeatureTask(
   const root = config.repoRoot;
   const tree = taskPath(root, `.worktrees/${key}`);
   const common = evalGit(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-  const baseBranch = config.project.repo.defaultBranch;
+  const baseBranch = featureBaseBranch(store, config, feature);
   evalGit(root, ['check-ref-format', '--branch', baseBranch]);
   const base = evalGit(root, ['rev-parse', `refs/heads/${baseBranch}^{commit}`]);
   const assertSource = () => {

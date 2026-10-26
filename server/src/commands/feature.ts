@@ -8,6 +8,7 @@ import { CliUsageError } from '../cliErrors.js';
 import { developerRequest, lastDeveloperFailure, pushDeveloperBranch } from '../developer.js';
 import { featureDocument } from '../featureArtifacts.js';
 import { featureIngressActor } from '../featureIngress.js';
+import { assertFeatureRunIngress, runFeature } from '../featureRun.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import {
@@ -24,7 +25,7 @@ import type { WorkStore } from '../workstore/WorkStore.js';
 import { readTaskInput, taskPath } from './taskFiles.js';
 
 const USAGE =
-  'Usage: pixel-agents feature spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
+  'Usage: pixel-agents feature run <FEAT-ID> [--request <file.md>] [--json] | spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
 
 export { featureIngressActor } from '../featureIngress.js';
 
@@ -94,6 +95,13 @@ export async function runFeatureCommand(
         rest.length === 2 &&
         ['--request', '--answers'].includes(rest[0]) &&
         !rest[1].startsWith('-')) ||
+      (command === 'run' &&
+        (rest.length === 0 ||
+          (rest.length === 1 && rest[0] === '--json') ||
+          (rest[0] === '--request' &&
+            !!rest[1] &&
+            !rest[1].startsWith('-') &&
+            (rest.length === 2 || (rest.length === 3 && rest[2] === '--json'))))) ||
       (command === 'approve' && rest.length === 0) ||
       (command === 'rebase' &&
         rest.length === 2 &&
@@ -113,7 +121,22 @@ export async function runFeatureCommand(
   try {
     const config = loadProjectConfig(cwd, true);
     if (!config) throw new Error('feature requires a bound Git Project');
+    if (command === 'run') assertFeatureRunIngress(config, argv);
     store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
+    if (command === 'run') {
+      const json = rest.includes('--json');
+      const summary = await runFeature(
+        store,
+        config,
+        key,
+        rest[0] === '--request' ? rest[1] : undefined,
+        (args) => runFeatureCommand(args, cwd, json ? console.error : log, workerOptions),
+        json ? console.error : log,
+      );
+      process.exitCode = summary.exit_code;
+      if (json) log(JSON.stringify(summary, null, 2));
+      return;
+    }
     let feature = store.getFeature(key);
     if (command === 'spec') {
       taskPath(cwd, requirementsDocPath(config.project.brain.path, key));
@@ -290,6 +313,7 @@ export async function runFeatureCommand(
       );
       const result = {
         ...feature,
+        orchestrator: store.getFeatureRun(key)?.state ?? null,
         ...document,
         design: store.getDesign(key) ?? null,
         tasks: store

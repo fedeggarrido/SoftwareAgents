@@ -119,6 +119,16 @@ const migrations = [
   ALTER TABLE executions ADD COLUMN agent_role TEXT;`,
   `ALTER TABLE tasks ADD COLUMN test_reports TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE tasks ADD COLUMN defect_context TEXT;`,
+  `CREATE TABLE feature_runs (
+    project_id TEXT NOT NULL REFERENCES projects(project_id), feature_key TEXT NOT NULL,
+    owner TEXT, pid INTEGER, state TEXT NOT NULL,
+    PRIMARY KEY(project_id, feature_key)
+  ) STRICT;
+  CREATE TABLE worker_publications (
+    project_id TEXT NOT NULL REFERENCES projects(project_id), task_key TEXT NOT NULL,
+    feature_key TEXT NOT NULL, body TEXT NOT NULL,
+    PRIMARY KEY(project_id, task_key)
+  ) STRICT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

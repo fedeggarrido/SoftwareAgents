@@ -20,6 +20,42 @@ export interface FeatureRecord {
   status: string;
 }
 
+/** Runtime checkpoints. Git publication is prepared here before a compare-and-swap. */
+export interface FeatureRunState {
+  branch: string;
+  initial_main: string;
+  head: string;
+  request: string;
+  integrated: Record<string, ReviewRef>;
+  attempts: Record<string, number>;
+  pending?: { task: string; before: string; after: string };
+  active?: { action: string; task: string; version: number };
+  status: string;
+  message?: string;
+}
+
+export interface FeatureRunRecord {
+  owner: string | null;
+  pid: number | null;
+  state: FeatureRunState;
+}
+
+export interface WorkerPublication {
+  feature: string;
+  task: string;
+  execution: string;
+  branch: string;
+  worktree: string;
+  before: string;
+  sha: string;
+  base: string;
+  tree: string;
+  spec?: import('../../../core/src/featureSpec.js').FeatureSpec;
+  design?: { record: Omit<DesignRecord, 'project_id'>; dag: TaskDag };
+  developer?: boolean;
+  draft?: { files: Record<string, string>; snapshot: [string, string][]; subject: string };
+}
+
 export interface DesignRecord {
   project_id: string;
   feature_key: string;
@@ -162,6 +198,20 @@ export interface DomainEventRecord {
 /** One Project per handle; no SQL/connection escape hatch. */
 export interface WorkStore {
   readonly projectId: string;
+  getFeatureRun(key: string): FeatureRunRecord | undefined;
+  claimFeatureRun(key: string, owner: string, initial: FeatureRunState): Promise<FeatureRunState>;
+  saveFeatureRun(key: string, owner: string, state: FeatureRunState): Promise<void>;
+  releaseFeatureRun(key: string, owner: string): Promise<void>;
+  prepareWorkerPublication(publication: WorkerPublication, owner: string): Promise<void>;
+  listWorkerPublications(feature: string): WorkerPublication[];
+  claimWorkerPublication(task: string, owner: string): Promise<TaskRecord>;
+  clearWorkerPublication(task: string, execution: string): Promise<void>;
+  reconcileTaskRebase(
+    task: string,
+    version: number,
+    ref: ReviewRef,
+    publish: () => void,
+  ): Promise<void>;
   getProject(): ProjectRecord;
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void;
   /** Trusted human feature ingress (Requirements or Architect); retains the gate during regeneration. */

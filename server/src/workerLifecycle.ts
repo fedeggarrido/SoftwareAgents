@@ -39,6 +39,7 @@ export class WorkerLifecycle {
   async claim(
     revision?: { gitSha: string; decisionId: string },
     reviewing: false | 'review' | 'qa' = false,
+    publication = false,
   ): Promise<void> {
     if (this.claimed) return;
     let task = this.store.getTask(this.task);
@@ -54,7 +55,8 @@ export class WorkerLifecycle {
         'Explicit worker run',
         this.owner,
       );
-    if (reviewing) await this.store.claimReview(task.key, task.version, this.owner, reviewing);
+    if (publication) await this.store.claimWorkerPublication(task.key, this.owner);
+    else if (reviewing) await this.store.claimReview(task.key, task.version, this.owner, reviewing);
     else if (revision)
       await this.store.claimRequirementsRevision(
         task.key,

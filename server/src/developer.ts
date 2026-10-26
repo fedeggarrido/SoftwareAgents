@@ -16,6 +16,7 @@ import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
+import { featureBaseBranch } from './featureRunBase.js';
 import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import {
@@ -240,7 +241,8 @@ export function developerRequest(
   reviewing = false,
 ): DeveloperRequest {
   const feature = store.getFeature(key);
-  if (feature?.status !== 'approved') throw new Error('Developer requires an approved FeatureSpec');
+  if (!feature || !['approved', 'ready_to_merge'].includes(feature.status))
+    throw new Error('Developer requires an approved FeatureSpec');
   const design = store.getDesign(key);
   if (!design) throw new Error('Developer requires a registered design');
   const { spec } = featureDocument(store, config, feature);
@@ -519,8 +521,11 @@ export async function pushDeveloperBranch(
     throw new Error('Developer push_main = deny; invalid branch publication target');
   const tree = store.getTask(taskKey)?.worktree_ref;
   if (
-    taskBranchBase(config.repoRoot, review.branch, config.project.repo.defaultBranch) !==
-    review.base
+    taskBranchBase(
+      config.repoRoot,
+      review.branch,
+      featureBaseBranch(store, config, store.getTask(taskKey)!.feature_key!),
+    ) !== review.base
   )
     throw new Error('Review base differs from registered trusted base');
   if (

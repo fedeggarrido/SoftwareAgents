@@ -9,6 +9,7 @@ import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { type DeveloperRequest, developerRequest } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executorSelection.js';
+import { featureBaseBranch } from './featureRunBase.js';
 import { isFailedReview } from './reviewAttempts.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
@@ -89,7 +90,8 @@ export function reviewerRequest(
     ref.branch !== `sa/${record.key}-developer` ||
     !/^[a-f0-9]{40,64}$/.test(ref.sha) ||
     !/^[a-f0-9]{40,64}$/.test(ref.base) ||
-    taskBranchBase(config.repoRoot, ref.branch, config.project.repo.defaultBranch) !== ref.base ||
+    taskBranchBase(config.repoRoot, ref.branch, featureBaseBranch(store, config, key)) !==
+      ref.base ||
     evalGit(config.repoRoot, ['rev-parse', `refs/heads/${ref.branch}`]) !== ref.sha ||
     evalGit(tree, ['rev-parse', 'HEAD']) !== ref.sha ||
     evalGit(tree, ['symbolic-ref', '--short', 'HEAD']) !== ref.branch ||

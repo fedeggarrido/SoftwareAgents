@@ -13,6 +13,7 @@ import {
   WORKSTORE_INITIAL_TASK_STATUS,
   WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
+import { isProcessRunning } from '../leaseLock.js';
 import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
@@ -42,6 +43,8 @@ import type {
   DomainEventRecord,
   ExecutionRecord,
   FeatureRecord,
+  FeatureRunRecord,
+  FeatureRunState,
   HumanDecisionRecord,
   LeaseRecoveryRecord,
   NewTask,
@@ -51,6 +54,7 @@ import type {
   TaskDependencyRecord,
   TaskRecord,
   TestRecord,
+  WorkerPublication,
   WorkStore,
 } from './WorkStore.js';
 
@@ -321,6 +325,21 @@ class SqliteWorkStore implements WorkStore {
       this.decisionTask(task, 'WAITING_HUMAN', actor, reason, token);
       return this.getTask(task.key)!;
     }
+    if (
+      this.db
+        .prepare('SELECT 1 FROM worker_publications WHERE project_id = ? AND task_key = ?')
+        .get(this.projectId, task.key)
+    )
+      return this.change(
+        task.key,
+        task.version,
+        'FAILED_RETRYABLE',
+        'Verified runtime publication pending',
+        actor,
+        task.attempt,
+        undefined,
+        token,
+      );
     return this.change(
       task.key,
       task.version,
@@ -602,6 +621,27 @@ class SqliteWorkStore implements WorkStore {
     }, rollback);
   }
 
+  reconcileTaskRebase(
+    taskId: string,
+    version: number,
+    ref: ReviewRef,
+    publish: () => void,
+  ): Promise<void> {
+    return this.write(() => {
+      this.assertNotRecovering(taskId);
+      this.assertNoDecisionGate(taskId);
+      const task = this.getTask(taskId);
+      if (
+        !task ||
+        task.version !== version ||
+        task.lease_owner ||
+        !sameReviewRef(task.review_ref, ref)
+      )
+        throw new Error('Task changed before rebase recovery');
+      publish();
+    });
+  }
+
   completeReview(
     taskId: string,
     owner: string,
@@ -841,6 +881,139 @@ class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM projects WHERE project_id = ?')
       .get(this.projectId) as unknown as ProjectRecord;
+  }
+  getFeatureRun(key: string): FeatureRunRecord | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT owner, pid, state FROM feature_runs WHERE project_id = ? AND feature_key = ?',
+      )
+      .get(this.projectId, key) as
+      { owner: string | null; pid: number | null; state: string } | undefined;
+    return row ? { ...row, state: JSON.parse(row.state) as FeatureRunState } : undefined;
+  }
+
+  prepareWorkerPublication(publication: WorkerPublication, owner: string): Promise<void> {
+    return this.write(() => {
+      const task = this.owned(publication.task, owner);
+      const execution = this.getExecution(publication.execution);
+      if (
+        task.branch !== publication.branch ||
+        task.worktree_ref !== publication.worktree ||
+        !execution?.tree_closed_at ||
+        execution.task_key !== task.key
+      )
+        throw new Error('Worker publication binding changed or execution not closed');
+      const previous = this.listWorkerPublications(publication.feature).find(
+        (p) => p.task === publication.task,
+      );
+      if (previous && previous.execution !== publication.execution)
+        throw new Error('Worker publication already pending');
+      this.db
+        .prepare(
+          'INSERT INTO worker_publications (project_id,task_key,feature_key,body) VALUES (?,?,?,?) ON CONFLICT(project_id,task_key) DO UPDATE SET body=excluded.body',
+        )
+        .run(this.projectId, task.key, publication.feature, JSON.stringify(publication));
+    });
+  }
+
+  listWorkerPublications(feature: string): WorkerPublication[] {
+    return this.db
+      .prepare(
+        'SELECT body FROM worker_publications WHERE project_id = ? AND feature_key = ? ORDER BY task_key',
+      )
+      .all(this.projectId, feature)
+      .map((r) => JSON.parse(r.body as string) as WorkerPublication);
+  }
+
+  claimWorkerPublication(taskId: string, owner: string): Promise<TaskRecord> {
+    return this.write(() => {
+      this.assertNotRecovering(taskId);
+      this.assertNoDecisionGate(taskId);
+      const task = this.getTask(taskId)!;
+      const pending = this.db
+        .prepare('SELECT body FROM worker_publications WHERE project_id = ? AND task_key = ?')
+        .get(this.projectId, taskId);
+      if (
+        !pending ||
+        task.lease_owner ||
+        !['FAILED_RETRYABLE', 'REVIEW'].includes(task.status) ||
+        this.listExecutions().some(
+          (e) => e.task_key === taskId && e.pid !== null && !e.tree_closed_at,
+        )
+      )
+        throw new Error('Publication recovery requires an idle task with closed executions');
+      // This resumes a previously verified result; it never launches an executor or consumes an attempt.
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          "UPDATE tasks SET status = 'RUNNING', version = version + 1, lease_owner = ?, lease_expires_at = ?, updated_at = ? WHERE project_id = ? AND key = ?",
+        )
+        .run(owner, leaseDeadline(owner, DEFAULT_LEASE_TTL_MS), now, this.projectId, taskId);
+      this.db
+        .prepare(
+          "INSERT INTO domain_events (project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at) VALUES (?,?,'TASK_TRANSITIONED',?,'RUNNING',?,?,'Resume verified publication',?,?)",
+        )
+        .run(this.projectId, taskId, task.status, task.version + 1, task.attempt, owner, now);
+      return this.getTask(taskId)!;
+    });
+  }
+
+  clearWorkerPublication(task: string, execution: string): Promise<void> {
+    return this.write(() => {
+      this.db
+        .prepare(
+          "DELETE FROM worker_publications WHERE project_id = ? AND task_key = ? AND json_extract(body, '$.execution') = ?",
+        )
+        .run(this.projectId, task, execution);
+    });
+  }
+
+  claimFeatureRun(key: string, owner: string, initial: FeatureRunState): Promise<FeatureRunState> {
+    return this.write(() => {
+      const current = this.getFeatureRun(key);
+      // Never steal a live runner, including a slow or suspended process. ESRCH alone proves death.
+      if (current?.owner && current.pid && isProcessRunning(current.pid))
+        throw new Error(`feature run ${key}: another orchestrator is running`);
+      const state = current?.state ?? initial;
+      this.db
+        .prepare(
+          'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state) VALUES (?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid',
+        )
+        .run(this.projectId, key, owner, process.pid, JSON.stringify(state));
+      return state;
+    });
+  }
+
+  saveFeatureRun(key: string, owner: string, state: FeatureRunState): Promise<void> {
+    return this.write(() => {
+      if (this.getFeatureRun(key)?.owner !== owner)
+        throw new Error('Feature orchestrator ownership lost');
+      this.db
+        .prepare(
+          'UPDATE feature_runs SET state = ? WHERE project_id = ? AND feature_key = ? AND owner = ?',
+        )
+        .run(JSON.stringify(state), this.projectId, key, owner);
+      if (state.status === 'ready_to_merge') {
+        const tasks = this.listTasks().filter((t) => t.feature_key === key && t.declaration);
+        if (!tasks.length || tasks.some((t) => t.status !== 'DONE' || !state.integrated[t.key]))
+          throw new Error('Feature still has unintegrated tasks');
+        this.db
+          .prepare(
+            "UPDATE features SET status = 'ready_to_merge' WHERE project_id = ? AND key = ? AND status IN ('approved','ready_to_merge')",
+          )
+          .run(this.projectId, key);
+      }
+    });
+  }
+
+  releaseFeatureRun(key: string, owner: string): Promise<void> {
+    return this.write(() => {
+      this.db
+        .prepare(
+          'UPDATE feature_runs SET owner = NULL, pid = NULL WHERE project_id = ? AND feature_key = ? AND owner = ?',
+        )
+        .run(this.projectId, key, owner);
+    });
   }
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void {
     this.db

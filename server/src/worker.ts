@@ -34,7 +34,7 @@ import {
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { validateChangeZone } from './changeZones.js';
 import { CliUsageError } from './cliErrors.js';
-import { readTaskInput } from './commands/taskFiles.js';
+import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { readConfig } from './configPersistence.js';
 import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
@@ -86,6 +86,7 @@ import {
   executorSlotsDirectory,
   withMachineAdmission,
 } from './executorSlots.js';
+import { featureBaseBranch } from './featureRunBase.js';
 import { HumanDecisions } from './humanDecisions.js';
 import {
   type CascadeAttempt,
@@ -117,6 +118,7 @@ import {
   requirementsDocPath,
   type RequirementsRequest,
   requirementsSnapshot,
+  serializeRequirements,
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
@@ -139,6 +141,7 @@ import {
   verifierFailureReason,
 } from './verifierFeedback.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
+import { publishWorkerResult } from './workerPublication.js';
 import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
@@ -1183,7 +1186,9 @@ async function runWorkerExecution(
           ? { path: options.evaluation.worktreePath, branch: '' }
           : await new WorktreeManager({
               repositoryPath: cwd,
-              defaultBranch: config.project.repo.defaultBranch,
+              defaultBranch: options.developer
+                ? featureBaseBranch(workStore!, config, options.developer.key)
+                : config.project.repo.defaultBranch,
               manualPreparation: true,
               trustedBase: !!options.developer,
             }).create(
@@ -1191,7 +1196,11 @@ async function runWorkerExecution(
               options.developer ? 'developer' : 'worker',
             );
       base ??= options.developer
-        ? taskBranchBase(cwd, tree.branch, config.project.repo.defaultBranch)
+        ? taskBranchBase(
+            cwd,
+            tree.branch,
+            featureBaseBranch(workStore!, config, options.developer!.key),
+          )
         : git(tree.path, ['rev-parse', 'HEAD']);
       if (developerRetry && !retryPrepared && workStore!.getTask(args.task)!.worktree_ref) {
         lifecycle!.assertOwned();
@@ -1714,6 +1723,54 @@ async function runWorkerExecution(
             );
           }
           lifecycle?.assertOwned();
+          const draftFeature = options.architect?.key ?? options.requirements?.key;
+          if (
+            draftFeature &&
+            workStore?.getFeatureRun(draftFeature) &&
+            !options.requirements?.revision &&
+            !options.architect?.revision
+          ) {
+            const paths = architectPaths(config.project.brain.path, draftFeature);
+            const files =
+              designFiles ?? new Map([[featureDoc!, serializeRequirements(featureSpec!)]]);
+            for (const relative of files.keys())
+              if (fs.existsSync(taskPath(tree.path, relative)))
+                throw new Error('Runtime artifact already exists without registration');
+            await workStore.prepareWorkerPublication(
+              {
+                feature: draftFeature,
+                task: args.task,
+                execution: executionId,
+                branch: tree.branch,
+                worktree: tree.path,
+                before: startingHead!,
+                sha: startingHead!,
+                base,
+                tree: git(tree.path, ['rev-parse', `${startingHead}^{tree}`]),
+                ...(featureSpec ? { spec: featureSpec } : {}),
+                ...(options.architect
+                  ? {
+                      design: {
+                        record: {
+                          feature_key: draftFeature,
+                          doc_path: paths.doc,
+                          dag_path: paths.dag,
+                          git_sha: startingHead!,
+                          feature_sha: options.architect.gitSha,
+                        },
+                        dag: designProposal!.dag,
+                      },
+                    }
+                  : {}),
+                draft: {
+                  files: Object.fromEntries(files),
+                  snapshot: [...requirementsBefore!],
+                  subject: `feat(${draftFeature}): proponer ${options.architect ? 'diseño técnico' : 'requisitos'}`,
+                },
+              },
+              lifecycle!.owner,
+            );
+          }
           if (options.architect) writeArchitectArtifacts(tree.path, designFiles!);
           else
             writeRequirements(
@@ -1930,6 +1987,65 @@ async function runWorkerExecution(
       }
       log('require_human: rutas protegidas: ' + gate.paths.join(', ') + '\nRama: ' + tree.branch);
       return { branch: tree.branch, commit: null, stat: '', policyDecision: gate.decision };
+    }
+    const orchestratedFeature =
+      options.developer?.key ?? options.architect?.key ?? options.requirements?.key;
+    if (
+      orchestratedFeature &&
+      workStore?.getFeatureRun(orchestratedFeature) &&
+      !options.requirements?.revision &&
+      !options.architect?.revision
+    ) {
+      lifecycle!.assertOwned();
+      const treeHash = git(tree.path, ['write-tree']);
+      const subject = options.developer
+        ? workerCommitSubject(args.task, options.developer.task.title.toLowerCase())
+        : `feat(${orchestratedFeature}): proponer ${options.architect ? 'diseño técnico' : 'requisitos'}`;
+      const sha = execFileSync(
+        'git',
+        ['-c', 'commit.gpgSign=false', 'commit-tree', treeHash, '-p', startingHead!],
+        {
+          cwd: tree.path,
+          input: `${subject}\n\nSoftwareAgents-Execution: ${executionId}\n`,
+          encoding: 'utf8',
+          windowsHide: true,
+        },
+      ).trim();
+      const paths = architectPaths(config.project.brain.path, orchestratedFeature);
+      const publication = {
+        feature: orchestratedFeature,
+        task: args.task,
+        execution: executionId,
+        branch: tree.branch,
+        worktree: tree.path,
+        before: startingHead!,
+        sha,
+        base,
+        tree: treeHash,
+        ...(options.developer ? { developer: true } : {}),
+        ...(featureSpec ? { spec: featureSpec } : {}),
+        ...(options.architect
+          ? {
+              design: {
+                record: {
+                  feature_key: orchestratedFeature,
+                  doc_path: paths.doc,
+                  dag_path: paths.dag,
+                  git_sha: sha,
+                  feature_sha: options.architect.gitSha,
+                },
+                dag: designProposal!.dag,
+              },
+            }
+          : {}),
+      };
+      await workStore.prepareWorkerPublication(publication, lifecycle!.owner);
+      await publishWorkerResult(workStore, config, publication, lifecycle!);
+      const stat = git(tree.path, ['diff', '--stat', base, sha]);
+      audit('ready_for_review');
+      telemetryStatus = 'ok';
+      log(`rama lista para revisión\nRama: ${tree.branch}\nCommit: ${sha}\n${stat}`);
+      return { branch: tree.branch, commit: sha, stat };
     }
     const commitChanges = () => {
       git(tree.path, [

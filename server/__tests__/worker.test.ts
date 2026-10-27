@@ -910,7 +910,7 @@ describe('Operator verifier cascade SA-103', () => {
     expect(attempts().map((r) => r.result)).toEqual(['executor_error']);
   });
   test.skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === '1')(
-    'times out a verifier, kills its tree and escalates',
+    'stops on verifier timeout after closing its tree without escalating the agent',
     async () => {
       const raw = configure();
       const pids = path.join(root, 'verifier-pids.json');
@@ -919,8 +919,15 @@ describe('Operator verifier cascade SA-103', () => {
       ];
       save(raw);
       try {
-        await run('standard');
-        expect(attempts().map((r) => r.verifiers)).toEqual([['timeout'], ['pass']]);
+        await expect(run('standard')).rejects.toThrow('Verifier infrastructure: command timed out');
+        expect(attempts().map((r) => r.tier)).toEqual(['economy']);
+        expect(attempts().map((r) => r.result)).toEqual(['infrastructure_error']);
+        const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+        try {
+          expect(store.getTask('SA-999')).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+        } finally {
+          store.close();
+        }
         for (const pid of Object.values(JSON.parse(fs.readFileSync(pids, 'utf8'))) as number[])
           await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 2000 });
       } finally {

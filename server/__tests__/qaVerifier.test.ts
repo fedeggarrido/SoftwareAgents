@@ -13,6 +13,7 @@ import { loadModelPolicy } from '../src/modelPolicy.js';
 import { qaCommands, qaRequestedCommands, qaTestFiles } from '../src/qa.js';
 import { lastReviewFailure, reviewReworkRounds } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
+import { VERIFIER_INFRASTRUCTURE_PREFIX } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { DomainEventRecord, TaskRecord, WorkStore } from '../src/workstore/WorkStore.js';
 
@@ -52,6 +53,156 @@ const source = (text: string, file = 'server/__tests__/check.test.ts') =>
 const verify = () => runIsolatedVitest(tree, scratch, 'server/__tests__/check.test.ts');
 
 describe('Shared isolated QA verifier', () => {
+  it('builds server hooks in a scratch snapshot and leaves the approved task tree clean', async () => {
+    fs.unlinkSync(link);
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    fs.writeFileSync(
+      path.join(tree, 'esbuild.js'),
+      `
+const fs = require('fs');
+const esbuild = require('esbuild');
+if (fs.existsSync('.git')) throw new Error('snapshot contains Git metadata');
+esbuild.buildSync({ stdin: { contents: 'module.exports = "built hook";' }, outfile: 'dist/hooks/claude-hook.js', platform: 'node' });
+esbuild.buildSync({ stdin: { contents: 'module.exports = "built containment";' }, outfile: 'dist/hooks/containment-hook.js', platform: 'node' });
+`,
+    );
+    source(`import { it, expect } from 'vitest';
+it('requires built hooks', () => {
+  expect(require('../../dist/hooks/claude-hook.js')).toBe('built hook');
+  expect(require('../../dist/hooks/containment-hook.js')).toBe('built containment');
+});`);
+    git('add', '.');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+    const sha = git('rev-parse', 'HEAD').trim();
+    const input = {
+      worktree: tree,
+      reviewRef: { sha },
+      files: ['server/__tests__/check.test.ts'],
+      task: { changeZones: [], testZones: [] },
+    } as unknown as ReviewerRequest;
+    expect(await qaCommands(input, scratch, new AbortController().signal)).toEqual([
+      { command: 'vitest:server/__tests__/check.test.ts', result: 'pass', passed: 1, failed: 0 },
+    ]);
+    expect(git('rev-parse', 'HEAD').trim()).toBe(sha);
+    expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
+    expect(fs.existsSync(path.join(tree, 'dist'))).toBe(false);
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+
+  it('does not charge Developer attempts for repeated verifier infrastructure failures', async () => {
+    git('init', '-b', 'main');
+    const store = await openWorkStore({ repositoryPath: tree, projectId: 'test' });
+    const key = 'FEAT-001-T01';
+    store.createTask({
+      key,
+      type: 'code',
+      agent_role: 'developer',
+      status: 'READY',
+      max_attempts: 1,
+    });
+    try {
+      for (let i = 0; i < 4; i++) {
+        const claimed = await store.claim(key, 'fixture-worker');
+        const running = await store.transition(
+          key,
+          claimed.version,
+          'RUNNING',
+          'Fixture launch',
+          'fixture-worker',
+        );
+        await store.transition(
+          key,
+          running.version,
+          'FAILED_RETRYABLE',
+          VERIFIER_INFRASTRUCTURE_PREFIX + 'build timed out',
+          'fixture-worker',
+        );
+        expect(store.getTask(key)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it('retains an unconfirmed verifier lease and recovers it without charging an attempt', async () => {
+    git('init', '-b', 'main');
+    const store = await openWorkStore({ repositoryPath: tree, projectId: 'test' });
+    const db = new DatabaseSync(path.join(tree, '.git/softwareagents/work.sqlite3'));
+    const key = 'FEAT-001-T01';
+    store.createTask({
+      key,
+      type: 'code',
+      agent_role: 'developer',
+      status: 'READY',
+      max_attempts: 1,
+    });
+    try {
+      const claimed = await store.claim(key, 'fixture-worker');
+      await store.transition(key, claimed.version, 'RUNNING', 'Fixture launch', 'fixture-worker');
+      await expect(store.markVerifierInfrastructureFailure(key, 'other-worker')).rejects.toThrow();
+      await store.markVerifierInfrastructureFailure(key, 'fixture-worker');
+      expect(store.getTask(key)).toMatchObject({
+        status: 'RUNNING',
+        lease_owner: 'fixture-worker',
+        attempt: 0,
+      });
+      db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+        new Date(0).toISOString(),
+        key,
+      );
+      await store.recoverExpiredLeases();
+      expect(store.getTask(key)).toMatchObject({
+        status: 'FAILED_RETRYABLE',
+        attempt: 0,
+        lease_owner: null,
+        blocked_reason: expect.stringContaining(VERIFIER_INFRASTRUCTURE_PREFIX),
+      });
+      await store.claim(key, 'resumed-worker');
+      expect(store.getTask(key)).toMatchObject({ status: 'LEASED', attempt: 0 });
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
+  it.each(['qa', 'review'] as const)(
+    'preserves an unconfirmed %s verifier diagnosis through lease recovery',
+    async (phase) => {
+      git('init', '-b', 'main');
+      const store = await openWorkStore({ repositoryPath: tree, projectId: 'test' });
+      const db = new DatabaseSync(path.join(tree, '.git/softwareagents/work.sqlite3'));
+      const key = 'FEAT-001-T01';
+      store.createTask({ key, type: 'code', status: phase === 'qa' ? 'QA' : 'REVIEW' });
+      try {
+        db.prepare('UPDATE tasks SET review_ref = ? WHERE key = ?').run(
+          JSON.stringify({
+            branch: `sa/${key}-developer`,
+            sha: 'a'.repeat(40),
+            base: 'b'.repeat(40),
+          }),
+          key,
+        );
+        await store.claimReview(key, store.getTask(key)!.version, 'fixture-worker', phase);
+        await store.markVerifierInfrastructureFailure(key, 'fixture-worker');
+        db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+          new Date(0).toISOString(),
+          key,
+        );
+        await store.recoverExpiredLeases();
+        const task = store.getTask(key)!;
+        expect(task).toMatchObject({
+          status: phase === 'qa' ? 'QA' : 'REVIEW',
+          attempt: 0,
+          lease_owner: null,
+        });
+        expect(lastReviewFailure(store, task)?.reason).toContain(VERIFIER_INFRASTRUCTURE_PREFIX);
+      } finally {
+        db.close();
+        store.close();
+      }
+    },
+  );
+
   it('selects only T03 diff tests and webview source mirrors unless a test directory is explicit', () => {
     git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
     const files = [

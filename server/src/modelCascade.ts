@@ -19,6 +19,7 @@ import { resolveInside } from './pathGuard.js';
 import { runTaskTest, validateTaskTest } from './taskTestRunner.js';
 import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
 import { type VerifierFailure, verifierFailure, verifierKind } from './verifierFeedback.js';
+import { VerifierInfrastructureError } from './verifierInfrastructure.js';
 
 export interface CascadeAttempt {
   attempt: number;
@@ -27,7 +28,7 @@ export interface CascadeAttempt {
   executor: string;
   model: string;
   verifiers: CriterionResult[];
-  result: 'pass' | 'fail' | 'executor_error' | 'criteria_tampered';
+  result: 'pass' | 'fail' | 'executor_error' | 'criteria_tampered' | 'infrastructure_error';
   usage: {
     input: number | 'unknown';
     output: number | 'unknown';
@@ -207,6 +208,7 @@ export async function checkCascadeCriteria(
             output = value;
           },
         );
+        if (result === 'timeout') throw new VerifierInfrastructureError('command timed out');
         results.push(result);
         const files = command.argv.includes('--')
           ? command.argv.slice(command.argv.indexOf('--') + 1)
@@ -238,6 +240,8 @@ export async function checkCascadeCriteria(
                 output = value;
               })
             ).result;
+            if (result === 'not_tested' && !file.startsWith('e2e/'))
+              throw new VerifierInfrastructureError('Vitest execution unavailable');
             checks.push(result);
             report(
               file.startsWith('e2e/') ? 'e2e' : 'tests',
@@ -247,7 +251,11 @@ export async function checkCascadeCriteria(
               output,
             );
           } catch (error) {
-            if (error instanceof EvalCriterionTerminationError) throw error;
+            if (
+              error instanceof EvalCriterionTerminationError ||
+              error instanceof VerifierInfrastructureError
+            )
+              throw error;
             checks.push('fail');
             report(
               file.startsWith('e2e/') ? 'e2e' : 'tests',
@@ -283,7 +291,11 @@ export async function checkCascadeCriteria(
             checks.push(result);
             report('tests', ['vitest', 'related', ...files], files, result, output);
           } catch (error) {
-            if (error instanceof EvalCriterionTerminationError) throw error;
+            if (
+              error instanceof EvalCriterionTerminationError ||
+              error instanceof VerifierInfrastructureError
+            )
+              throw error;
             checks.push('fail');
             report(
               'tests',
@@ -305,6 +317,7 @@ export async function checkCascadeCriteria(
                 (!('developerTests' in command) || checks.length > 0)
               ? 'pass'
               : 'fail';
+      if (result === 'timeout') throw new VerifierInfrastructureError('test batch timed out');
       results.push(result);
     }
     return results;

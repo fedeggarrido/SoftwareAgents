@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
-import { FEATURE_RUN_POLL_MS, WORKSTORE_DEFAULT_MAX_ATTEMPTS } from './constants.js';
+import { FEATURE_RUN_POLL_MS } from './constants.js';
 import { pushDeveloperBranch } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
@@ -12,6 +12,7 @@ import { assertTaskDependencies } from './featureRunBase.js';
 import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { lastReviewFailure } from './reviewAttempts.js';
 import { rebaseFeatureTask, recoverFeatureTaskRebase } from './taskRebase.js';
+import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import { recoverWorkerResults } from './workerPublication.js';
 import type { TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
@@ -64,9 +65,10 @@ export async function runFeature(
     head: main,
     request: request ?? `${config.project.brain.path}/features/requests/${key}.md`,
     integrated: {},
-    attempts: {},
     status: 'running',
   });
+  // Retire the old independent budget, including exhausted checkpoints from older versions.
+  delete state.attempts;
   const audit = new AuditLog();
   // Worker diagnostics (including historical ones) are not evidence that this
   // runner received an operator signal. Keep that authority local to this run.
@@ -258,15 +260,29 @@ export async function runFeature(
   };
   const execute = async (action: string, taskKey: string, args: string[]) => {
     const task = store.getTask(taskKey);
-    const attemptKey = `${action}/${taskKey}/${task?.review_ref?.sha ?? 'draft'}`;
-    const count = state.attempts[attemptKey] ?? 0;
-    if (count >= (task?.max_attempts ?? WORKSTORE_DEFAULT_MAX_ATTEMPTS))
+    // Developer's WorkStore claim enforces tasks.attempt/max_attempts. Review and QA
+    // already share validated rework rounds. Non-code proposals use task history,
+    // since their explicit retry transitions do not increment tasks.attempt.
+    const events = store.listDomainEvents(taskKey);
+    const reset = events
+      .map(
+        (event) =>
+          event.to_status === 'READY' &&
+          !['Retry lease', 'Explicit Requirements retry'].includes(event.reason),
+      )
+      .lastIndexOf(true);
+    const proposalFailures = events
+      .slice(reset + 1)
+      .filter(
+        (event) =>
+          event.to_status === 'FAILED_RETRYABLE' && !isVerifierInfrastructureFailure(event.reason),
+      ).length;
+    if (task && ['spec', 'design'].includes(action) && proposalFailures >= task.max_attempts)
       return stop(
         'failed',
         `${action} ${taskKey}: max_attempts exhausted; inspect feature show ${key}`,
         1,
       );
-    state.attempts[attemptKey] = count + 1;
     state.active = {
       action,
       task: taskKey,
@@ -279,7 +295,6 @@ export async function runFeature(
     append(action, taskKey, 'started');
     if (interrupted) return stopInterrupted();
     process.exitCode = 0;
-    const executions = store.listExecutions().filter((e) => e.task_key === taskKey).length;
     let error: unknown;
     try {
       await invoke(args);
@@ -296,15 +311,12 @@ export async function runFeature(
         push: state.active!.publication!.push,
       };
     }
-    if (
-      (exit === 3 || current?.status === 'WAITING_QUOTA' || current?.status === 'WAITING_HUMAN') &&
-      store.listExecutions().filter((e) => e.task_key === taskKey).length === executions
-    )
-      state.attempts[attemptKey] = count;
     delete state.active;
     await save();
     append(action, taskKey, current?.status ?? (error ? 'failed' : 'finished'));
     if (interrupted) return stopInterrupted();
+    if (isVerifierInfrastructureFailure(current?.blocked_reason))
+      return stop('WAITING_HUMAN', `${taskKey}: ${current!.blocked_reason}`, 3);
     if (current?.status === 'FAILED_RETRYABLE' && !current.review_ref) return;
     if (exit === 3 || current?.status === 'WAITING_QUOTA')
       return stop(
@@ -315,20 +327,30 @@ export async function runFeature(
         `${taskKey}: ${current?.blocked_reason ?? (current && lastReviewFailure(store, current)?.reason) ?? 'worker waiting; inspect feature show ' + key}`,
         3,
       );
-    if (error && action === 'develop') return stop('failed', (error as Error).message, 1);
-    if (
-      error &&
-      current?.review_ref &&
-      ['REVIEW', 'QA', 'FAILED_RETRYABLE'].includes(current.status)
-    )
-      return;
+    // A read-only worker failure retains its approval; retry only on explicit resume.
+    if (current && ['review', 'qa'].includes(action) && lastReviewFailure(store, current))
+      return stop('WAITING_HUMAN', `${taskKey}: ${lastReviewFailure(store, current)!.reason}`, 3);
     if (error) return stop('failed', (error as Error).message, 1);
-    if (current && current.status === task?.status && current.version === task.version)
+    if (
+      (!current &&
+        !(action === 'spec'
+          ? store.getFeature(key)
+          : action === 'design'
+            ? store.getDesign(key)
+            : false)) ||
+      (current && current.status === task?.status && current.version === task.version)
+    )
       return stop('WAITING_HUMAN', `${action} made no progress; inspect feature show ${key}`, 3);
     if (action === 'qa' && current?.status === 'QA')
       return stop(
         'WAITING_HUMAN',
-        `QA not_tested; inspect feature show ${key} and resolve runtime test evidence`,
+        `QA not_tested; inspect feature show ${key} and resolve runtime test evidence: ${
+          current.test_reports
+            ?.at(-1)
+            ?.report.commands.filter((command) => command.result === 'not_tested')
+            .map((command) => command.reason)
+            .join('; ') || 'acceptance criteria remain untested'
+        }`,
         3,
       );
   };
@@ -360,8 +382,21 @@ export async function runFeature(
     await save();
     for (;;) {
       if (interrupted) return await stopInterrupted();
-      await store.recoverExpiredLeases();
+      const recovered = await store.recoverExpiredLeases();
       if (interrupted) return await stopInterrupted();
+      const infrastructure = recovered.find(
+        (task) =>
+          (task.key === key || task.key === `${key}-DESIGN` || task.feature_key === key) &&
+          isVerifierInfrastructureFailure(
+            task.blocked_reason ?? lastReviewFailure(store, task)?.reason,
+          ),
+      );
+      if (infrastructure)
+        return await stop(
+          'WAITING_HUMAN',
+          `${infrastructure.key}: ${infrastructure.blocked_reason ?? lastReviewFailure(store, infrastructure)?.reason}`,
+          3,
+        );
       await recoverWorkerResults(store, config, key);
       if (interrupted) return await stopInterrupted();
       for (const task of tasks()) {

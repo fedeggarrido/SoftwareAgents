@@ -27,7 +27,8 @@ export interface FeatureRunState {
   head: string;
   request: string;
   integrated: Record<string, ReviewRef>;
-  attempts: Record<string, number>;
+  /** Legacy checkpoints only; retry authority belongs to Tasks and their history. */
+  attempts?: Record<string, number>;
   pending?: { task: string; before: string; after: string; main?: string };
   active?: {
     action: string;
@@ -268,6 +269,7 @@ export interface WorkStore {
   ): Promise<TaskRecord>;
   heartbeat(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;
   setTaskWorktree(taskId: string, owner: string, branch: string, worktree: string): Promise<void>;
+  markVerifierInfrastructureFailure(taskId: string, owner: string): Promise<void>;
   setTaskReview(taskId: string, owner: string, review: ReviewRef): Promise<void>;
   /** Human ingress: fence all writers while publishing a prepared Git rebase. */
   rebaseTask(

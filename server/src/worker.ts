@@ -141,6 +141,11 @@ import {
   type VerifierFailure,
   verifierFailureReason,
 } from './verifierFeedback.js';
+import {
+  isVerifierInfrastructureFailure,
+  VERIFIER_INFRASTRUCTURE_PREFIX,
+  VerifierInfrastructureError,
+} from './verifierInfrastructure.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
 import { publishWorkerResult } from './workerPublication.js';
 import { openWorkStore } from './workstore/SqliteWorkStore.js';
@@ -403,7 +408,11 @@ export async function runWorker(
       if (store.getTask(args.task)?.review_ref)
         throw new Error('Developer task already has a review_ref');
       const record = store.getTask(args.task)!;
-      if (developerRetry && record.attempt + 1 >= record.max_attempts) {
+      if (
+        developerRetry &&
+        !isVerifierInfrastructureFailure(record.blocked_reason) &&
+        record.attempt + 1 >= record.max_attempts
+      ) {
         await store.transition(
           record.key,
           record.version,
@@ -477,9 +486,14 @@ export async function runWorker(
       (options.reviewer ? (options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX) : '') +
         (error instanceof ChangeZonesExceededError || error instanceof MissingTestError
           ? error.diagnostic()
-          : error instanceof WorkerExecutionError
+          : error instanceof VerifierInfrastructureError
             ? error.message
-            : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
+            : error instanceof EvalCriterionTerminationError
+              ? VERIFIER_INFRASTRUCTURE_PREFIX +
+                'verifier termination unconfirmed; SA-026 recovery required'
+              : error instanceof WorkerExecutionError
+                ? error.message
+                : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
     );
     throw error;
   } finally {
@@ -1834,9 +1848,11 @@ async function runWorkerExecution(
               guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
           } catch (error) {
             if (error instanceof EvalIntegrityError) await recordAttempt([], 'criteria_tampered');
+            if (error instanceof VerifierInfrastructureError)
+              await recordAttempt([], 'infrastructure_error');
             if (error instanceof EvalCriterionTerminationError) {
               verifierClosed = false;
-              await recordAttempt([error.result], 'fail');
+              await recordAttempt([error.result], 'infrastructure_error');
             }
             throw error;
           }
@@ -2186,7 +2202,11 @@ async function runWorkerExecution(
         : {}),
     };
   } catch (error) {
-    if (error instanceof EvalCriterionTerminationError) verifierClosed = false;
+    if (error instanceof EvalCriterionTerminationError) {
+      verifierClosed = false;
+      if (workStore && lifecycle)
+        await workStore.markVerifierInfrastructureFailure(args.task, lifecycle.owner);
+    }
     telemetryStatus = 'error';
     audit(
       interrupted ? 'interrupted' : 'failed',

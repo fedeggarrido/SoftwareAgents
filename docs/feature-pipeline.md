@@ -691,6 +691,22 @@ también con cascada o verificadores del Operator. Un fallo impide REVIEW.
 Los tests Vitest escritos se ejecutan por fichero con el runner neutral aislado;
 se conservan las comprobaciones de aserciones y de integridad.
 
+Para Vitest del workspace `server`, si el checkout contiene `esbuild.js` (como
+SoftwareAgents), el runner copia el árbol a un snapshot en scratch, excluye `.git`,
+`node_modules`, `dist` y el scratch local, enlaza dependencias existentes y ejecuta
+`node esbuild.js` antes de Vitest. Así se construyen también los hooks que requieren
+los tests, incluso cuando los importan indirectamente. Nunca instala dependencias.
+La copia, el build, HOME y las cachés quedan fuera del árbol aprobado; antes de
+limpiar se valida y desenlaza la junction. Sin cierre confirmado se retiene scratch.
+El diagnóstico de infraestructura queda en la tarea sin liberar su lease; SA-026
+debe confirmar el cierre antes de recuperarla, conservando los intentos. Esa
+recuperación detiene el run y requiere una nueva reanudación explícita.
+Un fallo de preparación/build es infraestructura (`not_tested` en QA), nunca un
+fallo de aserción. Repositorios fuente sin esa entrada de build y el workspace
+webview conservan el perfil neutral sin build. El coste es una copia completa y
+un build por invocación server, incluidos `related`, dentro del mismo deadline
+compartido con Vitest; no se reutilizan artefactos entre referencias aprobadas.
+
 Un fallo exclusivamente de Prettier/ESLint recibe un único reintento en el mismo
 nivel; si persiste se detiene sin escalar. Los fallos de tipos/tests permiten la
 cascada. Cada siguiente intento recibe `task.verifierFailures` como datos JSON no
@@ -765,9 +781,15 @@ Architect importa el DAG. Selecciona secuencialmente por key entre las tareas qu
 cumplen `canStart`, y exige además que sus dependencias DONE estén integradas.
 Developer enruta `qa`/`test`/`qa-author` al autor de tests existente. Una revisión
 `request_changes` o QA con defectos vuelve al desarrollo con el contexto persistido.
-Los reintentos de `FAILED_RETRYABLE` y los fallos de review/QA son acotados por
-`max_attempts`, con contadores persistentes por acción/tarea/referencia; las esperas
-sin Execution no gastan reintentos. `FAILED_FINAL`, cancelación, bloqueo y topes
+Los reintentos de Developer usan únicamente `tasks.attempt`/`max_attempts` del
+WorkStore; Reviewer y QA conservan su límite compartido de informes negativos
+válidos. Requirements/Architect derivan sus fallos del historial de transiciones
+de la tarea desde el último reset explícito a READY. No hay otro presupuesto en
+`feature_runs.state`: los contadores antiguos se descartan al reanudar, por lo que
+un reset o cambio de base no deja intentos fantasma. Las esperas sin Execution,
+los fallos de infraestructura del verificador (build, entorno, timeout) y QA
+`not_tested` no gastan intentos del agente. Detienen el run con exit 3 y diagnóstico;
+se reanudan explícitamente una vez resuelto el entorno. `FAILED_FINAL`, cancelación, bloqueo y topes
 detienen el run con exit 1 y diagnóstico. No replanifica ni ejecuta en paralelo.
 
 ### Rama de integración y base de tareas

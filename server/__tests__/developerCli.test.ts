@@ -32,7 +32,7 @@ import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,

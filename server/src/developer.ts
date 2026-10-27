@@ -27,6 +27,7 @@ import {
   taskDeclaration,
 } from './taskDag.js';
 import { TASK_REBASE_REASON, taskRebaseHistory } from './taskRebaseHistory.js';
+import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export class ChangeZonesExceededError extends Error {
@@ -322,13 +323,23 @@ export function developerRequest(
           qaDefects: store
             .listTasks()
             .flatMap((t) => (t.defect_context?.task === record.key ? [t.defect_context] : [])),
-          reworkAttempt: record.attempt + (record.status === 'FAILED_RETRYABLE' ? 1 : 0),
+          reworkAttempt:
+            record.attempt +
+            (record.status === 'FAILED_RETRYABLE' &&
+            !isVerifierInfrastructureFailure(record.blocked_reason)
+              ? 1
+              : 0),
         }
       : {}),
     ...(record.review_reports?.length
       ? {
           reviewFindings: record.review_reports.at(-1)!.report.findings,
-          reworkAttempt: record.attempt + (record.status === 'FAILED_RETRYABLE' ? 1 : 0),
+          reworkAttempt:
+            record.attempt +
+            (record.status === 'FAILED_RETRYABLE' &&
+            !isVerifierInfrastructureFailure(record.blocked_reason)
+              ? 1
+              : 0),
         }
       : {}),
   };

@@ -15,7 +15,7 @@ import {
 } from '../constants.js';
 import { evalGit } from '../evalTasks.js';
 import { resolveInside } from '../pathGuard.js';
-import { isFailedReview, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
+import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
 import { taskDagDeclaration, taskDeclaration } from '../taskDag.js';
 import {
@@ -24,6 +24,10 @@ import {
   TASK_REBASE_REASON,
   type TaskRebase,
 } from '../taskRebaseHistory.js';
+import {
+  isVerifierInfrastructureFailure,
+  VERIFIER_INFRASTRUCTURE_PREFIX,
+} from '../verifierInfrastructure.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
 import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
@@ -303,7 +307,9 @@ class SqliteWorkStore implements WorkStore {
         task.key,
         task.version,
         'REVIEW',
-        `${REVIEW_FAILURE_PREFIX}category=lease; exit_code=unknown`,
+        isVerifierInfrastructureFailure(task.blocked_reason)
+          ? (qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX) + task.blocked_reason
+          : `${REVIEW_FAILURE_PREFIX}category=lease; exit_code=unknown`,
         actor,
         task.attempt,
         undefined,
@@ -341,13 +347,16 @@ class SqliteWorkStore implements WorkStore {
         undefined,
         token,
       );
+    const infrastructure = isVerifierInfrastructureFailure(task.blocked_reason);
     return this.change(
       task.key,
       task.version,
-      task.attempt + 1 >= task.max_attempts ? 'FAILED_FINAL' : 'FAILED_RETRYABLE',
-      reason,
+      !infrastructure && task.attempt + 1 >= task.max_attempts
+        ? 'FAILED_FINAL'
+        : 'FAILED_RETRYABLE',
+      infrastructure ? task.blocked_reason! : reason,
       actor,
-      task.attempt + 1,
+      infrastructure ? task.attempt : task.attempt + 1,
       undefined,
       token,
     );
@@ -508,6 +517,7 @@ class SqliteWorkStore implements WorkStore {
         task.type === 'code' &&
         task.agent_role === 'developer' &&
         task.status === 'FAILED_RETRYABLE' &&
+        !isVerifierInfrastructureFailure(task.blocked_reason) &&
         task.attempt + 1 >= task.max_attempts
       )
         throw new Error('Developer max_attempts exhausted');
@@ -535,7 +545,11 @@ class SqliteWorkStore implements WorkStore {
             'READY',
             'Retry lease',
             owner,
-            task.type === 'code' && task.agent_role === 'developer' ? task.attempt + 1 : undefined,
+            task.type === 'code' &&
+              task.agent_role === 'developer' &&
+              !isVerifierInfrastructureFailure(task.blocked_reason)
+              ? task.attempt + 1
+              : undefined,
             undefined,
             token,
           );
@@ -576,6 +590,21 @@ class SqliteWorkStore implements WorkStore {
       this.db
         .prepare('UPDATE tasks SET branch = ?, worktree_ref = ? WHERE project_id = ? AND key = ?')
         .run(branch, worktree, this.projectId, taskId);
+    });
+  }
+
+  /** Preserve the infrastructure diagnosis until SA-026 confirms closure; retain the lease. */
+  markVerifierInfrastructureFailure(taskId: string, owner: string): Promise<void> {
+    return this.write(() => {
+      this.owned(taskId, owner);
+      this.db
+        .prepare('UPDATE tasks SET blocked_reason = ? WHERE project_id = ? AND key = ?')
+        .run(
+          VERIFIER_INFRASTRUCTURE_PREFIX +
+            'verifier termination unconfirmed; SA-026 recovery required',
+          this.projectId,
+          taskId,
+        );
     });
   }
 

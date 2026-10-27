@@ -31,6 +31,11 @@ process.stdin.on('end', () => {
 import { implemented } from '../src/audit';
 it('implements AC-001', () => expect(implemented).toBe(${mode === 'bad-test' ? 'false' : 'true'}));\n`,
     );
+    if (mode === 'downstream')
+      fs.appendFileSync(
+        'server/__tests__/audit.test.ts',
+        "it('covers downstream AC-001', () => expect(implemented).toBe(true));\n",
+      );
     if (author) {
       fs.mkdirSync('server/__tests__/helpers', { recursive: true });
       fs.writeFileSync('server/__tests__/helpers/answer.ts', 'export const answer = 42;\n');

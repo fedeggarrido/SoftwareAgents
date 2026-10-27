@@ -12,6 +12,7 @@ import {
 } from './evalCriteria.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
 import { resolveInside } from './pathGuard.js';
+import { VerifierInfrastructureError } from './verifierInfrastructure.js';
 
 type TestResult = Omit<TestReport['commands'][number], 'command'>;
 
@@ -39,8 +40,14 @@ export async function runTaskTest(
   onOutput?: (output: string) => void,
 ): Promise<TestResult> {
   validateTaskTest(tree, file);
-  if (!isE2eTest(file))
-    return runIsolatedVitest(tree, scratch, file, undefined, signal, timeoutMs, onOutput);
+  if (!isE2eTest(file)) {
+    try {
+      return await runIsolatedVitest(tree, scratch, file, undefined, signal, timeoutMs, onOutput);
+    } catch (error) {
+      if (!(error instanceof VerifierInfrastructureError)) throw error;
+      return { result: 'not_tested', passed: 0, failed: 0, reason: error.message };
+    }
+  }
   const unavailable = (reason: string): TestResult => ({
     result: 'not_tested',
     passed: 0,

@@ -8,9 +8,11 @@ import {
   EXECUTOR_TERMINATION_TIMEOUT_MS,
 } from './constants.js';
 import { MANAGED_EXECUTION_ENV } from './evalGuard.js';
+import { EvalIntegrityError } from './evalIntegrity.js';
 import { evalGit, type EvalTask } from './evalTasks.js';
 import { processCancellation } from './executors/processCancellation.js';
 import { resolveInside } from './pathGuard.js';
+import { VerifierInfrastructureError } from './verifierInfrastructure.js';
 
 export class EvalCriterionTerminationError extends Error {
   constructor(readonly result: CriterionResult = 'timeout') {
@@ -62,6 +64,7 @@ export async function runVerifierCommand(
     const cancellation = processCancellation(() => child);
     let stopped = false;
     let timedOut = false;
+    let spawnFailed = false;
     let bytes = 0;
     const output: Buffer[] = [];
     let grace: ReturnType<typeof setTimeout> | undefined;
@@ -96,6 +99,7 @@ export async function runVerifierCommand(
     child.once('error', (error) => {
       // A failed spawn also emits close; only that event permits cleanup.
       stopped = true;
+      spawnFailed = true;
       if (onOutput) output.push(Buffer.from(error.message));
     });
     child.once('close', (code) => {
@@ -104,6 +108,10 @@ export async function runVerifierCommand(
       cancellation.confirmClose();
       signal?.removeEventListener('abort', stop);
       onOutput?.(Buffer.concat(output).toString('utf8'));
+      if (spawnFailed) {
+        reject(new VerifierInfrastructureError('verifier process could not start'));
+        return;
+      }
       resolve(timedOut ? 'timeout' : !stopped && code === 0 ? 'pass' : 'fail');
     });
   });
@@ -192,16 +200,61 @@ async function runWorkspaceVitest(
   testName?: string,
   onOutput?: (output: string) => void,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
-  const workspace = vitestWorkspace(tree, files[0]);
+  let workspace = vitestWorkspace(tree, files[0]);
   if (files.some((file) => vitestWorkspace(tree, file).root !== workspace.root))
     throw new Error('Vitest command must use a single workspace');
   const temporary = fs.mkdtempSync(path.join(scratch, 'criterion-'));
+  const deadline = Date.now() + timeoutMs;
+  const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
+  let link: string | undefined;
   const home = resolveInside(temporary, 'home');
   fs.mkdirSync(home);
-  const setup = resolveInside(temporary, 'isolated-home.mjs');
-  fs.writeFileSync(
-    setup,
-    `import { expect, vi } from 'vitest';
+  let safeToCleanup = true;
+  try {
+    // SoftwareAgents server tests may use built hooks indirectly through imported modules.
+    // Build every server invocation when this repository provides the fixed build entry.
+    // Source-only repositories without esbuild.js retain the neutral Vitest profile.
+    if (files[0].startsWith('server/') && fs.existsSync(path.join(tree, 'esbuild.js'))) {
+      const snapshot = resolveInside(temporary, 'project');
+      const relativeScratch = path.relative(tree, scratch);
+      const excludedScratch =
+        relativeScratch && !relativeScratch.startsWith('..') && !path.isAbsolute(relativeScratch)
+          ? path.join(tree, relativeScratch.split(path.sep)[0])
+          : undefined;
+      fs.mkdirSync(snapshot);
+      // Copy entries so fs.cp also supports a scratch directory inside the source.
+      // Its root-level source/destination overlap check runs before the filter.
+      for (const entry of fs.readdirSync(tree))
+        fs.cpSync(path.join(tree, entry), path.join(snapshot, entry), {
+          recursive: true,
+          filter: (source) =>
+            source !== excludedScratch &&
+            !['.git', 'node_modules', 'dist'].includes(path.basename(source)),
+        });
+      const dependencyLink = path.join(snapshot, 'node_modules');
+      fs.symlinkSync(
+        dependencies,
+        dependencyLink,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      link = dependencyLink;
+      const built = await runVerifierCommand(
+        [process.execPath, 'esbuild.js'],
+        snapshot,
+        home,
+        Math.max(1, deadline - Date.now()),
+        signal,
+        onOutput,
+      );
+      if (built !== 'pass' || signal?.aborted)
+        throw new VerifierInfrastructureError('server build failed or timed out in scratch');
+      tree = snapshot;
+      workspace = vitestWorkspace(tree, files[0]);
+    }
+    const setup = resolveInside(temporary, 'isolated-home.mjs');
+    fs.writeFileSync(
+      setup,
+      `import { expect, vi } from 'vitest';
 vi.mock('os', async (original) => ({ ...(await original()), homedir: () => process.env.HOME }));
 // Count executed node:assert calls in Vitest's own per-test state. Keep constructors
 // and Function utilities intact; merely importing or reading an assertion never counts.
@@ -234,35 +287,35 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
   expect.setState({ assertionCalls: expect.getState().assertionCalls + 1 });
 }));
 `,
-  );
-  const config = resolveInside(temporary, 'vitest.config.mjs');
-  const report = resolveInside(temporary, 'criteria.json');
-  fs.writeFileSync(
-    config,
-    `export default ${JSON.stringify({
-      cacheDir: resolveInside(temporary, 'cache'),
-      test: {
-        include: related
-          ? workspace.include
-          : files.map((file) =>
-              path.relative(workspace.root, resolveInside(tree, file)).replaceAll('\\', '/'),
-            ),
-        environment: workspace.environment,
-        allowOnly: false,
-        expect: { requireAssertions: true },
-        setupFiles: [setup],
-        globals: workspace.globals,
-        fileParallelism: false,
-        reporters: ['json'],
-        outputFile: report,
-        pool: 'threads',
-        maxWorkers: 1,
-        testTimeout: timeoutMs / 2,
-      },
-    })};`,
-  );
-  let safeToCleanup = true;
-  try {
+    );
+    const config = resolveInside(temporary, 'vitest.config.mjs');
+    const report = resolveInside(temporary, 'criteria.json');
+    fs.writeFileSync(
+      config,
+      `export default ${JSON.stringify({
+        cacheDir: resolveInside(temporary, 'cache'),
+        test: {
+          include: related
+            ? workspace.include
+            : files.map((file) =>
+                path.relative(workspace.root, resolveInside(tree, file)).replaceAll('\\', '/'),
+              ),
+          environment: workspace.environment,
+          allowOnly: false,
+          expect: { requireAssertions: true },
+          setupFiles: [setup],
+          globals: workspace.globals,
+          fileParallelism: false,
+          reporters: ['json'],
+          outputFile: report,
+          pool: 'threads',
+          maxWorkers: 1,
+          testTimeout: timeoutMs / 2,
+        },
+      })};`,
+    );
+    if (Date.now() >= deadline)
+      throw new VerifierInfrastructureError('Vitest deadline exhausted during preparation');
     const passed = await runVerifierCommand(
       [
         process.execPath,
@@ -282,7 +335,7 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
       ],
       workspace.root,
       home,
-      timeoutMs,
+      deadline - Date.now(),
       signal,
       onOutput,
     );
@@ -292,7 +345,7 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
       !fs.existsSync(report) ||
       fs.statSync(report).size > EVAL_CRITERION_MAX_OUTPUT_BYTES
     )
-      throw new Error('Vitest infrastructure failed: timeout or missing/oversized JSON report');
+      throw new VerifierInfrastructureError('Vitest timeout or missing/oversized JSON report');
     const result = JSON.parse(fs.readFileSync(report, 'utf8'));
     onOutput?.(
       result.testResults
@@ -323,7 +376,7 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
       (testName === undefined &&
         assertions.some((test: { status: string }) => !['passed', 'failed'].includes(test.status)))
     )
-      throw new Error('Vitest infrastructure failed: missing, skipped or incomplete tests');
+      throw new VerifierInfrastructureError('Vitest missing, skipped or incomplete tests');
     const counts = {
       passed: assertions.filter((test: { status: string }) => test.status === 'passed').length,
       failed: assertions.filter((test: { status: string }) => test.status === 'failed').length,
@@ -332,12 +385,30 @@ vi.mock('node:assert/strict', async (original) => instrumentAssert(await origina
       (!related && !counts.passed && !counts.failed) ||
       (!counts.failed && (passed !== 'pass' || result.success !== true))
     )
-      throw new Error('Vitest infrastructure failed without assertion failures');
+      throw new VerifierInfrastructureError('Vitest failed without assertion failures');
     return { result: counts.failed ? 'fail' : 'pass', ...counts };
   } catch (error) {
     if (error instanceof EvalCriterionTerminationError) safeToCleanup = false;
-    throw error;
+    if (
+      error instanceof EvalCriterionTerminationError ||
+      error instanceof EvalIntegrityError ||
+      error instanceof VerifierInfrastructureError
+    )
+      throw error;
+    throw new VerifierInfrastructureError(
+      'Vitest environment preparation or execution evidence unavailable',
+    );
   } finally {
-    if (safeToCleanup) fs.rmSync(temporary, { recursive: true, force: true });
+    if (safeToCleanup) {
+      if (link) {
+        if (
+          !fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink() ||
+          fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
+        )
+          throw new EvalIntegrityError('Vitest dependency link changed; scratch retained');
+        fs.unlinkSync(link);
+      }
+      fs.rmSync(resolveInside(scratch, path.basename(temporary)), { recursive: true, force: true });
+    }
   }
 }

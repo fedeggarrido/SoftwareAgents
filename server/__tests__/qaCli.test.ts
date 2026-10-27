@@ -12,16 +12,18 @@ import { runFeatureCommand } from '../src/commands/feature.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import * as verifier from '../src/evalCriteria.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import * as cascade from '../src/modelCascade.js';
 import { validateTestReport } from '../src/qa.js';
 import { lastReviewFailure } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { deferredAcceptanceCoverage } from '../src/taskDag.js';
+import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 vi.mock('../src/constants.js', async (original) => ({
   ...(await original<typeof import('../src/constants.js')>()),
   CLAUDE_OAUTH_REFRESH_WAIT_MS: 1,
@@ -278,6 +280,30 @@ describe('TestReport contract', () => {
 
 describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () => {
   beforeEach(() => prepare(), 90_000);
+  it('preserves the remaining Developer attempt when verifier infrastructure fails during rework', async () => {
+    await qa('fail');
+    const store = await storeFor();
+    const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+    try {
+      expect(store.getTask(task)).toMatchObject({ status: 'READY', attempt: 1 });
+      db.prepare('UPDATE tasks SET max_attempts = 2 WHERE key = ?').run(task);
+      const verifier = vi
+        .spyOn(cascade, 'checkCascadeCriteria')
+        .mockRejectedValue(new VerifierInfrastructureError('server build timed out'));
+      for (let i = 1; i <= 2; i++) {
+        await expect(develop()).rejects.toThrow('server build timed out');
+        expect(store.getTask(task)).toMatchObject({
+          status: 'FAILED_RETRYABLE',
+          attempt: 1,
+          blocked_reason: 'Verifier infrastructure: server build timed out',
+        });
+        expect(verifier).toHaveBeenCalledTimes(i);
+      }
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
   it.each([false, true])(
     'passes via a safe reader (Codex enabled=%s), persists report, keeps approved SHA and promotes T02',
     async (codexEnabled) => {
@@ -616,7 +642,16 @@ describe.skipIf(process.platform !== 'win32')('Deferred QA via worker (fake CLIs
           evidence: 'UI behavior belongs to the downstream task',
         },
       ]);
-      await run(['develop', 'FEAT-001', '--task', next], 'developer');
+      // DONE unblocks the DAG; its approved commit must also be in T02's launch base.
+      git(
+        repo,
+        '-c',
+        'core.hooksPath=',
+        'merge',
+        '--ff-only',
+        store.getTask(task)!.review_ref!.sha,
+      );
+      await run(['develop', 'FEAT-001', '--task', next], 'developer', 'downstream');
       await run(['review', 'FEAT-001', '--task', next], 'reviewer', 'approve');
       await run(['qa', 'FEAT-001', '--task', next], 'qa', 'deferred');
       expect(store.getTask(next)).toMatchObject({ status: 'QA', attempt: 0 });

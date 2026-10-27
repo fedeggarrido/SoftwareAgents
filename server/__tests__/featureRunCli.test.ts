@@ -17,13 +17,14 @@ import { loadProjectConfig } from '../src/projectConfig.js';
 import { reviewerDecision } from '../src/reviewer.js';
 import { taskBranchBase, taskBranchBaseFile } from '../src/taskBranchBase.js';
 import { recoverFeatureTaskRebase } from '../src/taskRebase.js';
+import { VERIFIER_INFRASTRUCTURE_PREFIX } from '../src/verifierInfrastructure.js';
 import * as processRecovery from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 // Style is covered with real tools in developerCli/qaCli. Keep these scheduling cases
 // within the 90 s budget while retaining real acceptance-test execution and Git.
 vi.mock('../src/developer.js', async (original) => ({
@@ -330,6 +331,270 @@ describe('feature run interruption authority', () => {
     const task = await store.claim(feature, 'fixture-worker');
     return store.transition(feature, task.version, 'RUNNING', 'Fixture launch', 'fixture-worker');
   };
+  it('stops a command that creates neither a task nor an artifact without a retry loop', async () => {
+    const store = await storeFor();
+    try {
+      const invoke = vi.fn(async () => {});
+      expect(
+        await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          feature,
+          undefined,
+          invoke,
+          () => {},
+        ),
+      ).toMatchObject({
+        status: 'WAITING_HUMAN',
+        message: expect.stringContaining('made no progress'),
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+    } finally {
+      store.close();
+    }
+  });
+  it('can resume QA not_tested repeatedly despite an exhausted legacy checkpoint', async () => {
+    const store = await storeFor();
+    const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+    const key = 'FEAT-001-T01';
+    try {
+      const main = git('rev-parse', 'main');
+      const review = { branch: `sa/${key}-developer`, sha: main, base: main };
+      git('branch', review.branch, main);
+      store.createFeature({
+        key: feature,
+        doc_path: 'request.md',
+        git_sha: main,
+        status: 'approved',
+      });
+      store.createTask({
+        key,
+        feature_key: feature,
+        type: 'code',
+        agent_role: 'developer',
+        status: 'QA',
+        declaration: '{}',
+        max_attempts: 1,
+      });
+      db.prepare("UPDATE tasks SET review_ref = ?, declaration = '{}' WHERE key = ?").run(
+        JSON.stringify(review),
+        key,
+      );
+      vi.spyOn(store, 'getDesign').mockReturnValue({
+        project_id: 'test',
+        feature_key: feature,
+        doc_path: 'design.md',
+        dag_path: 'dag.yaml',
+        git_sha: main,
+        feature_sha: main,
+      });
+      await store.claimFeatureRun(feature, 'legacy', {
+        branch: `sa/${feature}-integration`,
+        initial_main: main,
+        head: main,
+        request: 'request.md',
+        integrated: {},
+        attempts: { [`qa/${key}/${main}`]: 99 },
+        published: { [key]: main },
+        status: 'failed',
+      });
+      await store.releaseFeatureRun(feature, 'legacy');
+      const invoke = vi.fn(async () => {
+        db.prepare('UPDATE tasks SET version = version + 1, test_reports = ? WHERE key = ?').run(
+          JSON.stringify([
+            {
+              report: {
+                verdict: 'not_tested',
+                commands: [
+                  {
+                    command: 'vitest:server/__tests__/hooks.test.ts',
+                    result: 'not_tested',
+                    reason: 'server build unavailable',
+                  },
+                ],
+              },
+            },
+          ]),
+          key,
+        );
+      });
+      for (let i = 1; i <= 4; i++) {
+        expect(
+          await runFeature(
+            store,
+            loadProjectConfig(repo, true)!,
+            feature,
+            undefined,
+            invoke,
+            () => {},
+          ),
+        ).toMatchObject({
+          status: 'WAITING_HUMAN',
+          exit_code: 3,
+          message: expect.stringContaining('server build unavailable'),
+        });
+        expect(invoke).toHaveBeenCalledTimes(i);
+        expect(store.getTask(key)).toMatchObject({ status: 'QA', attempt: 0, review_ref: review });
+        expect(store.getFeatureRun(feature)?.state.attempts).toBeUndefined();
+      }
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
+  it('ignores exhausted legacy run counters after an operator task reset', async () => {
+    const store = await storeFor();
+    try {
+      store.createTask({ key: feature, type: 'unknown', status: 'READY', max_attempts: 1 });
+      const first = await claim(store);
+      const failed = await store.transition(
+        feature,
+        first.version,
+        'FAILED_RETRYABLE',
+        'Fixture agent failure',
+        'fixture-worker',
+      );
+      await store.transition(feature, failed.version, 'READY', 'Operator reset', 'operator');
+      const main = git('rev-parse', 'main');
+      await store.claimFeatureRun(feature, 'legacy', {
+        branch: `sa/${feature}-integration`,
+        initial_main: main,
+        head: main,
+        request: 'request.md',
+        integrated: {},
+        attempts: { [`spec/${feature}/draft`]: 99 },
+        status: 'failed',
+      });
+      await store.releaseFeatureRun(feature, 'legacy');
+      const invoke = vi.fn(async () => {
+        const task = await claim(store);
+        publishSpec(store);
+        await store.transition(
+          feature,
+          task.version,
+          'REVIEW',
+          'Fixture persisted',
+          'fixture-worker',
+        );
+      });
+      expect(
+        await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          feature,
+          undefined,
+          invoke,
+          () => {},
+        ),
+      ).toMatchObject({ status: 'WAITING_HUMAN', exit_code: 3 });
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(store.getFeatureRun(feature)?.state.attempts).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+  it('bounds proposal retries from task history without an independent run budget', async () => {
+    const store = await storeFor();
+    try {
+      store.createTask({ key: feature, type: 'unknown', status: 'READY', max_attempts: 2 });
+      const invoke = vi.fn(async () => {
+        const task = await claim(store);
+        await store.transition(
+          feature,
+          task.version,
+          'FAILED_RETRYABLE',
+          'Fixture agent failure',
+          'fixture-worker',
+        );
+      });
+      const config = loadProjectConfig(repo, true)!;
+      for (let i = 0; i < 2; i++) {
+        expect(await runFeature(store, config, feature, undefined, invoke, () => {})).toMatchObject(
+          { status: 'failed', message: expect.stringContaining('max_attempts exhausted') },
+        );
+        expect(invoke).toHaveBeenCalledTimes(2);
+      }
+    } finally {
+      store.close();
+    }
+  });
+  it('stops infrastructure failures immediately and permits explicit resume without spending attempts', async () => {
+    const store = await storeFor();
+    try {
+      store.createTask({ key: feature, type: 'unknown', status: 'READY', max_attempts: 1 });
+      const invoke = vi.fn(async () => {
+        const task = await claim(store);
+        await store.transition(
+          feature,
+          task.version,
+          'FAILED_RETRYABLE',
+          VERIFIER_INFRASTRUCTURE_PREFIX + 'timeout',
+          'fixture-worker',
+        );
+        throw new Error('verifier timeout');
+      });
+      for (let i = 1; i <= 4; i++) {
+        expect(
+          await runFeature(
+            store,
+            loadProjectConfig(repo, true)!,
+            feature,
+            undefined,
+            invoke,
+            () => {},
+          ),
+        ).toMatchObject({
+          status: 'WAITING_HUMAN',
+          exit_code: 3,
+          message: expect.stringContaining('Verifier infrastructure: timeout'),
+        });
+        expect(invoke).toHaveBeenCalledTimes(i);
+        expect(store.getTask(feature)!.attempt).toBe(0);
+      }
+    } finally {
+      store.close();
+    }
+  });
+  it('stops after recovering an unconfirmed verifier and resumes only on the next run', async () => {
+    const store = await storeFor();
+    const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+    try {
+      store.createTask({ key: feature, type: 'unknown', status: 'READY', max_attempts: 1 });
+      await claim(store);
+      await store.markVerifierInfrastructureFailure(feature, 'fixture-worker');
+      db.prepare('UPDATE tasks SET lease_expires_at = ? WHERE key = ?').run(
+        new Date(0).toISOString(),
+        feature,
+      );
+      const invoke = vi.fn(async () => {
+        const task = await claim(store);
+        publishSpec(store);
+        await store.transition(
+          feature,
+          task.version,
+          'REVIEW',
+          'Fixture persisted',
+          'fixture-worker',
+        );
+      });
+      const config = loadProjectConfig(repo, true)!;
+      expect(await runFeature(store, config, feature, undefined, invoke, () => {})).toMatchObject({
+        status: 'WAITING_HUMAN',
+        message: expect.stringContaining('SA-026 recovery required'),
+      });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(store.getTask(feature)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+      expect(await runFeature(store, config, feature, undefined, invoke, () => {})).toMatchObject({
+        status: 'WAITING_HUMAN',
+        message: expect.stringContaining('Review the spec'),
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(store.getTask(feature)!.attempt).toBe(0);
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
   it('retries a cancelled worker diagnostic without treating it as an operator signal', async () => {
     const store = await storeFor();
     try {

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as criteria from '../src/evalCriteria.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { runTaskTest } from '../src/taskTestRunner.js';
+import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 
 vi.setConfig({ testTimeout: 90_000 });
 let root: string;
@@ -37,6 +38,50 @@ afterEach(() => {
 });
 
 describe('Bounded Playwright runtime (fake commands)', () => {
+  it('does not turn a verifier timeout into agent failure feedback or a cascade', async () => {
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    git('add', '.');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+    const base = git('rev-parse', 'HEAD');
+    fs.mkdirSync(path.join(tree, 'server/src'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'server/src/change.ts'), 'export const changed = true;');
+    const run = vi.spyOn(criteria, 'runVerifierCommand').mockResolvedValue('timeout');
+    const failures: import('../src/verifierFeedback.js').VerifierFailure[] = [];
+    await expect(
+      checkCascadeCriteria(
+        { commands: [{ argv: [process.execPath, '-e', ''], timeoutMs: 10_000 }] },
+        base,
+        tree,
+        scratch,
+        new AbortController().signal,
+        undefined,
+        undefined,
+        base,
+        { failures },
+      ),
+    ).rejects.toBeInstanceOf(VerifierInfrastructureError);
+    expect(failures).toEqual([]);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+  it('reports a failed server build as not_tested and retains no task artifacts', async () => {
+    const test = 'server/__tests__/hook.test.ts';
+    fs.mkdirSync(path.join(tree, 'server/__tests__'), { recursive: true });
+    fs.writeFileSync(path.join(tree, test), "it('hook', () => expect(true).toBe(true));");
+    fs.writeFileSync(path.join(tree, 'esbuild.js'), 'process.exit(1);');
+    expect(await runTaskTest(tree, scratch, test, new AbortController().signal)).toMatchObject({
+      result: 'not_tested',
+      reason: expect.stringContaining('server build'),
+      passed: 0,
+      failed: 0,
+    });
+    expect(fs.existsSync(path.join(tree, 'dist'))).toBe(false);
+    expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
   it('keeps e2e out of Vitest related while retaining explicit execution evidence in the cascade', async () => {
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();

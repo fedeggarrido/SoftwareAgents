@@ -13,7 +13,7 @@ import {
   WORKSTORE_INITIAL_TASK_STATUS,
   WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
-import { isProcessRunning } from '../leaseLock.js';
+import { evalGit } from '../evalTasks.js';
 import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
@@ -138,7 +138,7 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
         .run(options.projectId, new Date().toISOString()),
     );
     db.exec(`PRAGMA busy_timeout = ${WORKSTORE_BUSY_TIMEOUT_MS}`);
-    return new SqliteWorkStore(db, options.projectId);
+    return new SqliteWorkStore(db, options.projectId, options.repositoryPath);
   } catch (error) {
     db.close();
     throw error;
@@ -150,6 +150,7 @@ class SqliteWorkStore implements WorkStore {
   constructor(
     private readonly db: DatabaseSync,
     readonly projectId: string,
+    private readonly repositoryPath: string,
   ) {
     this.sweeper = setInterval(() => {
       void this.recoverExpiredLeases().catch((error: unknown) => {
@@ -885,10 +886,11 @@ class SqliteWorkStore implements WorkStore {
   getFeatureRun(key: string): FeatureRunRecord | undefined {
     const row = this.db
       .prepare(
-        'SELECT owner, pid, state FROM feature_runs WHERE project_id = ? AND feature_key = ?',
+        'SELECT owner, pid, pid_started_at, state FROM feature_runs WHERE project_id = ? AND feature_key = ?',
       )
       .get(this.projectId, key) as
-      { owner: string | null; pid: number | null; state: string } | undefined;
+      | { owner: string | null; pid: number | null; pid_started_at: string | null; state: string }
+      | undefined;
     return row ? { ...row, state: JSON.parse(row.state) as FeatureRunState } : undefined;
   }
 
@@ -968,18 +970,38 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
-  claimFeatureRun(key: string, owner: string, initial: FeatureRunState): Promise<FeatureRunState> {
+  async claimFeatureRun(
+    key: string,
+    owner: string,
+    initial: FeatureRunState,
+  ): Promise<FeatureRunState> {
+    const observed = this.getFeatureRun(key);
+    const identity = await processStartIdentity(process.pid).catch(() => {
+      throw new Error('Runner identity uncertain; human reconciliation required');
+    });
+    if (!identity) throw new Error('Cannot verify runner identity; human reconciliation required');
+    let previous: string | null = null;
+    if (observed?.owner) {
+      if (!observed.pid || !observed.pid_started_at)
+        throw new Error('Runner identity missing; human reconciliation required');
+      try {
+        previous = await processStartIdentity(observed.pid);
+      } catch {
+        throw new Error('Runner identity uncertain; human reconciliation required');
+      }
+    }
     return this.write(() => {
       const current = this.getFeatureRun(key);
-      // Never steal a live runner, including a slow or suspended process. ESRCH alone proves death.
-      if (current?.owner && current.pid && isProcessRunning(current.pid))
+      if (JSON.stringify(current) !== JSON.stringify(observed))
+        throw new Error('Feature runner changed during identity check; retry claim');
+      if (current?.owner && previous === current.pid_started_at)
         throw new Error(`feature run ${key}: another orchestrator is running`);
       const state = current?.state ?? initial;
       this.db
         .prepare(
-          'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state) VALUES (?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid',
+          'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state,pid_started_at) VALUES (?,?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid,pid_started_at=excluded.pid_started_at',
         )
-        .run(this.projectId, key, owner, process.pid, JSON.stringify(state));
+        .run(this.projectId, key, owner, process.pid, JSON.stringify(state), identity);
       return state;
     });
   }
@@ -994,12 +1016,26 @@ class SqliteWorkStore implements WorkStore {
         )
         .run(JSON.stringify(state), this.projectId, key, owner);
       if (state.status === 'ready_to_merge') {
+        const main = evalGit(this.repositoryPath, ['rev-parse', 'refs/heads/main^{commit}']);
+        if (
+          state.pending ||
+          state.publication ||
+          main !== state.initial_main ||
+          evalGit(this.repositoryPath, ['merge-base', main, state.head]) !== main
+        )
+          throw new Error('Feature does not include current main or has pending publications');
         const tasks = this.listTasks().filter((t) => t.feature_key === key && t.declaration);
         if (!tasks.length || tasks.some((t) => t.status !== 'DONE' || !state.integrated[t.key]))
           throw new Error('Feature still has unintegrated tasks');
         this.db
           .prepare(
             "UPDATE features SET status = 'ready_to_merge' WHERE project_id = ? AND key = ? AND status IN ('approved','ready_to_merge')",
+          )
+          .run(this.projectId, key);
+      } else {
+        this.db
+          .prepare(
+            "UPDATE features SET status = 'approved' WHERE project_id = ? AND key = ? AND status = 'ready_to_merge'",
           )
           .run(this.projectId, key);
       }
@@ -1010,7 +1046,7 @@ class SqliteWorkStore implements WorkStore {
     return this.write(() => {
       this.db
         .prepare(
-          'UPDATE feature_runs SET owner = NULL, pid = NULL WHERE project_id = ? AND feature_key = ? AND owner = ?',
+          'UPDATE feature_runs SET owner = NULL, pid = NULL, pid_started_at = NULL WHERE project_id = ? AND feature_key = ? AND owner = ?',
         )
         .run(this.projectId, key, owner);
     });

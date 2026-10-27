@@ -5,6 +5,7 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { promisify } from 'util';
 
+import { assertDirectRef } from '../gitPublication.js';
 import { resolveInside } from '../pathGuard.js';
 import { taskBranchBase } from '../taskBranchBase.js';
 
@@ -44,6 +45,7 @@ export class WorktreeManager {
   create(taskKey: string, slug: string): Promise<WorktreeResult> {
     return this.serial(async () => {
       const { directory, branch } = this.target(taskKey, slug);
+      assertDirectRef(this.root, `refs/heads/${branch}`);
       await this.assertMainRepository();
       const base = this.options.trustedBase
         ? taskBranchBase(this.root, branch, this.options.defaultBranch, true)

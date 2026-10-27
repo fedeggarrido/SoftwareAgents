@@ -787,10 +787,25 @@ en lugar de `project.repo.defaultBranch`. `task-bases` registra el SHA exacto y
 el run invoca el rebase existente: patch-id idéntico mantiene las aprobaciones;
 un patch diferente vuelve a REVIEW. Un conflicto detiene el run conservando evidencia.
 
+Antes de admitir trabajo y de finalizar se compara `main` con la base persistida
+de integración. Un avance se verifica con `merge-tree` y se publica mediante un
+intent recuperable; REVIEW/QA se rebasan después sobre esa integración. Un conflicto
+abre un gate humano. Cada lanzamiento, incluidos reintentos de Developer/QA author,
+exige que los SHA aprobados de las dependencias DONE sean ancestros del HEAD real;
+una rama antigua que no los incluya se bloquea para reconciliación humana.
+Las publicaciones rechazan refs simbólicas, usan CAS con `update-ref --no-deref`
+y comprueban que `main` conserve su SHA tras cada movimiento.
+
 Tras integrar todas las tareas del DAG, `features.status=ready_to_merge` y el
 resumen indica rama y SHA. El merge de esa rama a main sigue siendo humano, tras
 revisión cruzada y QA real de Claude. No hay push de la rama de integración.
 La publicación opcional de ramas Developer sigue su política externa existente.
+El run conserva la obligación y la política de push junto al `review_ref` antes
+de avanzar. Fija la política antes de lanzar Developer y la conserva al recuperar
+su resultado, aunque cambie la configuración del Operator. Recupera también los
+resultados de worker sin push confirmado. Un
+push fallido o incierto detiene el run; su clave de idempotencia PENDING exige
+reconciliación y nunca se interpreta como publicación completada.
 
 ### Gates, estado y recuperación
 
@@ -802,12 +817,15 @@ Las respuestas de Requirements/Architect se incorporan mediante sus comandos
 El orquestador nunca responde una decisión ni aprueba. `WAITING_QUOTA` también sale
 con 3; relanzar el mismo run reevalúa el gate de cuota y selección.
 
-WorkStore v13 incorpora `feature_runs` y `worker_publications`. Actualizar y
+WorkStore v14 añade la identidad de creación del runner a `feature_runs`;
+v13 incorporó `feature_runs` y `worker_publications`. Actualizar y
 reiniciar coordinadamente los escritores antes de migrar, como en
 [task CLI](task-cli.md#migraciones-de-la-base-compartida). Guarda progreso,
 intentos, acción activa, rama/HEAD integrado y publicaciones preparadas. Un lock
-SQLite por Project/Feature rechaza un segundo run; solo un PID confirmado muerto
-permite recuperar el lock. No se roba a un runner vivo por antigüedad.
+SQLite por Project/Feature rechaza un segundo run con el mismo PID e identidad
+de creación SA-026. Solo un proceso ausente o una identidad distinta permite
+recuperar el lock. Identidad ausente o incierta exige reconciliación humana;
+no se roba a un runner vivo por antigüedad.
 
 Después de matar el proceso, relanzar el mismo comando espera las leases vigentes
 y usa SA-026 para recuperar las caducadas, verificando el cierre de Executions.

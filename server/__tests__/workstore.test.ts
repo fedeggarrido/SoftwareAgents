@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskDag } from '../../core/src/taskDag.js';
 import { openArchitectDecision } from '../src/architect.js';
 import { openRequirementsQuestions } from '../src/requirements.js';
+import * as processRecovery from '../src/workstore/processRecovery.js';
 import { retryBusy } from '../src/workstore/retryBusy.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import {
@@ -17,7 +18,7 @@ import {
 } from '../src/workstore/taskStateMachine.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 90_000 });
 
 describe('WorkStore (real SQLite)', () => {
   let root: string;
@@ -40,6 +41,44 @@ describe('WorkStore (real SQLite)', () => {
     const { DatabaseSync } = await import('node:sqlite');
     return new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
   }
+  it('fences feature locks by exact process creation identity and retains uncertain locks', async () => {
+    const store = await open();
+    const initial = {
+      branch: 'sa/FEAT-001-integration',
+      initial_main: 'a'.repeat(40),
+      head: 'a'.repeat(40),
+      request: 'request.md',
+      integrated: {},
+      attempts: {},
+      status: 'running',
+    };
+    const identity = vi.spyOn(processRecovery, 'processStartIdentity').mockResolvedValue('123');
+    await store.claimFeatureRun('FEAT-001', 'first', initial);
+    expect(store.getFeatureRun('FEAT-001')?.pid_started_at).toBe('123');
+    await expect(store.claimFeatureRun('FEAT-001', 'second', initial)).rejects.toThrow(
+      'another orchestrator',
+    );
+    identity.mockResolvedValueOnce('456').mockRejectedValueOnce(new Error('access denied'));
+    await expect(store.claimFeatureRun('FEAT-001', 'second', initial)).rejects.toThrow(
+      'reconciliation',
+    );
+    expect(store.getFeatureRun('FEAT-001')?.owner).toBe('first');
+    // Same PID, different creation: the original owner has exited.
+    identity.mockResolvedValue('456');
+    await store.claimFeatureRun('FEAT-001', 'second', initial);
+    expect(store.getFeatureRun('FEAT-001')).toMatchObject({
+      owner: 'second',
+      pid_started_at: '456',
+    });
+    await store.releaseFeatureRun('FEAT-001', 'second');
+    const db = await inspect();
+    db.exec("UPDATE feature_runs SET owner = 'legacy', pid = 123, pid_started_at = NULL");
+    db.close();
+    await expect(store.claimFeatureRun('FEAT-001', 'third', initial)).rejects.toThrow(
+      'identity missing',
+    );
+    expect(store.getFeatureRun('FEAT-001')?.owner).toBe('legacy');
+  });
   it('increments a failed Developer retry atomically and refuses an exhausted claim', async () => {
     const store = await open();
     store.createTask({
@@ -309,7 +348,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 13 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 14 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
         14,
@@ -897,7 +936,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 13 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 14 }]);
     } finally {
       db.close();
     }

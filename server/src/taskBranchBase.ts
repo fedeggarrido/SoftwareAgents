@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { evalGit } from './evalTasks.js';
+import { assertDirectRef } from './gitPublication.js';
 import { resolveInside } from './pathGuard.js';
 
 export function taskBranchBaseFile(repository: string, branch: string): string {
@@ -16,6 +17,8 @@ export function taskBranchBase(
   defaultBranch: string,
   create = false,
 ): string {
+  assertDirectRef(repository, `refs/heads/${branch}`);
+  assertDirectRef(repository, `refs/heads/${defaultBranch}`);
   const file = taskBranchBaseFile(repository, branch);
   if (fs.existsSync(file + '.rebase'))
     throw new Error('Task rebase pending; human reconciliation required');

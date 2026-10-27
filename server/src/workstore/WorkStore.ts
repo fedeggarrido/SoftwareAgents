@@ -28,8 +28,15 @@ export interface FeatureRunState {
   request: string;
   integrated: Record<string, ReviewRef>;
   attempts: Record<string, number>;
-  pending?: { task: string; before: string; after: string };
-  active?: { action: string; task: string; version: number };
+  pending?: { task: string; before: string; after: string; main?: string };
+  active?: {
+    action: string;
+    task: string;
+    version: number;
+    publication?: { push?: { enabled: boolean; remote: string } };
+  };
+  publication?: { task: string; review: ReviewRef; push?: { enabled: boolean; remote: string } };
+  published?: Record<string, string>;
   status: string;
   message?: string;
 }
@@ -37,6 +44,7 @@ export interface FeatureRunState {
 export interface FeatureRunRecord {
   owner: string | null;
   pid: number | null;
+  pid_started_at: string | null;
   state: FeatureRunState;
 }
 

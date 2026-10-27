@@ -11,10 +11,13 @@ import * as architect from '../src/architect.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { assertFeatureRunIngress, type FeatureRunSummary, runFeature } from '../src/featureRun.js';
+import { assertTaskDependencies } from '../src/featureRunBase.js';
+import { publishDirectRef } from '../src/gitPublication.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { reviewerDecision } from '../src/reviewer.js';
-import { taskBranchBaseFile } from '../src/taskBranchBase.js';
+import { taskBranchBase, taskBranchBaseFile } from '../src/taskBranchBase.js';
 import { recoverFeatureTaskRebase } from '../src/taskRebase.js';
+import * as processRecovery from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
@@ -170,6 +173,152 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
+  it.each([false, true])(
+    'recovers a main reconciliation intent already published=%s without losing its base',
+    async (published) => {
+      const store = await storeFor();
+      try {
+        const base = git('rev-parse', 'main');
+        const branch = 'sa/FEAT-001-integration';
+        git('branch', branch, base);
+        fs.writeFileSync(path.join(repo, 'new-main.txt'), 'main advancement\n');
+        git('add', 'new-main.txt');
+        git('commit', '-m', 'main fixture');
+        const main = git('rev-parse', 'main');
+        store.createFeature({
+          key: feature,
+          doc_path: 'request.md',
+          git_sha: base,
+          status: 'in_review',
+        });
+        await store.claimFeatureRun(feature, 'interrupted', {
+          branch,
+          initial_main: base,
+          head: base,
+          request: 'request.md',
+          integrated: {},
+          attempts: {},
+          status: 'running',
+          pending: { task: 'main', before: base, after: main, main },
+        });
+        await store.releaseFeatureRun(feature, 'interrupted');
+        if (published) publishDirectRef(repo, `refs/heads/${branch}`, main, base);
+        const invoke = vi.fn(async () => {});
+        const result = await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          feature,
+          undefined,
+          invoke,
+          () => {},
+        );
+        expect(result.status, result.message).toBe('WAITING_HUMAN');
+        expect(store.getFeatureRun(feature)?.state).toMatchObject({
+          initial_main: main,
+          head: main,
+        });
+        expect(store.getFeatureRun(feature)?.state.pending).toBeUndefined();
+        expect(git('rev-parse', branch)).toBe(main);
+        expect(git('rev-parse', 'main')).toBe(main);
+        expect(invoke).not.toHaveBeenCalled();
+      } finally {
+        store.close();
+      }
+    },
+  );
+  it('publishes direct refs with CAS and preserves main when the expected tip is stale', () => {
+    const main = git('rev-parse', 'main');
+    const next = git('commit-tree', `${main}^{tree}`, '-p', main, '-m', 'task fixture');
+    const ref = 'refs/heads/sa/FEAT-001-T01-developer';
+    fs.writeFileSync(
+      path.join(repo, '.git/hooks/reference-transaction'),
+      '#!/bin/sh\necho unexpected-hook > hook-ran\n',
+      { mode: 0o755 },
+    );
+    publishDirectRef(repo, ref, main, '0'.repeat(main.length));
+    publishDirectRef(repo, ref, next, main);
+    expect(() => publishDirectRef(repo, ref, main, main)).toThrow();
+    expect(git('rev-parse', ref)).toBe(next);
+    expect(git('rev-parse', 'main')).toBe(main);
+    expect(fs.existsSync(path.join(repo, 'hook-ran'))).toBe(false);
+  });
+  it('gates conflicting main advancement and retains the integration checkpoint on resume', async () => {
+    const store = await storeFor();
+    try {
+      const main = git('rev-parse', 'main');
+      const state = await store.claimFeatureRun(feature, 'fixture', {
+        branch: 'sa/FEAT-001-integration',
+        initial_main: main,
+        head: main,
+        request: 'request.md',
+        integrated: {},
+        attempts: {},
+        status: 'running',
+      });
+      git('checkout', '-b', state.branch);
+      fs.writeFileSync(path.join(repo, 'request.md'), 'integration edit\n');
+      git('add', 'request.md');
+      git('commit', '-m', 'integration fixture');
+      state.head = git('rev-parse', 'HEAD');
+      await store.saveFeatureRun(feature, 'fixture', state);
+      await store.releaseFeatureRun(feature, 'fixture');
+      git('checkout', 'main');
+      fs.writeFileSync(path.join(repo, 'request.md'), 'main edit\n');
+      git('add', 'request.md');
+      git('commit', '-m', 'main fixture');
+      const advanced = git('rev-parse', 'main');
+      const invoke = vi.fn(async () => {});
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          feature,
+          undefined,
+          invoke,
+          () => {},
+        );
+        expect(result.status, result.message).toBe('WAITING_HUMAN');
+        expect(result.message).toContain('merge conflict');
+        expect(git('rev-parse', state.branch)).toBe(state.head);
+        expect(git('rev-parse', 'main')).toBe(advanced);
+        expect(store.getFeatureRun(feature)?.state.initial_main).toBe(main);
+      }
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
+  it.each(['sa/FEAT-001-integration', 'sa/FEAT-001-T01-developer'])(
+    'rejects symbolic publication ref %s without moving main',
+    async (branch) => {
+      const main = git('rev-parse', 'main');
+      git('symbolic-ref', `refs/heads/${branch}`, 'refs/heads/main');
+      expect(() => publishDirectRef(repo, `refs/heads/${branch}`, main, main)).toThrow('Symbolic');
+      const store = await storeFor();
+      try {
+        const invoke = vi.fn(async () => {});
+        if (branch.endsWith('integration')) {
+          const result = await runFeature(
+            store,
+            loadProjectConfig(repo, true)!,
+            feature,
+            'request.md',
+            invoke,
+            () => {},
+          );
+          expect(result.status).toBe('failed');
+          expect(result.message).toContain('Symbolic');
+          expect(invoke).not.toHaveBeenCalled();
+        } else {
+          expect(() => taskBranchBase(repo, branch, 'main', true)).toThrow('Symbolic');
+        }
+        expect(git('rev-parse', 'main')).toBe(main);
+        expect(git('symbolic-ref', `refs/heads/${branch}`)).toBe('refs/heads/main');
+      } finally {
+        store.close();
+      }
+    },
+  );
   const publishSpec = (store: WorkStore) =>
     store.createFeature({
       key: feature,
@@ -305,6 +454,119 @@ describe('feature run interruption authority', () => {
 describe.skipIf(process.platform !== 'win32')(
   'feature run with fake CLIs and real WorkStore/Git/verifiers',
   () => {
+    it('retains a failed Developer command push before review even if push is later disabled', async () => {
+      await spec();
+      await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
+      const file = path.join(root, '.pixel-agents/config.json');
+      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+      config.projects.test.developer = { pushBranch: { enabled: true, remote: 'broken' } };
+      fs.writeFileSync(file, JSON.stringify(config));
+      git('remote', 'add', 'broken', path.join(root, 'missing.git'));
+      const result = await run('single');
+      expect(result.status, result.message).toBe('failed');
+      expect(result.message).toContain('branch push failed');
+      const store = await storeFor();
+      try {
+        expect(store.getFeatureRun(feature)?.state.publication).toMatchObject({
+          task: 'FEAT-001-T01',
+          push: { enabled: true, remote: 'broken' },
+        });
+        delete config.projects.test.developer;
+        fs.writeFileSync(file, JSON.stringify(config));
+        const resumed = await run('single');
+        expect(resumed.status, resumed.message).toBe('WAITING_HUMAN');
+        expect(resumed.message).toContain('publication unresolved');
+        expect(store.getTask('FEAT-001-T01')?.status).toBe('REVIEW');
+        expect(rows().filter((row) => row.role === 'developer')).toHaveLength(1);
+        expect(rows().some((row) => row.role === 'reviewer')).toBe(false);
+      } finally {
+        store.close();
+      }
+    });
+    it('blocks a pre-existing consumer branch missing its DONE dependency before launch', async () => {
+      await spec();
+      await runFeatureCommand(['design', feature], repo, () => {}, options());
+      const base = git('rev-parse', 'main');
+      git('branch', 'sa/FEAT-001-T02-developer', base);
+      const result = await run();
+      expect(result.status, result.message).toBe('WAITING_HUMAN');
+      expect(result.message).toContain('Dependency FEAT-001-T01 is absent');
+      expect(rows().some((row) => row.role === 'developer' && row.task === 'FEAT-001-T02')).toBe(
+        false,
+      );
+      const store = await storeFor();
+      try {
+        expect(store.getTask('FEAT-001-T01')?.status).toBe('DONE');
+        expect(() => assertTaskDependencies(store, repo, 'FEAT-001-T02', base)).toThrow(
+          'Dependency',
+        );
+        expect(() =>
+          assertTaskDependencies(store, repo, 'FEAT-001-T02', result.integration_sha),
+        ).not.toThrow();
+      } finally {
+        store.close();
+      }
+    });
+    it.each(['failure', 'uncertain', 'interrupted'])(
+      'stops and persists optional push %s before review, including on resume',
+      async (mode) => {
+        await spec();
+        await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
+        await runFeatureCommand(['develop', feature], repo, () => {}, options('single'));
+        const file = path.join(root, '.pixel-agents/config.json');
+        const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+        config.projects.test.developer = { pushBranch: { enabled: true, remote: 'broken' } };
+        fs.writeFileSync(file, JSON.stringify(config));
+        git('remote', 'add', 'broken', path.join(root, 'missing.git'));
+        const store = await storeFor();
+        try {
+          const review = store.getTask('FEAT-001-T01')!.review_ref!;
+          if (mode === 'interrupted') {
+            // The worker persisted its review_ref, but the runner died before
+            // recording completion. A later config change must not erase push.
+            const main = git('rev-parse', 'main');
+            await store.claimFeatureRun(feature, 'interrupted', {
+              branch: 'sa/FEAT-001-integration',
+              initial_main: main,
+              head: main,
+              request: 'request.md',
+              integrated: {},
+              attempts: {},
+              status: 'running',
+              active: {
+                action: 'develop',
+                task: 'FEAT-001-T01',
+                version: 0,
+                publication: { push: { enabled: true, remote: 'broken' } },
+              },
+            });
+            await store.releaseFeatureRun(feature, 'interrupted');
+            delete config.projects.test.developer;
+            fs.writeFileSync(file, JSON.stringify(config));
+          }
+          if (mode === 'uncertain')
+            await expect(
+              store.withIdempotency(`developer-push/FEAT-001-T01/${review.sha}/broken`, () => {
+                throw new Error('fixture crash');
+              }),
+            ).rejects.toThrow('fixture crash');
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const result = await run('single');
+            expect(result.status, result.message).toBe('WAITING_HUMAN');
+            expect(result.message).toContain('publication unresolved');
+            expect(store.getFeatureRun(feature)?.state.publication).toMatchObject({
+              task: 'FEAT-001-T01',
+              review,
+            });
+            expect(store.getTask('FEAT-001-T01')?.status).toBe('REVIEW');
+          }
+          expect(rows().filter((row) => row.role === 'developer')).toHaveLength(1);
+          expect(rows().some((row) => row.role === 'reviewer')).toBe(false);
+        } finally {
+          store.close();
+        }
+      },
+    );
     it('completes three dependent tasks including qa-author, preserves main and resumes without duplicate effects', async () => {
       const main = git('rev-parse', 'main');
       const result = await run();
@@ -353,6 +615,17 @@ describe.skipIf(process.platform !== 'win32')(
       }
       expect((await run()).integration_sha).toBe(result.integration_sha);
       expect(rows()).toHaveLength(before);
+      // Even an already completed run must incorporate main advances before
+      // returning ready_to_merge again, without rerunning any executor.
+      fs.writeFileSync(path.join(repo, 'later-main.txt'), 'Later main update\n');
+      git('add', 'later-main.txt');
+      git('commit', '-m', 'later main fixture');
+      const advanced = git('rev-parse', 'main');
+      const resumed = await run();
+      expect(resumed.status, resumed.message).toBe('ready_to_merge');
+      expect(git('merge-base', advanced, resumed.integration_sha)).toBe(advanced);
+      expect(git('rev-parse', 'main')).toBe(advanced);
+      expect(rows()).toHaveLength(before);
     });
     it('creates the spec, stops at human approval, and continues only after explicit approval', async () => {
       expect(await run('valid', ['--request', 'request.md'])).toMatchObject({
@@ -392,6 +665,19 @@ describe.skipIf(process.platform !== 'win32')(
       }
     });
     it('rebases a QA task onto the integration base and preserves an equivalent approval', async () => {
+      const checkpoint = await storeFor();
+      try {
+        await runFeature(
+          checkpoint,
+          loadProjectConfig(repo, true)!,
+          feature,
+          'request.md',
+          async () => {},
+          () => {},
+        );
+      } finally {
+        checkpoint.close();
+      }
       await spec();
       await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
       await runFeatureCommand(['develop', feature], repo, () => {}, options('single'));
@@ -419,6 +705,42 @@ describe.skipIf(process.platform !== 'win32')(
         await recoverFeatureTaskRebase(store, loadProjectConfig(repo, true)!, 'FEAT-001-T01');
         expect(fs.existsSync(journal)).toBe(false);
         expect(store.getTask('FEAT-001-T01')!.review_ref).toEqual(before);
+      } finally {
+        store.close();
+      }
+    });
+    it('gates a task rebase conflict after a clean reconciliation of main', async () => {
+      await spec();
+      await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
+      await runFeatureCommand(['develop', feature], repo, () => {}, options('single'));
+      await runFeatureCommand(['review', feature], repo, () => {}, options('single'));
+      const store = await storeFor();
+      try {
+        const main = git('rev-parse', 'main');
+        const review = store.getTask('FEAT-001-T01')!.review_ref!;
+        await store.claimFeatureRun(feature, 'checkpoint', {
+          branch: 'sa/FEAT-001-integration',
+          initial_main: main,
+          head: main,
+          request: 'request.md',
+          integrated: {},
+          attempts: {},
+          status: 'running',
+        });
+        await store.releaseFeatureRun(feature, 'checkpoint');
+        fs.writeFileSync(path.join(repo, 'server/src/step1.ts'), 'export const step1 = 100;\n');
+        git('add', 'server/src/step1.ts');
+        git('commit', '-m', 'conflicting main fixture');
+        const advanced = git('rev-parse', 'main');
+        const result = await run('single');
+        expect(result.status, result.message).toBe('WAITING_HUMAN');
+        expect(result.message).toContain('rebase blocked');
+        expect(result.message).toContain('Rebase conflict');
+        expect(store.getTask('FEAT-001-T01')).toMatchObject({ status: 'QA', review_ref: review });
+        expect(git('rev-parse', review.branch)).toBe(review.sha);
+        expect(git('rev-parse', 'main')).toBe(advanced);
+        expect(store.getFeatureRun(feature)?.state.head).toBe(advanced);
+        expect(rows().some((row) => row.role === 'qa')).toBe(false);
       } finally {
         store.close();
       }
@@ -489,7 +811,7 @@ describe.skipIf(process.platform !== 'win32')(
           integrated: {},
           attempts: {},
           status: 'running',
-          active: { action: 'develop', task: 'FEAT-001-T01', version: 0 },
+          active: { action: 'develop', task: 'FEAT-001-T01', version: 0, publication: {} },
         });
         const task = await store.claim('FEAT-001-T01', 'dead-worker', 10_000);
         await store.transition(task.key, task.version, 'RUNNING', 'Executor launch', 'dead-worker');
@@ -582,6 +904,14 @@ describe.skipIf(process.platform !== 'win32')(
       async () => {
         await spec();
         await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
+        // The subprocess records real SA-026 identities. Comparing those with
+        // the scheduler's synthetic identity would mistake a live PID for reuse.
+        const actual = await vi.importActual<typeof import('../src/workstore/processRecovery.js')>(
+          '../src/workstore/processRecovery.js',
+        );
+        vi.spyOn(processRecovery, 'processStartIdentity').mockImplementation(
+          actual.processStartIdentity,
+        );
         const main = git('rev-parse', 'main');
         const harness = path.resolve(__dirname, '../../dist/feature-run-test.cjs');
         buildSync({

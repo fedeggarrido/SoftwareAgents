@@ -12,6 +12,7 @@ import { evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
 import { featureBaseBranch } from './featureRunBase.js';
+import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { taskBranchBase, taskBranchBaseFile } from './taskBranchBase.js';
 import { type TaskRebase } from './taskRebaseHistory.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -28,6 +29,7 @@ export async function recoverFeatureTaskRebase(
   const journal = registry + '.rebase';
   if (!fs.existsSync(journal)) return;
   const current = task.review_ref;
+  assertDirectRef(config.repoRoot, `refs/heads/${current.branch}`);
   await store.reconcileTaskRebase(key, task.version, current, () => {
     const entry = JSON.parse(fs.readFileSync(journal, 'utf8')) as TaskRebase;
     const equal = (ref: typeof current) => JSON.stringify(ref) === JSON.stringify(current);
@@ -119,7 +121,7 @@ export async function recoverFeatureTaskRebase(
     if (git(['ls-files', '--others', '--exclude-standard']))
       throw new Error('Rebase journal worktree has foreign files');
     const head = git(['rev-parse', 'HEAD']);
-    git(['update-ref', `refs/heads/${current.branch}`, current.sha, head]);
+    publishDirectRef(config.repoRoot, `refs/heads/${current.branch}`, current.sha, head);
     git(['read-tree', '--reset', '-u', current.sha]);
     const temporary = registry + `.${randomUUID()}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify({ branch: current.branch, base: current.base }), {
@@ -194,6 +196,7 @@ export async function rebaseFeatureTask(
   evalGit(root, ['check-ref-format', '--branch', baseBranch]);
   const base = evalGit(root, ['rev-parse', `refs/heads/${baseBranch}^{commit}`]);
   const assertSource = () => {
+    assertDirectRef(root, `refs/heads/${before.branch}`);
     if (
       task.worktree_ref !== tree ||
       task.branch !== before.branch ||
@@ -351,8 +354,8 @@ export async function rebaseFeatureTask(
         fs.writeFileSync(journal, JSON.stringify(result), { flag: 'wx' });
         reserved = true;
         append('pending');
-        git(root, ['update-ref', `refs/heads/${before.branch}`, after.sha, before.sha]);
         moved = true;
+        publishDirectRef(root, `refs/heads/${before.branch}`, after.sha, before.sha);
         git(tree, ['read-tree', '--reset', '-u', after.sha]);
         writeRegistry(JSON.stringify({ branch: after.branch, base }));
         if (
@@ -365,7 +368,12 @@ export async function rebaseFeatureTask(
       () => {
         if (moved) {
           // CAS protects an unexpected external branch write from being overwritten.
-          git(root, ['update-ref', `refs/heads/${before.branch}`, before.sha, after.sha]);
+          assertDirectRef(root, `refs/heads/${before.branch}`);
+          const tip = git(root, ['rev-parse', `refs/heads/${before.branch}`]);
+          if (tip === after.sha)
+            publishDirectRef(root, `refs/heads/${before.branch}`, before.sha, after.sha);
+          else if (tip !== before.sha)
+            throw new Error('Rebase rollback branch changed; human reconciliation required');
           git(tree, ['read-tree', '--reset', '-u', before.sha]);
           writeRegistry(originalRegistry);
           moved = false;

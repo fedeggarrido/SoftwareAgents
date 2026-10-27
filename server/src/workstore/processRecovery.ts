@@ -30,7 +30,9 @@ function validatePid(pid: number): void {
 
 /** Exact OS creation timestamp. Only query the registered executor, never scan the host. */
 export async function processStartIdentity(pid: number): Promise<string | null> {
-  validatePid(pid);
+  // Identity queries also serve the orchestrator's own lock. Termination still
+  // rejects process.pid through validatePid.
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid process PID');
   try {
     process.kill(pid, 0);
   } catch (error) {

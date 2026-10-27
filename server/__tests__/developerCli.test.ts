@@ -1,3 +1,5 @@
+import { DatabaseSync } from 'node:sqlite';
+
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -903,6 +905,55 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       store.close();
     }
   });
+  it.each(['READY', 'FAILED_RETRYABLE'])(
+    'blocks a %s launch whose actual branch HEAD misses a DONE dependency',
+    async (status) => {
+      await prepare(true, true, 'developer-dependency');
+      const base = git(repo, 'rev-parse', 'main');
+      await new WorktreeManager({
+        repositoryPath: repo,
+        defaultBranch: 'main',
+        manualPreparation: true,
+        trustedBase: true,
+      }).create(task, 'developer');
+      const sha = git(
+        repo,
+        'commit-tree',
+        `${base}^{tree}`,
+        '-p',
+        base,
+        '-m',
+        'dependency fixture',
+      );
+      const branch = 'sa/FEAT-001-T02-developer';
+      git(repo, 'branch', branch, sha);
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      db.prepare("UPDATE tasks SET status = 'DONE', review_ref = ? WHERE key = 'FEAT-001-T02'").run(
+        JSON.stringify({ branch, sha, base }),
+      );
+      db.prepare('UPDATE tasks SET status = ? WHERE key = ?').run(status, task);
+      db.close();
+      const store = await storeFor();
+      try {
+        if (status === 'FAILED_RETRYABLE') {
+          // Match a prior attempt's durable worktree association, with no review_ref.
+          const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+          db.prepare('UPDATE tasks SET branch = ?, worktree_ref = ? WHERE key = ?').run(
+            `sa/${task}-developer`,
+            tree(),
+            task,
+          );
+          db.close();
+        }
+        await expect(develop()).rejects.toThrow(/Dependency FEAT-001-T02.*launch HEAD/);
+        expect(fs.readFileSync(launches, 'utf8')).toBe('');
+        expect(git(tree(), 'rev-parse', 'HEAD')).toBe(base);
+        expect(store.getTask(task)?.review_ref).toBeNull();
+      } finally {
+        store.close();
+      }
+    },
+  );
   it.each(['outside', 'no-test', 'bad-test', 'empty-test', 'unexecuted-assertion', 'skip-suite'])(
     'rejects %s without committing',
     async (mode) => {

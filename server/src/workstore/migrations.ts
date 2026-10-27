@@ -129,6 +129,7 @@ const migrations = [
     feature_key TEXT NOT NULL, body TEXT NOT NULL,
     PRIMARY KEY(project_id, task_key)
   ) STRICT;`,
+  `ALTER TABLE feature_runs ADD COLUMN pid_started_at TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

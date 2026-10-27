@@ -17,6 +17,7 @@ import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
 import { featureBaseBranch } from './featureRunBase.js';
+import { assertDirectRef } from './gitPublication.js';
 import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import {
@@ -148,6 +149,7 @@ export function resetDeveloperWorktree(
   branch: string,
   base: string,
 ): void {
+  assertDirectRef(config.repoRoot, `refs/heads/${branch}`);
   const expectedTree = taskPath(config.repoRoot, `.worktrees/${record.key}`);
   if (
     path.resolve(tree) !== expectedTree ||

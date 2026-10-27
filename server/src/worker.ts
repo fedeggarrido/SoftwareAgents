@@ -86,7 +86,8 @@ import {
   executorSlotsDirectory,
   withMachineAdmission,
 } from './executorSlots.js';
-import { featureBaseBranch } from './featureRunBase.js';
+import { assertTaskDependencies, featureBaseBranch } from './featureRunBase.js';
+import { assertDirectRef } from './gitPublication.js';
 import { HumanDecisions } from './humanDecisions.js';
 import {
   type CascadeAttempt,
@@ -1195,6 +1196,7 @@ async function runWorkerExecution(
               options.architect?.key ?? args.task,
               options.developer ? 'developer' : 'worker',
             );
+      if (options.developer) assertDirectRef(cwd, `refs/heads/${tree.branch}`);
       base ??= options.developer
         ? taskBranchBase(
             cwd,
@@ -1233,6 +1235,7 @@ async function runWorkerExecution(
       )
         throw new Error(`${options.qa ? 'QA' : 'Reviewer'} context changed before launch`);
       if (options.developer) {
+        assertTaskDependencies(workStore!, cwd, args.task, git(tree.path, ['rev-parse', 'HEAD']));
         const current = developerRequest(
           workStore!,
           config,

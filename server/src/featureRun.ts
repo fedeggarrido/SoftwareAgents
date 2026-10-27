@@ -5,8 +5,11 @@ import type { ProjectConfig } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
 import { FEATURE_RUN_POLL_MS, WORKSTORE_DEFAULT_MAX_ATTEMPTS } from './constants.js';
+import { pushDeveloperBranch } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
+import { assertTaskDependencies } from './featureRunBase.js';
+import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { lastReviewFailure } from './reviewAttempts.js';
 import { rebaseFeatureTask, recoverFeatureTaskRebase } from './taskRebase.js';
 import { recoverWorkerResults } from './workerPublication.js';
@@ -125,21 +128,133 @@ export async function runFeature(
   };
   const publishPending = async () => {
     const pending = state.pending!;
+    assertDirectRef(config.repoRoot, ref);
+    if (!pending.main) {
+      const review = store.getTask(pending.task)?.review_ref;
+      if (review) assertDirectRef(config.repoRoot, `refs/heads/${review.branch}`);
+    }
     assertUnchecked();
     const head = branchHead();
-    if (head === pending.before) git(['update-ref', ref, pending.after, pending.before]);
+    if (head === pending.before)
+      publishDirectRef(config.repoRoot, ref, pending.after, pending.before);
     else if (head !== pending.after)
       throw new Error('Integration branch changed outside the orchestrator');
     if (branchHead() !== pending.after || !ancestor(pending.before, pending.after))
       throw new Error('Integration verification failed');
-    const task = store.getTask(pending.task)!;
-    if (task.status !== 'DONE' || !task.review_ref || !ancestor(task.review_ref.sha, pending.after))
-      throw new Error('Integrated task no longer matches DONE review_ref');
+    if (pending.main) {
+      if (!ancestor(pending.main, pending.after))
+        throw new Error('Main reconciliation verification failed');
+      state.initial_main = pending.main;
+    } else {
+      const task = store.getTask(pending.task)!;
+      if (
+        task.status !== 'DONE' ||
+        !task.review_ref ||
+        !ancestor(task.review_ref.sha, pending.after)
+      )
+        throw new Error('Integrated task no longer matches DONE review_ref');
+      state.integrated[pending.task] = task.review_ref;
+    }
     state.head = pending.after;
-    state.integrated[pending.task] = task.review_ref;
     delete state.pending;
     await save();
     append('integrate', pending.task, 'DONE');
+  };
+  const merge = (left: string, right: string, subject: string) => {
+    // merge-tree fails before any ref changes when a conflict needs human input.
+    let tree: string;
+    try {
+      tree = git(['merge-tree', '--write-tree', left, right]).split('\n')[0];
+    } catch {
+      throw new Error('Main/integration merge conflict; human reconciliation required');
+    }
+    if (ancestor(left, right)) return right;
+    if (ancestor(right, left)) return left;
+    return execFileSync(
+      'git',
+      ['-c', 'commit.gpgSign=false', 'commit-tree', tree, '-p', left, '-p', right],
+      {
+        cwd: config.repoRoot,
+        input: subject + '\n',
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    ).trim();
+  };
+  const reconcileMain = async () => {
+    assertDirectRef(config.repoRoot, ref);
+    if (branchHead() !== state.head)
+      throw new Error('Integration branch changed outside the orchestrator');
+    const current = git(['rev-parse', 'refs/heads/main^{commit}']);
+    if (current === state.initial_main) return;
+    if (!ancestor(state.initial_main, current))
+      throw new Error('main history changed; human reconciliation required');
+    state.pending = {
+      task: 'main',
+      before: state.head,
+      after: merge(state.head, current, `feat(${key}): reconciliar main`),
+      main: current,
+    };
+    await save();
+    await publishPending();
+  };
+  const publishBranches = async () => {
+    // Revisit durable review_refs even after a crash between worker completion
+    // and the command's push. withIdempotency retains uncertain external effects.
+    const publish = async () => {
+      const pending = state.publication!;
+      try {
+        await pushDeveloperBranch(
+          store,
+          {
+            ...config,
+            operator: {
+              ...config.operator,
+              developer: pending.push
+                ? {
+                    ...config.operator.developer,
+                    pushBranch: pending.push,
+                  }
+                : undefined,
+            },
+          },
+          pending.task,
+          pending.review,
+        );
+      } catch (error) {
+        throw new Error(
+          `Developer branch publication unresolved for ${pending.task}; human reconciliation required: ${(error as Error).message}`,
+        );
+      }
+      (state.published ??= {})[pending.task] = pending.review.sha;
+      delete state.publication;
+      await save();
+    };
+    if (!state.publication && state.active?.action === 'develop') {
+      const review = store.getTask(state.active.task)?.review_ref;
+      if (review) {
+        if (!state.active.publication)
+          throw new Error(
+            'Interrupted Developer push policy unknown; human reconciliation required',
+          );
+        state.publication = {
+          task: state.active.task,
+          review,
+          push: state.active.publication.push,
+        };
+        delete state.active;
+        await save();
+      }
+    }
+    if (state.publication) await publish();
+    for (const task of tasks()) {
+      const review = task.review_ref;
+      if (review) assertDirectRef(config.repoRoot, `refs/heads/${review.branch}`);
+      if (!review || state.published?.[task.key] === review.sha) continue;
+      state.publication = { task: task.key, review, push: config.operator.developer?.pushBranch };
+      await save();
+      await publish();
+    }
   };
   const execute = async (action: string, taskKey: string, args: string[]) => {
     const task = store.getTask(taskKey);
@@ -152,7 +267,14 @@ export async function runFeature(
         1,
       );
     state.attempts[attemptKey] = count + 1;
-    state.active = { action, task: taskKey, version: task?.version ?? 0 };
+    state.active = {
+      action,
+      task: taskKey,
+      version: task?.version ?? 0,
+      ...(action === 'develop'
+        ? { publication: { push: config.operator.developer?.pushBranch } }
+        : {}),
+    };
     await save();
     append(action, taskKey, 'started');
     if (interrupted) return stopInterrupted();
@@ -167,6 +289,13 @@ export async function runFeature(
     const exit = process.exitCode;
     process.exitCode = 0;
     const current = store.getTask(taskKey);
+    if (action === 'develop' && current?.review_ref) {
+      state.publication = {
+        task: taskKey,
+        review: current.review_ref,
+        push: state.active!.publication!.push,
+      };
+    }
     if (
       (exit === 3 || current?.status === 'WAITING_QUOTA' || current?.status === 'WAITING_HUMAN') &&
       store.listExecutions().filter((e) => e.task_key === taskKey).length === executions
@@ -186,6 +315,7 @@ export async function runFeature(
         `${taskKey}: ${current?.blocked_reason ?? (current && lastReviewFailure(store, current)?.reason) ?? 'worker waiting; inspect feature show ' + key}`,
         3,
       );
+    if (error && action === 'develop') return stop('failed', (error as Error).message, 1);
     if (
       error &&
       current?.review_ref &&
@@ -209,13 +339,21 @@ export async function runFeature(
       throw new Error('Invalid runtime integration branch; main is never a publication target');
     if (request && request !== state.request)
       throw new Error('Run request already pinned; use the original request');
+    state.status = 'running';
+    await save();
     if (state.pending) await publishPending();
+    assertDirectRef(config.repoRoot, ref);
     assertUnchecked();
     const head = branchHead();
     if (!head) {
       if (state.head !== state.initial_main || Object.keys(state.integrated).length)
         throw new Error('Integration branch disappeared; human reconciliation required');
-      git(['update-ref', ref, state.initial_main, '0'.repeat(state.initial_main.length)]);
+      publishDirectRef(
+        config.repoRoot,
+        ref,
+        state.initial_main,
+        '0'.repeat(state.initial_main.length),
+      );
     } else if (head !== state.head)
       throw new Error('Integration branch changed outside the orchestrator');
     state.status = 'running';
@@ -233,7 +371,7 @@ export async function runFeature(
       }
       if (interrupted) return await stopInterrupted();
       const feature = store.getFeature(key);
-      const all = tasks();
+      let all = tasks();
       const related = [store.getTask(key), store.getTask(`${key}-DESIGN`), ...all].filter(
         (t): t is TaskRecord => !!t,
       );
@@ -276,6 +414,25 @@ export async function runFeature(
           `${failed.key}: ${failed.status}; ${failed.blocked_reason ?? 'operator intervention required'}`,
           1,
         );
+      await publishBranches();
+      await reconcileMain();
+      // Rebase every affected approval, not only the next schedulable task.
+      for (const task of tasks()) {
+        if (
+          task.review_ref &&
+          ['REVIEW', 'QA'].includes(task.status) &&
+          task.review_ref.base !== state.head
+        ) {
+          try {
+            await rebaseFeatureTask(store, config, key, task.key, audit, owner);
+          } catch (error) {
+            throw new Error(
+              `Task ${task.key} rebase blocked; human reconciliation required: ${(error as Error).message}`,
+            );
+          }
+        }
+      }
+      all = tasks();
       let result: FeatureRunSummary | undefined;
       if (!feature) result = await execute('spec', key, ['spec', key, '--request', state.request]);
       else if (!['approved', 'ready_to_merge'].includes(feature.status))
@@ -291,6 +448,7 @@ export async function runFeature(
         const done = all.find((t) => t.status === 'DONE' && !state.integrated[t.key]);
         if (done) {
           const review = done.review_ref;
+          if (review) assertDirectRef(config.repoRoot, `refs/heads/${review.branch}`);
           if (!review || git(['rev-parse', `refs/heads/${review.branch}`]) !== review.sha)
             throw new Error('DONE task has no matching review_ref branch');
           append('integrate', done.key, 'started');
@@ -324,8 +482,11 @@ export async function runFeature(
           await publishPending();
           continue;
         }
-        if (all.length && all.every((t) => t.status === 'DONE'))
+        if (all.length && all.every((t) => t.status === 'DONE')) {
+          await reconcileMain();
+          if (!ancestor(git(['rev-parse', 'refs/heads/main^{commit}']), state.head)) continue;
           return await stop('ready_to_merge', `Human merge required: ${state.branch} → main`, 0);
+        }
         const task = all.find(
           (t) =>
             t.status !== 'DONE' &&
@@ -349,6 +510,12 @@ export async function runFeature(
           continue;
         }
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
+        if (action === 'develop') {
+          const branch = `refs/heads/sa/${task.key}-developer`;
+          assertDirectRef(config.repoRoot, branch);
+          const head = git(['for-each-ref', '--format=%(objectname)', branch]) || state.head;
+          assertTaskDependencies(store, config.repoRoot, task.key, head);
+        }
         result = await execute(action, task.key, [action, key, '--task', task.key]);
       }
       if (result) return result;
@@ -356,7 +523,8 @@ export async function runFeature(
   } catch (error) {
     if (interrupted) return await stopInterrupted();
     append('run', key, 'failed');
-    return await stop('failed', (error as Error).message, 1);
+    const human = (error as Error).message.includes('human reconciliation required');
+    return await stop(human ? 'WAITING_HUMAN' : 'failed', (error as Error).message, human ? 3 : 1);
   } finally {
     try {
       await store.releaseFeatureRun(key, owner);

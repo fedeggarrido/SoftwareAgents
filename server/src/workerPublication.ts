@@ -7,6 +7,7 @@ import { AuditLog } from './auditLog.js';
 import { taskDirectory, taskPath } from './commands/taskFiles.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
+import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { guardRequirementsWrites, openRequirementsQuestions } from './requirements.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
 import type { WorkerPublication, WorkStore } from './workstore/WorkStore.js';
@@ -20,6 +21,7 @@ export async function publishWorkerResult(
 ): Promise<void> {
   lifecycle.assertOwned();
   const root = config.repoRoot;
+  assertDirectRef(root, `refs/heads/${pending.branch}`);
   const tree = taskPath(root, `.worktrees/${pending.developer ? pending.task : pending.feature}`);
   const git = (args: string[]) =>
     evalGit(tree, ['-c', 'core.hooksPath=', '-c', 'core.fsmonitor=false', ...args]);
@@ -90,7 +92,7 @@ export async function publishWorkerResult(
       'Verified worker publication blocked by current protected-path policy; human review required',
     );
   if (git(['rev-parse', 'HEAD']) === pending.before)
-    git(['update-ref', `refs/heads/${pending.branch}`, pending.sha, pending.before]);
+    publishDirectRef(root, `refs/heads/${pending.branch}`, pending.sha, pending.before);
   if (
     git(['rev-parse', 'HEAD']) !== pending.sha ||
     git(['status', '--porcelain', '--untracked-files=all'])

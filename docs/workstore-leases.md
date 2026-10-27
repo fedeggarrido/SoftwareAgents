@@ -130,6 +130,16 @@ modificado, uno sin seguimiento y una junction sintética, y comprueban su conse
 
 ## Idempotencia de efectos externos
 
+El lock del orquestador de Feature usa `feature_runs.pid_started_at` (WorkStore
+v14), consultado con `processStartIdentity` de SA-026. Un PID solo conserva la
+propiedad si coincide su identidad exacta de creación. Un PID reutilizado o un
+proceso confirmado ausente permite recuperar el lock; una consulta fallida o un
+lock histórico sin identidad conserva el bloqueo y pide reconciliación humana.
+La consulta al SO sucede fuera de SQLite y el claim vuelve a comprobar el registro
+bajo el lock de escritura, para no robar una propiedad cambiada durante la consulta.
+La reconciliación requiere comprobar el runner anterior y sus posibles escritores;
+la edad del lock nunca demuestra su cierre.
+
 `withIdempotency(key, fn)` reserva una clave persistente, única por Project, **antes**
 de invocar el efecto. No mantiene un lock SQLite mientras ejecuta `fn`. Usar claves
 estables que identifiquen operación, Task y artefacto (por ejemplo, el SHA para un

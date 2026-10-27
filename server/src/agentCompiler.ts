@@ -1,5 +1,6 @@
 import Ajv from 'ajv';
 import { createHash } from 'crypto';
+import * as path from 'path';
 
 import type { AgentPermissionProfile, AgentSpec } from '../../core/src/agentSpec.js';
 import {
@@ -212,6 +213,21 @@ export function windowsShellBaseline(
     ['WINDIR', pick('WINDIR') ?? systemRoot],
     ['ComSpec', pick('ComSpec') ?? `${systemRoot}\\system32\\cmd.exe`],
     ['PATHEXT', pick('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD'],
+  ];
+}
+
+/** Per-execution profile for the agent's shell, outside the task tree: without it,
+ * PowerShell and npm write caches (Microsoft/, npm-cache/) into the worktree and Node
+ * tools fail on os.userInfo(). Never the operator's real profile. */
+export function shellProfileBaseline(home: string): [string, string][] {
+  return [
+    ['USERPROFILE', home],
+    ['HOME', home],
+    ['APPDATA', path.win32.join(home, 'AppData', 'Roaming')],
+    ['LOCALAPPDATA', path.win32.join(home, 'AppData', 'Local')],
+    ['TEMP', path.win32.join(home, 'Temp')],
+    ['TMP', path.win32.join(home, 'Temp')],
+    ['npm_config_cache', path.win32.join(home, 'npm-cache')],
   ];
 }
 

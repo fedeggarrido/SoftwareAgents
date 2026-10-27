@@ -13,6 +13,8 @@ export interface ProjectRecord {
 }
 
 export interface FeatureRecord {
+  title?: string | null;
+  updated_at?: string | null;
   project_id: string;
   key: string;
   doc_path: string;

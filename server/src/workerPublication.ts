@@ -108,6 +108,7 @@ export async function publishWorkerResult(
   if (pending.spec && !store.getFeature(pending.feature))
     store.createFeature({
       key: pending.feature,
+      title: pending.spec.title,
       doc_path: `${config.project.brain.path}/features/${pending.feature}.yaml`,
       git_sha: pending.sha,
       status: 'in_review',

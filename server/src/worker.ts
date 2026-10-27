@@ -2102,6 +2102,7 @@ async function runWorkerExecution(
     if (options.requirements) {
       const feature = {
         key: args.task,
+        title: featureSpec!.title,
         doc_path: featureDoc!,
         git_sha: commit,
         status: 'in_review',

@@ -150,7 +150,7 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
 }
 
 /** Construct through openWorkStore; the connection stays private to the backend. */
-class SqliteWorkStore implements WorkStore {
+export class SqliteWorkStore implements WorkStore {
   constructor(
     private readonly db: DatabaseSync,
     readonly projectId: string,
@@ -1028,9 +1028,17 @@ class SqliteWorkStore implements WorkStore {
       const state = current?.state ?? initial;
       this.db
         .prepare(
-          'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state,pid_started_at) VALUES (?,?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid,pid_started_at=excluded.pid_started_at',
+          'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state,pid_started_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid,pid_started_at=excluded.pid_started_at,updated_at=excluded.updated_at',
         )
-        .run(this.projectId, key, owner, process.pid, JSON.stringify(state), identity);
+        .run(
+          this.projectId,
+          key,
+          owner,
+          process.pid,
+          JSON.stringify(state),
+          identity,
+          new Date().toISOString(),
+        );
       return state;
     });
   }
@@ -1041,9 +1049,9 @@ class SqliteWorkStore implements WorkStore {
         throw new Error('Feature orchestrator ownership lost');
       this.db
         .prepare(
-          'UPDATE feature_runs SET state = ? WHERE project_id = ? AND feature_key = ? AND owner = ?',
+          'UPDATE feature_runs SET state = ?, updated_at = ? WHERE project_id = ? AND feature_key = ? AND owner = ?',
         )
-        .run(JSON.stringify(state), this.projectId, key, owner);
+        .run(JSON.stringify(state), new Date().toISOString(), this.projectId, key, owner);
       if (state.status === 'ready_to_merge') {
         const main = evalGit(this.repositoryPath, ['rev-parse', 'refs/heads/main^{commit}']);
         if (
@@ -1058,15 +1066,15 @@ class SqliteWorkStore implements WorkStore {
           throw new Error('Feature still has unintegrated tasks');
         this.db
           .prepare(
-            "UPDATE features SET status = 'ready_to_merge' WHERE project_id = ? AND key = ? AND status IN ('approved','ready_to_merge')",
+            "UPDATE features SET status = 'ready_to_merge', updated_at = ? WHERE project_id = ? AND key = ? AND status IN ('approved','ready_to_merge')",
           )
-          .run(this.projectId, key);
+          .run(new Date().toISOString(), this.projectId, key);
       } else {
         this.db
           .prepare(
-            "UPDATE features SET status = 'approved' WHERE project_id = ? AND key = ? AND status = 'ready_to_merge'",
+            "UPDATE features SET status = 'approved', updated_at = ? WHERE project_id = ? AND key = ? AND status = 'ready_to_merge'",
           )
-          .run(this.projectId, key);
+          .run(new Date().toISOString(), this.projectId, key);
       }
     });
   }
@@ -1075,17 +1083,25 @@ class SqliteWorkStore implements WorkStore {
     return this.write(() => {
       this.db
         .prepare(
-          'UPDATE feature_runs SET owner = NULL, pid = NULL, pid_started_at = NULL WHERE project_id = ? AND feature_key = ? AND owner = ?',
+          'UPDATE feature_runs SET owner = NULL, pid = NULL, pid_started_at = NULL, updated_at = ? WHERE project_id = ? AND feature_key = ? AND owner = ?',
         )
-        .run(this.projectId, key, owner);
+        .run(new Date().toISOString(), this.projectId, key, owner);
     });
   }
   createFeature(feature: Omit<FeatureRecord, 'project_id'>): void {
     this.db
       .prepare(
-        'INSERT INTO features (project_id, key, doc_path, git_sha, status) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO features (project_id, key, doc_path, git_sha, status, title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(this.projectId, feature.key, feature.doc_path, feature.git_sha, feature.status);
+      .run(
+        this.projectId,
+        feature.key,
+        feature.doc_path,
+        feature.git_sha,
+        feature.status,
+        feature.title ?? null,
+        new Date().toISOString(),
+      );
   }
   reviseFeature(
     feature: Omit<FeatureRecord, 'project_id'>,
@@ -1106,9 +1122,17 @@ class SqliteWorkStore implements WorkStore {
         throw new Error('Requirements Execution still active');
       this.db
         .prepare(
-          'UPDATE features SET doc_path = ?, git_sha = ?, status = ? WHERE project_id = ? AND key = ?',
+          'UPDATE features SET doc_path = ?, git_sha = ?, status = ?, title = ?, updated_at = ? WHERE project_id = ? AND key = ?',
         )
-        .run(feature.doc_path, feature.git_sha, feature.status, this.projectId, feature.key);
+        .run(
+          feature.doc_path,
+          feature.git_sha,
+          feature.status,
+          feature.title ?? null,
+          new Date().toISOString(),
+          this.projectId,
+          feature.key,
+        );
       this.answerArtifactDecision(decisionId, { ...evidence, gitSha: feature.git_sha });
       beforeCommit();
     });
@@ -1194,8 +1218,8 @@ class SqliteWorkStore implements WorkStore {
         throw new Error('Feature requirements are still active or waiting for a human');
       beforeCommit();
       this.db
-        .prepare('UPDATE features SET status = ? WHERE project_id = ? AND key = ?')
-        .run('approved', this.projectId, key);
+        .prepare('UPDATE features SET status = ?, updated_at = ? WHERE project_id = ? AND key = ?')
+        .run('approved', new Date().toISOString(), this.projectId, key);
     });
   }
   createTask(task: NewTask): void {

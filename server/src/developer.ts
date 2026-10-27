@@ -326,6 +326,33 @@ export function isDeveloperTest(file: string): boolean {
 }
 
 /** Check the complete diff (both index and disk, including ignored files) before any verifier/commit. */
+/** Test runs by the agent leave Vite/Vitest caches (results.json, deps) under ignored
+ * node_modules/.vite. They are data, never code: delete them (never exempt them) before
+ * integrity checks. Real directories only; any link aborts so nothing is followed. */
+export function removeAgentToolCaches(tree: string): void {
+  for (const root of ['node_modules', 'server/node_modules', 'webview-ui/node_modules']) {
+    const cache = path.join(tree, root, '.vite');
+    const parent = path.join(tree, root);
+    const parentStat = fs.lstatSync(parent, { throwIfNoEntry: false });
+    // A linked node_modules is the shared dependency tree: never touch it.
+    if (!parentStat?.isDirectory() || parentStat.isSymbolicLink()) continue;
+    const stat = fs.lstatSync(cache, { throwIfNoEntry: false });
+    if (!stat) continue;
+    if (!stat.isDirectory() || stat.isSymbolicLink() || containsLink(cache))
+      throw new Error(`Refusing to remove tool cache with links: ${root}/.vite`);
+    fs.rmSync(cache, { recursive: true, force: true });
+    if (fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
+  }
+}
+
+function containsLink(dir: string): boolean {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) return true;
+    if (entry.isDirectory() && containsLink(path.join(dir, entry.name))) return true;
+  }
+  return false;
+}
+
 export function guardDeveloperChanges(
   input: DeveloperRequest,
   config: ProjectConfig,
@@ -333,6 +360,7 @@ export function guardDeveloperChanges(
   base: string,
   expectedHead = base,
 ): string[] {
+  removeAgentToolCaches(tree);
   try {
     return checkDeveloperChanges(input, config, tree, base, expectedHead);
   } catch (error) {

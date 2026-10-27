@@ -96,6 +96,21 @@ test('audit is visible', async ({ page }) => {
     fs.writeFileSync('outside.txt', 'outside changeZones');
     fs.writeFileSync('server/__tests__/foreign.test.ts', 'outside changeZones');
   }
+  if (mode.startsWith('core-')) {
+    fs.unlinkSync('server/src/audit.ts');
+    fs.unlinkSync('server/__tests__/audit.test.ts');
+    fs.mkdirSync('core/src', { recursive: true });
+    fs.writeFileSync('core/src/messages.ts', 'export const implemented = true;\n');
+    const test =
+      mode === 'core-outside'
+        ? 'core/src/messages.test.ts'
+        : 'server/__tests__/core/messages.test.ts';
+    fs.mkdirSync(require('path').dirname(test), { recursive: true });
+    fs.writeFileSync(
+      test,
+      "import { expect, it } from 'vitest';\n\nimport { implemented } from '../../../core/src/messages';\n\nit('implements AC-001', () => expect(implemented).toBe(true));\n",
+    );
+  }
   const emit = (value) => console.log(JSON.stringify(value));
   if (executor === 'claude') {
     emit({

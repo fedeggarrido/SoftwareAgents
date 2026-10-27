@@ -317,11 +317,16 @@ export async function runFeature(
     if (interrupted) return stopInterrupted();
     if (isVerifierInfrastructureFailure(current?.blocked_reason))
       return stop('WAITING_HUMAN', `${taskKey}: ${current!.blocked_reason}`, 3);
+    if (current?.status === 'WAITING_HUMAN')
+      return stop(
+        'WAITING_HUMAN',
+        `${taskKey}: ${current.blocked_reason ?? 'human review required'}`,
+        3,
+      );
     if (current?.status === 'FAILED_RETRYABLE' && !current.review_ref) return;
     if (exit === 3 || current?.status === 'WAITING_QUOTA')
       return stop(
-        current?.status === 'WAITING_HUMAN' ||
-          (current && lastReviewFailure(store, current)?.reason.includes('category=invalid_report'))
+        current && lastReviewFailure(store, current)?.reason.includes('category=invalid_report')
           ? 'WAITING_HUMAN'
           : 'WAITING_QUOTA',
         `${taskKey}: ${current?.blocked_reason ?? (current && lastReviewFailure(store, current)?.reason) ?? 'worker waiting; inspect feature show ' + key}`,
@@ -436,7 +441,7 @@ export async function runFeature(
             : 'Respond in the office and inspect';
         return await stop(
           'WAITING_HUMAN',
-          `Human Decision ${decision?.id ?? human!.key}: ${response}; pixel-agents feature show ${key}`,
+          `Human Decision ${decision?.id ?? human!.key}: ${human?.blocked_reason ?? decision?.context ?? response}; ${response}; pixel-agents feature show ${key}`,
           3,
         );
       }

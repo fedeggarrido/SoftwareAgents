@@ -1016,14 +1016,26 @@ describe.skipIf(process.platform !== 'win32')(
         await spec();
         const result = await run(scenario);
         expect(result.status, result.message).toBe(
-          scenario === 'retry' ? 'ready_to_merge' : 'failed',
+          scenario === 'retry' ? 'ready_to_merge' : 'WAITING_HUMAN',
         );
         const attempts = rows().filter((r) => r.role === 'developer');
-        expect(attempts).toHaveLength(scenario === 'retry' ? 2 : 3);
+        expect(attempts).toHaveLength(2);
         expect(attempts[1].data.previousFailure).toBeTruthy();
         const before = rows().length;
         if (scenario === 'always-fail') {
-          expect((await run(scenario)).status).toBe('failed');
+          expect(result.exit_code).toBe(3);
+          expect(result.message).toContain('missing_test');
+          expect(result.message).toContain('repeated_guard');
+          const store = await storeFor();
+          try {
+            expect(store.getTask('FEAT-001-T01')).toMatchObject({
+              status: 'WAITING_HUMAN',
+              attempt: 0,
+            });
+          } finally {
+            store.close();
+          }
+          expect((await run(scenario)).status).toBe('WAITING_HUMAN');
           expect(rows()).toHaveLength(before);
         }
       },

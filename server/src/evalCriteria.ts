@@ -151,7 +151,8 @@ export async function checkEvalCriteria(
 
 /** Runtime-owned profiles mirror the workspace configs without executing untrusted plugins/reporters. */
 export function vitestWorkspace(tree: string, file: string, test = false) {
-  const workspace = file.split('/')[0];
+  // Core source is exercised by mirrored tests in the server workspace.
+  const workspace = !test && file.startsWith('core/') ? 'server' : file.split('/')[0];
   if (!['server', 'webview-ui'].includes(workspace))
     throw new Error(
       `Unsupported Vitest ${test ? 'test ' : ''}root: ${JSON.stringify(file)}; expected server/ or webview-ui/`,
@@ -214,7 +215,10 @@ async function runWorkspaceVitest(
     // SoftwareAgents server tests may use built hooks indirectly through imported modules.
     // Build every server invocation when this repository provides the fixed build entry.
     // Source-only repositories without esbuild.js retain the neutral Vitest profile.
-    if (files[0].startsWith('server/') && fs.existsSync(path.join(tree, 'esbuild.js'))) {
+    if (
+      workspace.root === resolveInside(tree, 'server') &&
+      fs.existsSync(path.join(tree, 'esbuild.js'))
+    ) {
       const snapshot = resolveInside(temporary, 'project');
       const relativeScratch = path.relative(tree, scratch);
       const excludedScratch =

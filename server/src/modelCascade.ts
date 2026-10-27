@@ -28,7 +28,16 @@ export interface CascadeAttempt {
   executor: string;
   model: string;
   verifiers: CriterionResult[];
-  result: 'pass' | 'fail' | 'executor_error' | 'criteria_tampered' | 'infrastructure_error';
+  result:
+    | 'pass'
+    | 'fail'
+    | 'executor_error'
+    | 'criteria_tampered'
+    | 'infrastructure_error'
+    | 'guard_rejected'
+    | 'runtime_error';
+  exitCode?: number | null;
+  reason?: string;
   usage: {
     input: number | 'unknown';
     output: number | 'unknown';
@@ -235,13 +244,22 @@ export async function checkCascadeCriteria(
           }
           let output = '';
           try {
-            const result = (
-              await runTaskTest(tree, temporary, file, signal, remaining, (value) => {
+            const evidence = await runTaskTest(
+              tree,
+              temporary,
+              file,
+              signal,
+              remaining,
+              (value) => {
                 output = value;
-              })
-            ).result;
+              },
+            );
+            const result = evidence.result;
             if (result === 'not_tested' && !file.startsWith('e2e/'))
-              throw new VerifierInfrastructureError('Vitest execution unavailable');
+              throw new VerifierInfrastructureError(
+                evidence.reason?.replace(/^Verifier infrastructure: /, '') ??
+                  'Vitest execution unavailable',
+              );
             checks.push(result);
             report(
               file.startsWith('e2e/') ? 'e2e' : 'tests',

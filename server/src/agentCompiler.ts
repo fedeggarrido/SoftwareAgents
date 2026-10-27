@@ -198,6 +198,23 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
   };
 }
 
+/** Non-secret Windows system variables that native tools need even in an empty env. */
+export function windowsShellBaseline(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): [string, string][] {
+  if (platform !== 'win32') return [];
+  const pick = (name: string) =>
+    Object.entries(env).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  const systemRoot = pick('SystemRoot') ?? 'C:\\Windows';
+  return [
+    ['SystemRoot', systemRoot],
+    ['WINDIR', pick('WINDIR') ?? systemRoot],
+    ['ComSpec', pick('ComSpec') ?? `${systemRoot}\\system32\\cmd.exe`],
+    ['PATHEXT', pick('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD'],
+  ];
+}
+
 /** Codex executor must materialize the schema in private storage before using this argv. */
 export function codexCompilerFlags(
   compiled: ReturnType<typeof compileAgent>,

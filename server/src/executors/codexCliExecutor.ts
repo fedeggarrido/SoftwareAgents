@@ -12,6 +12,7 @@ import {
   compileAgent,
   executorSupportsRole,
   validateAgentOutput,
+  windowsShellBaseline,
 } from '../agentCompiler.js';
 import {
   CODEX_REPO_CONFIG_DIRS,
@@ -169,6 +170,13 @@ export class CodexCliExecutor implements Executor {
             'exec',
             '--json',
             ...codexCompilerFlags(compiled, schemaFile),
+            // inherit="none" leaves Windows without SystemRoot, which breaks the crypto
+            // provider: Node aborts (CSPRNG) and PowerShell fails with 8009001d. Re-add only
+            // non-secret system variables; credentials stay out of the agent's shell.
+            ...windowsShellBaseline().flatMap(([name, value]) => [
+              '-c',
+              `shell_environment_policy.set.${name}=${JSON.stringify(value)}`,
+            ]),
             ...(process.platform === 'win32'
               ? ['-c', `windows.sandbox="${CODEX_WINDOWS_SANDBOX}"`]
               : []),

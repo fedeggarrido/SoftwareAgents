@@ -48,6 +48,12 @@ describe('validateDeveloperTests', () => {
     expect(check(spec)).not.toThrow();
   });
 
+  it('rejects node:test with a precise reason', () => {
+    expect(
+      check("import { test } from 'node:test';\ntest('x', () => { expect(1).toBe(1); });"),
+    ).toThrow(/must use Vitest, not node:test/);
+  });
+
   it('still rejects a test without assertions and skipped groups', () => {
     expect(check("test('empty', async () => {});")).toThrow(/requires an assertion/);
     expect(

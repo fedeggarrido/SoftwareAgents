@@ -19,6 +19,9 @@ const NON_DECLARATION_MODIFIERS = new Set([
 
 /** A conservative syntax check, not a proof of assertion quality or test-first ordering. */
 export function validateDeveloperTests(file: string, source: string, baseline: string): void {
+  // The runtime runs Vitest (and Playwright for e2e); node:test files are silently empty for it.
+  if (/from\s+['"](node:)?test['"]/.test(source))
+    throw new Error(`Developer test must use Vitest, not node:test: ${file}`);
   const parse = (text: string) =>
     ts.createSourceFile(file, text.replaceAll('\r\n', '\n'), ts.ScriptTarget.Latest, true);
   const declarations = (root: ts.SourceFile) => {

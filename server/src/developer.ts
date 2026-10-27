@@ -106,6 +106,8 @@ export function developerScope(task: DagTask, root: string) {
     ...(isQaAuthorTask(task) ? { testRoots: QA_AUTHOR_TEST_ROOTS } : {}),
     coreTestRule:
       'Tests for core/src/ belong in server/__tests__/core/, mirroring source paths and .test/.spec suffixes. Never place tests in core/src/, even without testZones.',
+    testFrameworkRule:
+      "Unit tests use Vitest (import { describe, expect, it } from 'vitest'); never node:test or another runner. The runtime only executes Vitest and Playwright specs.",
     colocatedTestRule:
       'Except in core/, remove .test/.spec before the extension and match a changeZone.',
   };

@@ -11,6 +11,7 @@ import {
   codexCompilerFlags,
   compileAgent,
   executorSupportsRole,
+  shellProfileBaseline,
   validateAgentOutput,
   windowsShellBaseline,
 } from '../agentCompiler.js';
@@ -163,6 +164,12 @@ export class CodexCliExecutor implements Executor {
             throw new Error('Runtime settings must be outside the worktree');
           directory = fs.mkdtempSync(path.join(options.runtimeDirectory, 'codex-'));
           const schemaFile = path.join(directory, 'output-schema.json');
+          // Private shell profile for the agent (caches, temp), outside the worktree.
+          const shellHome =
+            process.platform === 'win32' ? path.join(directory, 'shell-home') : undefined;
+          if (shellHome)
+            for (const sub of ['AppData/Roaming', 'AppData/Local', 'Temp', 'npm-cache'])
+              fs.mkdirSync(path.join(shellHome, sub), { recursive: true });
           if (compiled.outputSchema)
             fs.writeFileSync(schemaFile, JSON.stringify(compiled.outputSchema), { mode: 0o600 });
           const args = [
@@ -173,10 +180,16 @@ export class CodexCliExecutor implements Executor {
             // inherit="none" leaves Windows without SystemRoot, which breaks the crypto
             // provider: Node aborts (CSPRNG) and PowerShell fails with 8009001d. Re-add only
             // non-secret system variables; credentials stay out of the agent's shell.
-            ...windowsShellBaseline().flatMap(([name, value]) => [
+            ...[
+              ...windowsShellBaseline(),
+              ...(shellHome ? shellProfileBaseline(shellHome) : []),
+            ].flatMap(([name, value]) => [
               '-c',
               `shell_environment_policy.set.${name}=${JSON.stringify(value)}`,
             ]),
+            ...(shellHome
+              ? ['-c', `sandbox_workspace_write.writable_roots=${JSON.stringify([shellHome])}`]
+              : []),
             ...(process.platform === 'win32'
               ? ['-c', `windows.sandbox="${CODEX_WINDOWS_SANDBOX}"`]
               : []),

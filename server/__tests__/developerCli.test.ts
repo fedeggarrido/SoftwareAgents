@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 
 import { AuditLog } from '../src/auditLog.js';
 import { matchesChangeZone, validateChangeZone } from '../src/changeZones.js';
@@ -27,6 +28,7 @@ import { loadProjectConfig } from '../src/projectConfig.js';
 import { taskBranchBase } from '../src/taskBranchBase.js';
 import * as taskTests from '../src/taskTestRunner.js';
 import type { VerifierFailure } from '../src/verifierFeedback.js';
+import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
@@ -398,7 +400,7 @@ describe('Developer diff guard', () => {
         "it.skip('omitted', () => expect(true).toBe(true));",
       );
     const failures: VerifierFailure[] = [];
-    const result = await checkCascadeCriteria(
+    const verification = checkCascadeCriteria(
       { commands: [] },
       base,
       directory,
@@ -409,6 +411,14 @@ describe('Developer diff guard', () => {
       base,
       { failures },
     );
+    // Missing/skipped execution provides no assertion evidence. It must stop the
+    // run as infrastructure, without consuming another Developer attempt.
+    if (['empty', 'skipped', 'partial-skip', 'missing'].includes(mode)) {
+      await expect(verification).rejects.toBeInstanceOf(VerifierInfrastructureError);
+      await expect(verification).rejects.toThrow('Vitest missing, skipped or incomplete tests');
+      return;
+    }
+    const result = await verification;
     expect(result).toEqual([mode === 'passed' ? 'pass' : 'fail']);
     if (mode === 'failed') {
       expect(failures[0]).toMatchObject({ verifier: 'tests', files: [relative], result: 'fail' });
@@ -685,13 +695,13 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       await develop();
       expect(store.getTask(task)).toMatchObject({
         status: 'REVIEW',
-        attempt: 2,
+        attempt: 1,
         review_ref: { base: git(repo, 'rev-parse', 'main') },
       });
       expect(git(tree(), 'rev-parse', 'HEAD^')).toBe(head);
       const launch = JSON.parse(fs.readFileSync(launches, 'utf8').trim().split('\n').at(-1)!);
       expect(JSON.parse(launch.context.task.brief)).toMatchObject({
-        reworkAttempt: 2,
+        reworkAttempt: 1,
         reviewFindings: [{ summary: 'Missing pagination' }],
         previousFailure: { category: 'change_zones_exceeded' },
       });
@@ -777,7 +787,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       const retried = store.getTask(task)!;
       expect(retried).toMatchObject({
         status: 'REVIEW',
-        attempt: failed.attempt + 1,
+        attempt: failed.attempt,
         branch: failed.branch,
         worktree_ref: failed.worktree_ref,
         review_ref: { base },
@@ -817,28 +827,207 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
     }
   });
 
-  it('caps explicit failed Developer retries at max_attempts and preserves the evidence for humans', async () => {
+  it('preserves the concrete verifier infrastructure cause without consuming agent attempts', async () => {
     await prepare();
+    vi.spyOn(taskTests, 'runTaskTest').mockResolvedValueOnce({
+      result: 'not_tested',
+      passed: 0,
+      failed: 0,
+      reason: 'Verifier infrastructure: synthetic server build failed in scratch',
+    });
+    await expect(develop()).rejects.toThrow('synthetic server build failed in scratch');
     const store = await storeFor();
     try {
-      const max = store.getTask(task)!.max_attempts;
-      for (let attempt = 0; attempt < max; attempt++) {
-        await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
-        expect(store.getTask(task)!.attempt).toBe(attempt);
-      }
-      await expect(develop()).rejects.toThrow('max_attempts exhausted');
       expect(store.getTask(task)).toMatchObject({
-        status: 'FAILED_FINAL',
-        attempt: max - 1,
-        review_ref: null,
-        lease_owner: null,
+        status: 'FAILED_RETRYABLE',
+        attempt: 0,
+        blocked_reason: 'Verifier infrastructure: synthetic server build failed in scratch',
       });
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(max);
-      expect(fs.existsSync(path.join(tree(), 'outside.txt'))).toBe(true);
+      expect(
+        new AuditLog()
+          .read('test')
+          .some(
+            (row) =>
+              !row.corrupt && row.entry.outcome.reason === store.getTask(task)!.blocked_reason,
+          ),
+      ).toBe(true);
     } finally {
       store.close();
     }
   });
+
+  it('gates workspace infrastructure failures before launching the Developer', async () => {
+    await prepare();
+    vi.spyOn(WorktreeManager.prototype, 'create').mockRejectedValueOnce(
+      new Error('synthetic Git worktree preparation unavailable'),
+    );
+    await expect(develop()).rejects.toThrow('synthetic Git worktree preparation unavailable');
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)).toMatchObject({
+        status: 'WAITING_HUMAN',
+        attempt: 0,
+        lease_owner: null,
+      });
+      expect(store.getTask(task)?.blocked_reason).toContain(
+        'category=workspace; exit_code=unknown',
+      );
+      expect(store.getTask(task)?.blocked_reason).toContain(
+        'synthetic Git worktree preparation unavailable',
+      );
+      expect(lastDeveloperFailure(store, store.getTask(task)!)?.reason).toBe(
+        store.getTask(task)?.blocked_reason,
+      );
+      expect(fs.readFileSync(launches, 'utf8')).toBe('');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('gates repeated scope violations with the exact cause instead of exhausting attempts', async () => {
+    await prepare();
+    const store = await storeFor();
+    try {
+      for (let i = 0; i < 2; i++)
+        await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+      expect(store.getTask(task)).toMatchObject({
+        status: 'WAITING_HUMAN',
+        attempt: 0,
+        review_ref: null,
+        lease_owner: null,
+      });
+      expect(lastDeveloperFailure(store, store.getTask(task)!)).toMatchObject({
+        category: 'change_zones_exceeded',
+        gate: 'repeated_guard; human review required',
+      });
+      expect(store.getTask(task)!.blocked_reason).toContain('outside.txt');
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(2);
+      await expect(develop()).rejects.toThrow('No eligible');
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(2);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('bounds alternating guard violations and allows a fresh cycle after an operator reset', async () => {
+    await prepare();
+    for (const mode of ['outside', 'no-test', 'outside'])
+      await expect(develop(mode)).rejects.toThrow();
+    const store = await storeFor();
+    try {
+      const record = store.getTask(task)!;
+      expect(record).toMatchObject({ status: 'WAITING_HUMAN', attempt: 0 });
+      await store.transition(
+        task,
+        record.version,
+        'READY',
+        'Operator reset after inspection',
+        'operator',
+      );
+      // Simulate the operator repairing the rejected tree; READY is an explicit new cycle.
+      for (const file of [
+        'outside.txt',
+        'server/__tests__/foreign.test.ts',
+        'server/src/audit.ts',
+        'server/__tests__/audit.test.ts',
+      ])
+        fs.unlinkSync(path.join(tree(), file));
+      await expect(develop('outside')).rejects.toThrow('changeZones exceeded');
+      expect(store.getTask(task)?.status).toBe('FAILED_RETRYABLE');
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each(['claude', 'codex'] as const)(
+    'preserves exit 0 and core scope diagnostics through audit, task and retry (%s)',
+    async (selected) => {
+      configure(undefined, selected);
+      await prepare(true, true, 'core');
+      const file = path.join(root, '.pixel-agents/config.json');
+      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+      config.projects.test.modelTiers = {
+        rule: parse(
+          fs.readFileSync(
+            path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+            'utf8',
+          ),
+        ).tierRule,
+        maxTier: 'economy',
+        tiers: {
+          economy: {
+            candidates: [
+              { executor: selected, model: selected === 'claude' ? 'haiku' : 'gpt-5.4-mini' },
+            ],
+          },
+        },
+        cascade: {
+          enabled: true,
+          startTier: 'economy',
+          maxEscalations: 0,
+          verifiers: {},
+          defaultVerifier: { commands: [{ vitestRelated: true, timeoutMs: 30_000 }] },
+        },
+      };
+      fs.writeFileSync(file, JSON.stringify(config));
+      await expect(develop('core-outside')).rejects.toThrow('changeZones exceeded');
+      const store = await storeFor();
+      try {
+        const failure = lastDeveloperFailure(store, store.getTask(task)!);
+        expect(failure).toMatchObject({
+          category: 'change_zones_exceeded',
+          paths: ['core/src/messages.test.ts'],
+        });
+        const audit = new AuditLog()
+          .read('test')
+          .filter((row) => !row.corrupt && row.entry.outcome.status === 'cascade_attempt');
+        expect(audit).toHaveLength(1);
+        expect(audit[0].corrupt ? undefined : audit[0].entry.outcome.cascade).toMatchObject({
+          result: 'guard_rejected',
+          exitCode: 0,
+          verifiers: [],
+          reason: failure!.reason,
+        });
+        const attempts = () =>
+          fs
+            .readFileSync(path.join(repo, '.git/softwareagents/cascade-attempts.jsonl'), 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+        expect(attempts()[0]).toMatchObject({
+          result: 'guard_rejected',
+          exitCode: 0,
+          reason: failure!.reason,
+        });
+        await develop('core-valid');
+        expect(store.getTask(task)?.status).toBe('REVIEW');
+        const context = JSON.parse(
+          JSON.parse(fs.readFileSync(launches, 'utf8').trim().split('\n').at(-1)!).context.task
+            .brief,
+        );
+        expect(context.previousFailure).toMatchObject({
+          category: 'change_zones_exceeded',
+          paths: ['core/src/messages.test.ts'],
+        });
+        expect(context.allowedScope).toMatchObject({
+          testZones: [],
+          mirroredTestZones: [
+            'server/__tests__/core/messages*.test.ts',
+            'server/__tests__/core/messages*.spec.ts',
+          ],
+        });
+        expect(context.allowedScope.coreTestRule).toContain('Never place tests in core/src/');
+        expect(attempts().at(-1)).toMatchObject({ result: 'pass', exitCode: 0 });
+        expect(
+          attempts()
+            .at(-1)
+            .verifiers.every((result: string) => result === 'pass'),
+        ).toBe(true);
+      } finally {
+        store.close();
+      }
+    },
+  );
   it.each(['claude', 'codex'] as const)(
     'commits one eligible task via %s, records review_ref and retries without duplicate executions',
     async (selected) => {

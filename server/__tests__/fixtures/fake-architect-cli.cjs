@@ -58,6 +58,12 @@ process.stdin.on('end', () => {
       testZones: ['server/__tests__/helpers/**'],
     });
   }
+  if (mode === 'core')
+    proposal.dag.tasks[0].changeZones = [
+      'core/asyncapi.yaml',
+      'core/src/messages.ts',
+      'docs/reference/protocol.md',
+    ];
   if (mode === 'deferred-chain')
     Object.assign(proposal.dag.tasks[1], {
       type: 'code',

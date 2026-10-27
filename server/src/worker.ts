@@ -56,6 +56,7 @@ import {
   MissingTestError,
   resetDeveloperWorktree,
 } from './developer.js';
+import { DeveloperGuardError, developerGuardFailure } from './developerFailure.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalRunAllowed } from './evalGuard.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
@@ -123,7 +124,12 @@ import {
   validateRequirements,
   writeRequirements,
 } from './requirements.js';
-import { QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX, reviewReworkRounds } from './reviewAttempts.js';
+import {
+  isSuccessfulTaskStep,
+  QA_FAILURE_PREFIX,
+  REVIEW_FAILURE_PREFIX,
+  reviewReworkRounds,
+} from './reviewAttempts.js';
 import {
   preferCrossExecutor,
   reviewerBrief,
@@ -139,6 +145,7 @@ import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemet
 import {
   styleOnlyFailures,
   type VerifierFailure,
+  verifierFailure,
   verifierFailureReason,
 } from './verifierFeedback.js';
 import {
@@ -345,6 +352,10 @@ function failureDiagnostic(detail: string, exitCode?: number): string {
 
 class WorkerExecutionError extends Error {}
 
+// Preserve error identity (including persistence/recovery error codes) while carrying
+// the diagnostic from the execution scope, where finished.exitCode is still known.
+const workerFailureReasons = new WeakMap<Error, string>();
+
 export async function runWorker(
   args: WorkerArgs,
   options: WorkerOptions = {},
@@ -411,6 +422,7 @@ export async function runWorker(
       if (
         developerRetry &&
         !isVerifierInfrastructureFailure(record.blocked_reason) &&
+        !developerGuardFailure(record.blocked_reason) &&
         record.attempt + 1 >= record.max_attempts
       ) {
         await store.transition(
@@ -481,11 +493,56 @@ export async function runWorker(
       );
     return result;
   } catch (error) {
+    const executionFailure = error instanceof Error ? workerFailureReasons.get(error) : undefined;
+    const guard =
+      error instanceof ChangeZonesExceededError ||
+      error instanceof MissingTestError ||
+      error instanceof DeveloperGuardError;
+    const diagnostic = guard ? error.diagnostic() : undefined;
+    const history = store.listDomainEvents(args.task);
+    // A successful step or an explicit operator reset starts a fresh correction cycle.
+    // Looking beyond the last failure also bounds alternating guard violations.
+    const reset = history
+      .map(
+        (event) =>
+          isSuccessfulTaskStep(event) ||
+          (event.to_status === 'READY' && event.reason !== 'Retry lease'),
+      )
+      .lastIndexOf(true);
+    const repeated =
+      !!options.developer &&
+      !!diagnostic &&
+      history.slice(reset + 1).some((event) => {
+        const previous = developerGuardFailure(event.reason);
+        return (
+          previous?.category === developerGuardFailure(diagnostic)?.category &&
+          (!(error instanceof DeveloperGuardError) || previous?.detail === error.message)
+        );
+      });
+    const executorInfrastructure =
+      !!options.developer &&
+      /category=(spawn|auth|timeout|lease|workspace);/.test(
+        executionFailure ?? (error instanceof WorkerExecutionError ? error.message : ''),
+      );
+    const humanGate = repeated || executorInfrastructure;
+    if (humanGate) process.exitCode = 3;
     await lifecycle.finish(
-      options.reviewer ? (options.qa ? 'QA' : 'REVIEW') : 'FAILED_RETRYABLE',
+      humanGate
+        ? 'WAITING_HUMAN'
+        : options.reviewer
+          ? options.qa
+            ? 'QA'
+            : 'REVIEW'
+          : 'FAILED_RETRYABLE',
       (options.reviewer ? (options.qa ? QA_FAILURE_PREFIX : REVIEW_FAILURE_PREFIX) : '') +
-        (error instanceof ChangeZonesExceededError || error instanceof MissingTestError
-          ? error.diagnostic()
+        (diagnostic
+          ? repeated
+            ? 'Developer failed: ' +
+              JSON.stringify({
+                ...developerGuardFailure(diagnostic),
+                gate: 'repeated_guard; human review required',
+              })
+            : diagnostic
           : error instanceof VerifierInfrastructureError
             ? error.message
             : error instanceof EvalCriterionTerminationError
@@ -493,7 +550,8 @@ export async function runWorker(
                 'verifier termination unconfirmed; SA-026 recovery required'
               : error instanceof WorkerExecutionError
                 ? error.message
-                : `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`),
+                : (executionFailure ??
+                  `Worker failed (${failureDiagnostic(error instanceof Error ? error.message : '')})`)),
     );
     throw error;
   } finally {
@@ -776,7 +834,11 @@ async function runWorkerExecution(
   const featureDoc = options.requirements
     ? requirementsDocPath(config.project.brain.path, options.requirements.key)
     : undefined;
-  const recordAttempt = async (results: CriterionResult[], result: CascadeAttempt['result']) => {
+  const recordAttempt = async (
+    results: CriterionResult[],
+    result: CascadeAttempt['result'],
+    reason?: string,
+  ) => {
     if (!verifier || !telemetry || !tree || attemptRecorded || !tierSelection?.choice) return;
     const outcome: CascadeAttempt = {
       attempt: attempt + 1,
@@ -786,6 +848,8 @@ async function runWorkerExecution(
       model: tierSelection.choice.model,
       verifiers: results,
       result,
+      exitCode: exitCode ?? null,
+      ...(reason ? { reason } : {}),
       usage: cascadeUsage(telemetry.usageAttributes, config.operator),
     };
     // A failed append must not be retried by the fallback in finally.
@@ -1847,12 +1911,8 @@ async function runWorkerExecution(
             if (options.developer)
               guardDeveloperChanges(options.developer, config, tree.path, base, startingHead);
           } catch (error) {
-            if (error instanceof EvalIntegrityError) await recordAttempt([], 'criteria_tampered');
-            if (error instanceof VerifierInfrastructureError)
-              await recordAttempt([], 'infrastructure_error');
             if (error instanceof EvalCriterionTerminationError) {
               verifierClosed = false;
-              await recordAttempt([error.result], 'infrastructure_error');
             }
             throw error;
           }
@@ -1869,6 +1929,13 @@ async function runWorkerExecution(
         await recordAttempt(
           results,
           exitCode === 0 ? (passed ? 'pass' : 'fail') : 'executor_error',
+          passed
+            ? undefined
+            : exitCode !== 0
+              ? (executionDiagnostic ?? failureDiagnostic('', exitCode))
+              : failures.length
+                ? verifierFailureReason(failures)
+                : 'verifier_failed: no passing criteria',
         );
         if (!passed) {
           // Only deterministic verifier failures permit another admitted attempt.
@@ -1914,6 +1981,10 @@ async function runWorkerExecution(
               evaluationSuccess: false,
               evaluationVerifierFailed: !interrupted && exitCode === 0,
             };
+          if (exitCode !== 0)
+            throw new WorkerExecutionError(
+              `${options.developer ? 'Execution failed' : 'Cascade failed'} (${executionDiagnostic ?? failureDiagnostic('', exitCode)})`,
+            );
           throw new WorkerExecutionError(
             (options.developer
               ? 'Developer verifier failed; changes retained for review'
@@ -2208,21 +2279,50 @@ async function runWorkerExecution(
         await workStore.markVerifierInfrastructureFailure(args.task, lifecycle.owner);
     }
     telemetryStatus = 'error';
-    audit(
-      interrupted ? 'interrupted' : 'failed',
-      error instanceof ChangeZonesExceededError ? { reason: error.diagnostic() } : undefined,
+    const guard =
+      error instanceof ChangeZonesExceededError ||
+      error instanceof MissingTestError ||
+      error instanceof DeveloperGuardError;
+    const infrastructure =
+      error instanceof VerifierInfrastructureError ||
+      error instanceof EvalCriterionTerminationError;
+    const reason = guard
+      ? error.diagnostic()
+      : error instanceof EvalCriterionTerminationError
+        ? VERIFIER_INFRASTRUCTURE_PREFIX +
+          'verifier termination unconfirmed; SA-026 recovery required'
+        : error instanceof VerifierInfrastructureError || error instanceof WorkerExecutionError
+          ? error.message
+          : 'Worker failed (' +
+            failureDiagnostic(error instanceof Error ? error.message : '', exitCode) +
+            '): ' +
+            verifierFailure('tests', [], [], 'fail', String(error), [
+              common,
+              process.env.HOME ?? '',
+              process.env.USERPROFILE ?? '',
+            ]).detail;
+    audit(interrupted ? 'interrupted' : 'failed', {
+      reason,
+      detail: JSON.stringify({ exitCode: exitCode ?? null }),
+    });
+    await recordAttempt(
+      error instanceof EvalCriterionTerminationError ? [error.result] : [],
+      guard
+        ? 'guard_rejected'
+        : infrastructure
+          ? 'infrastructure_error'
+          : error instanceof EvalIntegrityError
+            ? 'criteria_tampered'
+            : exitCode === 0
+              ? 'runtime_error'
+              : 'executor_error',
+      reason,
     );
+    if (error instanceof Error) workerFailureReasons.set(error, reason);
     throw error;
   } finally {
     try {
-      try {
-        await recordAttempt([], 'executor_error');
-      } catch (error) {
-        telemetryStatus = 'error';
-        throw error;
-      } finally {
-        await telemetry?.finish(telemetryStatus);
-      }
+      await telemetry?.finish(telemetryStatus);
     } finally {
       process.removeListener('SIGINT', cancel);
       process.removeListener('SIGTERM', cancel);

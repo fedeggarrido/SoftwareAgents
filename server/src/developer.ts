@@ -11,6 +11,13 @@ import { recordAudit } from './auditLog.js';
 import { matchesChangeZone, validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
+import {
+  ChangeZonesExceededError,
+  DeveloperGuardError,
+  developerGuardFailure,
+  MissingTestError,
+} from './developerFailure.js';
+export { ChangeZonesExceededError, MissingTestError } from './developerFailure.js';
 import { validateDeveloperTests } from './developerTests.js';
 import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
@@ -27,36 +34,9 @@ import {
   taskDeclaration,
 } from './taskDag.js';
 import { TASK_REBASE_REASON, taskRebaseHistory } from './taskRebaseHistory.js';
+import { verifierFailure } from './verifierFeedback.js';
 import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
-
-export class ChangeZonesExceededError extends Error {
-  readonly category = 'change_zones_exceeded';
-  readonly paths: string[];
-
-  constructor(paths: string[]) {
-    // JSON escaping preserves exact relative names without terminal/control injection.
-    const safe = [...new Set(paths)].sort();
-    super(`Developer changeZones exceeded: ${JSON.stringify(safe)}; human review required`);
-    this.paths = safe;
-  }
-
-  diagnostic(): string {
-    return `Developer failed: ${JSON.stringify({ category: this.category, paths: this.paths })}`;
-  }
-}
-
-export class MissingTestError extends Error {
-  readonly category = 'missing_test';
-
-  constructor() {
-    super('Developer requires an added or adjusted acceptance/reproduction test');
-  }
-
-  diagnostic(): string {
-    return `Developer failed: ${JSON.stringify({ category: this.category, paths: [] })}`;
-  }
-}
 
 /** DAG declarations remain immutable; only the execution role is routed. */
 export function isQaAuthorTask(task: Pick<DagTask, 'agentRole'>): boolean {
@@ -82,32 +62,18 @@ export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
     .filter(
       (e) =>
         isSuccessfulTaskStep(e) ||
-        ((e.to_status === 'FAILED_RETRYABLE' || e.to_status === 'FAILED_FINAL') &&
+        ((e.to_status === 'FAILED_RETRYABLE' ||
+          e.to_status === 'FAILED_FINAL' ||
+          (e.to_status === 'WAITING_HUMAN' &&
+            (!!developerGuardFailure(e.reason) ||
+              e.reason.startsWith('Worker failed (') ||
+              e.reason.startsWith('Execution failed')))) &&
           !isReviewFailure(e.reason)),
     )
     .at(-1);
   if (!event || isSuccessfulTaskStep(event)) return null;
-  if (event.reason.startsWith('Developer failed: ')) {
-    try {
-      const data = JSON.parse(event.reason.slice('Developer failed: '.length)) as {
-        category: string;
-        paths: string[];
-      };
-      if (
-        ['change_zones_exceeded', 'missing_test'].includes(data.category) &&
-        Array.isArray(data.paths) &&
-        data.paths.every((file) => typeof file === 'string')
-      )
-        return {
-          category: data.category,
-          paths: data.paths,
-          reason: event.reason,
-          created_at: event.created_at,
-        };
-    } catch {
-      /* Historical malformed diagnostics remain visible as a reason. */
-    }
-  }
+  const diagnostic = developerGuardFailure(event.reason);
+  if (diagnostic) return { ...diagnostic, reason: event.reason, created_at: event.created_at };
   return { reason: event.reason, created_at: event.created_at };
 }
 
@@ -122,8 +88,10 @@ export function developerScope(task: DagTask, root: string) {
     );
   });
   const mirroredTestZones = (task.changeZones ?? []).flatMap((zone) => {
-    if (!zone.startsWith('server/src/')) return [];
-    const mirror = zone.replace('server/src/', 'server/__tests__/');
+    if (!zone.startsWith('server/src/') && !zone.startsWith('core/src/')) return [];
+    const mirror = zone.startsWith('core/src/')
+      ? zone.replace('core/src/', 'server/__tests__/core/')
+      : zone.replace('server/src/', 'server/__tests__/');
     if (directories.includes(zone)) return [mirror.replace(/\/$/, '') + '/'];
     const match = /^(.*)(\.[cm]?[jt]sx?)$/i.exec(mirror);
     return match
@@ -136,7 +104,10 @@ export function developerScope(task: DagTask, root: string) {
     directoryChangeZones: directories,
     mirroredTestZones,
     ...(isQaAuthorTask(task) ? { testRoots: QA_AUTHOR_TEST_ROOTS } : {}),
-    colocatedTestRule: 'Remove .test/.spec before the extension and match a changeZone.',
+    coreTestRule:
+      'Tests for core/src/ belong in server/__tests__/core/, mirroring source paths and .test/.spec suffixes. Never place tests in core/src/, even without testZones.',
+    colocatedTestRule:
+      'Except in core/, remove .test/.spec before the extension and match a changeZone.',
   };
 }
 
@@ -326,7 +297,8 @@ export function developerRequest(
           reworkAttempt:
             record.attempt +
             (record.status === 'FAILED_RETRYABLE' &&
-            !isVerifierInfrastructureFailure(record.blocked_reason)
+            !isVerifierInfrastructureFailure(record.blocked_reason) &&
+            !developerGuardFailure(record.blocked_reason)
               ? 1
               : 0),
         }
@@ -337,7 +309,8 @@ export function developerRequest(
           reworkAttempt:
             record.attempt +
             (record.status === 'FAILED_RETRYABLE' &&
-            !isVerifierInfrastructureFailure(record.blocked_reason)
+            !isVerifierInfrastructureFailure(record.blocked_reason) &&
+            !developerGuardFailure(record.blocked_reason)
               ? 1
               : 0),
         }
@@ -357,6 +330,28 @@ export function guardDeveloperChanges(
   tree: string,
   base: string,
   expectedHead = base,
+): string[] {
+  try {
+    return checkDeveloperChanges(input, config, tree, base, expectedHead);
+  } catch (error) {
+    if (error instanceof ChangeZonesExceededError || error instanceof MissingTestError) throw error;
+    throw new DeveloperGuardError(
+      verifierFailure('tests', [], [], 'fail', String(error), [
+        tree,
+        process.env.HOME ?? '',
+        process.env.USERPROFILE ?? '',
+      ]).detail,
+      { cause: error },
+    );
+  }
+}
+
+function checkDeveloperChanges(
+  input: DeveloperRequest,
+  config: ProjectConfig,
+  tree: string,
+  base: string,
+  expectedHead: string,
 ): string[] {
   assertEvalIntegrity(
     {
@@ -381,7 +376,10 @@ export function guardDeveloperChanges(
     taskPath(tree, file);
     if (!committable.has(file) && fs.existsSync(taskPath(tree, file)))
       throw new Error('Developer changed an ignored file; human review required');
-    if (qaAuthor && !isQaAuthorPath(file)) {
+    if (
+      (qaAuthor && !isQaAuthorPath(file)) ||
+      (isDeveloperTest(file) && file.startsWith('core/'))
+    ) {
       offending.push(file);
       continue;
     }

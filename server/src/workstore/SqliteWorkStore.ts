@@ -13,6 +13,7 @@ import {
   WORKSTORE_INITIAL_TASK_STATUS,
   WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
+import { developerGuardFailure } from '../developerFailure.js';
 import { evalGit } from '../evalTasks.js';
 import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
@@ -518,6 +519,7 @@ class SqliteWorkStore implements WorkStore {
         task.agent_role === 'developer' &&
         task.status === 'FAILED_RETRYABLE' &&
         !isVerifierInfrastructureFailure(task.blocked_reason) &&
+        !developerGuardFailure(task.blocked_reason) &&
         task.attempt + 1 >= task.max_attempts
       )
         throw new Error('Developer max_attempts exhausted');
@@ -547,7 +549,8 @@ class SqliteWorkStore implements WorkStore {
             owner,
             task.type === 'code' &&
               task.agent_role === 'developer' &&
-              !isVerifierInfrastructureFailure(task.blocked_reason)
+              !isVerifierInfrastructureFailure(task.blocked_reason) &&
+              !developerGuardFailure(task.blocked_reason)
               ? task.attempt + 1
               : undefined,
             undefined,
@@ -1443,7 +1446,9 @@ class SqliteWorkStore implements WorkStore {
       .run(
         to,
         attempt,
-        ['BLOCKED', 'WAITING_QUOTA', 'FAILED_RETRYABLE', 'FAILED_FINAL'].includes(to)
+        ['BLOCKED', 'WAITING_QUOTA', 'WAITING_HUMAN', 'FAILED_RETRYABLE', 'FAILED_FINAL'].includes(
+          to,
+        )
           ? reason
           : null,
         now,

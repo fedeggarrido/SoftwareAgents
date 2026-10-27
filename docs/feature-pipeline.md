@@ -311,7 +311,7 @@ SHA, disco, índice, rama y declaraciones importadas antes de admitir y de lanza
 `feature develop <FEAT-ID> --task <KEY>` permite reintentar explícitamente una tarea
 de código en FAILED_RETRYABLE, sin `review_ref`, con las mismas validaciones de
 feature, diseño y dependencias. Sin `--task` no selecciona fallos para reintentar.
-El claim incrementa `attempt` de forma atómica; si el siguiente intento alcanza
+Para fallos del agente/verificadores, el claim incrementa `attempt` de forma atómica; si el siguiente intento alcanza
 `max_attempts`, queda en FAILED_FINAL para revisión humana sin lanzar el executor.
 Reutiliza rama, worktree y base registrada. Tras confirmar el cierre de procesos y
 adquirir el claim, descarta los cambios fallidos hasta el último commit registrado
@@ -323,6 +323,20 @@ para ese reintento; el historial conserva las referencias a las bases anteriores
 
 Una infracción de zonas registra `change_zones_exceeded` y todas las rutas relativas
 ofensivas, escapadas en JSON, en auditoría y en el motivo de la tarea.
+También persiste `missing_test` y `guard:developer_changes` con el detalle saneado
+de la guardia. Estos rechazos permiten una corrección con `previousFailure`, sin
+gastar el presupuesto del agente. Repetir la misma categoría (y el mismo detalle
+para guardias genéricas) deja WAITING_HUMAN con `gate: repeated_guard`, conserva
+los cambios y detiene `feature run` con exit 3. Requiere intervención humana y un
+reset explícito a READY; relanzar el run no abre otro intento.
+Los errores de infraestructura del verificador detienen el run sin gastar intentos;
+los errores de executor de autenticación, spawn, timeout, lease o workspace abren
+un gate humano. No se convierten en FAILED_FINAL por reintentos automáticos.
+Cada `cascade_attempt` registra `exitCode` (null solo sin evento finished),
+`result` y `reason` en caso de fallo: `guard_rejected`, `infrastructure_error`,
+`criteria_tampered`, `runtime_error`, fallo de verificador o del executor.
+Un fallo posterior a un finished con exit 0 conserva ese 0; el motivo identifica
+la causa sin guardar salida bruta del verificador.
 `task list` y `feature show` exponen `last_developer_failure`. El siguiente contexto
 incluye `previousFailure` y `allowedScope`: zonas exactas, directorios efectivos,
 `testZones` y patrones de espejo permitidos. Son datos no confiables, sin autoridad.
@@ -333,7 +347,15 @@ completo contra la base (índice, disco, archivos nuevos e ignorados): solo admi
 las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*` autorizados. Estos tests
 deben estar en `changeZones`, ser co-ubicados con sus archivos fuente (retirando
 `.test`/`.spec` de su nombre), ser su espejo `server/__tests__/` de `server/src/`,
-o coincidir con `testZones`. El sufijo no autoriza rutas ajenas, ni siquiera para
+o coincidir con `testZones`. **Para `core/src/`, los tests van en
+`server/__tests__/core/`, conservando el subdirectorio y el nombre de origen con
+sufijo `.test` o `.spec`** (p. ej. `core/src/messages.ts` →
+`server/__tests__/core/messages.test.ts`). Se permiten las variantes del mismo
+nombre que anuncian los patrones de espejo. Este espejo se comunica en
+`allowedScope.mirroredTestZones` y `coreTestRule`, incluso sin `testZones`.
+No se admiten tests en `core/src/` ni otra raíz `core/`, tampoco mediante una
+zona amplia o explícita: no existe runner core. Vitest related de fuentes core
+usa el workspace server y sus tests espejo. El sufijo no autoriza rutas ajenas, ni siquiera para
 borrar o vaciar suites existentes. Una zona literal que ya
 era directorio en el checkout principal, o acaba en `/`, incluye descendientes;
 los globs usan la gramática de Architect, incluido `**/` sin directorios.

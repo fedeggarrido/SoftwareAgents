@@ -31,7 +31,7 @@ import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();

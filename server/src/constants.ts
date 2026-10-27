@@ -257,3 +257,7 @@ export const REVIEW_MAX_REWORK_ROUNDS = 3;
 export const QA_MAX_TEST_FILES = 32;
 /** Recheck SA-026 leases without keeping a runner busy. */
 export const FEATURE_RUN_POLL_MS = 1000;
+
+/** QA runs whole task test files (e.g. worker.test.ts takes minutes on Windows); the
+ * 60 s eval criterion budget is for single tests. Still bounded and tree-killed. */
+export const QA_COMMAND_TIMEOUT_MS = 15 * 60_000;

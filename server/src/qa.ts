@@ -5,7 +5,7 @@ import * as contract from '../../core/schemas/test-report.schema.json';
 import type { TestReport } from '../../core/src/testReport.js';
 import { matchesChangeZone } from './changeZones.js';
 import { taskPath } from './commands/taskFiles.js';
-import { QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
+import { QA_COMMAND_TIMEOUT_MS, QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
 import { developerScope, isDeveloperTest } from './developer.js';
 import { EvalCriterionTerminationError } from './evalCriteria.js';
 import { assertEvalIntegrity } from './evalIntegrity.js';
@@ -101,7 +101,7 @@ export async function qaCommands(
       if (signal.aborted) throw new Error('QA verifier interrupted');
       results.push({
         command: taskTestCommand(file),
-        ...(await runTaskTest(tree, scratch, file, signal)),
+        ...(await runTaskTest(tree, scratch, file, signal, QA_COMMAND_TIMEOUT_MS)),
       });
     }
     return results;

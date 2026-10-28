@@ -34,7 +34,12 @@ export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
 export function lastReviewFailure(store: WorkStore, task: TaskRecord) {
   const event = store
     .listDomainEvents(task.key)
-    .filter((e) => isReviewFailure(e.reason) || isSuccessfulTaskStep(e))
+    .filter(
+      (e) =>
+        isReviewFailure(e.reason) ||
+        isSuccessfulTaskStep(e) ||
+        ['READY', 'FAILED_RETRYABLE'].includes(e.to_status),
+    )
     .at(-1);
   return event && isReviewFailure(event.reason)
     ? { reason: event.reason, created_at: event.created_at }

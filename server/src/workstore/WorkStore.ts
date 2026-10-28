@@ -257,6 +257,13 @@ export interface WorkStore {
   ): Promise<number>;
   /** SQLite-consistent snapshot, including committed WAL pages. Destination must not exist. */
   backup(destination: string): Promise<void>;
+  /** Human recovery, fenced by version and absence of leases; retains all reports. */
+  retryTask(
+    taskId: string,
+    version: number,
+    reason: string,
+    beforeCommit: () => void,
+  ): Promise<TaskRecord>;
   canStart(taskId: string): boolean;
   /** TTL in milliseconds. Owner must be unique to this worker incarnation. */
   claim(taskId: string, owner: string, ttl?: number): Promise<TaskRecord>;

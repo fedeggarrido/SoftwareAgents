@@ -14,6 +14,7 @@ import {
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
 import { lastDeveloperFailure } from '../developer.js';
+import { featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
@@ -26,7 +27,7 @@ import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFile
 const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
 const USAGE =
-  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | backup [--keep N]';
+  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | backup [--keep N] | retry <KEY> --reason <text>';
 
 /** Keep untrusted fields on one terminal line without executing control sequences. */
 function textField(value: string): string {
@@ -43,6 +44,14 @@ function parseArgs(argv: string[]) {
   let status: TaskStatus | undefined;
   let json = false;
   let keep = TASK_CLI_DEFAULT_KEEP;
+  if (
+    command === 'retry' &&
+    args.length === 3 &&
+    !args[0].startsWith('-') &&
+    args[1] === '--reason' &&
+    args[2].trim()
+  )
+    return { command, file: args[0], reason: args[2], status, json, keep };
   if (command === 'import' && args.length === 1 && !args[0].startsWith('-'))
     return { command, file: args[0], status, json, keep };
   if (command === 'list') {
@@ -66,18 +75,24 @@ function parseArgs(argv: string[]) {
   return { command, file: undefined, status, json, keep };
 }
 
-function audit(projectId: string, action: string, status: string, input?: unknown) {
+function audit(
+  projectId: string,
+  action: string,
+  status: string,
+  input?: unknown,
+  taskKey?: string,
+) {
   // Direct append fails visibly; intent precedes mutation, completion follows commit.
   new AuditLog().append({
     projectId,
     actorType: 'human',
     actorId: 'operator',
     action,
-    resourceType: 'project',
-    resourceId: projectId,
+    resourceType: taskKey ? 'task' : 'project',
+    resourceId: taskKey ?? projectId,
     policyDecision: null,
     riskLevel: 'medium',
-    taskKey: null,
+    taskKey: taskKey ?? null,
     executionId: null,
     outcome: { status },
     input,
@@ -243,6 +258,8 @@ export async function runTaskCommand(
   log = console.log,
 ): Promise<void> {
   const args = parseArgs(argv);
+  if (args.command === 'retry' && featureIngressActor() !== 'human')
+    throw new CliUsageError('task retry requires human ingress (SA-003)');
   let store: WorkStore | undefined;
   try {
     const config = loadProjectConfig(cwd, true);
@@ -310,7 +327,17 @@ export async function runTaskCommand(
       );
     } else {
       store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-      if (args.command === 'backup') log(textField(await backup(store, args.keep)));
+      if (args.command === 'retry') {
+        const task = store.getTask(args.file!);
+        if (!task) throw new Error('Unknown task');
+        const destination = await backup(store, args.keep);
+        const input = { task: task.key, reason: args.reason!, backup: destination };
+        const result = await store.retryTask(task.key, task.version, args.reason!, () =>
+          audit(config.project.id, 'manual_retry', 'intent', input, task.key),
+        );
+        audit(config.project.id, 'manual_retry', 'committed', input, task.key);
+        log(textField(`${result.key}: ${result.status}; backup: ${destination}`));
+      } else if (args.command === 'backup') log(textField(await backup(store, args.keep)));
       else {
         const tasks = list(store, args.status);
         if (args.json) log(JSON.stringify(tasks, null, 2));

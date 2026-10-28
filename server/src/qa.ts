@@ -17,6 +17,28 @@ import { runTaskTest, taskTestCommand, validateTaskTest } from './taskTestRunner
 
 const validateReport = compileSchema<TestReport>(contract);
 
+export class QaTestSelectionError extends Error {}
+
+/** Runtime evidence of an authoring defect, without invented command execution. */
+export function qaSelectionReport(input: ReviewerRequest, error: QaTestSelectionError): TestReport {
+  return {
+    verdict: 'fail',
+    commands: [],
+    acceptance: input.task.acceptanceRefs.map((ac) => ({
+      ac,
+      status: 'fail',
+      evidence: error.message,
+    })),
+    // One authoring defect, not one per AC: completeQa turns each defect into a bug task.
+    defects: input.task.acceptanceRefs.slice(0, 1).map((ac) => ({
+      ac,
+      severity: 'major',
+      summary: 'Task tests cannot be executed by QA',
+      reproduction: error.message,
+    })),
+  };
+}
+
 /** Closed command set derived by the runtime, never shell/argv supplied by the model or Brain. */
 export function qaTestFiles(input: ReviewerRequest): string[] {
   const files = evalGit(input.worktree, ['ls-files', '-z']).split('\0').filter(Boolean);
@@ -57,13 +79,24 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
       );
     })
     .sort();
-  if (!selected.length || selected.length > QA_MAX_TEST_FILES)
-    throw new Error('QA requires a bounded set of task tests (1-' + QA_MAX_TEST_FILES + ')');
+  if (!selected.length)
+    throw new QaTestSelectionError(
+      'No executable task tests selected. Task paths: ' +
+        JSON.stringify(input.files) +
+        '; zones: ' +
+        JSON.stringify(zones),
+    );
   for (const file of selected) {
+    if (
+      file.startsWith('core/') ||
+      (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)) &&
+        !(input.task.testZones ?? []).some((zone) => matchesZone(file, zone)))
+    )
+      throw new QaTestSelectionError('Unsupported QA test root: ' + JSON.stringify(file));
     validateTaskTest(input.worktree, file);
-    if (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)))
-      throw new Error('Unsupported QA test root: ' + JSON.stringify(file));
   }
+  if (selected.length > QA_MAX_TEST_FILES)
+    throw new Error('QA requires a bounded set of task tests (1-' + QA_MAX_TEST_FILES + ')');
   return selected;
 }
 

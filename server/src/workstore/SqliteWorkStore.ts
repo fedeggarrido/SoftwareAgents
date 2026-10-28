@@ -1380,6 +1380,41 @@ class SqliteWorkStore implements WorkStore {
       ),
     });
   }
+  retryTask(
+    taskId: string,
+    version: number,
+    reason: string,
+    beforeCommit: () => void,
+  ): Promise<TaskRecord> {
+    return this.write(() => {
+      this.assertNotRecovering(taskId);
+      const task = this.getTask(taskId);
+      if (!task || task.version !== version) throw new Error('Task changed before manual retry');
+      if (!task.feature_key || !this.getFeature(task.feature_key))
+        throw new Error('Manual retry requires a feature task');
+      if (task.lease_owner || task.lease_expires_at)
+        throw new Error('Manual retry refuses a task with a lease');
+      if (!['WAITING_HUMAN', 'FAILED_FINAL', 'FAILED_RETRYABLE', 'QA'].includes(task.status))
+        throw new Error('Task status does not allow manual retry: ' + task.status);
+      this.assertNoDecisionGate(taskId);
+      if (!reason.trim()) throw new Error('Manual retry requires a reason');
+      const to = task.review_ref ? 'READY' : 'FAILED_RETRYABLE';
+      const now = new Date().toISOString();
+      beforeCommit();
+      this.db
+        .prepare(
+          'UPDATE tasks SET status = ?, version = version + 1, attempt = 0, review_ref = NULL, blocked_reason = ?, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+        )
+        .run(to, reason, now, this.projectId, taskId, version);
+      this.db
+        .prepare(
+          "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, ?, ?, 0, ?, 'human', ?)",
+        )
+        .run(this.projectId, taskId, task.status, to, version + 1, 'manual_retry: ' + reason, now);
+      return this.getTask(taskId)!;
+    });
+  }
+
   async transition(
     taskId: string,
     expectedVersion: number,

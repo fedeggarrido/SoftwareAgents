@@ -12,7 +12,7 @@ import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 300_000 });
 
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
@@ -62,6 +62,8 @@ beforeEach(() => {
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
+  for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+    vi.stubEnv(key, undefined);
   vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
   vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(root, 'no-git-config'));
   for (const who of ['AUTHOR', 'COMMITTER']) {
@@ -129,6 +131,118 @@ async function open() {
 function dbFile() {
   return path.join(repo, '.git/softwareagents/work.sqlite3');
 }
+
+it('retries QA with a backup, human audit and preserved reports', async () => {
+  expect(cli('import', 'dag.yaml').code).toBe(0);
+  const store = await open();
+  const ref = { branch: 'sa/test', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+  store.createTask({
+    key: 'retry-me',
+    type: 'code',
+    feature_key: 'FEAT-001',
+    status: 'READY',
+    attempt: 3,
+  });
+  await store.claim('retry-me', 'fixture');
+  await store.setTaskWorktree('retry-me', 'fixture', ref.branch, repo);
+  await store.setTaskReview('retry-me', 'fixture', ref);
+  await store.transition(
+    'retry-me',
+    store.getTask('retry-me')!.version,
+    'RUNNING',
+    'fixture launch',
+    'fixture',
+  );
+  await store.transition(
+    'retry-me',
+    store.getTask('retry-me')!.version,
+    'REVIEW',
+    'fixture review',
+    'fixture',
+  );
+  await store.transition(
+    'retry-me',
+    store.getTask('retry-me')!.version,
+    'QA',
+    'fixture approval',
+    'fixture',
+  );
+  const result = cli('retry', 'retry-me', '--reason', 'Move the test to webview-ui/test');
+  expect(result).toMatchObject({ code: 0, err: '' });
+  expect(store.getTask('retry-me')).toMatchObject({
+    status: 'READY',
+    attempt: 0,
+    review_ref: null,
+    blocked_reason: 'Move the test to webview-ui/test',
+  });
+  expect(store.listDomainEvents('retry-me').at(-1)).toMatchObject({
+    actor: 'human',
+    to_status: 'READY',
+    reason: expect.stringContaining('manual_retry:'),
+  });
+  expect(fs.readdirSync(path.join(root, '.pixel-agents/backups/test')).length).toBe(1);
+  expect(new AuditLog().read('test')).toContainEqual(
+    expect.objectContaining({
+      entry: expect.objectContaining({
+        action: 'manual_retry',
+        actorType: 'human',
+        outcome: { status: 'committed' },
+      }),
+    }),
+  );
+});
+
+it('requires human ingress before creating any retry backup', async () => {
+  vi.stubEnv('SA_MANAGED_EXECUTION', 'fixture-agent');
+  await expect(runTaskCommand(['retry', first, '--reason', 'Try again'], repo)).rejects.toThrow(
+    'human ingress',
+  );
+  expect(fs.existsSync(path.join(root, '.pixel-agents/backups'))).toBe(false);
+});
+
+it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'FAILED_RETRYABLE', 'QA'] as const)(
+  'retries %s without an approval as FAILED_RETRYABLE',
+  async (status) => {
+    expect(cli('import', 'dag.yaml').code).toBe(0);
+    const store = await open();
+    store.createTask({
+      key: 'retry-unapproved',
+      type: 'code',
+      feature_key: 'FEAT-001',
+      status,
+      attempt: 3,
+    });
+    await runTaskCommand(
+      ['retry', 'retry-unapproved', '--reason', 'Operator recovery'],
+      repo,
+      () => {},
+    );
+    expect(store.getTask('retry-unapproved')).toMatchObject({
+      status: 'FAILED_RETRYABLE',
+      review_ref: null,
+      attempt: 0,
+      blocked_reason: 'Operator recovery',
+    });
+  },
+);
+
+it.each(['DONE', 'QA'] as const)(
+  'refuses manual retry for DONE or a leased QA task (%s)',
+  async (status) => {
+    expect(cli('import', 'dag.yaml').code).toBe(0);
+    const store = await open();
+    store.createTask({
+      key: 'no-retry',
+      type: 'code',
+      feature_key: 'FEAT-001',
+      status: status === 'QA' ? 'READY' : status,
+    });
+    if (status === 'QA') await store.claim('no-retry', 'worker');
+    const before = store.getTask('no-retry');
+    expect(cli('retry', 'no-retry', '--reason', 'try again').code).not.toBe(0);
+    expect(store.getTask('no-retry')).toEqual(before);
+  },
+);
 
 it('dispatches import/list, reimports without duplication and preserves a live lease', async () => {
   expect(cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });

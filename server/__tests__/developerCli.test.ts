@@ -1019,6 +1019,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
         expect(context.allowedScope.coreTestRule).toContain('Never place tests in core/src/');
         expect(context.allowedScope.fileWriteRule).toContain('never through shell writes');
         expect(context.allowedScope.testTempRule).toContain('os.tmpdir()');
+        expect(context.allowedScope.colocatedTestRule).toContain('never next to sources');
         expect(attempts().at(-1)).toMatchObject({ result: 'pass', exitCode: 0 });
         expect(
           attempts()

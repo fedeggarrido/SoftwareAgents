@@ -113,7 +113,7 @@ export function developerScope(task: DagTask, root: string) {
     testTempRule:
       'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
     colocatedTestRule:
-      'Except in core/, remove .test/.spec before the extension and match a changeZone.',
+      'Tests live only in server/__tests__/ (mirroring server/src/), webview-ui/test/ (flat, named after the source: webview-ui/test/<basename>*.test.ts) or e2e/; never next to sources. Other locations never run and are rejected.',
   };
 }
 
@@ -433,7 +433,9 @@ function checkDeveloperChanges(
       throw new Error('Developer changed an ignored file; human review required');
     if (
       (qaAuthor && !isQaAuthorPath(file)) ||
-      (isDeveloperTest(file) && file.startsWith('core/'))
+      // Only these roots are ever executed (server/webview Vitest include, Playwright).
+      (isDeveloperTest(file) &&
+        !['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)))
     ) {
       offending.push(file);
       continue;

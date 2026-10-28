@@ -13,6 +13,32 @@ import { runMigrations } from '../../src/workstore/migrations.js';
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
 
 describe('read-only WorkStore acceptance', () => {
+  it('AC-010 accepts the current schema and rejects older or unknown schemas', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'features-schema-'));
+    let db: DatabaseSync | undefined;
+    try {
+      const directory = path.join(root, '.git', 'softwareagents');
+      fs.mkdirSync(directory, { recursive: true });
+      db = new DatabaseSync(path.join(directory, 'work.sqlite3'));
+      runMigrations(db);
+      const currentVersion = Number(
+        db.prepare('SELECT version FROM schema_version WHERE singleton = 1').get()?.version,
+      );
+      for (const version of [14, 15, currentVersion, currentVersion + 1]) {
+        db.prepare('UPDATE schema_version SET version = ?').run(version);
+        const result = await readFeaturesView(root, 'P');
+        expect(result).toEqual(
+          version >= 15 && version <= currentVersion
+            ? { status: 'empty', reason: null, features: [] }
+            : { status: 'read_error', reason: 'schema_incompatible', features: [] },
+        );
+      }
+    } finally {
+      db?.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('AC-006/011 resolves gitdir and commondir; concurrent WAL reads preserve bytes and project isolation', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'features-reader-'));
     let db: DatabaseSync | undefined;

@@ -48,6 +48,18 @@
             "enum": ["pass", "fail", "not_tested"]
           },
           "reason": { "type": "string", "minLength": 1 },
+          "preexisting": { "type": "boolean" },
+          "baseline": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["result", "passed", "failed"],
+            "properties": {
+              "result": { "enum": ["pass", "fail", "not_tested"] },
+              "passed": { "type": "integer", "minimum": 0 },
+              "failed": { "type": "integer", "minimum": 0 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          },
           "passed": {
             "type": "integer",
             "minimum": 0

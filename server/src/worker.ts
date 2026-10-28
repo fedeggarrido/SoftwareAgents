@@ -1372,6 +1372,11 @@ async function runWorkerExecution(
             options.reviewer!,
             resolveInside(common, 'softwareagents/runtime/verifiers'),
             verifierAbort.signal,
+            undefined,
+            (command) =>
+              audit('qa_baseline', {
+                detail: JSON.stringify({ base: options.reviewer!.reviewRef.base, ...command }),
+              }),
           );
           guardRequirementsWrites(tree.path, requirementsBefore!);
           taskData.task.brief = qaBrief(options.reviewer!, qaEvidence);
@@ -1680,6 +1685,13 @@ async function runWorkerExecution(
                     resolveInside(common, 'softwareagents/runtime/verifiers'),
                     verifierAbort.signal,
                     requested,
+                    (command) =>
+                      audit('qa_baseline', {
+                        detail: JSON.stringify({
+                          base: options.reviewer!.reviewRef.base,
+                          ...command,
+                        }),
+                      }),
                   )),
                 );
                 guardRequirementsWrites(tree.path, requirementsBefore!);

@@ -7,7 +7,7 @@ import { matchesChangeZone } from './changeZones.js';
 import { taskPath } from './commands/taskFiles.js';
 import { QA_COMMAND_TIMEOUT_MS, QA_MAX_TEST_FILES, TASK_CLI_INPUT_BYTES } from './constants.js';
 import { developerScope, isDeveloperTest } from './developer.js';
-import { EvalCriterionTerminationError } from './evalCriteria.js';
+import { EvalCriterionTerminationError, runVerifierCommand } from './evalCriteria.js';
 import { assertEvalIntegrity } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
 import { guardRequirementsWrites, requirementsSnapshot } from './requirements.js';
@@ -16,6 +16,97 @@ import { compileSchema, SchemaValidationError, validateSchema } from './schemaVa
 import { runTaskTest, taskTestCommand, validateTaskTest } from './taskTestRunner.js';
 
 const validateReport = compileSchema<TestReport>(contract);
+
+/** Materialize the pinned commit with a private index, without changing any Git ref or index.
+ * The shared task runner still owns builds, isolated profiles, deadlines and process closure. */
+async function qaBaseline(
+  input: ReviewerRequest,
+  scratch: string,
+  file: string,
+  signal: AbortSignal,
+): Promise<NonNullable<TestReport['commands'][number]['baseline']>> {
+  const temporary = fs.mkdtempSync(path.join(scratch, 'qa-baseline-'));
+  const snapshot = path.join(temporary, 'project');
+  const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
+  const link = path.join(snapshot, 'node_modules');
+  const deadline = Date.now() + QA_COMMAND_TIMEOUT_MS;
+  let safe = true;
+  let linked = false;
+  try {
+    fs.mkdirSync(snapshot);
+    const home = path.join(temporary, 'home');
+    fs.mkdirSync(home);
+    const git = async (args: string[]) => {
+      if (signal.aborted) throw new Error('QA verifier interrupted');
+      const result = await runVerifierCommand(
+        ['git', ...args],
+        input.worktree,
+        home,
+        Math.max(1, deadline - Date.now()),
+        signal,
+        undefined,
+        path.join(temporary, 'index'),
+      );
+      if (result !== 'pass' || signal.aborted) throw new Error('Baseline preparation unavailable');
+    };
+    await git(['read-tree', input.reviewRef.base]);
+    await git(['checkout-index', '--all', '--prefix=' + snapshot.replace(/\\/g, '/') + '/']);
+    if (!fs.existsSync(path.join(snapshot, file)))
+      return {
+        result: 'not_tested',
+        passed: 0,
+        failed: 0,
+        reason: 'Test file absent in base commit',
+      };
+    fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+    linked = true;
+    if (signal.aborted) throw new Error('QA verifier interrupted');
+    if (Date.now() >= deadline)
+      return {
+        result: 'not_tested',
+        passed: 0,
+        failed: 0,
+        reason: 'Baseline preparation timed out',
+      };
+    const result = await runTaskTest(snapshot, scratch, file, signal, deadline - Date.now());
+    if (signal.aborted) throw new Error('QA verifier interrupted');
+    return result;
+  } catch (error) {
+    if (error instanceof EvalCriterionTerminationError) {
+      safe = false;
+      throw error;
+    }
+    if (signal.aborted) throw error;
+    return {
+      result: 'not_tested',
+      passed: 0,
+      failed: 0,
+      reason: 'Baseline verification unavailable',
+    };
+  } finally {
+    if (safe) {
+      if (linked) {
+        if (
+          !fs.lstatSync(link).isSymbolicLink() ||
+          fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
+        )
+          throw new Error('QA baseline dependency link changed');
+        fs.unlinkSync(link);
+      }
+      // Never traverse repository symlinks or dependency junctions during cleanup.
+      const remove = (dir: string) => {
+        for (const name of fs.readdirSync(dir)) {
+          const target = path.join(dir, name);
+          const stat = fs.lstatSync(target);
+          if (stat.isDirectory() && !stat.isSymbolicLink()) remove(target);
+          else fs.unlinkSync(target);
+        }
+        fs.rmdirSync(dir);
+      };
+      remove(temporary);
+    }
+  }
+}
 
 export class QaTestSelectionError extends Error {}
 
@@ -106,6 +197,7 @@ export async function qaCommands(
   scratch: string,
   signal: AbortSignal,
   requested?: string[],
+  auditBaseline?: (command: TestReport['commands'][number]) => void,
 ): Promise<TestReport['commands']> {
   const tree = input.worktree;
   const integrity = {
@@ -132,10 +224,22 @@ export async function qaCommands(
     const results: TestReport['commands'] = [];
     for (const file of files) {
       if (signal.aborted) throw new Error('QA verifier interrupted');
-      results.push({
+      const evidence: TestReport['commands'][number] = {
         command: taskTestCommand(file),
         ...(await runTaskTest(tree, scratch, file, signal, QA_COMMAND_TIMEOUT_MS)),
-      });
+      };
+      if (evidence.result === 'fail' && input.reviewRef.base) {
+        evidence.baseline = await qaBaseline(input, scratch, file, signal);
+        if (evidence.baseline.result === 'fail' && evidence.baseline.failed >= evidence.failed) {
+          evidence.preexisting = true;
+          evidence.reason =
+            'Base commit ' +
+            input.reviewRef.base +
+            ' also fails with at least as many failed tests as the task';
+        }
+        auditBaseline?.(evidence);
+      }
+      results.push(evidence);
     }
     return results;
   } catch (error) {
@@ -165,6 +269,8 @@ export function qaBrief(
     ...input,
     contract,
     commands,
+    baselineInstruction:
+      'Only runtime preexisting=true identifies a failure reproduced on the pinned base with at least as many failed tests. These failures alone do not block pass; preserve all baseline, preexisting and reason fields exactly. New failures and unavailable task commands still block pass. Independently assess every AC.',
     commandAllowlist: requestsUsed ? [] : commands.map((c) => c.command),
     validationErrors: errors,
     instruction:
@@ -261,15 +367,39 @@ export function validateTestReport(
       : 'pass';
   if (downgraded && proposedPass && verdict === 'not_tested') report.verdict = verdict;
   else if (verdict !== report.verdict) errors.push('Contradictory verdict');
-  if (report.verdict === 'pass' && (!commands.length || commands.some((c) => c.result !== 'pass')))
+  if (
+    report.verdict === 'pass' &&
+    (!commands.length ||
+      commands.some(
+        (c) =>
+          c.result !== 'pass' &&
+          !(
+            c.result === 'fail' &&
+            c.preexisting === true &&
+            c.baseline?.result === 'fail' &&
+            c.baseline.failed >= c.failed
+          ),
+      ))
+  )
     errors.push('Cannot pass with missing/failed runtime commands');
   const evidence = (rows: TestReport['commands']) =>
-    rows.map(({ command, result, passed, failed, reason }) => ({
+    rows.map(({ command, result, passed, failed, reason, baseline, preexisting }) => ({
       command,
       result,
       passed,
       failed,
       ...(reason ? { reason } : {}),
+      ...(baseline
+        ? {
+            baseline: {
+              result: baseline.result,
+              passed: baseline.passed,
+              failed: baseline.failed,
+              ...(baseline.reason ? { reason: baseline.reason } : {}),
+            },
+          }
+        : {}),
+      ...(preexisting !== undefined ? { preexisting } : {}),
     }));
   if (JSON.stringify(evidence(report.commands)) !== JSON.stringify(evidence(commands)))
     errors.push('Commands must exactly match runtime evidence; model commands are forbidden');

@@ -13,6 +13,15 @@ export interface TestReport {
     passed: number;
     failed: number;
     reason?: string;
+    /** Optional runtime comparison against review_ref.base; absent in historical reports. */
+    baseline?: {
+      result: 'pass' | 'fail' | 'not_tested';
+      passed: number;
+      failed: number;
+      reason?: string;
+    };
+    /** Runtime only: the base failed at least as many tests as the task. */
+    preexisting?: boolean;
   }[];
   defects: {
     ac: string;

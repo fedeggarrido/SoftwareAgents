@@ -10,14 +10,20 @@ import { QA_MAX_TEST_FILES } from '../src/constants.js';
 import { lastDeveloperFailure } from '../src/developer.js';
 import { runIsolatedVitest } from '../src/evalCriteria.js';
 import { loadModelPolicy } from '../src/modelPolicy.js';
-import { qaCommands, qaRequestedCommands, qaTestFiles } from '../src/qa.js';
+import {
+  qaBrief,
+  qaCommands,
+  qaRequestedCommands,
+  qaTestFiles,
+  validateTestReport,
+} from '../src/qa.js';
 import { lastReviewFailure, reviewReworkRounds } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { VERIFIER_INFRASTRUCTURE_PREFIX } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { DomainEventRecord, TaskRecord, WorkStore } from '../src/workstore/WorkStore.js';
 
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
@@ -53,6 +59,96 @@ const source = (text: string, file = 'server/__tests__/check.test.ts') =>
 const verify = () => runIsolatedVitest(tree, scratch, 'server/__tests__/check.test.ts');
 
 describe('Shared isolated QA verifier', () => {
+  it.each(['preexisting', 'new-failure', 'new-spec', 'more-failures'])(
+    'compares only failed commands against the pinned base: %s',
+    async (scenario) => {
+      fs.unlinkSync(link);
+      git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+      const file = 'server/__tests__/check.test.ts';
+      const passing =
+        "import { it, expect } from 'vitest'; it('check', () => expect(true).toBe(true));";
+      const failing =
+        "import { it, expect } from 'vitest'; it('check', () => expect(true).toBe(false));";
+      const passingFile = 'server/__tests__/passing.test.ts';
+      source(passing, passingFile);
+      source(
+        scenario === 'new-spec' || scenario === 'new-failure' ? passing : failing,
+        scenario === 'new-spec' ? 'server/__tests__/old.test.ts' : file,
+      );
+      const commit = () => {
+        git('add', 'server');
+        git(
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.invalid',
+          'commit',
+          '-m',
+          'fixture',
+        );
+        return git('rev-parse', 'HEAD').trim();
+      };
+      const base = commit();
+      source(
+        failing +
+          (scenario === 'more-failures' ? " it('another', () => expect(true).toBe(false));" : '\n'),
+      );
+      const sha = commit();
+      const input = {
+        worktree: tree,
+        reviewRef: { sha, base },
+        files: [file, passingFile],
+        task: { changeZones: [], testZones: [], acceptanceRefs: ['AC-001'] },
+      } as unknown as ReviewerRequest;
+      const audit = vi.fn();
+      const commands = await qaCommands(
+        input,
+        scratch,
+        new AbortController().signal,
+        undefined,
+        audit,
+      );
+      const preexisting = scenario === 'preexisting';
+      expect(commands).toHaveLength(2);
+      expect(commands[1]).toEqual({
+        command: 'vitest:' + passingFile,
+        result: 'pass',
+        passed: 1,
+        failed: 0,
+      });
+      expect(commands[0]).toMatchObject({
+        result: 'fail',
+        failed: scenario === 'more-failures' ? 2 : 1,
+        baseline: {
+          result:
+            scenario === 'new-spec' ? 'not_tested' : scenario === 'new-failure' ? 'pass' : 'fail',
+        },
+      });
+      expect(commands[0].preexisting === true).toBe(preexisting);
+      expect(audit).toHaveBeenCalledExactlyOnceWith(commands[0]);
+      expect(JSON.parse(qaBrief(input, commands)).commands).toEqual(commands);
+      const report = {
+        verdict: 'pass',
+        commands,
+        defects: [],
+        acceptance: [{ ac: 'AC-001', status: 'pass', evidence: 'Inspected AC' }],
+      };
+      if (preexisting) {
+        expect(validateTestReport(JSON.stringify(report), input, commands).verdict).toBe('pass');
+        const forged = structuredClone(report);
+        forged.commands[0].baseline!.failed++;
+        expect(() => validateTestReport(JSON.stringify(forged), input, commands)).toThrow(
+          'exactly match',
+        );
+      } else {
+        expect(() => validateTestReport(JSON.stringify(report), input, commands)).toThrow(
+          'Cannot pass',
+        );
+      }
+      expect(fs.readdirSync(scratch)).toEqual([]);
+      expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
+    },
+  );
   it('builds server hooks in a scratch snapshot and leaves the approved task tree clean', async () => {
     fs.unlinkSync(link);
     git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));

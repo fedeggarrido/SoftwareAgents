@@ -268,6 +268,46 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     },
   );
 
+  it('gates a proposal whose acceptance coverage belongs only to documentation', () => {
+    const spec = { key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] } as Parameters<
+      typeof validateArchitect
+    >[1];
+    const doc = {
+      key: 'FEAT-001-T01',
+      type: 'doc',
+      title: 'Guide',
+      description: 'Document behavior',
+      acceptanceRefs: ['AC-001'],
+      dependsOn: [],
+      agentRole: 'developer',
+      size: 'S',
+      changeZones: ['docs/guide.md'],
+      parallelizable: false,
+    };
+    const proposal = {
+      components: ['Guide'],
+      risks: [],
+      body: 'Design',
+      dag: {
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'TaskDAG',
+        feature: 'FEAT-001',
+        tasks: [doc],
+      },
+    };
+    expect(() => validateArchitect(JSON.stringify(proposal), spec, { cwd: repo })).toThrow(
+      'doc_only_acceptance',
+    );
+    proposal.dag.tasks.push({
+      ...doc,
+      key: 'FEAT-001-T02',
+      type: 'qa',
+      agentRole: 'qa-author',
+      changeZones: ['server/__tests__/guide.test.ts'],
+    });
+    expect(() => validateArchitect(JSON.stringify(proposal), spec, { cwd: repo })).not.toThrow();
+  });
+
   it('rejects unsafe zones, physical junction escapes and Operator-protected prefixes', () => {
     const spec = { key: 'FEAT-001', acceptance: [{ id: 'AC-001' }] } as Parameters<
       typeof validateArchitect

@@ -44,7 +44,14 @@ export function isQaAuthorTask(task: Pick<DagTask, 'agentRole'>): boolean {
 }
 
 function isDevelopableTask(task: DagTask): boolean {
-  return (task.type === 'code' && task.agentRole === 'developer') || isQaAuthorTask(task);
+  return (
+    (['code', 'doc'].includes(task.type) && task.agentRole === 'developer') ||
+    (task.type !== 'doc' && isQaAuthorTask(task))
+  );
+}
+
+export function isDocumentationPath(file: string): boolean {
+  return file.endsWith('.md') || file.startsWith('docs/');
 }
 
 /** Fixtures/helpers belong under these test roots, never under product source directories. */
@@ -106,6 +113,7 @@ export function developerScope(task: DagTask, root: string) {
   });
   return {
     changeZones: task.changeZones ?? [],
+    documentationOnly: task.type === 'doc',
     testZones: task.testZones ?? [],
     directoryChangeZones: directories,
     mirroredTestZones,
@@ -271,7 +279,7 @@ export function developerRequest(
       dag.tasks.find((t) => isDevelopableTask(t) && !!store.getTask(t.key)?.review_ref));
   if (!task || (!eligible(task) && !store.getTask(task.key)?.review_ref))
     throw new Error(
-      'No eligible READY code or test task; use --task to inspect a previously developed task',
+      'No eligible READY code, doc or test task; use --task to inspect a previously developed task',
     );
   const record = store.getTask(task.key)!;
   if (
@@ -281,9 +289,11 @@ export function developerRequest(
   )
     throw new Error('Developer review registration requires human reconciliation before retrying');
   if (!isDevelopableTask(task) || !task.changeZones?.length)
-    throw new Error('Developer task requires a code/developer or qa/test role and changeZones');
+    throw new Error('Developer task requires a code/doc developer or qa/test role and changeZones');
   for (const zone of [...task.changeZones, ...(task.testZones ?? [])])
     validateChangeZone(config.repoRoot, zone, config.operator.protectedPaths ?? []);
+  if (task.type === 'doc' && task.changeZones.some((zone) => !isDocumentationPath(zone)))
+    throw new Error('Documentation tasks require documentation-only changeZones');
   return {
     key,
     approvedSpec: spec,
@@ -444,6 +454,7 @@ function checkDeveloperChanges(
     if (!committable.has(file) && fs.existsSync(taskPath(tree, file)))
       throw new Error('Developer changed an ignored file; human review required');
     if (
+      (input.task.type === 'doc' && !isDocumentationPath(file)) ||
       (qaAuthor && !isQaAuthorPath(file)) ||
       // Only these roots are ever executed (server/webview Vitest include, Playwright),
       // unless the task declares the location as an explicit testZone; core/ never.
@@ -464,8 +475,12 @@ function checkDeveloperChanges(
     if (
       ![
         ...input.task.changeZones!,
-        ...(qaAuthor || isDeveloperTest(file) ? (input.task.testZones ?? []) : []),
-        ...(!qaAuthor && isDeveloperTest(file) ? scope.mirroredTestZones : []),
+        ...(input.task.type !== 'doc' && (qaAuthor || isDeveloperTest(file))
+          ? (input.task.testZones ?? [])
+          : []),
+        ...(input.task.type !== 'doc' && !qaAuthor && isDeveloperTest(file)
+          ? scope.mirroredTestZones
+          : []),
       ].some((zone) => {
         const literal = zone.replace(/\/$/, '');
         const directory =
@@ -486,6 +501,7 @@ function checkDeveloperChanges(
       offending.push(file);
   }
   if (offending.length) throw new ChangeZonesExceededError(offending);
+  if (input.task.type === 'doc') return [];
   const tests = files.filter(
     (file) =>
       isDeveloperTest(file) &&

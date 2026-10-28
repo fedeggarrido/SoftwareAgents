@@ -8,6 +8,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as architect from '../src/architect.js';
+import { AuditLog } from '../src/auditLog.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { assertFeatureRunIngress, type FeatureRunSummary, runFeature } from '../src/featureRun.js';
@@ -28,11 +29,17 @@ import { readyProbeFor } from './helpers/readyProbe.js';
 vi.setConfig({ testTimeout: 300_000 });
 // Style is covered with real tools in developerCli/qaCli. Keep these scheduling cases
 // within the 90 s budget while retaining real acceptance-test execution and Git.
-vi.mock('../src/developer.js', async (original) => ({
-  ...(await original<typeof import('../src/developer.js')>()),
-  developerStyleCommands: () => [],
-  developerVerifier: () => ({ commands: [] }),
-}));
+vi.mock('../src/developer.js', async (original) => {
+  const actual = await original<typeof import('../src/developer.js')>();
+  return {
+    ...actual,
+    developerStyleCommands: (tree: string, base: string, fix?: boolean) =>
+      fs.existsSync(path.join(tree, 'docs/guide.md'))
+        ? actual.developerStyleCommands(tree, base, fix)
+        : [],
+    developerVerifier: () => ({ commands: [] }),
+  };
+});
 // The real Windows identity/termination boundary has its own suite and the separate
 // kill/restart harness below. Avoid dozens of PowerShell startups in scheduler cases.
 vi.mock('../src/workstore/processRecovery.js', async (original) => {
@@ -868,6 +875,64 @@ describe.skipIf(process.platform !== 'win32')(
         } finally {
           store.close();
         }
+      },
+    );
+    it.each(['doc', 'doc-delete'])(
+      'integrates %s after cross review without QA or fabricated TestReport',
+      async (scenario) => {
+        if (scenario === 'doc-delete') {
+          fs.mkdirSync(path.join(repo, 'docs'));
+          fs.writeFileSync(path.join(repo, 'docs/guide.md'), '# Obsolete guide\n');
+          git('add', 'docs/guide.md');
+          git('commit', '-m', 'obsolete documentation fixture');
+        }
+        await spec();
+        const main = git('rev-parse', 'main');
+        const result = await run(scenario);
+        expect(result.status, result.message).toBe('ready_to_merge');
+        const store = await storeFor();
+        try {
+          const key = 'FEAT-001-T03';
+          const doc = store.getTask(key)!;
+          expect(doc.status).toBe('DONE');
+          expect(doc.test_reports ?? []).toEqual([]);
+          expect(
+            new AuditLog()
+              .read('test')
+              .some(
+                (row) =>
+                  !row.corrupt &&
+                  row.entry.taskKey === key &&
+                  row.entry.outcome.status === 'qa_not_applicable' &&
+                  row.entry.outcome.detail === 'QA no aplicable: tarea doc',
+              ),
+          ).toBe(true);
+          expect(doc.review_reports?.at(-1)?.report.verdict).toBe('approve');
+          expect(
+            store
+              .listDomainEvents(key)
+              .some((e) => e.to_status === 'DONE' && e.reason === 'QA no aplicable: tarea doc'),
+          ).toBe(true);
+          expect(
+            rows()
+              .filter((r) => r.task === key)
+              .map((r) => r.role),
+          ).toEqual(['developer', 'reviewer']);
+          if (scenario === 'doc-delete')
+            expect(
+              git('ls-tree', '--name-only', result.integration_sha!, '--', 'docs/guide.md'),
+            ).toBe('');
+          else expect(git('show', `${result.integration_sha}:docs/guide.md`)).toContain('# Guide');
+          expect(git('diff-tree', '--no-commit-id', '--name-only', '-r', doc.review_ref!.sha)).toBe(
+            'docs/guide.md',
+          );
+          expect(git('rev-parse', 'main')).toBe(main);
+        } finally {
+          store.close();
+        }
+        const count = rows().length;
+        expect((await run(scenario)).status).toBe('ready_to_merge');
+        expect(rows()).toHaveLength(count);
       },
     );
     it('completes three dependent tasks including qa-author, preserves main and resumes without duplicate effects', async () => {

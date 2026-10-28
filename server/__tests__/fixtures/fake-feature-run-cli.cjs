@@ -38,23 +38,29 @@ process.stdin.on('end', () => {
       return;
     }
     const n = Number(data.task.key.slice(-1));
-    fs.mkdirSync('server/src', { recursive: true });
-    fs.mkdirSync('server/__tests__', { recursive: true });
-    if (n < 3) fs.writeFileSync(`server/src/step${n}.ts`, `export const step${n} = ${n};\n`);
-    const previous = n === 1 ? 1 : n - 1;
-    const rework =
-      data.reviewFindings?.length || data.qaDefects?.length
-        ? `it('fixes rework', () => expect(step${previous}).toBe(${previous}));\n`
-        : '';
-    fs.writeFileSync(
-      `server/__tests__/step${n}.test.ts`,
-      `import { expect, it } from 'vitest';\n\nimport { step${previous} } from '../src/step${previous}';\n\nit('step ${n} sees its dependency', () => expect(step${previous}).toBe(${previous}));\n${rework}`,
-    );
-    if (
-      scenario === 'always-fail' ||
-      (scenario === 'retry' && !rows.some((r) => r.role === 'developer'))
-    )
-      fs.unlinkSync(`server/__tests__/step${n}.test.ts`);
+    if (data.task.type === 'doc') {
+      fs.mkdirSync('docs', { recursive: true });
+      if (scenario === 'doc-delete') fs.unlinkSync('docs/guide.md');
+      else fs.writeFileSync('docs/guide.md', '# Guide\n\nDocumented behavior.\n');
+    } else {
+      fs.mkdirSync('server/src', { recursive: true });
+      fs.mkdirSync('server/__tests__', { recursive: true });
+      if (n < 3) fs.writeFileSync(`server/src/step${n}.ts`, `export const step${n} = ${n};\n`);
+      const previous = n === 1 ? 1 : n - 1;
+      const rework =
+        data.reviewFindings?.length || data.qaDefects?.length
+          ? `it('fixes rework', () => expect(step${previous}).toBe(${previous}));\n`
+          : '';
+      fs.writeFileSync(
+        `server/__tests__/step${n}.test.ts`,
+        `import { expect, it } from 'vitest';\n\nimport { step${previous} } from '../src/step${previous}';\n\nit('step ${n} sees its dependency', () => expect(step${previous}).toBe(${previous}));\n${rework}`,
+      );
+      if (
+        scenario === 'always-fail' ||
+        (scenario === 'retry' && !rows.some((r) => r.role === 'developer'))
+      )
+        fs.unlinkSync(`server/__tests__/step${n}.test.ts`);
+    }
     if (executor === 'claude') {
       console.log(
         JSON.stringify({
@@ -84,9 +90,11 @@ process.stdin.on('end', () => {
   }
   const mode =
     role === 'architect'
-      ? ['rework', 'defect', 'single', 'retry', 'always-fail'].includes(scenario)
-        ? 'orchestrator-single'
-        : 'orchestrator-chain'
+      ? scenario.startsWith('doc')
+        ? 'orchestrator-doc'
+        : ['rework', 'defect', 'single', 'retry', 'always-fail'].includes(scenario)
+          ? 'orchestrator-single'
+          : 'orchestrator-chain'
       : role === 'reviewer'
         ? scenario === 'rework' && !rows.some((r) => r.role === 'reviewer')
           ? 'reject'

@@ -719,7 +719,24 @@ export class SqliteWorkStore implements WorkStore {
             JSON.stringify({ [taskId]: 'REVIEW' }),
           );
       } else if (review.report.verdict === 'approve') {
-        this.change(taskId, task.version, 'QA', 'Reviewer approved', owner);
+        if (task.type === 'doc') {
+          this.change(taskId, task.version, 'DONE', 'QA no aplicable: tarea doc', owner);
+          for (const dependent of this.listTasks())
+            if (
+              dependent.feature_key === task.feature_key &&
+              dependent.declaration &&
+              dependent.status === 'DRAFT' &&
+              this.listTaskDependencies(dependent.key).some((d) => d.depends_on_key === taskId) &&
+              this.canStart(dependent.key)
+            )
+              this.change(
+                dependent.key,
+                dependent.version,
+                'READY',
+                'Documentation dependency completed',
+                owner,
+              );
+        } else this.change(taskId, task.version, 'QA', 'Reviewer approved', owner);
       } else {
         this.change(taskId, task.version, 'READY', 'Reviewer requested changes', owner);
         this.db
@@ -1466,6 +1483,12 @@ export class SqliteWorkStore implements WorkStore {
     if (task.version !== expectedVersion)
       throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
     if (!isTaskStatus(to) || !isTaskStatus(task.status) || !canTransition(task.status, to))
+      throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
+    if (
+      task.status === 'REVIEW' &&
+      to === 'DONE' &&
+      (task.type !== 'doc' || !hasCurrentApproval(this, taskId))
+    )
       throw new TaskTransitionError(taskId, 'INVALID_TRANSITION');
     // Failure/cleanup retains the unresolved gate. Only the dedicated human revision
     // claim may enter RUNNING while that one gate remains open.

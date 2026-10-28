@@ -648,6 +648,7 @@ async function runWorkerExecution(
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
   );
   const taskData = {
+    documentationOnly: options.developer?.task.type === 'doc',
     task: { key: args.task, brief, verifierFailures: [] as VerifierFailure[] },
     brainContents: {} as Record<string, string>,
     repository: {
@@ -976,6 +977,12 @@ async function runWorkerExecution(
       throw new CliUsageError(
         'Cascade eval requires an enabled, eligible Operator verifier binding',
       );
+    if (options.developer?.task.type === 'doc') {
+      // Documentation bypasses execution/type verifiers, including Operator overrides.
+      verifier = { ...verifier, commands: [] };
+      usingDefaultVerifier = !verifier.allowedPaths;
+      levels = [];
+    }
     for (;;) {
       const inputs: TierInputs =
         verifier && levels.length ? { cascadeTier: levels[tierIndex] } : normalInputs;
@@ -1796,6 +1803,8 @@ async function runWorkerExecution(
                 ),
               );
               audit('review_report_persisted', { detail: JSON.stringify(review) });
+              if (options.reviewer.task.type === 'doc' && report.verdict === 'approve')
+                audit('qa_not_applicable', { detail: 'QA no aplicable: tarea doc' });
               telemetryStatus = capped ? 'require_human' : 'ok';
               if (capped) process.exitCode = 3;
               log(`${args.task}: ${report.verdict} → ${workStore!.getTask(args.task)!.status}`);
@@ -1961,7 +1970,7 @@ async function runWorkerExecution(
               scratch,
               verifierAbort.signal,
               usingDefaultVerifier ? config.operator.protectedPaths : undefined,
-              developerTests,
+              options.developer?.task.type === 'doc' ? undefined : developerTests,
               startingHead,
               {
                 failures,
@@ -1992,7 +2001,7 @@ async function runWorkerExecution(
         const passed =
           !interrupted &&
           exitCode === 0 &&
-          results.length > 0 &&
+          (results.length > 0 || options.developer?.task.type === 'doc') &&
           results.every(
             (r) =>
               r === 'pass' ||

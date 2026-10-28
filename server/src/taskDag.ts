@@ -56,6 +56,7 @@ export function deferredAcceptanceCoverage(
         .filter(
           (task) =>
             task.key !== key &&
+            task.type !== 'doc' &&
             descendants.has(task.key) &&
             !isDone(task.key) &&
             task.acceptanceRefs.includes(ac),
@@ -137,6 +138,16 @@ export function analyzeTaskDag(
   const covered = new Set<string>();
   for (const task of dag.tasks) {
     for (const ref of task.acceptanceRefs) {
+      if (
+        task.type === 'doc' &&
+        !dag.tasks.some(
+          (other) =>
+            other.type !== 'doc' &&
+            (other.type === 'code' || ['qa', 'test', 'qa-author'].includes(other.agentRole)) &&
+            other.acceptanceRefs.includes(ref),
+        )
+      )
+        issues.push({ code: 'doc_only_acceptance', task: task.key, acceptanceRef: ref });
       if (acceptanceIds.has(ref)) covered.add(ref);
       else issues.push({ code: 'unknown_acceptance', task: task.key, acceptanceRef: ref });
     }

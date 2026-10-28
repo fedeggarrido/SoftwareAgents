@@ -15,6 +15,7 @@ import { loadFeatureSpec } from '../src/featureSpec.js';
 import { SchemaValidationError } from '../src/schemaValidation.js';
 import {
   analyzeTaskDag,
+  deferredAcceptanceCoverage,
   parseTaskDag,
   parseTechnicalDesign,
   taskDeclaration,
@@ -45,6 +46,31 @@ function dag(...tasks: DagTask[]): TaskDag {
 }
 
 const covered = (...tasks: DagTask[]) => dag(task(99, [], ['AC-001', 'AC-002']), ...tasks);
+
+it('rejects doc-only AC ownership and never defers runtime coverage to docs', () => {
+  const doc = { ...task(2, [1], ['AC-001', 'AC-002']), type: 'doc' as const };
+  const code = task(1, [], ['AC-001']);
+  expect(analyzeTaskDag(dag(code, doc), spec).issues).toContainEqual({
+    code: 'doc_only_acceptance',
+    task: doc.key,
+    acceptanceRef: 'AC-002',
+  });
+  code.acceptanceRefs.push('AC-002');
+  expect(analyzeTaskDag(dag(code, doc), spec).valid).toBe(true);
+  expect(deferredAcceptanceCoverage(dag(code, doc), code.key, () => false)).toEqual({
+    'AC-001': [],
+    'AC-002': [],
+  });
+  const author = {
+    ...task(3, [2], ['AC-001', 'AC-002']),
+    type: 'qa' as const,
+    agentRole: 'qa-author',
+  };
+  expect(deferredAcceptanceCoverage(dag(code, doc, author), code.key, () => false)).toEqual({
+    'AC-001': [author.key],
+    'AC-002': [author.key],
+  });
+});
 
 describe('TaskDAG schema', () => {
   it('keeps testZones optional, validates their paths and persists their immutable content', () => {

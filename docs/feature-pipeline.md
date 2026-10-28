@@ -993,6 +993,87 @@ Los reports históricos no se reescriben: si una QA ya difirió cobertura a una
 tarea doc, se requiere una tarea posterior de tests con esos AC, revisión cruzada
 y QA real antes de considerar verificada la Feature.
 
+## Panel de features en el Command Center (FEAT-002)
+
+El Command Center incluye un panel de **solo lectura** que muestra las features del
+Project seleccionado que construye el pipeline, para seguir `feature run` sin abrir
+la terminal ni leer `feature show --json`. El botón de apertura está junto a
+Auditoría.
+
+- **Ingreso:** exige el mismo ingreso autorizado y privilegio que la vista de
+  auditoría de FEAT-001. No añade permisos, tokens ni flags de actor. Sin ese
+  ingreso la petición se rechaza sin devolver datos, y una petición para un Project
+  distinto del seleccionado o inexistente tampoco devuelve datos de otros Projects.
+- **Solo lectura:** no aprueba, no responde ni cierra decisiones, y no lanza,
+  reanuda, detiene ni cancela runs o tareas. No modifica WorkStore, Git, Brain ni
+  auditoría, y no lanza procesos. Los comandos de gate se muestran como texto: el
+  operador los ejecuta en su terminal.
+- **Fuentes:** solo el WorkStore (features, diseños técnicos, Tasks, decisiones y
+  checkpoint de `feature_runs`), abierto en modo lectura. No lee el Brain, rollouts,
+  transcripts ni worktrees. No muestra prompts, salidas de modelo, respuestas del
+  operador, stdout/stderr, rutas absolutas, PIDs ni URLs de remotos; los textos
+  libres se escapan como texto.
+- **Actualización:** no hay push en vivo. El panel refleja el estado al abrirlo y
+  al pulsar **Actualizar**; mientras `feature run` avanza hay que actualizarlo para
+  ver el progreso. Al cambiar de Project se descarta cualquier respuesta tardía del
+  anterior.
+- **Orden:** por actividad más reciente (feature, Tasks, decisiones y checkpoint)
+  descendente; el empate se resuelve por clave ascendente.
+
+### Qué muestra cada fila
+
+- **Estado:** `ready_to_merge`; «spec en revisión» (`in_review`); «en diseño»
+  (`approved` sin diseño); «en desarrollo» (`approved` con diseño y sin
+  `ready_to_merge`); cualquier otro valor se muestra como «desconocido: valor».
+- **Progreso:** `DONE/total` de las Tasks del DAG importado. No cuentan los bugs
+  `<TASK>-D<n>` ni las Tasks operativas `<FEAT>-DESIGN` o de Requirements. Sin DAG
+  importado: «sin tareas».
+- **Tarea en curso:** la acción activa del checkpoint de `feature run`; si no hay,
+  una Task con lease o Execution activa. Paso `develop`, `review` o `qa`. Si hay
+  varias, la más reciente y el número de las demás.
+- **Gates pendientes:** tipo, Task afectada si la hay, marca de expirado y comando.
+- **Integración:** rama de integración y SHA abreviado, solo si existe en el
+  checkpoint de `feature run`.
+
+### Gates y comandos
+
+- Aprobación del spec: `pixel-agents feature approve <FEAT>`
+- Preguntas de Requirements:
+  `pixel-agents feature spec <FEAT> --answers <fichero-de-respuestas>`
+- Preguntas de Architect:
+  `pixel-agents feature design <FEAT> --answers <fichero-de-respuestas>`
+- Espera de cuota y QA `not_tested` que detiene el run:
+  `pixel-agents feature run <FEAT>`
+- Otros `WAITING_HUMAN`: `pixel-agents feature show <FEAT>`
+
+`<fichero-de-respuestas>` es un marcador literal, nunca una ruta concreta. Con
+`openQuestions` pendientes el gate es la decisión de preguntas, no la aprobación.
+Una decisión expirada se marca como tal. `FAILED_FINAL`, cancelación o bloqueo sin
+decisión abierta no inventan un gate.
+
+### Estados vacío y de error
+
+«sin features» solo aparece si la lectura terminó bien y el Project no tiene
+Features. Un fallo de lectura (base no disponible, esquema incompatible, error SQL
+o datos inválidos) muestra un estado de error con un motivo saneado, nunca una
+lista vacía.
+
+### Límites conocidos
+
+- **Features legacy sin título:** el título y las marcas de tiempo del Feature se
+  guardan con una migración aditiva del WorkStore. Los Features registrados antes
+  de ella se muestran solo con su clave, y su actividad se basa en Tasks y
+  decisiones, hasta que se reescriban.
+- **`schema_incompatible`:** el panel abre la base en solo lectura y no la migra.
+  Si la base es anterior a la versión que necesita, muestra el error
+  `schema_incompatible` (no una lista parcial) hasta que cualquier comando
+  `pixel-agents` migre la base. La migración es solo hacia delante: los binarios
+  anteriores rechazan una base migrada, como indica
+  [task CLI](task-cli.md#migraciones-de-la-base-compartida).
+- **Tarea en curso obsoleta:** si el proceso de `feature run` muere, el checkpoint
+  puede seguir marcando una acción activa; el panel no inspecciona procesos.
+- **Sin paginación:** la lista no tiene límite ni paginación en esta versión.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

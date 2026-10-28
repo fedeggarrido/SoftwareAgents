@@ -20,6 +20,12 @@ import {
   getExecutorStore,
   setExecutorStore,
 } from '../office/executorStore.js';
+import {
+  applyFeaturesSnapshot,
+  emptyFeaturesStore,
+  getFeaturesStore,
+  setFeaturesStore,
+} from '../office/featuresStore.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
@@ -365,10 +371,13 @@ export function useExtensionMessages(
         const next = applyExecutorState(getExecutorStore(), msg);
         if (next.state?.projectId !== getExecutorStore().state?.projectId) {
           setAuditStore(emptyAuditStore());
+          setFeaturesStore(emptyFeaturesStore());
         }
         setExecutorStore(next);
       } else if (msg.type === 'auditLog') {
         setAuditStore(applyAuditLog(getAuditStore(), msg));
+      } else if (msg.type === 'featuresSnapshot') {
+        setFeaturesStore(applyFeaturesSnapshot(getFeaturesStore(), msg));
       } else if (msg.type === 'executorToggleResult') {
         const settled = applyToggleResult(getExecutorStore(), msg);
         setExecutorStore(settled.store);
@@ -854,6 +863,7 @@ export function useExtensionMessages(
       // Invalidate old responses on disconnect and every new connection. The
       // panel waits for a connected transport before requesting a fresh log.
       setAuditStore(emptyAuditStore());
+      setFeaturesStore(emptyFeaturesStore());
     });
     return () => {
       stopAuditLifecycle();

@@ -10,6 +10,7 @@ import { ConnectionIndicator } from './components/ConnectionIndicator.js';
 import { DebugView } from './components/DebugView.js';
 import { DecisionsPanel } from './components/DecisionsPanel.js';
 import { EditActionBar } from './components/EditActionBar.js';
+import { FeaturesPanel } from './components/FeaturesPanel.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
@@ -112,6 +113,7 @@ function App() {
   const [isBacklogOpen, setIsBacklogOpen] = useState(false);
   const [isDecisionsOpen, setIsDecisionsOpen] = useState(false);
   const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [isFeaturesOpen, setIsFeaturesOpen] = useState(false);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -527,6 +529,8 @@ function App() {
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         isBacklogOpen={isBacklogOpen}
         isAuditOpen={isAuditOpen}
+        isFeaturesOpen={isFeaturesOpen}
+        onToggleFeatures={() => setIsFeaturesOpen((v) => !v)}
         onToggleAudit={() => setIsAuditOpen((v) => !v)}
         onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
@@ -540,6 +544,7 @@ function App() {
       />
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
       <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
+      <FeaturesPanel isOpen={isFeaturesOpen} onClose={() => setIsFeaturesOpen(false)} />
       <MeetingPanel />
 
       <BacklogPanel

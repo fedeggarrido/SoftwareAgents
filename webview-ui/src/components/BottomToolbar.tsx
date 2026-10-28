@@ -16,6 +16,8 @@ interface BottomToolbarProps {
   onToggleBacklog: () => void;
   isAuditOpen: boolean;
   onToggleAudit: () => void;
+  isFeaturesOpen: boolean;
+  onToggleFeatures: () => void;
   workspaceFolders: WorkspaceFolder[];
 }
 
@@ -29,6 +31,8 @@ export function BottomToolbar({
   onToggleBacklog,
   isAuditOpen,
   onToggleAudit,
+  isFeaturesOpen,
+  onToggleFeatures,
   workspaceFolders,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
@@ -148,6 +152,13 @@ export function BottomToolbar({
         title="Auditoría de solo lectura"
       >
         Auditoría
+      </Button>
+      <Button
+        variant={isFeaturesOpen ? 'active' : 'default'}
+        onClick={onToggleFeatures}
+        title="Features de solo lectura"
+      >
+        Features
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

@@ -9,11 +9,12 @@ import { parse } from 'yaml';
 
 import type { TaskDag } from '../../core/src/taskDag.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
+import { runTaskCommand } from '../src/commands/task.js';
 import { REVIEW_MAX_REWORK_ROUNDS } from '../src/constants.js';
 import * as verifier from '../src/evalCriteria.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import * as cascade from '../src/modelCascade.js';
-import { validateTestReport } from '../src/qa.js';
+import { qaTestFiles, QaTestSelectionError, validateTestReport } from '../src/qa.js';
 import { lastReviewFailure } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
 import { deferredAcceptanceCoverage } from '../src/taskDag.js';
@@ -278,8 +279,101 @@ describe('TestReport contract', () => {
   });
 });
 
+describe('QA test selection', () => {
+  it('rejects missing executable tests with concrete task paths', () => {
+    const input = {
+      worktree: repo,
+      files: ['server/src/baseline.ts'],
+      task: { changeZones: ['server/src/baseline.ts'] },
+    } as ReviewerRequest;
+    expect(() => qaTestFiles(input)).toThrow(QaTestSelectionError);
+    expect(() => qaTestFiles(input)).toThrow('server/src/baseline.ts');
+  });
+  it('allows source-colocated tests only with explicit testZones', () => {
+    const file = 'webview-ui/src/office/featuresStore.test.ts';
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, file),
+      "import { it } from 'vitest';\nit('fixture', () => {});\n",
+    );
+    git(repo, 'add', file);
+    const input = {
+      worktree: repo,
+      files: [file],
+      task: { changeZones: [] },
+    } as unknown as ReviewerRequest;
+    expect(() => qaTestFiles(input)).toThrow(file);
+    input.task.testZones = [file];
+    expect(qaTestFiles(input)).toEqual([file]);
+  });
+});
+
 describe.skipIf(process.platform !== 'win32')('QA via worker (fake CLIs)', () => {
   beforeEach(() => prepare(), 90_000);
+  it('returns runtime QA defects for a source-colocated test without launching QA, then gives Developer the cause', async () => {
+    const file = 'webview-ui/src/office/featuresStore.test.ts';
+    fs.mkdirSync(path.dirname(path.join(tree(), file)), { recursive: true });
+    fs.writeFileSync(
+      path.join(tree(), file),
+      "import { it, expect } from 'vitest';\nit('works', () => expect(true).toBe(true));\n",
+    );
+    git(tree(), 'add', file);
+    git(tree(), '-c', 'core.hooksPath=', 'commit', '-m', 'fixture misplaced test');
+    const sha = git(tree(), 'rev-parse', 'HEAD');
+    const store = await storeFor();
+    const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+    try {
+      const before = store.getTask(task)!;
+      const ref = { ...before.review_ref!, sha };
+      const reviews = before.review_reports!.map((report) => ({ ...report, review_ref: ref }));
+      db.prepare('UPDATE tasks SET review_ref = ?, review_reports = ? WHERE key = ?').run(
+        JSON.stringify(ref),
+        JSON.stringify(reviews),
+        task,
+      );
+      await qa();
+      expect(fs.readFileSync(launches, 'utf8')).toBe('');
+      expect(store.getTask(task)).toMatchObject({ status: 'READY', review_ref: null });
+      const report = store.getTask(task)!.test_reports!.at(-1)!;
+      expect(report.report).toMatchObject({ verdict: 'fail', commands: [] });
+      expect(store.getExecution(report.execution_id)!.tree_closed_at).toBeTruthy();
+      expect(store.getTask(task + '-D1')!.defect_context!.reproduction).toContain(file);
+      // This fake records the context but does not relocate the misplaced test.
+      await expect(develop()).rejects.toThrow('changeZones exceeded');
+      const logs = fs
+        .readFileSync(launches, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(JSON.parse(logs[0].context.task.brief).qaDefects[0].reproduction).toContain(file);
+    } finally {
+      db.close();
+      store.close();
+    }
+  });
+
+  it('manually retries approved QA without losing the reports', async () => {
+    const store = await storeFor();
+    try {
+      const reports = store.getTask(task)!.review_reports;
+      await runTaskCommand(['retry', task, '--reason', 'Fix misplaced tests'], repo, () => {});
+      expect(store.getTask(task)).toMatchObject({
+        status: 'READY',
+        review_ref: null,
+        attempt: 0,
+        review_reports: reports,
+      });
+      await expect(develop()).rejects.toThrow('Developer rework produced no changes');
+      const logs = fs
+        .readFileSync(launches, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(JSON.parse(logs[0].context.task.brief).retryReason).toContain('Fix misplaced tests');
+    } finally {
+      store.close();
+    }
+  });
   it('preserves the remaining Developer attempt when verifier infrastructure fails during rework', async () => {
     await qa('fail');
     const store = await storeFor();

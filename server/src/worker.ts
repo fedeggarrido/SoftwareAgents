@@ -109,7 +109,14 @@ import {
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
-import { qaBrief, qaCommands, qaRequestedCommands, validateTestReport } from './qa.js';
+import {
+  qaBrief,
+  qaCommands,
+  qaRequestedCommands,
+  qaSelectionReport,
+  QaTestSelectionError,
+  validateTestReport,
+} from './qa.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
 import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
 import {
@@ -1360,14 +1367,67 @@ async function runWorkerExecution(
       if (options.requirements || options.architect || options.reviewer)
         requirementsBefore ??= requirementsSnapshot(tree.path);
       if (options.qa && !qaEvidence) {
-        qaEvidence = await qaCommands(
-          options.reviewer!,
-          resolveInside(common, 'softwareagents/runtime/verifiers'),
-          verifierAbort.signal,
-        );
-        guardRequirementsWrites(tree.path, requirementsBefore!);
-        taskData.task.brief = qaBrief(options.reviewer!, qaEvidence);
-        compiled = compileAgent(spec, role, taskData);
+        try {
+          qaEvidence = await qaCommands(
+            options.reviewer!,
+            resolveInside(common, 'softwareagents/runtime/verifiers'),
+            verifierAbort.signal,
+          );
+          guardRequirementsWrites(tree.path, requirementsBefore!);
+          taskData.task.brief = qaBrief(options.reviewer!, qaEvidence);
+          compiled = compileAgent(spec, role, taskData);
+        } catch (error) {
+          if (!(error instanceof QaTestSelectionError)) throw error;
+          // Registration already happened; no process has been launched, so closure is certain.
+          await workStore!.closeExecution(executionId, lifecycle!.owner);
+          const report = qaSelectionReport(options.reviewer!, error);
+          const capped =
+            reviewReworkRounds(workStore!.getTask(args.task)!) >= REVIEW_MAX_REWORK_ROUNDS;
+          const artifact = resolveInside(
+            common,
+            'softwareagents/brain/test-reports/' + args.task + '/' + executionId + '.json',
+          );
+          const record = {
+            execution_id: executionId,
+            review_ref: options.reviewer!.reviewRef,
+            report,
+            artifact_path: artifact,
+          };
+          await lifecycle!.completeReview(() =>
+            workStore!.completeQa(
+              args.task,
+              lifecycle!.owner,
+              record,
+              () => {
+                guardRequirementsWrites(tree.path, requirementsBefore!);
+                if (
+                  JSON.stringify(
+                    reviewerRequest(
+                      workStore!,
+                      config,
+                      options.reviewer!.key,
+                      args.task,
+                      lifecycle!.owner,
+                      'qa',
+                    ),
+                  ) !== JSON.stringify(options.reviewer)
+                )
+                  throw new Error('QA SHA/context changed before runtime report persistence');
+                audit('test_report_pending', { detail: JSON.stringify(record) });
+                fs.mkdirSync(path.dirname(artifact), { recursive: true });
+                fs.writeFileSync(artifact, JSON.stringify(record, null, 2) + '\n', { flag: 'wx' });
+              },
+              capped
+                ? { ...reviewerDecision(args.task, 'rework_limit'), requestedBy: 'qa' }
+                : undefined,
+            ),
+          );
+          audit('test_report_persisted', { detail: JSON.stringify(record) });
+          telemetryStatus = capped ? 'require_human' : 'ok';
+          if (capped) process.exitCode = 3;
+          log(args.task + ': fail -> ' + workStore!.getTask(args.task)!.status);
+          return { branch: tree.branch, commit: null, stat: '' };
+        }
       }
       if (lifecycle)
         await workStore!.setTaskWorktree(args.task, lifecycle.owner, tree.branch, tree.path);

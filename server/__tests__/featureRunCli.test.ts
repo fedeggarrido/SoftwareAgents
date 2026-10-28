@@ -14,6 +14,7 @@ import { assertFeatureRunIngress, type FeatureRunSummary, runFeature } from '../
 import { assertTaskDependencies } from '../src/featureRunBase.js';
 import { publishDirectRef } from '../src/gitPublication.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
+import { lastReviewFailure } from '../src/reviewAttempts.js';
 import { reviewerDecision } from '../src/reviewer.js';
 import { taskBranchBase, taskBranchBaseFile } from '../src/taskBranchBase.js';
 import { recoverFeatureTaskRebase } from '../src/taskRebase.js';
@@ -174,6 +175,43 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
+  it('supersedes a historical QA failure after an operator reset or subsequent retry', async () => {
+    const store = await storeFor();
+    try {
+      const key = 'FEAT-001-T01';
+      store.createTask({ key, type: 'code', status: 'REVIEW' });
+      const failure = await store.transition(
+        key,
+        store.getTask(key)!.version,
+        'QA',
+        'QA failed: Unsupported QA test root',
+        'worker',
+      );
+      expect(lastReviewFailure(store, failure)?.reason).toContain('Unsupported QA test root');
+      const ready = await store.transition(
+        key,
+        failure.version,
+        'READY',
+        'Operator reset',
+        'human',
+      );
+      expect(lastReviewFailure(store, ready)).toBeNull();
+      await store.claim(key, 'retry-worker');
+      const failed = await store.transition(
+        key,
+        store.getTask(key)!.version,
+        'FAILED_RETRYABLE',
+        'Developer retry failed',
+        'retry-worker',
+      );
+      expect(lastReviewFailure(store, failed)).toBeNull();
+      expect(
+        store.listDomainEvents(key).some((event) => event.reason.startsWith('QA failed:')),
+      ).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
   it.each([false, true])(
     'recovers a main reconciliation intent already published=%s without losing its base',
     async (published) => {

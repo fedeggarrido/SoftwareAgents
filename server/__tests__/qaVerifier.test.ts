@@ -369,7 +369,7 @@ it('webview runtime', () => {
     git('add', 'integration');
     expect(() =>
       qaTestFiles({ worktree: tree, files: [file], task: {} } as unknown as ReviewerRequest),
-    ).toThrow(/Unsupported Vitest test root/);
+    ).toThrow(/Unsupported QA test root/);
   });
 
   it.each(['Runtime commit abc', 'Reviewer report persisted', 'QA report persisted'])(

@@ -670,8 +670,8 @@ autoritativa y nunca se sobrescribe un huérfano automáticamente.
 OAuth/auth, cuota, spawn, timeout, informe inválido tras dos intentos, lease perdida,
 JSON ausente/vacío o tests omitidos conservan QA y `review_ref`, sin consumir rondas.
 `last_review_failure` conserva el diagnóstico saneado del último fallo de revisión/QA;
-se limpia en cuanto se persiste un informe válido o se completa Developer con
-éxito. Los fallos nuevos de QA usan `QA failed:` y `qa_validation_failed`. Los lectores
+se limpia en cuanto se persiste un informe válido, se completa Developer con
+éxito o la tarea avanza a READY/FAILED_RETRYABLE tras reset o rework. Los fallos nuevos de QA usan `QA failed:` y `qa_validation_failed`. Los lectores
 conservan compatibilidad con los fallos históricos etiquetados como Reviewer.
 El diagnóstico visible `last_developer_failure` también se limpia tras
 completar Developer, Reviewer o QA con éxito. Los eventos y la auditoría conservan
@@ -852,6 +852,27 @@ push fallido o incierto detiene el run; su clave de idempotencia PENDING exige
 reconciliación y nunca se interpreta como publicación completada.
 
 ### Gates, estado y recuperación
+
+`pixel-agents task retry <KEY> --reason <texto>` exige ingreso humano (SA-003),
+sin excepción de autopilot. Primero reutiliza `task backup` y después aplica un
+reset atómico con control de versión. Admite WAITING_HUMAN, FAILED_FINAL,
+FAILED_RETRYABLE y QA de una Feature; rechaza DONE, leases y recuperaciones
+pendientes. Las decisiones humanas abiertas deben resolverse antes del retry.
+Con `review_ref` vuelve a READY y lo limpia para rework del Developer; sin él,
+queda FAILED_RETRYABLE. Conserva informes, reinicia `attempt` a cero y guarda el
+motivo en `blocked_reason` y en el contexto del siguiente Developer. La auditoría
+`manual_retry` identifica al operador humano, motivo y backup. No reinicia el
+límite compartido de rondas de rework.
+
+Si la selección QA no contiene tests ejecutables o incluye un test fuera de las
+raíces admitidas (salvo `testZones` explícitas), el runtime genera un TestReport
+`fail` con la causa y la ruta, sin lanzar al agente. Reutiliza la Execution QA
+ya registrada durante la preparación y confirma su cierre sin proceso; después
+usa `completeQa`, artefacto y auditoría habituales. Esto conserva los invariantes,
+la identidad existente de los defectos y el límite de rondas: vuelve a READY sin
+`review_ref`, o escala al alcanzar el tope. No representa fallos de infraestructura.
+Un avance posterior a READY/FAILED_RETRYABLE deja de proyectar un fallo histórico
+de Reviewer/QA como bloqueo actual; el historial permanece intacto.
 
 Una decisión abierta o expirada, `WAITING_HUMAN`, la aprobación pendiente del spec
 o un QA `not_tested` detienen el bucle con exit 3. El mensaje identifica qué falta,

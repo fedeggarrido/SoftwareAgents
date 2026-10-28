@@ -207,6 +207,7 @@ export interface DeveloperRequest {
   reworkAttempt?: number;
   qaDefects?: import('./workstore/WorkStore.js').DefectContext[];
   previousFailure?: ReturnType<typeof lastDeveloperFailure>;
+  retryReason?: string | null;
   deferredCoverage?: Record<string, string[]>;
   allowedScope?: ReturnType<typeof developerScope>;
 }
@@ -294,6 +295,11 @@ export function developerRequest(
         }
       : {}),
     previousFailure: lastDeveloperFailure(store, record),
+    retryReason:
+      store
+        .listDomainEvents(record.key)
+        .filter((event) => event.reason.startsWith('manual_retry: '))
+        .at(-1)?.reason ?? null,
     allowedScope: developerScope(task, config.repoRoot),
     ...(record.test_reports?.some((r) => r.report.verdict === 'fail')
       ? {

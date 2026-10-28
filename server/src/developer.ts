@@ -110,6 +110,8 @@ export function developerScope(task: DagTask, root: string) {
       "Unit tests use Vitest (import { describe, expect, it } from 'vitest'); never node:test or another runner. The runtime only executes Vitest and Playwright specs.",
     fileWriteRule:
       'Create and edit files only with the file-edit tool (apply_patch, Edit/Write), never through shell writes (Set-Content, Out-File, >, tee, node -e). Containment rejects any shell write whose text mentions .git or .claude, and that ends the attempt.',
+    testTempRule:
+      'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
     colocatedTestRule:
       'Except in core/, remove .test/.spec before the extension and match a changeZone.',
   };

@@ -433,9 +433,16 @@ function checkDeveloperChanges(
       throw new Error('Developer changed an ignored file; human review required');
     if (
       (qaAuthor && !isQaAuthorPath(file)) ||
-      // Only these roots are ever executed (server/webview Vitest include, Playwright).
+      // Only these roots are ever executed (server/webview Vitest include, Playwright),
+      // unless the task declares the location as an explicit testZone; core/ never.
       (isDeveloperTest(file) &&
-        !['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)))
+        (file.startsWith('core/') ||
+          (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) =>
+            file.startsWith(root),
+          ) &&
+            !(input.task.testZones ?? []).some((zone) =>
+              file.startsWith(zone.replace(/\*.*$/, '').replace(/\/$/, '')),
+            ))))
     ) {
       offending.push(file);
       continue;

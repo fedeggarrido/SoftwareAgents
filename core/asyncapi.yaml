@@ -77,6 +77,7 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/FeaturesSnapshot'
         - $ref: '#/components/schemas/AuditLogSnapshot'
         # Provider capabilities
         - $ref: '#/components/schemas/ProviderCapabilities'
@@ -134,6 +135,7 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestFeatures'
         - $ref: '#/components/schemas/RequestAuditLog'
         - $ref: '#/components/schemas/WebviewReady'
         - $ref: '#/components/schemas/LaunchAgent'
@@ -165,6 +167,162 @@ components:
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
+
+    RequestFeatures:
+      description: Read-only WorkStore projection; same existing connection privilege and bound-Project guard as requestAuditLog. No new authority or mutation.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId]
+      properties:
+        type:
+          const: requestFeatures
+        projectId:
+          type: string
+        requestId:
+          type: string
+
+    FeaturesSnapshot:
+      description: |
+        Point-to-point read-only reply, never broadcast. Echoes projectId/requestId;
+        clients discard obsolete requests or Projects. denied, unknown_project,
+        read_error and empty carry no features. Only read_error carries a fixed
+        reason code; other statuses use null. No raw exception details or private
+        WorkStore payloads. Free text must be sanitized and rendered as text.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, status, reason, features]
+      properties:
+        type:
+          const: featuresSnapshot
+        projectId:
+          type: string
+        requestId:
+          type: string
+        status:
+          $ref: '#/components/schemas/FeaturesStatus'
+        reason:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturesReadError'
+            - type: 'null'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureRow'
+
+    FeatureRow:
+      description: Sanitized display projection only; no paths, process identities, prompts, answers, command outputs, remote URLs, secrets or reports.
+      type: object
+      additionalProperties: false
+      required:
+        [key, title, state, rawStatus, progress, currentTask, gates, integration, lastActivityAt]
+      properties:
+        key:
+          type: string
+        title:
+          type: [string, 'null']
+        state:
+          $ref: '#/components/schemas/FeatureState'
+        rawStatus:
+          type: [string, 'null']
+        progress:
+          oneOf:
+            - $ref: '#/components/schemas/FeatureProgress'
+            - type: 'null'
+        currentTask:
+          oneOf:
+            - $ref: '#/components/schemas/FeatureCurrentTask'
+            - type: 'null'
+        gates:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureGate'
+        integration:
+          oneOf:
+            - $ref: '#/components/schemas/FeatureIntegration'
+            - type: 'null'
+        lastActivityAt:
+          type: [string, 'null']
+
+    FeatureProgress:
+      type: object
+      additionalProperties: false
+      required: [done, total]
+      properties:
+        done:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+
+    FeatureCurrentTask:
+      type: object
+      additionalProperties: false
+      required: [key, step, others]
+      properties:
+        key:
+          type: string
+        step:
+          oneOf:
+            - $ref: '#/components/schemas/FeatureTaskStep'
+            - type: 'null'
+        others:
+          type: integer
+          minimum: 0
+
+    FeatureGate:
+      type: object
+      additionalProperties: false
+      required: [kind, task, expired, command]
+      properties:
+        kind:
+          $ref: '#/components/schemas/FeatureGateKind'
+        task:
+          type: [string, 'null']
+        expired:
+          type: boolean
+        command:
+          description: Relative command for the operator to run manually; answers use the literal <fichero-de-respuestas> placeholder.
+          type: string
+
+    FeatureIntegration:
+      type: object
+      additionalProperties: false
+      required: [branch, sha]
+      properties:
+        branch:
+          type: string
+        sha:
+          type: [string, 'null']
+
+    FeaturesStatus:
+      type: string
+      enum: [ok, empty, denied, unknown_project, read_error]
+
+    FeaturesReadError:
+      type: string
+      enum: [unavailable, schema_incompatible, query_failed, invalid_data]
+
+    FeatureState:
+      type: string
+      enum: [ready_to_merge, in_review, in_design, in_development, unknown]
+
+    FeatureTaskStep:
+      type: string
+      enum: [develop, review, qa]
+
+    FeatureGateKind:
+      type: string
+      enum:
+        [
+          spec_approval,
+          requirements_questions,
+          design_questions,
+          human_decision,
+          waiting_human,
+          quota,
+          qa_not_tested,
+        ]
 
     RequestAuditLog:
       description: Pure read of the bound Project audit log; requires existing connection privilege.

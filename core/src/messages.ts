@@ -8,6 +8,7 @@
  */
 
 export type ServerMessage =
+  | FeaturesSnapshot
   | AuditLogSnapshot
   | ProviderCapabilities
   | AgentCreated
@@ -50,6 +51,7 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestFeatures
   | RequestAuditLog
   | WebviewReady
   | LaunchAgent
@@ -78,6 +80,69 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface FeaturesSnapshot {
+  type: 'featuresSnapshot';
+  projectId: string;
+  requestId: string;
+  status: FeaturesStatus;
+  reason: FeaturesReadError | null;
+  features: FeatureRow[];
+}
+
+export type FeaturesStatus = 'ok' | 'empty' | 'denied' | 'unknown_project' | 'read_error';
+
+export type FeaturesReadError =
+  'unavailable' | 'schema_incompatible' | 'query_failed' | 'invalid_data';
+
+export interface FeatureRow {
+  key: string;
+  title: string | null;
+  state: FeatureState;
+  rawStatus: string | null;
+  progress: FeatureProgress | null;
+  currentTask: FeatureCurrentTask | null;
+  gates: FeatureGate[];
+  integration: FeatureIntegration | null;
+  lastActivityAt: string | null;
+}
+
+export type FeatureState =
+  'ready_to_merge' | 'in_review' | 'in_design' | 'in_development' | 'unknown';
+
+export interface FeatureProgress {
+  done: number;
+  total: number;
+}
+
+export interface FeatureCurrentTask {
+  key: string;
+  step: FeatureTaskStep | null;
+  others: number;
+}
+
+export type FeatureTaskStep = 'develop' | 'review' | 'qa';
+
+export interface FeatureGate {
+  kind: FeatureGateKind;
+  task: string | null;
+  expired: boolean;
+  command: string;
+}
+
+export type FeatureGateKind =
+  | 'spec_approval'
+  | 'requirements_questions'
+  | 'design_questions'
+  | 'human_decision'
+  | 'waiting_human'
+  | 'quota'
+  | 'qa_not_tested';
+
+export interface FeatureIntegration {
+  branch: string;
+  sha: string | null;
+}
 
 export interface AuditLogSnapshot {
   type: 'auditLog';
@@ -750,6 +815,12 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestFeatures {
+  type: 'requestFeatures';
+  projectId: string;
+  requestId: string;
 }
 
 export interface RequestAuditLog {

@@ -52,6 +52,8 @@ export async function runVerifierCommand(
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
   signal?: AbortSignal,
   onOutput?: (output: string) => void,
+  /** Runtime-owned private index when materializing a pinned Git baseline. */
+  gitIndexFile?: string,
 ): Promise<CriterionResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
@@ -59,7 +61,10 @@ export async function runVerifierCommand(
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: criterionEnvironment(home),
+      env: {
+        ...criterionEnvironment(home),
+        ...(gitIndexFile ? { GIT_INDEX_FILE: gitIndexFile } : {}),
+      },
     });
     const cancellation = processCancellation(() => child);
     let stopped = false;

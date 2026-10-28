@@ -682,6 +682,31 @@ artefacto, DONE con review_ref aprobado y T02 READY. Las pruebas automatizadas
 solo usan CLIs falsas y repositorios/perfiles desechables. La revisión cruzada,
 QA real e integración siguen pendientes hasta que Claude las valide.
 
+### Baseline de comandos runtime (SA-QA-59)
+
+QA compara únicamente los comandos con `result: fail` con el commit base fijado
+en `review_ref.base` (la base runtime de la tarea), nunca con el main actual.
+Materializa ese commit en scratch con un índice Git privado, sin cambiar refs,
+índice ni checkout del operador, y reutiliza `runTaskTest` y sus snapshots,
+dependencias existentes y perfiles aislados. Cada comparación comparte el límite
+`QA_COMMAND_TIMEOUT_MS` entre preparación y ejecución y respeta la cancelación.
+No vuelve a ejecutar comandos pass ni not_tested en base.
+
+La evidencia opcional `baseline: { result, passed, failed, reason? }` conserva el
+resultado de base. Solo si también falla y `baseline.failed >= failed` se añade
+`preexisting: true` y un motivo con el SHA. Es una comparación por conteos, no por
+identidad de aserciones; el agente sigue comprobando cada AC. Un spec inexistente
+en base o una comparación no disponible no exime el fallo de la tarea.
+El brief explica esta evidencia y la auditoría `qa_baseline` registra cada
+comparación, también en la tanda adicional solicitada por el agente.
+
+`validateTestReport` admite pass con fallos exclusivamente preexistentes; los
+fallos nuevos y comandos de tarea no ejecutados siguen bloqueando. Exige que el
+modelo reproduzca exactamente toda la evidencia runtime, incluidos los campos
+opcionales: no puede inventar una exención. Los reports históricos sin baseline
+ni preexisting conservan su validación anterior. La revisión real e integración
+siguen correspondiendo a Claude.
+
 ## QA author: tareas de tests del DAG (SA-107)
 
 `feature develop` enruta los roles declarados `qa`, `test` y `qa-author` al

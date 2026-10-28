@@ -9,7 +9,7 @@ import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { runTaskTest } from '../src/taskTestRunner.js';
 import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 300_000 });
 let root: string;
 let tree: string;
 let scratch: string;

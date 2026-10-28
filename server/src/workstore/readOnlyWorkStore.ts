@@ -4,6 +4,22 @@ import { DatabaseSync } from 'node:sqlite';
 
 import type { FeaturesReadError } from '../../../core/src/messages.js';
 import { resolveInside } from '../pathGuard.js';
+import { runMigrations } from './migrations.js';
+
+export const MIN_PANEL_SCHEMA_VERSION = 15;
+
+/** Number of known migrations, derived by migrating a scratch in-memory database. */
+function latestSchemaVersion(): number {
+  const scratch = new DatabaseSync(':memory:');
+  try {
+    runMigrations(scratch);
+    return Number(
+      scratch.prepare('SELECT version FROM schema_version WHERE singleton = 1').get()?.version,
+    );
+  } finally {
+    scratch.close();
+  }
+}
 
 export class FeaturesReadFailure extends Error {
   constructor(readonly reason: FeaturesReadError) {
@@ -39,8 +55,16 @@ export function openReadOnlyWorkStore(root: string): DatabaseSync {
     } catch {
       throw new FeaturesReadFailure('schema_incompatible');
     }
-    // Migration 15 introduced the display fields. Reject unknown future schemas.
-    if (version !== 15) throw new FeaturesReadFailure('schema_incompatible');
+    // Migration 15 introduced the display fields. Later additive migrations stay readable;
+    // schemas beyond the migration list are unknown and rejected.
+    if (
+      typeof version !== 'number' ||
+      !Number.isInteger(version) ||
+      version < MIN_PANEL_SCHEMA_VERSION ||
+      version > latestSchemaVersion()
+    ) {
+      throw new FeaturesReadFailure('schema_incompatible');
+    }
     return db;
   } catch (error) {
     db?.close();

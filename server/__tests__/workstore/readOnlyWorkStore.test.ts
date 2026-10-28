@@ -13,7 +13,7 @@ import { runMigrations } from '../../src/workstore/migrations.js';
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
 
 describe('read-only WorkStore acceptance', () => {
-  it('AC-010 accepts the current schema and rejects older or unknown schemas', async () => {
+  it('AC-010 accepts a later supported additive schema and rejects versions beyond the supported list', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'features-schema-'));
     let db: DatabaseSync | undefined;
     try {
@@ -24,7 +24,8 @@ describe('read-only WorkStore acceptance', () => {
       const currentVersion = Number(
         db.prepare('SELECT version FROM schema_version WHERE singleton = 1').get()?.version,
       );
-      for (const version of [14, 15, currentVersion, currentVersion + 1]) {
+      const supported = Array.from({ length: currentVersion - 14 }, (_, i) => 15 + i);
+      for (const version of [14, ...supported, currentVersion + 1]) {
         db.prepare('UPDATE schema_version SET version = ?').run(version);
         const result = await readFeaturesView(root, 'P');
         expect(result).toEqual(

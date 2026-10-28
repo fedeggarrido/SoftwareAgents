@@ -1,5 +1,5 @@
 import { EXECUTOR_IDS } from '../../core/src/executorCatalog.js';
-import type { AuditLogSnapshot, CompanyNotice } from '../../core/src/messages.js';
+import type { AuditLogSnapshot, CompanyNotice, FeaturesSnapshot } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
@@ -33,6 +33,7 @@ import {
   parseSetExecutorLevels,
   toggleResult,
 } from './executorState.js';
+import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
@@ -149,6 +150,48 @@ export function handleClientMessage(
           send({ type: 'auditLog', projectId, requestId, ...snapshot } satisfies AuditLogSnapshot),
         )
         .catch(() => reply('read_error'));
+      break;
+    }
+
+    case 'requestFeatures': {
+      if (typeof msg.projectId !== 'string' || typeof msg.requestId !== 'string') break;
+      const { projectId, requestId } = msg;
+      const reply = (
+        status: FeaturesSnapshot['status'],
+        reason: FeaturesSnapshot['reason'] = null,
+      ) =>
+        send({
+          type: 'featuresSnapshot',
+          projectId,
+          requestId,
+          status,
+          reason,
+          features: [],
+        } satisfies FeaturesSnapshot);
+      // Reuse audit ingress and Project binding; reads have no audit side effects.
+      if (!ctx.privileged) {
+        reply('denied');
+        break;
+      }
+      if (executorProject()?.id !== projectId) {
+        reply('unknown_project');
+        break;
+      }
+      const root = companyWorkspaceRoot();
+      if (!root) {
+        reply('read_error', 'unavailable');
+        break;
+      }
+      void readFeaturesView(root, projectId)
+        .then((snapshot) =>
+          send({
+            type: 'featuresSnapshot',
+            projectId,
+            requestId,
+            ...snapshot,
+          } satisfies FeaturesSnapshot),
+        )
+        .catch(() => reply('read_error', 'query_failed'));
       break;
     }
 

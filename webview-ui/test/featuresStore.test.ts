@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FeatureRow, FeaturesSnapshot } from '../../../core/src/messages.js';
+import type { FeatureRow, FeaturesSnapshot } from '../../core/src/messages.js';
 import {
   applyFeaturesSnapshot,
   beginFeaturesRequest,
@@ -13,7 +13,7 @@ import {
   subscribeFeaturesStore,
   viewState,
   visibleFeatures,
-} from './featuresStore.js';
+} from '../src/office/featuresStore.js';
 
 const row: FeatureRow = {
   key: 'FEAT-020',
@@ -94,6 +94,28 @@ describe('features store acceptance', () => {
         applyFeaturesSnapshot(pending, snapshot({ requestId: 'r2', features: rows })),
       ),
     ).toEqual(rows);
+  });
+
+  it('AC-010/011 keeps a new Project error when the old Project responds late', () => {
+    const loaded = applyFeaturesSnapshot(
+      beginFeaturesRequest(emptyFeaturesStore(), 'P', 'r1'),
+      snapshot(),
+    );
+    const pending = beginFeaturesRequest(loaded, 'Q', 'r2');
+    const failed = applyFeaturesSnapshot(
+      pending,
+      snapshot({
+        projectId: 'Q',
+        requestId: 'r2',
+        status: 'read_error',
+        reason: 'query_failed',
+        features: [],
+      }),
+    );
+    expect(viewState(failed)).toBe('read_error');
+    expect(visibleFeatures(failed)).toEqual([]);
+    expect(applyFeaturesSnapshot(failed, snapshot())).toBe(failed);
+    expect(failed.projectId).toBe('Q');
   });
 
   it('formats states and uses fixed safe error text', () => {

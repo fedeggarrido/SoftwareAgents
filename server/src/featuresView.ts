@@ -54,6 +54,8 @@ function step(value: unknown): FeatureTaskStep | null {
 }
 // Free display text is never interpreted as markup. Remove controls and redact
 // common credential/path forms before it crosses the webview boundary.
+// Slash-prefixed title fragments are also redacted: confidentiality takes
+// precedence over preserving ambiguous path-like display text.
 function display(value: unknown): string | null {
   return (
     optional(value)
@@ -65,23 +67,18 @@ function display(value: unknown): string | null {
 
 /** Pure projection: only explicitly named display fields can escape. */
 export function projectFeatures(source: FeaturesSource): FeatureRow[] {
-  for (const task of source.tasks) {
-    text(task.key);
-    optional(task.feature_key);
-    if (!absent(task.status)) text(task.status);
-    if (!absent(task.version) && (!Number.isInteger(task.version) || Number(task.version) < 1))
-      invalid();
-  }
-  const decisions: (Row & { data: Row | null })[] = source.decisions.map((d) => ({
-    ...d,
-    data: absent(d.escalation) ? null : object(d.escalation),
-  }));
   return source.features
     .map((feature): FeatureRow => {
       const key = text(feature.key);
       if (!/^FEAT-\d{3}$/.test(key)) return invalid();
       const status = text(feature.status);
       const tasks = source.tasks.filter((t) => t.feature_key === key);
+      for (const task of tasks) {
+        text(task.key);
+        if (!absent(task.status)) text(task.status);
+        if (!absent(task.version) && (!Number.isInteger(task.version) || Number(task.version) < 1))
+          invalid();
+      }
       const taskKeys = new Set(tasks.map((t) => text(t.key)));
       for (const taskKey of taskKeys)
         if (
@@ -97,12 +94,25 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
       if (run) {
         for (const field of ['status', 'branch', 'head', 'message']) optional(run[field]);
       }
-      const related = decisions.filter((d) => {
-        if (!d.data) return !absent(d.task_key) && taskKeys.has(text(d.task_key));
-        const blocks = d.data.blocks;
-        if (!Array.isArray(blocks) || !blocks.every((v) => typeof v === 'string')) return invalid();
-        return blocks.some((v) => v === key || v === `${key}-DESIGN` || taskKeys.has(v));
-      });
+      const belongs = (value: unknown) =>
+        typeof value === 'string' &&
+        (value === key || value === `${key}-DESIGN` || taskKeys.has(value));
+      const related: (Row & { data: Row | null })[] = [];
+      for (const decision of source.decisions) {
+        let data: Row | null = null;
+        try {
+          data = absent(decision.escalation) ? null : object(decision.escalation);
+        } catch (error) {
+          if (belongs(decision.task_key)) throw error;
+          continue;
+        }
+        const blocks = data?.blocks;
+        if (!belongs(decision.task_key) && !(Array.isArray(blocks) && blocks.some(belongs)))
+          continue;
+        if (data && (!Array.isArray(blocks) || !blocks.every((v) => typeof v === 'string')))
+          return invalid();
+        related.push({ ...decision, data });
+      }
       const gates: FeatureGate[] = [];
       const gate = (
         kind: FeatureGate['kind'],

@@ -22,6 +22,15 @@ describe('features view acceptance', () => {
     events: [],
   });
 
+  it('AC-010 ignores unrelated legacy data but rejects malformed decisions tied to this feature', () => {
+    const data = fixture();
+    data.tasks = [{ key: 42, feature_key: null, version: -1 }];
+    data.decisions = [{ task_key: 'legacy-task', escalation: 'broken' }];
+    expect(projectFeatures(data)).toHaveLength(1);
+    data.decisions.push({ task_key: 'FEAT-001', escalation: 'broken' });
+    expect(() => projectFeatures(data)).toThrow('invalid_data');
+  });
+
   it('AC-001 derives design, ready and unknown states; AC-008 breaks ties by key', () => {
     const data = fixture();
     data.features.push(

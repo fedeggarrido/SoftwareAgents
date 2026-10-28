@@ -25,6 +25,31 @@ describe('removeAgentToolCaches', () => {
     expect(fs.existsSync(path.join(tree, 'server/node_modules'))).toBe(false);
   });
 
+  it('removes allure-results and .vitest-tmp left by the agent running tests', () => {
+    const tree = temp();
+    fs.mkdirSync(path.join(tree, 'allure-results'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'allure-results', 'r.json'), '{}');
+    fs.mkdirSync(path.join(tree, 'server/.vitest-tmp/x'), { recursive: true });
+    removeAgentToolCaches(tree);
+    expect(fs.existsSync(path.join(tree, 'allure-results'))).toBe(false);
+    expect(fs.existsSync(path.join(tree, 'server/.vitest-tmp'))).toBe(false);
+  });
+
+  it('removes .vitest-tmp with junctions inside without touching their targets', () => {
+    const tree = temp();
+    const shared = temp();
+    fs.writeFileSync(path.join(shared, 'keep.json'), '{}');
+    fs.mkdirSync(path.join(tree, '.vitest-tmp/repo'), { recursive: true });
+    fs.symlinkSync(
+      shared,
+      path.join(tree, '.vitest-tmp/repo/node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    removeAgentToolCaches(tree);
+    expect(fs.existsSync(path.join(tree, '.vitest-tmp'))).toBe(false);
+    expect(fs.existsSync(path.join(shared, 'keep.json'))).toBe(true);
+  });
+
   it('never touches a linked (junction) node_modules or what it points to', () => {
     const tree = temp();
     const shared = temp();

@@ -343,6 +343,27 @@ export function removeAgentToolCaches(tree: string): void {
     fs.rmSync(cache, { recursive: true, force: true });
     if (fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
   }
+  // Reporter/temp outputs of the repo's own Vitest config (gitignored, never code).
+  for (const root of ['', 'server', 'webview-ui'])
+    for (const name of ['allure-results', '.vitest-tmp']) {
+      const output = path.join(tree, root, name);
+      const stat = fs.lstatSync(output, { throwIfNoEntry: false });
+      if (!stat) continue;
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error(`Refusing to remove tool output: ${path.join(root, name)}`);
+      // .vitest-tmp holds eval repos whose node_modules are junctions: drop the links, never their targets.
+      removeUnlinkingLinks(output);
+    }
+}
+
+function removeUnlinkingLinks(dir: string): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) fs.unlinkSync(entryPath);
+    else if (entry.isDirectory()) removeUnlinkingLinks(entryPath);
+    else fs.unlinkSync(entryPath);
+  }
+  fs.rmdirSync(dir);
 }
 
 function containsLink(dir: string): boolean {

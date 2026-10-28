@@ -88,6 +88,12 @@ export function developerScope(task: DagTask, root: string) {
     );
   });
   const mirroredTestZones = (task.changeZones ?? []).flatMap((zone) => {
+    // Webview tests are flat (vitest include test/*.test.ts), named after the source file;
+    // same mirror as qaTestFiles. Directories and globs imply no test files.
+    if (zone.startsWith('webview-ui/src/'))
+      return !directories.includes(zone) && !zone.includes('*') && /\.[cm]?[jt]sx?$/i.test(zone)
+        ? ['webview-ui/test/' + path.posix.basename(zone).replace(/\.[^.]+$/, '') + '*.test.ts']
+        : [];
     if (!zone.startsWith('server/src/') && !zone.startsWith('core/src/')) return [];
     const mirror = zone.startsWith('core/src/')
       ? zone.replace('core/src/', 'server/__tests__/core/')
@@ -441,7 +447,9 @@ function checkDeveloperChanges(
       (qaAuthor && !isQaAuthorPath(file)) ||
       // Only these roots are ever executed (server/webview Vitest include, Playwright),
       // unless the task declares the location as an explicit testZone; core/ never.
+      // Deleting a misplaced test is the fix, never a violation.
       (isDeveloperTest(file) &&
+        fs.existsSync(taskPath(tree, file)) &&
         (file.startsWith('core/') ||
           (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) =>
             file.startsWith(root),

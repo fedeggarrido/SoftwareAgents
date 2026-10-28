@@ -231,6 +231,11 @@ describe('Developer diff guard', () => {
       'server/__tests__/clientMessageHandler*.test.ts',
       'server/__tests__/clientMessageHandler*.spec.ts',
     ]);
+    // Webview tests are flat and named after the source file (same mirror as QA).
+    expect(
+      developerScope({ changeZones: ['webview-ui/src/office/featuresStore.ts'] } as never, repo)
+        .mirroredTestZones,
+    ).toEqual(['webview-ui/test/featuresStore*.test.ts']);
     fs.mkdirSync(path.join(directory, 'server/__tests__'), { recursive: true });
     const allowed = 'server/__tests__/clientMessageHandlerWs.test.ts';
     fs.writeFileSync(

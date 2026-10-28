@@ -70,7 +70,11 @@ process.stdin.on('end', () => {
       agentRole: 'developer',
       changeZones: ['server/src/audit*.ts'],
     });
-  if (mode === 'orchestrator-chain' || mode === 'orchestrator-single')
+  if (
+    mode === 'orchestrator-chain' ||
+    mode === 'orchestrator-single' ||
+    mode === 'orchestrator-doc'
+  )
     proposal.dag.tasks = [1, 2, 3].map((n) => ({
       key: `FEAT-001-T0${n}`,
       type: n === 3 ? 'qa' : 'code',
@@ -84,6 +88,12 @@ process.stdin.on('end', () => {
       parallelizable: false,
     }));
   if (mode === 'orchestrator-single') proposal.dag.tasks = proposal.dag.tasks.slice(0, 1);
+  if (mode === 'orchestrator-doc')
+    Object.assign(proposal.dag.tasks[2], {
+      type: 'doc',
+      agentRole: 'developer',
+      changeZones: ['docs/guide.md'],
+    });
   if (mode === 'developer-dependency') {
     proposal.dag.tasks[0].dependsOn = ['FEAT-001-T02'];
     Object.assign(proposal.dag.tasks[1], {

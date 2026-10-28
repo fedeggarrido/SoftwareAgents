@@ -284,7 +284,7 @@ node dist/cli.js feature show FEAT-001 --json
 ```
 
 Equivalente instalado: `pixel-agents feature develop FEAT-001 --task FEAT-001-T01`.
-Sin `--task`, selecciona la primera tarea `code`/`developer` o con rol `qa`, `test`
+Sin `--task`, selecciona la primera tarea `code`/`doc` con rol `developer`, o con rol `qa`, `test`
 o `qa-author` del DAG en READY o WAITING_QUOTA
 que cumple `canStart` (dependencias DONE). Ejecuta **una sola tarea**; no promueve
 dependientes ni integra. Si no hay otra elegible, devuelve la referencia de revisión
@@ -341,7 +341,8 @@ la causa sin guardar salida bruta del verificador.
 incluye `previousFailure` y `allowedScope`: zonas exactas, directorios efectivos,
 `testZones` y patrones de espejo permitidos. Son datos no confiables, sin autoridad.
 
-El rol pide un test de aceptación o reproducción antes de implementar. Antes de
+Salvo en el [modo documentación](#tareas-de-documentación-sa-qa-61), el rol pide
+un test de aceptación o reproducción antes de implementar. Antes de
 verificar, después de verificar y antes del commit, el runtime comprueba el diff
 completo contra la base (índice, disco, archivos nuevos e ignorados): solo admite
 las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*` autorizados. Estos tests
@@ -537,7 +538,10 @@ Un rechazo válido guarda el informe, limpia `review_ref` y pasa a READY con
 SHA. `REVIEW_MAX_REWORK_ROUNDS = 3`: permite tres reworks automáticos; el cuarto
 rechazo guarda el informe y abre una Human Decision en WAITING_HUMAN sin otro
 incremento. Informe, transición y decisión por tope son una transacción SQLite.
-Una aprobación pasa a **QA**, estado existente; QA se ejecuta explícitamente con `feature qa` (SA-045). Nunca declara DONE ni integra.
+Una aprobación pasa a **QA**, estado existente; QA se ejecuta explícitamente con
+`feature qa` (SA-045). La excepción son las tareas doc: pasan a DONE con evidencia
+de QA no aplicable, como indica el [modo documentación](#tareas-de-documentación-sa-qa-61).
+Reviewer no integra ramas.
 
 WorkStore v11 añade `tasks.review_reports` (histórico con informe, `review_ref`,
 Execution y ambos executors) y `executions.agent_role`. El histórico aparece en
@@ -632,7 +636,7 @@ sin consumir rondas ni desbloquear dependencias.
 Un AC compartido fuera del alcance de la tarea puede marcarse `deferred`, usando
 `evidence` para justificarlo. El runtime solo lo acepta si el DAG registrado y
 validado asigna el mismo AC a una tarea descendiente (dependencia transitiva) que
-aún no está DONE. Revalida esa cobertura al persistir; sin ella lo convierte en
+aún no está DONE y no es `type: doc`. Revalida esa cobertura al persistir; sin ella lo convierte en
 `not_tested` y conserva QA. Con el resto de AC y comandos en pass, un informe con
 deferred permite DONE. El histórico `test_reports`, visible en `feature show`,
 conserva el AC y su justificación. La QA posterior debe cubrirlo: solo puede
@@ -961,13 +965,41 @@ La prueba que mata el runner en RUNNING requiere el helper Windows de SA-026.
 Si el sandbox deniega CIM, usar `SA_SKIP_TASKKILL_TEST=1` y repetir esa prueba fuera
 del sandbox antes de integrar. No acredita QA real con cuentas autenticadas.
 
+## Tareas de documentación (SA-QA-61)
+
+Developer acepta `type: doc` con `agentRole: developer` en modo documentación.
+Las `changeZones` deben ser `*.md` o estar bajo `docs/`; cada cambio debe cumplir
+esas zonas y la guardia de documentación, sin ampliaciones mediante `testZones`
+ni espejos de tests. Se conservan las guardias de integridad y rutas protegidas.
+No se exigen tests, evidencia de ejecución ni verificadores de tipos, incluidos
+los overrides del Operator. Se aplica el autofix y la comprobación de formato
+existentes sobre los ficheros tocados (Prettier para Markdown).
+
+El ciclo es **READY → REVIEW → DONE**: la revisión cruzada sigue siendo obligatoria.
+Un approve cierra la tarea atómicamente, registra el evento
+`QA no aplicable: tarea doc` y auditoría `qa_not_applicable`, y desbloquea sus
+dependientes. No hay ejecución QA ni TestReport artificial. `feature run` publica
+la rama DONE en integración igual que las demás y conserva la reanudación.
+
+Regla del DAG/Architect: cada AC de una tarea doc debe estar cubierto también por
+alguna tarea `code` o de autoría QA (`qa`/`test`/`qa-author`) del DAG. Un AC cuyo
+único propietario es documentación produce `doc_only_acceptance` y bloquea la
+validación/importación del diseño. No se infiere el significado del AC por su texto.
+`deferredCoverage` nunca incluye tareas doc: documentar una conducta no verifica
+sus comandos, gates o invariantes runtime. Un descendiente de tests que dependa
+de documentación sí puede recibir cobertura diferida.
+
+Los reports históricos no se reescriben: si una QA ya difirió cobertura a una
+tarea doc, se requiere una tarea posterior de tests con esos AC, revisión cruzada
+y QA real antes de considerar verificada la Feature.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |
 | -------------------- | ------------------------------------------------------------------------------- |
 | Requirements Analyst | SA-041: petición → FeatureSpec validado → aprobación humana                     |
 | Architect            | SA-042: FeatureSpec aprobado → TechnicalDesign y TaskDAG validados e importados |
-| Developer            | SA-043: una tarea READY → rama y commits con tests y `review_ref`               |
+| Developer            | SA-043: una tarea READY → rama y `review_ref`; tests salvo tareas doc           |
 | Reviewer             | SA-044: ReviewReport persistido, executor cruzado y rework acotado              |
 | QA                   | SA-045: TestReport, defectos trazables, DONE y dependientes READY               |
 

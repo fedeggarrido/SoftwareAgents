@@ -549,6 +549,8 @@ export async function runFeature(
           append('rebase', task.key, store.getTask(task.key)!.status);
           continue;
         }
+        // Approved doc tasks are DONE atomically in completeReview; publish them above
+        // exactly like runtime-QA tasks, without scheduling a synthetic QA execution.
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
         if (action === 'develop') {
           const branch = `refs/heads/sa/${task.key}-developer`;

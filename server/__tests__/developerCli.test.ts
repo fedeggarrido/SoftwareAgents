@@ -53,6 +53,25 @@ function detachedTree(): string {
   git(repo, 'worktree', 'add', '--detach', directory, 'main');
   return directory;
 }
+
+it('allows documentation without tests, rejecting product and out-of-zone markdown', () => {
+  const base = git(repo, 'rev-parse', 'HEAD');
+  const directory = detachedTree();
+  const input = {
+    task: { type: 'doc', agentRole: 'developer', changeZones: ['docs/'] },
+  } as DeveloperRequest;
+  fs.mkdirSync(path.join(directory, 'docs'));
+  fs.writeFileSync(path.join(directory, 'docs/guide.md'), '# Guide\n');
+  const check = () => guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base);
+  expect(check()).toEqual([]);
+  fs.writeFileSync(path.join(directory, 'outside.md'), '# Outside\n');
+  expect(check).toThrow(ChangeZonesExceededError);
+  fs.unlinkSync(path.join(directory, 'outside.md'));
+  fs.mkdirSync(path.join(directory, 'server/src'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'server/src/product.ts'), 'export const x = 1;\n');
+  input.task.changeZones!.push('server/');
+  expect(check).toThrow(ChangeZonesExceededError);
+});
 function configure(
   push?: { enabled: boolean; remote: string },
   selected: 'claude' | 'codex' = 'claude',

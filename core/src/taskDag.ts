@@ -41,6 +41,7 @@ export type TaskDagIssue =
   | { code: 'cycle'; path: string[] }
   | { code: 'feature_mismatch'; dagFeature: string; specFeature: string }
   | { code: 'unknown_acceptance'; task: string; acceptanceRef: string }
+  | { code: 'doc_only_acceptance'; task: string; acceptanceRef: string }
   | { code: 'uncovered_acceptance'; acceptanceId: string };
 
 export interface TaskDagAnalysis {

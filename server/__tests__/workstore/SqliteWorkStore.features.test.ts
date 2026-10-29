@@ -40,7 +40,7 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         updated_at: null,
       });
       runMigrations(db);
-      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(15);
+      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(16);
     } finally {
       db.close();
     }

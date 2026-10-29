@@ -221,6 +221,53 @@ describe('features view acceptance', () => {
     }
   });
 
+  it.each(['other', 'nonexistent'])(
+    'AC-008 rejects a request for Project %s without cost figures',
+    async (projectId) => {
+      vi.doMock('../src/companyControl.js', () => ({ companyWorkspaceRoot: () => 'bound-root' }));
+      vi.doMock('../src/projectConfig.js', () => ({
+        loadProjectConfig: () => ({ project: { id: 'selected' }, operator: {} }),
+      }));
+      vi.doMock('../src/configPersistence.js', () => ({
+        readConfig: () => ({ projects: {} }),
+        projectConfigError: () => undefined,
+      }));
+      vi.resetModules();
+      const view = await import('../src/featuresView.js');
+      const spy = vi.spyOn(view, 'readFeaturesView');
+      const { AgentStateStore } = await import('../src/agentStateStore.js');
+      const { handleClientMessage } = await import('../src/clientMessageHandler.js');
+      const store = new AgentStateStore();
+      const send = vi.fn();
+      try {
+        handleClientMessage({ type: 'requestFeatures', projectId, requestId: 'r1' }, send, {
+          store,
+          cache: null,
+          privileged: true,
+        });
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          type: 'featuresSnapshot',
+          projectId,
+          requestId: 'r1',
+          status: 'unknown_project',
+          reason: null,
+          features: [],
+        });
+        const serialized = JSON.stringify(send.mock.calls[0][0]);
+        for (const field of ['costUsd', 'executions', 'costKnown', 'costPerDoneTaskUsd'])
+          expect(serialized).not.toContain(field);
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        store.dispose();
+        spy.mockRestore();
+        vi.doUnmock('../src/companyControl.js');
+        vi.doUnmock('../src/projectConfig.js');
+        vi.doUnmock('../src/configPersistence.js');
+        vi.resetModules();
+      }
+    },
+  );
+
   it('derives merged only for a completed DAG with integration ancestry evidence', () => {
     const data = fixture();
     const head = 'a'.repeat(40);

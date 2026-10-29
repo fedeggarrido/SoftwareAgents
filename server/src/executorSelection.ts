@@ -168,7 +168,7 @@ export function selectionBlock(
   return { code: 'no_enabled_executor', exclusions };
 }
 
-/** Order is a preference, never permission. Waiting does not trigger fallback (SA-038). */
+/** Order is a preference, never permission. Only quota waits permit policy-controlled fallback. */
 export function selectExecutor(agent: AgentSpec, policy: ModelPolicy, snapshot: SelectionSnapshot) {
   const capability = agent.modelPolicy.capabilityClass;
   const preferences = Object.hasOwn(policy, capability) ? policy[capability] : [];
@@ -178,9 +178,9 @@ export function selectExecutor(agent: AgentSpec, policy: ModelPolicy, snapshot: 
     if (code) exclusions.push({ executor: p.executor, code });
     return !code;
   });
-  const choice = alternatives[0] ?? null;
+  let choice = alternatives[0] ?? null;
   const block = choice ? undefined : selectionBlock(preferences.length, false, exclusions);
-  const gate: QuotaDecision = choice
+  let gate: QuotaDecision = choice
     ? (unprovenWait(choice.executor, snapshot) ??
       quotaGate(
         choice.executor,
@@ -196,6 +196,28 @@ export function selectExecutor(agent: AgentSpec, policy: ModelPolicy, snapshot: 
         reason: `No allowed executor for ${capability}${block ? ` (${block.code})` : ''}`,
         cause: 'disabled',
       };
+  if (gate.status === 'wait' && gate.cause === 'quota' && agent.modelPolicy.fallbackAllowed) {
+    for (const candidate of alternatives.slice(1)) {
+      const candidateGate =
+        unprovenWait(candidate.executor, snapshot) ??
+        quotaGate(
+          candidate.executor,
+          snapshot.machinePolicy,
+          snapshot.capacities[candidate.executor],
+          snapshot.active[candidate.executor] ?? NaN,
+          snapshot.nowS,
+          (snapshot.active.claude ?? 0) + (snapshot.active.codex ?? 0),
+        );
+      if (candidateGate.status !== 'wait') {
+        choice = candidate;
+        gate = {
+          ...candidateGate,
+          reason: `quota fallback to ${candidate.executor}; ${candidateGate.reason}`,
+        };
+        break;
+      }
+    }
+  }
   const excluded = exclusions.map((e) => `${e.executor}: ${e.code}`).join('; ');
   return {
     choice,

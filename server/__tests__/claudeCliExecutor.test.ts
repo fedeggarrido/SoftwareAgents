@@ -75,6 +75,11 @@ function executor(mode?: string) {
     hookCommand: 'node "trusted-hook.js"',
   });
 }
+it.each(['--usage-limit', '--quota-stderr'])('normalizes quota diagnostic %s', async (mode) => {
+  const events: ExecutionEvent[] = [];
+  for await (const event of executor(mode).start(req).events) events.push(event);
+  expect(events).toContainEqual({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
+});
 it('reserves UUID before launch and normalizes cumulative usage and quota', async () => {
   const handle = new ExecutionRegistry(root).executor(executor()).start(req);
   const ledger = path.join(root, '.git/softwareagents/executions.jsonl');

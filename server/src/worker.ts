@@ -40,6 +40,9 @@ import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
   CLAUDE_OAUTH_REFRESH_RETRIES,
   CLAUDE_OAUTH_REFRESH_WAIT_MS,
+  EXECUTOR_TRANSIENT_BACKOFF_MS,
+  EXECUTOR_TRANSIENT_MAX_BACKOFF_MS,
+  EXECUTOR_TRANSIENT_RETRIES,
   REVIEW_MAX_REWORK_ROUNDS,
   VALIDATION_AUDIT_MAX_ERROR_CHARS,
   VALIDATION_AUDIT_MAX_ERRORS,
@@ -64,8 +67,16 @@ import {
   closeAvailabilityDecisions,
   escalateUnavailable,
   executorAuthorityBlock,
+  recordExecutorQuota,
+  recordExecutorQuotaSuccess,
 } from './executorAvailability.js';
 import { observeExecutors, type ProbeRunner, runProbe } from './executorProbes.js';
+import {
+  isQuotaDiagnostic,
+  isTransientDiagnostic,
+  quotaBackoffSeconds,
+  retryAtFromDiagnostic,
+} from './executorQuotaState.js';
 import { ClaudeCliExecutor } from './executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from './executors/codexCliExecutor.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
@@ -990,6 +1001,9 @@ async function runWorkerExecution(
       usingDefaultVerifier = !verifier.allowedPaths;
       levels = [];
     }
+    let quotaFallbackFrom: string | undefined;
+    let transientRetries = 0;
+    const quotaExecutors = new Set<string>();
     for (;;) {
       const inputs: TierInputs =
         verifier && levels.length ? { cascadeTier: levels[tierIndex] } : normalInputs;
@@ -1222,7 +1236,11 @@ async function runWorkerExecution(
           detail: JSON.stringify(reviewSelection),
         });
       const selectionReason = `${options.reviewer ? `${role}: excluded codex: code_execution_not_mediated; ` : ''}${reviewSelection ? `${options.qa ? 'QA' : 'Reviewer'} ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
-      if (tierSelection && reviewSelection) tierSelection.reason = selectionReason;
+      const tracedSelectionReason = quotaFallbackFrom
+        ? `quota fallback from ${quotaFallbackFrom}; ${selectionReason}`
+        : selectionReason;
+      if (quotaFallbackFrom) audit('quota_fallback_selected', { detail: tracedSelectionReason });
+      if (tierSelection && reviewSelection) tierSelection.reason = tracedSelectionReason;
       if (selection && reviewSelection) selection.reason = selectionReason;
       telemetry = new ExecutionTelemetry(
         new TelemetrySink(common, config.project.id, config.operator.telemetry),
@@ -1253,7 +1271,7 @@ async function runWorkerExecution(
           model_id: tierSelection?.choice?.model ?? selection?.choice?.model ?? '',
           model_tier: tierSelection?.tier,
           model_effort: tierSelection?.choice?.effort ?? null,
-          selection_reason: selectionReason,
+          selection_reason: tracedSelectionReason,
           session_id: null,
           // Supervisor registration is fenced before ACK, after preparation.
           pid: null,
@@ -1586,7 +1604,10 @@ async function runWorkerExecution(
       oauthRefreshContention = false;
       eventsStarted = true;
       let environmentBlocked = false;
+      let transientFailure = false;
       for await (const event of handle.events) {
+        if (event.type === 'output' && event.stream === 'stderr')
+          transientFailure ||= isTransientDiagnostic(event.text);
         if (event.type === 'guardCorrection') containmentCorrection = event.diagnostic;
         if (
           selectedExecutor === 'claude' &&
@@ -1599,11 +1620,15 @@ async function runWorkerExecution(
         if (
           !options.evaluation &&
           event.type === 'rateLimit' &&
-          (!event.capacity || event.message === 'rejected')
+          (!event.capacity || event.message === 'rejected' || event.capacity.status === 'rejected')
         ) {
           const resets =
             event.capacity?.windows.flatMap((window) =>
-              window.resetsAt !== null && window.resetsAt > nowSeconds() ? [window.resetsAt] : [],
+              (window.usedRatio === null || window.usedRatio >= 1) &&
+              window.resetsAt !== null &&
+              window.resetsAt > nowSeconds()
+                ? [window.resetsAt]
+                : [],
             ) ?? [];
           if (
             runtimeQuota?.status === 'wait' &&
@@ -1615,8 +1640,8 @@ async function runWorkerExecution(
           runtimeQuota = {
             status: 'wait',
             cause: 'quota',
-            reason: event.message,
-            resetsAt: resets.length ? Math.max(...resets) : null,
+            reason: 'rejected',
+            resetsAt: resets.length ? Math.max(...resets) : nowSeconds() + quotaBackoffSeconds(),
           };
           audit('quota_exhausted', { detail: JSON.stringify(runtimeQuota) });
         }
@@ -1634,6 +1659,21 @@ async function runWorkerExecution(
           }
         }
         if (event.type === 'finished') {
+          transientFailure ||= isTransientDiagnostic(event.resultSummary);
+          if (
+            !options.evaluation &&
+            event.exitCode !== 0 &&
+            isQuotaDiagnostic(event.resultSummary) &&
+            !/containment/i.test(event.resultSummary)
+          )
+            runtimeQuota ??= {
+              status: 'wait',
+              cause: 'quota',
+              reason: 'rejected',
+              resetsAt:
+                retryAtFromDiagnostic(event.resultSummary, new Date()) ??
+                nowSeconds() + quotaBackoffSeconds(),
+            };
           environmentBlocked = isAgentEnvironmentFailure(event.resultSummary);
           exitCode = event.exitCode;
           if ((options.requirements || options.architect || options.reviewer) && exitCode === 0)
@@ -1657,11 +1697,75 @@ async function runWorkerExecution(
         throw new VerifierInfrastructureError(
           'agent reported an environment blocker; operator retry required',
         );
-      if (runtimeQuota) {
+      if (runtimeQuota && !interrupted && !executionDiagnostic?.includes('category=containment;')) {
+        const quota = runtimeQuota as Extract<QuotaDecision, { status: 'wait' }>;
+        const persisted = withMachineAdmission(`${executionId}-quota`, () =>
+          recordExecutorQuota(selectedExecutor, quota.resetsAt!, nowSeconds()),
+        );
+        audit('quota_exhausted', { detail: JSON.stringify({ ...quota, ...persisted }) });
+        const pristine =
+          git(tree.path, ['rev-parse', 'HEAD']) === startingHead &&
+          !git(tree.path, ['status', '--porcelain', '--untracked-files=all']);
+        quotaExecutors.add(selectedExecutor);
+        if (
+          persisted &&
+          pristine &&
+          !interrupted &&
+          !executionDiagnostic?.includes('category=containment;') &&
+          spec.modelPolicy.fallbackAllowed &&
+          !options.evaluation &&
+          !inputs.cascadeTier &&
+          (tierPolicy || modelPolicy) &&
+          quotaExecutors.size < 2 &&
+          !args.executor
+        ) {
+          quotaFallbackFrom = selectedExecutor;
+          await lifecycle?.releaseForQuotaRetry(quota);
+          await telemetry.finish('error');
+          slot.release();
+          slot = undefined;
+          handle = undefined;
+          eventsStarted = false;
+          executionFinished = false;
+          telemetry = undefined;
+          runtimeQuota = undefined;
+          executionId = randomUUID();
+          continue;
+        }
         process.exitCode = 3;
         return { branch: tree.branch, commit: null, stat: '', quotaDecision: runtimeQuota };
       }
+      if (
+        !interrupted &&
+        executionFinished &&
+        exitCode !== 0 &&
+        !executionDiagnostic?.includes('category=containment;') &&
+        transientFailure &&
+        transientRetries < EXECUTOR_TRANSIENT_RETRIES &&
+        git(tree.path, ['rev-parse', 'HEAD']) === startingHead &&
+        !git(tree.path, ['status', '--porcelain', '--untracked-files=all'])
+      ) {
+        const waitMs = Math.min(
+          EXECUTOR_TRANSIENT_MAX_BACKOFF_MS,
+          EXECUTOR_TRANSIENT_BACKOFF_MS * 2 ** transientRetries++,
+        );
+        audit('transient_retry', { detail: JSON.stringify({ waitMs, retry: transientRetries }) });
+        await telemetry.finish('error');
+        slot.release();
+        slot = undefined;
+        handle = undefined;
+        eventsStarted = false;
+        executionFinished = false;
+        telemetry = undefined;
+        await delay(waitMs, undefined, { signal: verifierAbort.signal });
+        executionId = randomUUID();
+        continue;
+      }
       telemetry.phase('commit_guards');
+      if (executionFinished && exitCode === 0 && !runtimeQuota && !options.evaluation)
+        withMachineAdmission(`${executionId}-quota-success`, () =>
+          recordExecutorQuotaSuccess(selectedExecutor, nowSeconds()),
+        );
       if (slotFailure) throw slotFailure;
       if (
         !interrupted &&

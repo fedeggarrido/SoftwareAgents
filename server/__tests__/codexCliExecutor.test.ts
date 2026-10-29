@@ -65,6 +65,13 @@ async function collect(mode?: string) {
   for await (const event of executor(mode).start(req).events) events.push(event);
   return events;
 }
+it.each(['--usage-limit', '--quota-stderr'])('normalizes quota diagnostic %s', async (mode) => {
+  expect(await collect(mode)).toContainEqual({
+    type: 'rateLimit',
+    message: 'rejected',
+    retryAfterSec: 0,
+  });
+});
 it.each(['qa', 'reviewer'])('refuses %s before creating a process or runtime directory', (role) => {
   expect(() => executor().start({ ...req, role })).toThrow('code_execution_not_mediated');
   expect(fs.existsSync(path.join(root, 'runtime'))).toBe(false);

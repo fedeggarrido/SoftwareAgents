@@ -20,6 +20,19 @@ process.stdin.on('end', () => {
     fs.readFileSync(require('path').join(__dirname, 'codex-startup-real.jsonl')),
   );
   if (args.includes('--startup-only')) return;
+  if (args.includes('--usage-limit')) {
+    emit({
+      type: 'turn.failed',
+      error: { message: "You've hit your usage limit. Try again later." },
+    });
+    process.exitCode = 1;
+    return;
+  }
+  if (args.includes('--quota-stderr')) {
+    console.error('HTTP 429: rate limit exceeded');
+    process.exitCode = 1;
+    return;
+  }
   const containedCommands = {
     '--claude-shell-write': 'echo TEST_SECRET > .claude/settings.json',
     '--git-dynamic': 'p=push; git $p origin TEST_SECRET',

@@ -23,6 +23,7 @@ import {
   CODEX_WINDOWS_SANDBOX,
   TELEMETRY_ROLLOUT_BYTES,
 } from '../constants.js';
+import { isQuotaDiagnostic } from '../executorQuotaState.js';
 import { validateModelChoice } from '../modelTiers.js';
 import { parseCodexRateLimits } from '../quotaReader.js';
 import { CliTelemetryProjection } from '../telemetryObservations.js';
@@ -285,6 +286,8 @@ export class CodexCliExecutor implements Executor {
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: proc[stream]! })) {
               if (stream === 'stderr') {
+                if (isQuotaDiagnostic(line))
+                  push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                 push({ type: 'output', text: line, stream });
                 continue;
               }
@@ -292,6 +295,8 @@ export class CodexCliExecutor implements Executor {
               try {
                 record = JSON.parse(line);
               } catch {
+                if (isQuotaDiagnostic(line))
+                  push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                 push({ type: 'output', text: line, stream });
                 continue;
               }
@@ -444,13 +449,22 @@ export class CodexCliExecutor implements Executor {
               if (record?.type === 'turn.failed') {
                 resultError = true;
                 summary = record.error?.message ?? 'Codex turn failed';
+                if (isQuotaDiagnostic(summary))
+                  push({
+                    type: 'rateLimit',
+                    message: 'rejected',
+                    retryAfterSec: record.error?.retry_after_seconds ?? 0,
+                  });
               }
               if (record?.type === 'error') {
                 push({ type: 'output', text: record.message ?? 'Codex error', stream });
-                if (record.code === 'rate_limit_exceeded')
+                if (
+                  record.code === 'rate_limit_exceeded' ||
+                  isQuotaDiagnostic(record.message ?? '')
+                )
                   push({
                     type: 'rateLimit',
-                    message: record.message,
+                    message: 'rejected',
                     retryAfterSec: record.retry_after_seconds ?? 0,
                   });
               }

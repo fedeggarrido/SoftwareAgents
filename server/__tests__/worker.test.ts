@@ -55,6 +55,7 @@ const readyProbe = readyProbeFor(EXECUTOR_PROBE_CATALOG);
 vi.mock('../src/constants.js', async (original) => ({
   ...(await original<typeof import('../src/constants.js')>()),
   CLAUDE_OAUTH_REFRESH_WAIT_MS: 1,
+  EXECUTOR_TRANSIENT_BACKOFF_MS: 1,
 }));
 // Normal runs require Windows recovery. Keep the POSIX refusal regression below
 // active everywhere; the remaining integration cases exercise Windows launches.
@@ -123,6 +124,80 @@ beforeEach(() => {
 });
 
 describe('worker lifecycle SA-039', () => {
+  it('re-admits a quota fallback, persists both executions and keeps attempt zero', async () => {
+    const file = path.join(root, '.pixel-agents/config.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    Object.assign(raw.projects.test, {
+      allowedExecutors: ['claude', 'codex'],
+      binaryPaths: { claude: process.execPath, codex: process.execPath },
+      quotaThresholds: { claude: 5, codex: 5 },
+      concurrency: { maxExecutions: 2, perExecutor: { claude: 1, codex: 1 } },
+      modelTiers: {
+        maxTier: 'standard',
+        rule: parse(
+          fs.readFileSync(
+            path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+            'utf8',
+          ),
+        ).tierRule,
+        tiers: {
+          standard: {
+            candidates: [
+              { executor: 'claude', model: 'test-model' },
+              { executor: 'codex', model: 'test-model' },
+            ],
+          },
+        },
+      },
+    });
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const limited = vi.spyOn(ClaudeCliExecutor.prototype, 'start').mockReturnValue({
+      cancel: vi.fn(),
+      events: (async function* (): AsyncGenerator<ExecutionEvent> {
+        yield { type: 'finished', exitCode: 1, resultSummary: 'HTTP 429 rate limit exceeded' };
+      })(),
+    });
+    const fallback = vi.spyOn(CodexCliExecutor.prototype, 'start').mockReturnValue({
+      cancel: vi.fn(),
+      events: (async function* (): AsyncGenerator<ExecutionEvent> {
+        yield { type: 'finished', exitCode: 0, resultSummary: 'done' };
+      })(),
+    });
+    await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
+    expect(limited).toHaveBeenCalledTimes(1);
+    expect(fallback).toHaveBeenCalledTimes(1);
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')).toMatchObject({ status: 'REVIEW', attempt: 0 });
+      expect(
+        store
+          .listExecutions()
+          .map((e) => e.executor)
+          .sort(),
+      ).toEqual(['claude', 'codex']);
+      expect(
+        store.listExecutions().find((e) => e.executor === 'codex')!.selection_reason,
+      ).toContain('quota fallback from claude');
+      expect(store.listDomainEvents('SA-999').some((e) => e.to_status === 'WAITING_QUOTA')).toBe(
+        true,
+      );
+    } finally {
+      store.close();
+    }
+  });
+  it('retries transient transport failures with bounded backoff, without quota wait', async () => {
+    const start = vi.spyOn(ClaudeCliExecutor.prototype, 'start');
+    for (const summary of ['HTTP 503 temporarily unavailable', 'ECONNRESET', 'done'])
+      start.mockReturnValueOnce({
+        cancel: vi.fn(),
+        events: (async function* (): AsyncGenerator<ExecutionEvent> {
+          yield { type: 'finished', exitCode: summary === 'done' ? 0 : 1, resultSummary: summary };
+        })(),
+      });
+    const result = await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
+    expect(result.quotaDecision).toBeUndefined();
+    expect(start).toHaveBeenCalledTimes(3);
+  });
   test.each(['linux', 'darwin'])(
     'refuses %s before claiming work, preparing a worktree or spawning',
     async (platform) => {
@@ -142,6 +217,27 @@ describe('worker lifecycle SA-039', () => {
     },
   );
 
+  it('waits without consuming an attempt when only the final diagnostic reports a limit', async () => {
+    vi.spyOn(ClaudeCliExecutor.prototype, 'start').mockReturnValue({
+      cancel: vi.fn(),
+      events: (async function* (): AsyncGenerator<ExecutionEvent> {
+        yield { type: 'finished', exitCode: 1, resultSummary: "You've hit your usage limit" };
+      })(),
+    });
+    const result = await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
+    expect(result.quotaDecision).toMatchObject({
+      status: 'wait',
+      cause: 'quota',
+      resetsAt: expect.any(Number),
+    });
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      expect(store.getTask('SA-999')).toMatchObject({ status: 'WAITING_QUOTA', attempt: 0 });
+    } finally {
+      store.close();
+      process.exitCode = 0;
+    }
+  });
   it.each(['capacity', 'retryAfter'])(
     'keeps the latest known future reset across a subsequent rejection without a reset (%s)',
     async (source) => {

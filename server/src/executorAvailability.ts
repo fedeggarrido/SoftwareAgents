@@ -17,11 +17,24 @@ import {
   writeRawConfigFile,
 } from './configPersistence.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
+import { readExecutorQuota } from './executorQuotaState.js';
 import type { SelectionBlock } from './executorSelection.js';
 import { withMachineAdmission } from './executorSlots.js';
 import { catalogLevelsFor, operatorRevision } from './executorState.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
+
+/** Runtime circuit state is independent of the Operator's enabled switch. */
+export function executorQuotaAvailability(executor: ExecutorId, nowS: number) {
+  const quota = readExecutorQuota(executor, nowS);
+  return { available: quota?.unavailable !== true, resetsAt: quota?.resetsAt ?? null };
+}
+
+export {
+  readExecutorQuota,
+  recordExecutorQuota,
+  recordExecutorQuotaSuccess,
+} from './executorQuotaState.js';
 
 /**
  * SA-088: the one service that changes which Executors a Project may use.

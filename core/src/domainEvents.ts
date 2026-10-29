@@ -53,7 +53,8 @@ type TransitionKind =
   | 'execution.finished'
   | 'review.requested'
   | 'qa.requested'
-  | 'quota.waiting';
+  | 'quota.waiting'
+  | 'quota.exhausted';
 
 export type TransitionDomainEvent = {
   [K in TransitionKind]: DomainEventBase & TransitionFields & { kind: K };
@@ -67,7 +68,7 @@ export interface HumanDecisionDomainEvent extends DomainEventBase, TransitionFie
 
 /** Kinds no WorkStore writer records yet; defined so producers and clients share one catalog. */
 export interface PendingDomainEvent extends DomainEventBase {
-  kind: 'task.created' | 'quota.exhausted';
+  kind: 'task.created';
 }
 
 export type DomainEvent = TransitionDomainEvent | HumanDecisionDomainEvent | PendingDomainEvent;

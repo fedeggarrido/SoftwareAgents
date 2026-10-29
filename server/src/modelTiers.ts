@@ -466,6 +466,11 @@ export function selectModelTier(
         };
       waits.push(gate);
       quotaBlocked ||= gate.cause === 'quota';
+      if (
+        gate.cause === 'quota' &&
+        (!agent.modelPolicy.fallbackAllowed || input.evaluation || input.cascadeTier)
+      )
+        break;
     }
     if (
       input.evaluation ||

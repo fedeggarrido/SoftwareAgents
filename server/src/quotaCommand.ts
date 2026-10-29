@@ -9,6 +9,7 @@ import type { WorkSize, WorkType } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { CliUsageError } from './cliErrors.js';
 import { readConfig } from './configPersistence.js';
+import { readExecutorQuota } from './executorQuotaState.js';
 import type { ExecutorId } from './executors/executor.js';
 import type { SelectionSnapshot } from './executorSelection.js';
 import { selectExecutor } from './executorSelection.js';
@@ -212,6 +213,18 @@ export function readSelectionSnapshot(
       );
       capacities[executor] = backedByFreshPublisher ? evidence : { ...evidence, confidence: 'low' };
     }
+  }
+  for (const executor of ['claude', 'codex'] as const) {
+    const exhausted = readExecutorQuota(executor, nowS);
+    if (exhausted)
+      capacities[executor] = {
+        provider: executor,
+        status: 'rejected',
+        source: 'estimated',
+        confidence: 'high',
+        observedAt: nowS,
+        windows: [{ kind: 'other', usedRatio: 1, resetsAt: exhausted.resetsAt }],
+      };
   }
   return {
     allowedExecutors: operator.allowedExecutors,

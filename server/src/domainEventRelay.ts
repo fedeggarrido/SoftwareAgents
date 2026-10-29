@@ -84,6 +84,15 @@ export function eventsFromTransition(
   if (to === 'REVIEW') events.push({ ...base, kind: 'review.requested' });
   if (to === 'QA') events.push({ ...base, kind: 'qa.requested' });
   if (to === 'WAITING_QUOTA') events.push({ ...base, kind: 'quota.waiting' });
+  if (to === 'WAITING_QUOTA') {
+    try {
+      const wait = JSON.parse(row.reason) as { cause?: string; reason?: string };
+      if (wait?.cause === 'quota' && wait.reason === 'rejected')
+        events.push({ ...base, kind: 'quota.exhausted' });
+    } catch {
+      // Legacy free-text reasons are waits, not proof of an exhausted account.
+    }
+  }
   if (to === 'WAITING_HUMAN')
     events.push({ ...base, kind: 'human.decision.required', decisionId: context.decisionId });
   if (from === 'WAITING_HUMAN' && context.decisionId !== null)

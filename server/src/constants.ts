@@ -263,3 +263,9 @@ export const FEATURE_RUN_POLL_MS = 1000;
 /** QA runs whole task test files (e.g. worker.test.ts takes minutes on Windows); the
  * 60 s eval criterion budget is for single tests. Still bounded and tree-killed. */
 export const QA_COMMAND_TIMEOUT_MS = 15 * 60_000;
+/** SA-038: runtime quota rejection and transient transport recovery. */
+export const EXECUTOR_QUOTA_FAILURE_THRESHOLD = 2;
+export const QUOTA_BACKOFF_SECONDS = 300;
+export const EXECUTOR_TRANSIENT_RETRIES = 2;
+export const EXECUTOR_TRANSIENT_BACKOFF_MS = 1000;
+export const EXECUTOR_TRANSIENT_MAX_BACKOFF_MS = 10000;

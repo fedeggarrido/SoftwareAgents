@@ -147,7 +147,7 @@ export class WorkerLifecycle {
   async wait(gate: Extract<QuotaDecision, { status: 'wait' }>): Promise<void> {
     await this.finish(
       'WAITING_QUOTA',
-      JSON.stringify({ reason: gate.reason, resetsAt: gate.resetsAt }),
+      JSON.stringify({ reason: gate.reason, resetsAt: gate.resetsAt, cause: gate.cause }),
     );
   }
 
@@ -156,6 +156,12 @@ export class WorkerLifecycle {
     const task = this.store.getTask(this.task)!;
     if (task.status === 'FAILED_RETRYABLE')
       await this.store.transition(this.task, task.version, 'READY', reason, this.owner);
+  }
+
+  /** Persist quota exhaustion before a fresh admission/claim for a fallback. */
+  async releaseForQuotaRetry(gate: Extract<QuotaDecision, { status: 'wait' }>): Promise<void> {
+    await this.wait(gate);
+    this.claimed = false;
   }
 
   async stopHeartbeat(): Promise<void> {

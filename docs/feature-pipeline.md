@@ -1174,6 +1174,37 @@ vivo/reutilizado, formato desconocido, enlace o consulta incierta conserva el lo
 La consulta es conservadora: otro Node también impide retirarlo. La auditoría
 registra el intento de limpieza antes de borrar; nunca se mata ningún proceso.
 
+## Cuota agotada y recuperación (SA-038)
+
+Un rechazo `rateLimit` de Claude (`rate_limit_event`) o Codex (`rate_limits`,
+`error` o `turn.failed`), un `result.is_error` de Claude o un diagnóstico del CLI
+en stderr/salida final con usage limit, rate limit o HTTP 429 produce
+`WAITING_QUOTA`, sin consumir `attempt`. No se interpreta el contenido de las
+herramientas como cuota. El reset explícito de las ventanas/retry-after prevalece;
+si falta, `SOFTWAREAGENTS_QUOTA_BACKOFF_SECONDS` configura la espera (300 s por
+defecto). La transición persistida publica `quota.waiting` y `quota.exhausted`
+del contrato existente. El sweeper reanuda tras el reset y el orquestador conserva
+su parada del run entero en `WAITING_QUOTA`.
+
+El runtime guarda el rechazo por ejecutor en `~/.pixel-agents/executor-quota/`,
+bajo admisión de máquina; todas las nuevas admisiones consultan esa evidencia.
+`EXECUTOR_QUOTA_FAILURE_THRESHOLD` (2) marca los rechazos consecutivos como
+indisponibilidad; la evidencia bloquea nuevos lanzamientos desde el primer rechazo
+y caduca automáticamente al reset. No cambia los switches del operador.
+
+Con `modelPolicy.fallbackAllowed`, la selección puede probar el otro ejecutor
+permitido, pasando de nuevo por los gates de instalación, autoridad, nivel, cuota
+y concurrencia. La nueva Execution conserva la elección en `selection_reason`
+y auditoría `quota_fallback_selected`. Una ejecución explícita o de evaluación
+no cambia de ejecutor. Solo se relanza automáticamente un árbol limpio y con
+cierre confirmado; con cambios pendientes se espera para no mezclar trabajos.
+
+Los fallos transitorios de red/5xx tienen hasta dos reintentos, con espera
+exponencial de 1 s y 2 s (tope 10 s), árbol limpio y nueva admisión. No se tratan
+como agotamiento de cuota. Se auditan `quota_exhausted` y `transient_retry`, sin
+guardar el texto del diagnóstico. Los fixtures de rechazo añadidos son
+reproducciones de formato, no capturas acreditadas de una ejecución real.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

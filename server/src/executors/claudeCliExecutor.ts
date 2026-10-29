@@ -12,6 +12,7 @@ import {
   validateAgentOutput,
 } from '../agentCompiler.js';
 import { claudeConfigEnvironment } from '../claudeConfig.js';
+import { isQuotaDiagnostic } from '../executorQuotaState.js';
 import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from '../modelTiers.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
 import { CLAUDE_HOOK_EVENTS } from '../providers/hook/claude/constants.js';
@@ -293,11 +294,15 @@ export class ClaudeCliExecutor implements Executor {
           const readers = (['stdout', 'stderr'] as const).map(async (stream) => {
             for await (const line of createInterface({ input: processChild[stream]! })) {
               if (stream === 'stderr') {
+                if (isQuotaDiagnostic(line))
+                  push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                 push({ type: 'output', text: line, stream });
                 continue;
               }
               try {
                 const record = JSON.parse(line);
+                if (record.type === 'assistant' && record.error === 'rate_limit')
+                  push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                 for (const observation of telemetry.claude(record))
                   push({ type: 'telemetry', observation });
                 if (!record?.type) {
@@ -418,9 +423,11 @@ export class ClaudeCliExecutor implements Executor {
                       inputTokens: record.usage.input_tokens ?? 0,
                       outputTokens: record.usage.output_tokens ?? 0,
                     });
-                  summary = record.result ?? record.errors?.join('\n') ?? '';
+                  summary = record.result || record.errors?.join('\n') || '';
                   resultError = record.is_error === true;
-                  if (compiled.outputSchema) {
+                  if (resultError && isQuotaDiagnostic(summary))
+                    push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
+                  if (compiled.outputSchema && !resultError) {
                     try {
                       const output = record.structured_output ?? JSON.parse(summary);
                       if (!validateAgentOutput(compiled.outputSchema, output))
@@ -447,6 +454,8 @@ export class ClaudeCliExecutor implements Executor {
                   });
                 }
               } catch {
+                if (isQuotaDiagnostic(line))
+                  push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                 push({ type: 'output', text: line, stream });
               }
             }

@@ -35,6 +35,32 @@ if (!valid) {
     }
   }
   if (executor === 'codex') require('./codex-rollout.cjs')('fake-codex-session');
+  // Protocol-shaped rejection fixtures. No live quota request is made.
+  if (args.includes('--usage-limit')) {
+    console.log(
+      JSON.stringify(
+        executor === 'claude'
+          ? {
+              type: 'result',
+              subtype: 'error_during_execution',
+              is_error: true,
+              errors: ["You've hit your limit"],
+              result: '',
+            }
+          : {
+              type: 'turn.failed',
+              error: { message: "You've hit your usage limit. Try again later." },
+            },
+      ),
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (args.includes('--quota-stderr')) {
+    console.error('HTTP 429: rate limit exceeded');
+    process.exitCode = 1;
+    return;
+  }
   if (args.includes('--write-doc')) {
     require('fs').writeFileSync('worker-result.md', 'Synthetic documentation correction\n');
   }

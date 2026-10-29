@@ -67,7 +67,10 @@ describe('Designer phase 1', () => {
     invented.validations = [
       { kind: 'contrast', tool: 'model', result: 'pass', evidence: 'Looks fine' },
     ];
-    expect(() => validateDesignReport(JSON.stringify(invented), validations)).toThrow();
+    // Model-authored validations are discarded; only runtime evidence is kept.
+    expect(validateDesignReport(JSON.stringify(invented), validations).validations).toEqual(
+      validations,
+    );
     expect(() => validateDesignReport(JSON.stringify(report()), [])).toThrow();
     const missing = report();
     missing.validations = validations.map((v) => ({ ...v, evidence: '' }));

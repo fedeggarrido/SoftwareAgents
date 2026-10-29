@@ -20,8 +20,9 @@ export function validateDesignReport(source: string, runtime: DesignValidation[]
     report.findings.some((f) => ['blocker', 'major'].includes(f.severity))
   )
     errors.push('blocker/major prohibits approve');
-  if (JSON.stringify(report.validations) !== JSON.stringify(runtime))
-    errors.push('Validations must exactly match runtime evidence');
+  // Validations are runtime-owned evidence: the model never authors or transcribes them
+  // (a transcription mismatch failed the first real review); attach the runtime's own.
+  report.validations = runtime;
   if (
     !runtime.some((v) => v.kind === 'capture' && v.result === 'pass') ||
     !runtime.some(

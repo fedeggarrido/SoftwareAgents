@@ -32,6 +32,8 @@ describe('features view acceptance', () => {
       inputTokens: 100,
       cacheReadTokens: 25,
       prompt: '<private-prompt>',
+      output: '<private-output>',
+      prices: { input: 'private-configured-price' },
       path: 'C:\\private\\file',
       model: 'private-model',
       quotaBefore: 'private-quota',
@@ -158,7 +160,7 @@ describe('features view acceptance', () => {
       // This fixture tests read isolation; execution/task storage is not under test.
       db.exec('PRAGMA foreign_keys = OFF');
       db.exec(
-        "INSERT INTO projects VALUES ('P','now'),('Q','now'); INSERT INTO features(project_id,key,doc_path,git_sha,status) VALUES ('P','FEAT-001','doc','sha','approved'),('P','FEAT-002','doc','sha','approved'),('Q','FEAT-001','doc','sha','approved')",
+        "INSERT INTO projects VALUES ('P','now'),('Q','now'); INSERT INTO features(project_id,key,doc_path,git_sha,status,title) VALUES ('P','FEAT-001','doc','sha','approved',NULL),('P','FEAT-002','doc','sha','approved',NULL),('Q','FEAT-001','doc','sha','approved','OTHER_PROJECT_ONLY')",
       );
       const insert = db.prepare('INSERT INTO usage_ledger VALUES (?, ?, ?)');
       for (const [project, id, cost, feature] of [
@@ -176,6 +178,22 @@ describe('features view acceptance', () => {
         ['FEAT-002', 2, 1],
       ]);
       expect(JSON.stringify(result)).not.toContain('private-');
+      expect(JSON.stringify(result)).not.toContain('OTHER_PROJECT_ONLY');
+      const serialized = JSON.parse(JSON.stringify(result)) as typeof result;
+      for (const feature of serialized.features)
+        expect(Object.keys(feature.cost).sort()).toEqual([
+          'cacheHitRate',
+          'costKnown',
+          'costPerDoneTaskUsd',
+          'costUsd',
+          'executions',
+        ]);
+      expect(await readFeaturesView(root, 'P')).toEqual(result);
+      const otherProject = await readFeaturesView(root, 'Q');
+      expect(otherProject.status).toBe('ok');
+      expect(otherProject.features.map((r) => [r.key, r.cost.costUsd, r.cost.executions])).toEqual([
+        ['FEAT-001', 5, 1],
+      ]);
       expect(fs.readFileSync(file)).toEqual(before);
       db.exec("UPDATE usage_ledger SET body = 'broken' WHERE project_id = 'P'");
       expect(await readFeaturesView(root, 'P')).toEqual({
@@ -184,11 +202,19 @@ describe('features view acceptance', () => {
         features: [],
       });
       db.exec('DROP TABLE usage_ledger; UPDATE schema_version SET version = 15');
+      const legacyBefore = fs.readFileSync(file);
       const v15 = await readFeaturesView(root, 'P');
       expect(v15.status).toBe('ok');
-      expect(v15.features.every((r) => r.cost.executions === 0 && r.cost.costUsd === null)).toBe(
-        true,
-      );
+      expect(v15.features).toHaveLength(2);
+      for (const feature of v15.features)
+        expect(feature.cost).toEqual({
+          executions: 0,
+          costKnown: 0,
+          costUsd: null,
+          costPerDoneTaskUsd: null,
+          cacheHitRate: null,
+        });
+      expect(fs.readFileSync(file)).toEqual(legacyBefore);
     } finally {
       db?.close();
       fs.rmSync(root, { recursive: true, force: true });

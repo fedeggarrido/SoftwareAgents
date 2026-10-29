@@ -93,6 +93,43 @@ beforeEach(() => {
   respond();
 });
 describe('FEAT-002-T06 panel acceptance', () => {
+  it.each([
+    { executions: 4, costKnown: 0, costUsd: null, costPerDoneTaskUsd: null, cacheHitRate: null },
+    { executions: 1, costKnown: 1, costUsd: 0, costPerDoneTaskUsd: 0, cacheHitRate: null },
+  ])('FEAT-003 AC-003 distinguishes historical unknown from known zero: %j', async (cost) => {
+    respond({ features: [{ ...row, cost }] });
+    const html = await render();
+    expect(html).toContain(`Ejecuciones: ${cost.executions}`);
+    expect(html).toContain(`Cobertura: ${cost.costKnown} de ${cost.executions}`);
+    expect(html).toContain(`Coste: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`);
+    expect(html).toContain(
+      `Coste/tarea DONE: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
+    );
+    expect(html.match(/sin datos/g)).toHaveLength(cost.costUsd === null ? 3 : 1);
+    expect(html).not.toMatch(/NaN|Infinity|\(parcial\)/);
+    if (cost.costUsd === null) expect(html).not.toContain('0.00 USD');
+  });
+
+  it('FEAT-003 AC-005 hides costs across Projects with the same feature key', async () => {
+    const previousRequest = getFeaturesStore().requestId!;
+    expect(await render()).toContain('Coste: 0.60 USD');
+    project('Q');
+    expect(await render()).not.toContain('USD');
+    await flush();
+    respond({ features: [{ ...row, cost: { ...row.cost, costUsd: 5 } }] });
+    expect(await render()).toContain('Coste: 5.00 USD');
+    respond({ projectId: 'P', requestId: previousRequest });
+    const html = await render();
+    expect(html).toContain('Coste: 5.00 USD');
+    expect(html).not.toContain('Coste: 0.60 USD');
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
+    expect(lifecycle.send).toHaveBeenCalledWith({
+      type: 'requestFeatures',
+      projectId: 'Q',
+      requestId: getFeaturesStore().requestId,
+    });
+  });
+
   it('FEAT-003 AC-001/002/003/004/007/008 renders only cost text with explicit partial coverage', async () => {
     const sensitive = {
       prompt: 'PRIVATE_PROMPT',

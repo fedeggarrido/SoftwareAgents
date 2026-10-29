@@ -1,7 +1,8 @@
+import { buildSync } from 'esbuild';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import type { AgentSpec } from '../../core/src/agentSpec.js';
@@ -55,6 +56,16 @@ vi.mock('child_process', async (original) => {
 });
 
 let root: string;
+// Fresh worktrees do not contain ignored dist artifacts. Use this checkout's hook.
+beforeAll(() => {
+  buildSync({
+    entryPoints: [path.resolve(__dirname, '../src/executors/containmentHook.ts')],
+    outfile: path.resolve(__dirname, '../../dist/hooks/containment-hook.js'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+  });
+});
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'injection-battery-'));
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex-home'));

@@ -305,7 +305,7 @@ components:
 
     FeatureState:
       type: string
-      enum: [ready_to_merge, in_review, in_design, in_development, unknown]
+      enum: [merged, ready_to_merge, in_review, in_design, in_development, unknown]
 
     FeatureTaskStep:
       type: string

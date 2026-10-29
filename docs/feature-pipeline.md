@@ -1028,7 +1028,8 @@ Auditoría.
   auditoría, y no lanza procesos. Los comandos de gate se muestran como texto: el
   operador los ejecuta en su terminal.
 - **Fuentes:** solo el WorkStore (features, diseños técnicos, Tasks, decisiones y
-  checkpoint de `feature_runs`), abierto en modo lectura. No lee el Brain, rollouts,
+  checkpoint de `feature_runs`), abierto en modo lectura, y refs/objetos Git locales
+  para comprobar la integración en `main`. No lee el Brain, rollouts,
   transcripts ni worktrees. No muestra prompts, salidas de modelo, respuestas del
   operador, stdout/stderr, rutas absolutas, PIDs ni URLs de remotos; los textos
   libres se escapan como texto.
@@ -1041,9 +1042,13 @@ Auditoría.
 
 ### Qué muestra cada fila
 
-- **Estado:** `ready_to_merge`; «spec en revisión» (`in_review`); «en diseño»
+- **Estado:** «fusionada» (`merged`) cuando todas las Tasks del DAG están DONE y
+  el HEAD de integración persistido es ancestro de `main`; «lista para fusionar»
+  (`ready_to_merge`); «spec en revisión» (`in_review`); «en diseño»
   (`approved` sin diseño); «en desarrollo» (`approved` con diseño y sin
-  `ready_to_merge`); cualquier otro valor se muestra como «desconocido: valor».
+  `ready_to_merge`); cualquier otro valor se muestra como «estado desconocido».
+  La detección de integración lee refs sueltas o empaquetadas y objetos sueltos o
+  packs SHA-1, sin procesos. Si falta historia local no infiere una fusión.
 - **Progreso:** `DONE/total` de las Tasks del DAG importado. No cuentan los bugs
   `<TASK>-D<n>` ni las Tasks operativas `<FEAT>-DESIGN` o de Requirements. Sin DAG
   importado: «sin tareas».

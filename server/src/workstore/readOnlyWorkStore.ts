@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { FeaturesReadError } from '../../../core/src/messages.js';
 import { resolveInside } from '../pathGuard.js';
 import { runMigrations } from './migrations.js';
+import { gitObjectReader } from './readOnlyGit.js';
 
 export const MIN_PANEL_SCHEMA_VERSION = 15;
 
@@ -28,21 +29,61 @@ export class FeaturesReadFailure extends Error {
 }
 
 /** Resolve Git metadata using files only, including linked worktrees. */
+function gitCommonDir(root: string): string {
+  const marker = path.join(fs.realpathSync.native(root), '.git');
+  let gitDir = marker;
+  if (!fs.statSync(marker).isDirectory()) {
+    const match = /^gitdir: (.+)\s*$/.exec(fs.readFileSync(marker, 'utf8').trim());
+    if (!match) throw new Error('Invalid gitdir');
+    gitDir = path.resolve(root, match[1]);
+  }
+  gitDir = fs.realpathSync.native(gitDir);
+  const commonFile = path.join(gitDir, 'commondir');
+  return fs.existsSync(commonFile)
+    ? fs.realpathSync.native(path.resolve(gitDir, fs.readFileSync(commonFile, 'utf8').trim()))
+    : gitDir;
+}
+
+/** Conservative ancestry evidence. Missing/unreadable objects never imply a merge. */
+export function readMainAncestors(root: string): ReadonlySet<string> {
+  const ancestors = new Set<string>();
+  try {
+    const common = gitCommonDir(root);
+    const readObject = gitObjectReader(common);
+    let head: string | undefined;
+    try {
+      head = fs.readFileSync(resolveInside(common, 'refs/heads/main'), 'utf8').trim();
+    } catch {
+      const refs = fs.readFileSync(resolveInside(common, 'packed-refs'), 'utf8');
+      head = refs
+        .split(/\r?\n/)
+        .find((line) => line.endsWith(' refs/heads/main'))
+        ?.split(' ')[0];
+    }
+    const pending = head ? [head] : [];
+    while (pending.length) {
+      const sha = pending.pop()!;
+      if (!/^[a-f0-9]{40}$/i.test(sha) || ancestors.has(sha)) continue;
+      ancestors.add(sha);
+      try {
+        const header = readObject(sha).toString('utf8').split('\n\n')[0];
+        for (const line of header.split('\n')) {
+          if (/^parent [a-f0-9]{40}$/i.test(line)) pending.push(line.slice(7));
+        }
+      } catch {
+        // Unavailable history: only the refs/objects actually read are evidence.
+      }
+    }
+  } catch {
+    // Git evidence is optional; the WorkStore projection remains readable.
+  }
+  return ancestors;
+}
+
 export function openReadOnlyWorkStore(root: string): DatabaseSync {
   let db: DatabaseSync | undefined;
   try {
-    const marker = path.join(fs.realpathSync.native(root), '.git');
-    let gitDir = marker;
-    if (!fs.statSync(marker).isDirectory()) {
-      const match = /^gitdir: (.+)\s*$/.exec(fs.readFileSync(marker, 'utf8').trim());
-      if (!match) throw new Error('Invalid gitdir');
-      gitDir = path.resolve(root, match[1]);
-    }
-    gitDir = fs.realpathSync.native(gitDir);
-    const commonFile = path.join(gitDir, 'commondir');
-    const commonDir = fs.existsSync(commonFile)
-      ? fs.realpathSync.native(path.resolve(gitDir, fs.readFileSync(commonFile, 'utf8').trim()))
-      : gitDir;
+    const commonDir = gitCommonDir(root);
     const filename = resolveInside(commonDir, 'softwareagents/work.sqlite3');
     for (const suffix of ['-wal', '-shm', '-journal']) {
       resolveInside(commonDir, `softwareagents/work.sqlite3${suffix}`);

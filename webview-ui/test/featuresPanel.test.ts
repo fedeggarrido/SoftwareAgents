@@ -125,6 +125,21 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).not.toContain('<b>Title</b>');
     expect(html.indexOf('FEAT-020')).toBeLessThan(html.indexOf('FEAT-021'));
     expect(html.match(/<article/g)).toHaveLength(2);
+    expect(html).toContain('feature-row');
+    expect(html).toContain('feature-state-chip');
+    expect(html).toContain('data-state="in_development"');
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain('aria-valuenow="2"');
+    expect(html).toContain('aria-valuemax="5"');
+    expect(html).toContain('width:40%');
+    expect(html).not.toContain('<dl>');
+  });
+  it('renders the merged chip and a complete progress bar', async () => {
+    respond({ features: [{ ...row, state: 'merged', progress: { done: 5, total: 5 } }] });
+    const html = await render();
+    expect(html).toContain('data-state="merged"');
+    expect(html).toContain('fusionada');
+    expect(html).toContain('width:100%');
   });
   it.each([
     ['empty', 'sin features'],

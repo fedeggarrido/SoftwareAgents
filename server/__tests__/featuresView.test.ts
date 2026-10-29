@@ -3,11 +3,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { deflateSync } from 'node:zlib';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { type FeaturesSource, projectFeatures, readFeaturesView } from '../src/featuresView.js';
 import { runMigrations } from '../src/workstore/migrations.js';
+import { readMainAncestors } from '../src/workstore/readOnlyWorkStore.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
 
@@ -20,6 +22,61 @@ describe('features view acceptance', () => {
     decisions: [],
     executions: [],
     events: [],
+  });
+
+  it('derives merged only for a completed DAG with integration ancestry evidence', () => {
+    const data = fixture();
+    const head = 'a'.repeat(40);
+    data.tasks = [
+      { key: 'FEAT-001-T01', feature_key: 'FEAT-001', status: 'DONE', declaration: '{}' },
+    ];
+    data.runs = [{ feature_key: 'FEAT-001', state: { branch: 'sa/FEAT-001-integration', head } }];
+    data.mainAncestors = new Set([head]);
+    expect(projectFeatures(data)[0].state).toBe('merged');
+    data.features[0].status = 'ready_to_merge';
+    expect(projectFeatures(data)[0].state).toBe('merged');
+    data.mainAncestors = new Set(['b'.repeat(40)]);
+    expect(projectFeatures(data)[0].state).toBe('ready_to_merge');
+    data.mainAncestors = new Set([head]);
+    data.tasks[0].status = 'RUNNING';
+    expect(projectFeatures(data)[0].state).toBe('ready_to_merge');
+    data.tasks = [];
+    expect(projectFeatures(data)[0].state).toBe('ready_to_merge');
+  });
+
+  it('reads merge parents, packed refs and linked worktree metadata without processes', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'features-git-'));
+    try {
+      const common = path.join(root, 'common');
+      const gitDir = path.join(common, 'worktrees', 'test');
+      fs.mkdirSync(gitDir, { recursive: true });
+      fs.writeFileSync(path.join(root, '.git'), `gitdir: ${gitDir}`);
+      fs.writeFileSync(path.join(gitDir, 'commondir'), '../..');
+      const commit = (parents: string[]) => {
+        const body = Buffer.from(
+          `tree ${'0'.repeat(40)}\n${parents.map((sha) => `parent ${sha}\n`).join('')}\nfixture\n`,
+        );
+        const object = Buffer.concat([Buffer.from(`commit ${body.length}\0`), body]);
+        const sha = createHash('sha1').update(object).digest('hex');
+        const directory = path.join(common, 'objects', sha.slice(0, 2));
+        fs.mkdirSync(directory, { recursive: true });
+        fs.writeFileSync(path.join(directory, sha.slice(2)), deflateSync(object));
+        return sha;
+      };
+      const integration = commit([]);
+      const unrelated = commit(['f'.repeat(40)]);
+      const main = commit([unrelated, integration]);
+      fs.writeFileSync(path.join(common, 'packed-refs'), `${main} refs/heads/main\n`);
+      const ancestors = readMainAncestors(root);
+      expect(ancestors.has(main)).toBe(true);
+      expect(ancestors.has(integration)).toBe(true);
+      expect(ancestors.has('e'.repeat(40))).toBe(false);
+      fs.mkdirSync(path.join(common, 'refs', 'heads'), { recursive: true });
+      fs.writeFileSync(path.join(common, 'refs', 'heads', 'main'), unrelated);
+      expect(readMainAncestors(root).has(integration)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('AC-010 ignores unrelated legacy data but rejects malformed decisions tied to this feature', () => {

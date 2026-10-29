@@ -43,6 +43,14 @@
   /* Non-utility values */
   --vignette: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.6) 100%);
   --btn-disabled-opacity: 0.35;
+
+  /* Features use the office status palette, with text labels as well as color. */
+  --feature-in-review: var(--color-status-permission);
+  --feature-in-design: var(--color-accent-bright);
+  --feature-in-development: var(--color-status-active);
+  --feature-ready-to-merge: var(--color-status-permission);
+  --feature-merged: var(--color-status-success);
+  --feature-unknown: var(--color-text-muted);
 }
 
 @theme inline {
@@ -101,6 +109,84 @@
 }
 
 @layer components {
+  .feature-row {
+    --feature-state-color: var(--feature-unknown);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    box-shadow: var(--shadow-pixel);
+  }
+  .feature-row[data-state='in_review'] {
+    --feature-state-color: var(--feature-in-review);
+  }
+  .feature-row[data-state='in_design'] {
+    --feature-state-color: var(--feature-in-design);
+  }
+  .feature-row[data-state='in_development'] {
+    --feature-state-color: var(--feature-in-development);
+  }
+  .feature-row[data-state='ready_to_merge'] {
+    --feature-state-color: var(--feature-ready-to-merge);
+  }
+  .feature-row[data-state='merged'] {
+    --feature-state-color: var(--feature-merged);
+  }
+  .feature-heading {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 180px;
+  }
+  .feature-heading > span:first-child {
+    flex-shrink: 0;
+  }
+  .feature-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .feature-state-chip {
+    color: var(--feature-state-color);
+    border: 2px solid var(--feature-state-color);
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+  .feature-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .feature-progress-track {
+    width: 64px;
+    height: 10px;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg);
+  }
+  .feature-progress-track > span {
+    display: block;
+    height: 100%;
+    background: var(--feature-state-color);
+  }
+  .feature-context {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .feature-gate {
+    border-left: 2px solid var(--color-status-permission);
+    padding-left: 6px;
+  }
+  .feature-gate code {
+    display: block;
+  }
+  .feature-integration {
+    margin-left: auto;
+    overflow-wrap: anywhere;
+  }
+
   /* Panel with standard pixel-art border + shadow */
   .pixel-panel {
     @apply bg-bg border-2 border-border rounded-none shadow-pixel;

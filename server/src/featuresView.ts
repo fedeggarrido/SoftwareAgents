@@ -4,7 +4,11 @@ import type {
   FeaturesReadError,
   FeatureTaskStep,
 } from '../../core/src/messages.js';
-import { FeaturesReadFailure, openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
+import {
+  FeaturesReadFailure,
+  openReadOnlyWorkStore,
+  readMainAncestors,
+} from './workstore/readOnlyWorkStore.js';
 
 type Row = Record<string, unknown>;
 export interface FeaturesSource {
@@ -15,6 +19,7 @@ export interface FeaturesSource {
   decisions: Row[];
   executions: Row[];
   events: Row[];
+  mainAncestors?: ReadonlySet<string>;
 }
 export interface FeaturesViewResult {
   status: 'ok' | 'empty' | 'read_error';
@@ -94,6 +99,12 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
       if (run) {
         for (const field of ['status', 'branch', 'head', 'message']) optional(run[field]);
       }
+      const merged =
+        dag.length > 0 &&
+        dag.every((task) => task.status === 'DONE') &&
+        run?.branch === `sa/${key}-integration` &&
+        typeof run.head === 'string' &&
+        source.mainAncestors?.has(run.head) === true;
       const belongs = (value: unknown) =>
         typeof value === 'string' &&
         (value === key || value === `${key}-DESIGN` || taskKeys.has(value));
@@ -214,8 +225,9 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
       return {
         key,
         title: display(feature.title),
-        state:
-          status === 'ready_to_merge'
+        state: merged
+          ? 'merged'
+          : status === 'ready_to_merge'
             ? 'ready_to_merge'
             : status === 'in_review'
               ? 'in_review'
@@ -274,6 +286,7 @@ export async function readFeaturesView(
       decisions: read('human_decisions', 'task_key, escalation, decided_at'),
       executions: read('executions', 'task_key, agent_role, task_version, started_at'),
       events: read('domain_events', 'task_key, created_at'),
+      mainAncestors: readMainAncestors(root),
     });
     return { status: features.length ? 'ok' : 'empty', reason: null, features };
   } catch (error) {

@@ -369,3 +369,5 @@ export const PET_THUMB_SCALE_MARGIN = 0.85;
 export const EMPTY_SPRITE_THUMBNAIL_BG = '#333';
 /** Maximum string length for a PlacedPet.id (defends against pathologically-long layout entries). */
 export const MAX_PET_ID_LENGTH = 128;
+/** Features panel progress is expressed as a percentage for its pixel bar. */
+export const FEATURE_PROGRESS_PERCENT_MAX = 100;

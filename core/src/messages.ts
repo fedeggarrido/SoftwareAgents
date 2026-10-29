@@ -108,7 +108,7 @@ export interface FeatureRow {
 }
 
 export type FeatureState =
-  'ready_to_merge' | 'in_review' | 'in_design' | 'in_development' | 'unknown';
+  'merged' | 'ready_to_merge' | 'in_review' | 'in_design' | 'in_development' | 'unknown';
 
 export interface FeatureProgress {
   done: number;

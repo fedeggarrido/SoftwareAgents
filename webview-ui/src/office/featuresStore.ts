@@ -68,9 +68,11 @@ export function featureStateLabel(feature: Pick<FeatureRow, 'state' | 'rawStatus
     case 'in_development':
       return 'en desarrollo';
     case 'ready_to_merge':
-      return 'ready_to_merge';
+      return 'lista para fusionar';
+    case 'merged':
+      return 'fusionada';
     case 'unknown':
-      return `desconocido: ${feature.rawStatus ?? ''}`;
+      return 'estado desconocido';
   }
 }
 

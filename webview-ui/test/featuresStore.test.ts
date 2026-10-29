@@ -122,9 +122,9 @@ describe('features store acceptance', () => {
     expect(featureStateLabel(row)).toBe('en desarrollo');
     expect(featureStateLabel({ ...row, state: 'in_review' })).toBe('spec en revisión');
     expect(featureStateLabel({ ...row, state: 'in_design' })).toBe('en diseño');
-    expect(featureStateLabel({ ...row, state: 'ready_to_merge' })).toBe('ready_to_merge');
+    expect(featureStateLabel({ ...row, state: 'ready_to_merge' })).toBe('lista para fusionar');
     expect(featureStateLabel({ ...row, state: 'unknown', rawStatus: 'legacy' })).toBe(
-      'desconocido: legacy',
+      'estado desconocido',
     );
     for (const reason of [
       'unavailable',
@@ -136,6 +136,28 @@ describe('features store acceptance', () => {
       expect(featuresReasonText(reason)).toBeTruthy();
     }
     expect(featuresReasonText('C:/secret/trace' as never)).toBe(featuresReasonText(null));
+  });
+
+  it('labels every state from the AsyncAPI enum without exposing raw values', () => {
+    const contract = readFileSync(new URL('../../core/asyncapi.yaml', import.meta.url), 'utf8');
+    const states = /FeatureState:\s+type: string\s+enum: \[([^\]]+)\]/
+      .exec(contract)![1]
+      .split(',')
+      .map((state) => state.trim());
+    const labels: Record<FeatureRow['state'], string> = {
+      merged: 'fusionada',
+      ready_to_merge: 'lista para fusionar',
+      in_review: 'spec en revisión',
+      in_design: 'en diseño',
+      in_development: 'en desarrollo',
+      unknown: 'estado desconocido',
+    };
+    expect(states.sort()).toEqual(Object.keys(labels).sort());
+    for (const state of states) {
+      expect(
+        featureStateLabel({ state: state as FeatureRow['state'], rawStatus: 'private_state' }),
+      ).toBe(labels[state as FeatureRow['state']]);
+    }
   });
 
   it('notifies subscribers only on changed references and supports unsubscribe', () => {
@@ -152,3 +174,4 @@ describe('features store acceptance', () => {
     expect(calls).toBe(1);
   });
 });
+import { readFileSync } from 'node:fs';

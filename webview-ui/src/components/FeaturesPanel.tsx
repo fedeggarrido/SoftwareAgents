@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
+import { FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import {
   beginFeaturesRequest,
@@ -81,44 +82,59 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
           {visibleFeatures(selectedStore).map((feature) => (
             <article
               key={feature.key}
-              className="bg-bg-dark border-2 border-border p-8 text-xs break-words"
+              className="feature-row bg-bg-dark border-2 border-border p-8 text-xs"
+              data-state={feature.state}
             >
-              <h3>
-                {feature.key}
-                {feature.title ? ` · ${feature.title}` : ''}
+              <h3 className="feature-heading" title={feature.title ?? feature.key}>
+                <span className="text-accent-bright">{feature.key}</span>
+                {feature.title && <span className="feature-title"> · {feature.title}</span>}
               </h3>
-              <dl>
-                <dt>Estado</dt>
-                <dd>{featureStateLabel(feature)}</dd>
-                <dt>Progreso</dt>
-                <dd>{featureProgressLabel(feature.progress)}</dd>
+              <span className="feature-state-chip">{featureStateLabel(feature)}</span>
+              <div className="feature-progress">
+                {feature.progress && (
+                  <div
+                    className="feature-progress-track"
+                    role="progressbar"
+                    aria-label={`Progreso de ${feature.key}`}
+                    aria-valuemin={0}
+                    aria-valuemax={feature.progress.total}
+                    aria-valuenow={feature.progress.done}
+                    aria-valuetext={featureProgressLabel(feature.progress)}
+                  >
+                    <span
+                      style={{
+                        width: `${Math.min(FEATURE_PROGRESS_PERCENT_MAX, (feature.progress.done / feature.progress.total) * FEATURE_PROGRESS_PERCENT_MAX)}%`,
+                      }}
+                    />
+                  </div>
+                )}
+                <span>{featureProgressLabel(feature.progress)}</span>
+              </div>
+              <div className="feature-context text-text-muted">
                 {feature.currentTask && (
-                  <>
-                    <dt>Tarea en curso</dt>
-                    <dd>
-                      {feature.currentTask.key} {feature.currentTask.step}
-                      {feature.currentTask.others > 0 && ` (+${feature.currentTask.others})`}
-                    </dd>
-                  </>
+                  <span title="Tarea en curso">
+                    {feature.currentTask.key} {feature.currentTask.step}
+                    {feature.currentTask.others > 0 && ` (+${feature.currentTask.others})`}
+                  </span>
                 )}
-                {feature.integration && (
-                  <>
-                    <dt>Rama de integración</dt>
-                    <dd>
-                      {feature.integration.branch} {feature.integration.sha}
-                    </dd>
-                  </>
-                )}
-              </dl>
-              {feature.gates.map((gate, index) => (
-                <div key={index}>
-                  <p>
-                    {gate.kind} {gate.task}
-                    {gate.expired && ' · expirado'}
-                  </p>
-                  <code>{gate.command}</code>
-                </div>
-              ))}
+                {feature.gates.map((gate, index) => (
+                  <div key={index} className="feature-gate">
+                    <span>
+                      {gate.kind} {gate.task}
+                      {gate.expired && ' · expirado'}
+                    </span>
+                    <code>{gate.command}</code>
+                  </div>
+                ))}
+              </div>
+              {feature.integration && (
+                <span
+                  className="feature-integration text-text-muted"
+                  title={feature.integration.branch}
+                >
+                  {feature.integration.branch.replace(/^sa\//, '')} {feature.integration.sha}
+                </span>
+              )}
             </article>
           ))}
         </>

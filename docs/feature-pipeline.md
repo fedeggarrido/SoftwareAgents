@@ -1284,6 +1284,64 @@ cuentan. Responder la decisión no modifica la config:
 si el tope sigue alcanzado, vuelve a bloquear. No activa concurrencia 2 en
 `feature run`; admisión y executor-slots mantienen sus responsabilidades.
 
+## Principal Product Designer — SA-105, fase 1
+
+La fuente de verdad del rol es [product-designer.md](agents/product-designer.md).
+El digest estable `phase1/v1.0.0` vive en `server/src/designerPrompt.ts`: incluye
+las diez preguntas UX, los antipatrones de la sección 12, rúbrica de aspecto IA,
+WCAG 2.2 AA y la prohibición de inventar validaciones. AgentSpec usa `read_only`
+y capability `review`; Claude recibe solo Read/Glob/Grep (Read abre los PNG).
+Codex queda excluido por el mismo límite de herramientas que Reviewer/QA.
+
+Ingreso humano explícito, fuera de `feature run`:
+
+```sh
+pixel-agents design review
+pixel-agents design review --views office,features,audit,backlog,hud --json
+```
+
+En el checkout, compilar primero CLI y webview (`node esbuild.js` y
+`npm run build:webview`) y usar `node dist/cli.js design review`. Requiere Project
+vinculado, Claude permitido en la configuración del operador y Chromium de
+Playwright ya disponible en `PLAYWRIGHT_BROWSERS_PATH`. El comando no instala
+dependencias ni navegadores. No ejecutarlo desde un worker o un Agent.
+
+El runtime arranca un proceso con HOME/USERPROFILE/APPDATA/TEMP privados, un
+servidor standalone de fixture que sirve la SPA compilada del árbol de la tarea,
+en 127.0.0.1 y puerto efímero. El fixture de protocolo suministra el Project demo,
+HUD y backlog vacío; Features y Auditoría tienen estados vacío/error. No conecta
+WorkStore de producción, watchers, hooks ni handlers de operador. No hay tokens
+en la URL. Captura las cinco vistas a 1440×1000 y 390×844: catorce PNGs por defecto.
+El servidor y Chromium se cierran en finally; el timeout solicita cancelación y
+espera el cierre antes de recurrir a terminar el proceso.
+
+Por cada captura, el runtime lee getComputedStyle de texto DOM visible y calcula
+luminancia sRGB WCAG (4.5:1 normal, 3:1 grande). Guarda pares, ratios y umbrales en
+JSON. Transparencias, imágenes/gradientes, canvas, oclusión y contraste no textual
+no acreditan accesibilidad completa; combinaciones no resolubles quedan sin medir.
+Un navegador ausente o un fallo de navegación es fallo de infraestructura y no
+produce aprobación. Las capturas son fixtures de la UI real, no evidencia de los
+datos ni de las operaciones de la oficina del operador.
+
+`core/schemas/design-report.schema.json` valida verdict, findings
+(severity/screen/area/problem/principle/fix), siete puntuaciones enteras 1–5 y
+validations (kind/tool/result/evidence). Un blocker/major o un contraste fallido
+impide approve. Las validations deben coincidir exactamente con las del runtime;
+no se acepta contraste atribuido al modelo, evidencia vacía ni informe sin captura.
+Se guardan `report.json`, `evidence.json`, PNGs y contrastes bajo
+`<Brain>/design-reviews/<uuid>/`; auditoría registra inicio, resultado o fallo.
+Solo el runtime escribe; el diseñador devuelve su informe como resultado.
+
+Pruebas desde server: `npx vitest run __tests__/designer.test.ts
+__tests__/designCapture.test.ts` (compilar antes). La prueba de capturas levanta el
+servidor real y Chromium; solo omite con motivo explícito si no puede lanzar el
+navegador. La prueba del comando usa un executor fake y no lanza CLIs de IA.
+
+TODO fase 2: tres direcciones artísticas distintas y matriz ponderada; HumanDecision
+de dirección; materialización de docs/design/* y tokens; integración en feature run;
+bucle de corrección y seguimiento de hallazgos. Los puntos de extensión son el
+contrato DesignReport, AgentSpec, compilador, evidencia y el comando separado.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

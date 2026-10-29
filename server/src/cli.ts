@@ -29,6 +29,7 @@ import {
 } from './clientMessageHandler.js';
 import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
+import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
 import { runTaskCommand } from './commands/task.js';
 import { configureCompanyControl } from './companyControl.js';
@@ -39,6 +40,7 @@ import {
   readConfig,
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
+import { designCaptureHost } from './designCaptureHost.js';
 import { createDomainEventRelay } from './domainEventRelay.js';
 import { runEvalCommand } from './evalCommand.js';
 import { runExecutorsCommand } from './executorAvailability.js';
@@ -158,7 +160,11 @@ export async function dispatchCli(
   argv: string[],
   handlers = { server: startServer, worker: runWorker },
 ): Promise<void> {
-  if (argv[0] === 'quota') {
+  if (argv[0] === '--design-capture-host' && process.send) {
+    designCaptureHost();
+  } else if (argv[0] === 'design') {
+    await runDesignCommand(argv.slice(1));
+  } else if (argv[0] === 'quota') {
     process.exitCode = runQuotaCheck(parseQuotaArgs(argv.slice(1)));
   } else if (argv[0] === 'executors') {
     runExecutorsCommand(argv.slice(1));

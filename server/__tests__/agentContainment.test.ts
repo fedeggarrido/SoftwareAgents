@@ -20,6 +20,21 @@ import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
 import { getHookScriptPath } from '../src/providers/hook/claude/claudeHookInstaller.js';
 
+vi.setConfig({ testTimeout: 300_000 });
+
+it.each(['Set-Content test.ts ".git"', 'Set-Content ../outside.ts text'])(
+  'returns actionable shell containment diagnostics: %s',
+  (command) => {
+    const verdict = claudeToolContainment('PowerShell', { command }, worktree);
+    expect(verdict).toMatchObject({ allowed: false });
+    if (verdict.allowed) throw new Error('Expected denial');
+    expect(verdict.reason).toContain(verdict.rule);
+    expect(verdict.reason).toContain(command.includes('.git') ? '.git' : '../outside.ts');
+    expect(verdict.reason).toContain('usa apply_patch/Edit para escribir ficheros');
+    expect(codexItemContainment({ type: 'command_execution', command }, worktree)).toEqual(verdict);
+  },
+);
+
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
@@ -404,6 +419,15 @@ describe('executors', () => {
     // One entry from the hook (it did deny) and one from the executor tripwire.
     expect(denials()).toHaveLength(2);
   });
+  it('Claude continues after an actionable shell-write denial from the hook', async () => {
+    const events = await drain(claude('--containment-shell').executor.start(req).events);
+    expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
+    expect(denials()[0].outcome).toMatchObject({
+      detail: 'protected_write',
+      reason: expect.stringContaining('usa apply_patch/Edit'),
+    });
+    expect(events.some((event) => event.type === 'guardCorrection')).toBe(false);
+  });
   it.each(['--containment-no-result', '--containment-partial-results'])(
     'Claude: %s fails and audits every unresolved attempt at EOF',
     async (mode) => {
@@ -463,5 +487,8 @@ describe('executors', () => {
       }),
     ]);
     expect(JSON.stringify(events)).not.toContain('TEST_SECRET');
+    expect(events.some((event) => event.type === 'guardCorrection')).toBe(
+      mode === '--claude-shell-write',
+    );
   });
 });

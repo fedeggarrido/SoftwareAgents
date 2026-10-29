@@ -324,7 +324,8 @@ para ese reintento; el historial conserva las referencias a las bases anteriores
 Una infracción de zonas registra `change_zones_exceeded` y todas las rutas relativas
 ofensivas, escapadas en JSON, en auditoría y en el motivo de la tarea.
 También persiste `missing_test` y `guard:developer_changes` con el detalle saneado
-de la guardia. Estos rechazos permiten una corrección con `previousFailure`, sin
+de la guardia. Primero se ofrece la [corrección automática en el mismo intento](#corrección-de-guardias-del-developer-sa-qa-54).
+Si también falla, estos rechazos permiten una corrección con `previousFailure`, sin
 gastar el presupuesto del agente. Repetir la misma categoría (y el mismo detalle
 para guardias genéricas) deja WAITING_HUMAN con `gate: repeated_guard`, conserva
 los cambios y detiene `feature run` con exit 3. Requiere intervención humana y un
@@ -1091,6 +1092,35 @@ lista vacía.
 - **Tarea en curso obsoleta:** si el proceso de `feature run` muere, el checkpoint
   puede seguir marcando una acción activa; el panel no inspecciona procesos.
 - **Sin paginación:** la lista no tiene límite ni paginación en esta versión.
+
+## Corrección de guardias del Developer (SA-QA-54)
+
+Antes de lanzar tsc/Vitest, el paso de precomprobación `guardDeveloperChanges`
+retira cachés y residuos conocidos de herramientas con `removeAgentToolCaches`,
+comprueba integridad del árbol (incluidos temporales y `.git` anidados), zonas,
+raíces ejecutadas de tests y reglas de autoría. No ejecuta código del agente.
+También se rechazan directorios nuevos de temporales/cachés (`tmp`, `temp`,
+`scratch`, `.tmp`, `.cache`, `__pycache__`, `.pytest_cache` y sus variantes con
+sufijo), aunque estén vacíos. Los directorios ya presentes en la base se conservan.
+Los repos de fixtures deben vivir bajo `os.tmpdir()` y limpiarse desde sus tests.
+
+Un rechazo permite **una corrección gratuita** por invocación de Developer:
+el runtime conserva árbol, ejecutor, modelo, nivel y brief original, añade
+`guardCorrection` con regla, rutas, diagnóstico y acción, y abre otra Execution.
+No incrementa `attempt` ni registra una ronda de cascada por el rechazo inicial.
+La admisión y las comprobaciones de autoridad siguen siendo obligatorias.
+Auditoría `guard_correction` registra el antes y el después. Si vuelve a fallar,
+se aplica el cómputo de fallo habitual y el gate existente por violación repetida;
+no se permiten cadenas ilimitadas de correcciones.
+
+La contención de comandos mantiene sus reglas. Sus denegaciones de escrituras
+shell (`protected_write`, `outside_worktree`) indican regla, fragmento detectado
+y «usa apply_patch/Edit para escribir ficheros». Claude puede continuar tras el
+error del hook; si lo ignora o falta su resultado, conserva el fallo cerrado.
+Codex detiene la Execution: una denegación shell de esas dos categorías permite
+la misma corrección gratuita, después del cierre confirmado del proceso.
+No se corrigen gratis push/config/remote, delegación, fallos de hooks ni otras
+violaciones de seguridad. Nunca se amplían permisos ni se modifica la regla.
 
 ## Próximos pasos
 

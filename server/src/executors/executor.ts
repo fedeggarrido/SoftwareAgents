@@ -30,6 +30,8 @@ export interface ExecutionRequest {
 }
 
 export type ExecutionEvent =
+  /** Adapter-produced eligibility after confirmed closure, never inferred from model text. */
+  | { type: 'guardCorrection'; diagnostic: string }
   | { type: 'telemetry'; observation: TelemetryObservation }
   | { type: 'started'; sessionId: string; pid: number; startedAt: string }
   | { type: 'toolUse'; toolId: string; toolName: string; input: unknown }

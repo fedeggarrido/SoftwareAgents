@@ -123,7 +123,7 @@ export function developerScope(task: DagTask, root: string) {
     testFrameworkRule:
       "Unit tests use Vitest (import { describe, expect, it } from 'vitest'); never node:test or another runner. The runtime only executes Vitest and Playwright specs.",
     fileWriteRule:
-      'Create and edit files only with the file-edit tool (apply_patch, Edit/Write), never through shell writes (Set-Content, Out-File, >, tee, node -e). Containment rejects any shell write whose text mentions .git or .claude, and that ends the attempt.',
+      'Create and edit files only with the file-edit tool (apply_patch, Edit/Write), never through shell writes (Set-Content, Out-File, >, tee, node -e). Containment rejects shell writes whose text mentions .git or .claude; use the diagnostic to correct the tool, never bypass the rule.',
     testTempRule:
       'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
     colocatedTestRule:
@@ -407,9 +407,9 @@ export function guardDeveloperChanges(
   base: string,
   expectedHead = base,
 ): string[] {
-  removeAgentToolCaches(tree);
   try {
-    return checkDeveloperChanges(input, config, tree, base, expectedHead);
+    preflightDeveloperTree(config, tree, base, expectedHead);
+    return checkDeveloperChanges(input, config, tree, base);
   } catch (error) {
     if (error instanceof ChangeZonesExceededError || error instanceof MissingTestError) throw error;
     throw new DeveloperGuardError(
@@ -423,13 +423,14 @@ export function guardDeveloperChanges(
   }
 }
 
-function checkDeveloperChanges(
-  input: DeveloperRequest,
+/** Cheap, non-executing preflight shared by every Developer validation boundary. */
+function preflightDeveloperTree(
   config: ProjectConfig,
   tree: string,
   base: string,
   expectedHead: string,
-): string[] {
+): void {
+  removeAgentToolCaches(tree);
   assertEvalIntegrity(
     {
       baseCommit: base,
@@ -439,6 +440,33 @@ function checkDeveloperChanges(
     },
     tree,
   );
+  const tracked = evalGit(tree, ['ls-tree', '-r', '--name-only', '-z', base]).split('\0');
+  const inspect = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === '.git') continue;
+      const child = path.join(directory, entry.name);
+      const relative = path.relative(tree, child).replace(/\\/g, '/');
+      if (
+        /^(?:tmp|temp|scratch|\.tmp|\.cache|__pycache__|\.pytest_cache)(?:[-_.]|$)/i.test(
+          entry.name,
+        ) &&
+        !tracked.some((file) => file.startsWith(relative + '/'))
+      )
+        throw new Error(
+          `temporary_directory: ${relative}; remove scratch/tool output and create fixtures under os.tmpdir()`,
+        );
+      inspect(child);
+    }
+  };
+  inspect(tree);
+}
+
+function checkDeveloperChanges(
+  input: DeveloperRequest,
+  config: ProjectConfig,
+  tree: string,
+  base: string,
+): string[] {
   const files = evalChangedFiles(tree, base);
   const baseFiles = new Set(
     evalGit(tree, ['ls-tree', '-r', '--name-only', '-z', base]).split('\0'),

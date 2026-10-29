@@ -14,6 +14,7 @@ process.stdin.on('end', () => {
     reviewFindings = [],
     qaDefects = [],
     reworkAttempt,
+    guardCorrection,
     task,
   } = JSON.parse(context.task.brief);
   const author = ['qa', 'test', 'qa-author'].includes(task.agentRole);
@@ -96,6 +97,14 @@ test('audit is visible', async ({ page }) => {
     fs.writeFileSync('outside.txt', 'outside changeZones');
     fs.writeFileSync('server/__tests__/foreign.test.ts', 'outside changeZones');
   }
+  if (mode === 'misplaced' || mode === 'misplaced-always') {
+    if (!guardCorrection || mode === 'misplaced-always')
+      fs.renameSync('server/__tests__/audit.test.ts', 'server/src/audit.test.ts');
+    else if (fs.existsSync('server/src/audit.test.ts')) fs.unlinkSync('server/src/audit.test.ts');
+  }
+  if (mode === 'nested-git') {
+    fs.mkdirSync('scratch/.git', { recursive: true });
+  }
   if (mode.startsWith('core-')) {
     fs.unlinkSync('server/src/audit.ts');
     fs.unlinkSync('server/__tests__/audit.test.ts');
@@ -124,6 +133,15 @@ test('audit is visible', async ({ page }) => {
     require('./codex-rollout.cjs')('fake-developer-codex');
     emit({ type: 'thread.started', thread_id: 'fake-developer-codex' });
     emit({ type: 'turn.started' });
+    if (mode === 'shell-denied' && !guardCorrection)
+      emit({
+        type: 'item.started',
+        item: {
+          id: 'shell-denied',
+          type: 'command_execution',
+          command: 'Set-Content test.ts ".git"',
+        },
+      });
     emit({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } });
   }
 });

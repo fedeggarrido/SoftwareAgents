@@ -93,11 +93,22 @@ if (!valid) {
   // Emulates Claude Code's PreToolUse contract (SA-062): every registered hook command runs
   // through a shell with the tool call on stdin; exit 2 blocks the tool and returns an error
   // result. --containment-failopen reports the tool as run whatever the hooks said.
-  if (args.includes('--containment-push') || args.includes('--containment-failopen')) {
+  if (
+    args.includes('--containment-push') ||
+    args.includes('--containment-failopen') ||
+    args.includes('--containment-shell')
+  ) {
     const fs = require('fs');
     const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
     const settings = JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1]));
-    const tool = { name: 'Bash', input: { command: 'git push origin HEAD:main' } };
+    const tool = {
+      name: 'Bash',
+      input: {
+        command: args.includes('--containment-shell')
+          ? 'Set-Content test.ts ".git"'
+          : 'git push origin HEAD:main',
+      },
+    };
     emit({ type: 'system', subtype: 'init', session_id: 'fake-claude-session', tools: ['Read'] });
     emit({
       type: 'assistant',

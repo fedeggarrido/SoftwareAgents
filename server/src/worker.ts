@@ -827,6 +827,9 @@ async function runWorkerExecution(
   let attemptRecorded = false;
   let exitCode: number | undefined;
   let executionDiagnostic: string | undefined;
+  let containmentCorrection: string | undefined;
+  let guardCorrection: { before: string; executor: string; selection: string } | undefined;
+  let correctionPending = false;
   let oauthRefreshContention = false;
   let oauthRefreshRetries = 0;
   let runtimeQuota: QuotaDecision | undefined;
@@ -1199,6 +1202,16 @@ async function runWorkerExecution(
                 : 'same_executor_no_available_alternative',
           }
         : undefined;
+      if (
+        correctionPending &&
+        guardCorrection &&
+        (selectedExecutor !== guardCorrection.executor ||
+          JSON.stringify(tierSelection?.choice ?? selection?.choice ?? null) !==
+            guardCorrection.selection)
+      )
+        throw new DeveloperGuardError(
+          'Guard correction requires the same executor/model; retry admission later',
+        );
       if (reviewSelection)
         audit('review_executor_selected', {
           executor: selectedExecutor,
@@ -1309,7 +1322,7 @@ async function runWorkerExecution(
         audit('developer_retry_reset');
       }
       retryPrepared = true;
-      if (git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
+      if (!correctionPending && git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       startingHead ??= git(tree.path, ['rev-parse', 'HEAD']);
       if (
@@ -1556,9 +1569,11 @@ async function runWorkerExecution(
       exitCode = undefined;
       requirementsOutput = '';
       executionDiagnostic = undefined;
+      containmentCorrection = undefined;
       oauthRefreshContention = false;
       eventsStarted = true;
       for await (const event of handle.events) {
+        if (event.type === 'guardCorrection') containmentCorrection = event.diagnostic;
         if (
           selectedExecutor === 'claude' &&
           ((event.type === 'output' && event.text.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)) ||
@@ -1948,13 +1963,90 @@ async function runWorkerExecution(
           );
         }
       }
+      // One free correction on the same tree, before any verifier or cascade accounting.
+      // Containment itself still stops Codex; Claude continues after its hook denial.
+      let developerTests: string[] | undefined;
+      if (options.developer && !interrupted && executionFinished) {
+        let rejection:
+          ChangeZonesExceededError | MissingTestError | DeveloperGuardError | undefined;
+        if (exitCode !== 0 && containmentCorrection)
+          rejection = new DeveloperGuardError(containmentCorrection);
+        else if (exitCode === 0) {
+          try {
+            developerTests = guardDeveloperChanges(
+              options.developer,
+              config,
+              tree.path,
+              base,
+              startingHead,
+            );
+          } catch (error) {
+            if (!(
+              error instanceof ChangeZonesExceededError ||
+              error instanceof MissingTestError ||
+              error instanceof DeveloperGuardError
+            ))
+              throw error;
+            rejection = error;
+          }
+        }
+        if (guardCorrection && correctionPending) {
+          audit('guard_correction', {
+            detail: JSON.stringify({
+              before: guardCorrection.before,
+              after: rejection?.diagnostic() ?? (exitCode === 0 ? 'pass' : executionDiagnostic),
+              phase: 'after',
+            }),
+          });
+          correctionPending = false;
+        }
+        if (rejection) {
+          if (guardCorrection) throw rejection;
+          // Never relaunch over changed Git identity or an unconfirmed process close.
+          if (
+            git(tree.path, ['rev-parse', 'HEAD']) !== startingHead ||
+            git(tree.path, ['symbolic-ref', '--short', 'HEAD']) !== tree.branch
+          )
+            throw rejection;
+          guardCorrection = {
+            before: rejection.diagnostic(),
+            executor: selectedExecutor,
+            selection: JSON.stringify(tierSelection?.choice ?? selection?.choice ?? null),
+          };
+          correctionPending = true;
+          const diagnostic = {
+            ...JSON.parse(rejection.diagnostic().slice('Developer failed: '.length)),
+            detail: rejection.message,
+            action:
+              'Correct only the rejected changes on this same tree. Respect allowedScope/changeZones. Move tests to executed test roots, remove temporary directories/nested .git you created, use os.tmpdir() for fixtures, and use apply_patch/Edit for file writes. Never bypass containment or modify protected paths.',
+          };
+          taskData.task.brief = JSON.stringify({
+            ...JSON.parse(taskData.task.brief),
+            guardCorrection: diagnostic,
+          });
+          compiled = compileAgent(spec, role, taskData);
+          audit('guard_correction', {
+            detail: JSON.stringify({
+              before: guardCorrection.before,
+              after: 'pending',
+              phase: 'before',
+            }),
+          });
+          await telemetry!.finish('error');
+          slot!.release();
+          slot = undefined;
+          executionId = randomUUID();
+          handle = undefined;
+          eventsStarted = false;
+          executionFinished = false;
+          telemetry = undefined;
+          continue;
+        }
+      }
       if (verifier) {
         let results: CriterionResult[] = [];
         const failures: VerifierFailure[] = [];
         if (!interrupted && exitCode === 0) {
-          const developerTests = options.developer
-            ? guardDeveloperChanges(options.developer, config, tree.path, base, startingHead)
-            : undefined;
           const scratch = resolveInside(common, 'softwareagents/runtime/verifiers');
           fs.mkdirSync(scratch, { recursive: true });
           try {

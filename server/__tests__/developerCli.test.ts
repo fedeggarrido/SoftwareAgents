@@ -23,6 +23,7 @@ import {
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { guardProtectedPaths } from '../src/executors/protectedPaths.js';
 import { WorktreeManager } from '../src/executors/worktreeManager.js';
+import * as modelCascade from '../src/modelCascade.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { taskBranchBase } from '../src/taskBranchBase.js';
@@ -72,6 +73,16 @@ it('allows documentation without tests, rejecting product and out-of-zone markdo
   input.task.changeZones!.push('server/');
   expect(check).toThrow(ChangeZonesExceededError);
 });
+
+it('rejects empty scratch directories before verifiers', () => {
+  const base = git(repo, 'rev-parse', 'HEAD');
+  const directory = detachedTree();
+  fs.mkdirSync(path.join(directory, 'scratch'));
+  const input = { task: { type: 'doc', changeZones: ['docs/'] } } as DeveloperRequest;
+  expect(() =>
+    guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base),
+  ).toThrow('temporary_directory: scratch');
+});
 function configure(
   push?: { enabled: boolean; remote: string },
   selected: 'claude' | 'codex' = 'claude',
@@ -93,6 +104,110 @@ function configure(
     }),
   );
 }
+
+it('corrects a misplaced test for free on the same tree before verification', async () => {
+  await prepare();
+  enableGuardCascade();
+  await develop('misplaced');
+  const calls = fs
+    .readFileSync(launches, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(calls).toHaveLength(2);
+  expect(calls[1].cwd).toBe(calls[0].cwd);
+  expect(JSON.parse(calls[1].context.task.brief).guardCorrection).toMatchObject({
+    category: 'change_zones_exceeded',
+    paths: ['server/src/audit.test.ts'],
+  });
+  const store = await storeFor();
+  try {
+    expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
+  } finally {
+    store.close();
+  }
+  const corrections = new AuditLog()
+    .read('test')
+    .filter((row) => !row.corrupt && row.entry.outcome.status === 'guard_correction');
+  expect(corrections).toHaveLength(2);
+  expect(cascadeAttempts()).toEqual([expect.objectContaining({ attempt: 1, result: 'pass' })]);
+});
+
+it('bounds a failed free correction and retains normal retry accounting', async () => {
+  await prepare();
+  enableGuardCascade();
+  await expect(develop('misplaced-always')).rejects.toThrow('changeZones exceeded');
+  expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+  const store = await storeFor();
+  try {
+    expect(store.getTask(task)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+  } finally {
+    store.close();
+  }
+  expect(cascadeAttempts()).toEqual([
+    expect.objectContaining({ attempt: 1, result: 'guard_rejected' }),
+  ]);
+});
+
+function enableGuardCascade() {
+  const file = path.join(root, '.pixel-agents/config.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  config.projects.test.modelTiers = {
+    rule: parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../.softwareagents/agents/model-policy.yaml'),
+        'utf8',
+      ),
+    ).tierRule,
+    maxTier: 'economy',
+    tiers: { economy: { candidates: [{ executor: 'claude', model: 'haiku' }] } },
+    cascade: {
+      enabled: true,
+      startTier: 'economy',
+      maxEscalations: 0,
+      verifiers: {},
+      defaultVerifier: { commands: [{ vitestRelated: true, timeoutMs: 30_000 }] },
+    },
+  };
+  fs.writeFileSync(file, JSON.stringify(config));
+}
+
+function cascadeAttempts() {
+  return fs
+    .readFileSync(path.join(repo, '.git/softwareagents/cascade-attempts.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+}
+
+it('relaunches Codex after a contained shell write without relaxing containment', async () => {
+  configure(undefined, 'codex');
+  await prepare();
+  await develop('shell-denied');
+  const calls = fs
+    .readFileSync(launches, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(calls).toHaveLength(2);
+  expect(JSON.parse(calls[1].context.task.brief).guardCorrection.detail).toContain(
+    'usa apply_patch/Edit',
+  );
+  const store = await storeFor();
+  try {
+    expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
+  } finally {
+    store.close();
+  }
+});
+
+it('rejects nested Git before starting any verifier', async () => {
+  await prepare();
+  const verifier = vi.spyOn(modelCascade, 'checkCascadeCriteria');
+  await expect(develop('nested-git')).rejects.toThrow(/nested .git/);
+  expect(verifier).not.toHaveBeenCalled();
+  expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+});
 const run = (command: string[], fixture = 'developer', mode = 'valid') =>
   runFeatureCommand(command, repo, () => {}, {
     binaryArgs: [
@@ -795,7 +910,8 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
           .last_developer_failure,
       ).toMatchObject({ category: 'change_zones_exceeded', paths });
       await expect(develop('valid', false)).rejects.toThrow('eligible READY');
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(1);
+      // Initial result plus its free correction share the same logical attempt.
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(2);
       expect(fs.existsSync(path.join(tree(), 'outside.txt'))).toBe(true);
       // Both a nested link and node_modules point outside the tree; their targets must survive.
       const target = path.join(root, 'link-target');
@@ -925,9 +1041,9 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
         gate: 'repeated_guard; human review required',
       });
       expect(store.getTask(task)!.blocked_reason).toContain('outside.txt');
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(2);
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(4);
       await expect(develop()).rejects.toThrow('No eligible');
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(2);
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(4);
     } finally {
       store.close();
     }

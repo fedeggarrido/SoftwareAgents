@@ -135,10 +135,18 @@ function shellWriteContainment(command: string, worktreeRoot: string): Containme
     if (protectedRelative(target))
       return deny(
         'protected_write',
-        'Shell writes to protected paths are reserved to the runtime.',
+        `protected_write: detected ${JSON.stringify(target.match(/(?:\.gitconfig|\.git|\.claude)(?=[/\\]|$)/i)?.[0] ?? 'protected path')}; usa apply_patch/Edit para escribir ficheros. Protected paths remain forbidden.`,
       );
     const verdict = pathContainment(target, worktreeRoot);
-    if (!verdict.allowed && verdict.rule === 'protected_write') return verdict;
+    if (
+      !verdict.allowed &&
+      (verdict.rule === 'protected_write' ||
+        (verdict.rule === 'outside_worktree' && /^(?:\.\.[/\\]|[/\\]|[a-z]:[/\\])/i.test(target)))
+    )
+      return deny(
+        verdict.rule,
+        `${verdict.rule}: detected ${JSON.stringify(target)}; usa apply_patch/Edit para escribir ficheros dentro del worktree. Protected paths remain forbidden.`,
+      );
   }
   return { allowed: true };
 }

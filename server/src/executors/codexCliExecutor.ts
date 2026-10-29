@@ -135,6 +135,7 @@ export class CodexCliExecutor implements Executor {
     let child: ChildProcess | undefined;
     let done = false;
     let violation: string | undefined;
+    let correctionCandidate: string | undefined;
     const cancellation = processCancellation(() => child);
     const cancel = () => {
       if (!done) cancellation.cancel();
@@ -244,7 +245,10 @@ export class CodexCliExecutor implements Executor {
           let tokenCountSeen = false;
           let watcher: ReturnType<typeof setInterval> | undefined;
           const violate = (detail: string) => {
-            if (violation) return;
+            if (violation) {
+              if (violation !== `Policy violation: ${detail}`) correctionCandidate = undefined;
+              return;
+            }
             violation = `Policy violation: ${detail}`;
             push({ type: 'output', text: violation, stream: 'stdout' });
             try {
@@ -362,6 +366,12 @@ export class CodexCliExecutor implements Executor {
                 const key = typeof item?.id === 'string' ? item.id : JSON.stringify(item);
                 if (!auditedContained.has(key)) {
                   auditedContained.add(key);
+                  if (
+                    !violation &&
+                    item?.type === 'command_execution' &&
+                    ['protected_write', 'outside_worktree'].includes(contained.rule)
+                  )
+                    correctionCandidate = contained.reason;
                   try {
                     auditContainmentDenial(
                       {
@@ -376,6 +386,7 @@ export class CodexCliExecutor implements Executor {
                       item,
                     );
                   } catch {
+                    correctionCandidate = undefined;
                     // The violation below still fails the run.
                     push({
                       type: 'output',
@@ -510,6 +521,13 @@ export class CodexCliExecutor implements Executor {
             }
           }
           done = true;
+          if (
+            correctionCandidate &&
+            !failure &&
+            !cancellation.failure &&
+            violation?.startsWith('Policy violation: Codex attempted ')
+          )
+            yield { type: 'guardCorrection', diagnostic: correctionCandidate };
           yield {
             type: 'finished',
             exitCode:

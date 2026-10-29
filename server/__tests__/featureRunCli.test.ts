@@ -182,6 +182,139 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
+  it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'WAITING_QUOTA', 'DONE'])(
+    'schedules A to C and independent B after current A becomes %s',
+    async (status) => {
+      const store = await storeFor();
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      try {
+        const main = git('rev-parse', 'main');
+        store.createFeature({
+          key: feature,
+          doc_path: 'request.md',
+          git_sha: main,
+          status: 'approved',
+        });
+        vi.spyOn(store, 'getDesign').mockReturnValue({
+          project_id: 'test',
+          feature_key: feature,
+          doc_path: 'design.md',
+          dag_path: 'dag.yaml',
+          git_sha: main,
+          feature_sha: main,
+        });
+        for (const suffix of ['A', 'B', 'C'])
+          store.createTask({
+            key: `${feature}-${suffix}`,
+            feature_key: feature,
+            type: 'code',
+            status: 'READY',
+            declaration: '{}',
+          });
+        store.addTaskDependency(`${feature}-C`, `${feature}-A`);
+        db.prepare("UPDATE tasks SET declaration = '{}' WHERE feature_key = ?").run(feature);
+        const invoke = vi.fn(async (args: string[]) => {
+          const task = args.at(-1)!;
+          const next = task.endsWith('-A') ? status : 'DONE';
+          const branch = `sa/${task}-developer`;
+          if (next === 'DONE') {
+            taskBranchBase(repo, branch, `sa/${feature}-integration`, true);
+            git('branch', branch, main);
+            const tree = path.join(root, task);
+            git('worktree', 'add', tree, branch);
+            db.prepare('UPDATE tasks SET worktree_ref = ? WHERE key = ?').run(tree, task);
+          }
+          db.prepare(
+            'UPDATE tasks SET status = ?, version = version + 1, review_ref = ?, blocked_reason = ? WHERE key = ?',
+          ).run(
+            next,
+            next === 'DONE' ? JSON.stringify({ branch, sha: main, base: main }) : null,
+            next === 'DONE' ? null : 'current fixture gate',
+            task,
+          );
+          if (next === 'WAITING_QUOTA') process.exitCode = 3;
+        });
+        const result = await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          feature,
+          undefined,
+          invoke,
+          () => {},
+        );
+        const launched = invoke.mock.calls.map(([args]) => args.at(-1));
+        if (status === 'DONE') {
+          expect(launched, result.message).toEqual([
+            `${feature}-A`,
+            `${feature}-B`,
+            `${feature}-C`,
+          ]);
+          expect(result).toMatchObject({ status: 'ready_to_merge', exit_code: 0, blocked: [] });
+        } else if (status === 'WAITING_QUOTA') {
+          expect(launched).toEqual([`${feature}-A`]);
+          expect(result).toMatchObject({ status, exit_code: 3 });
+        } else {
+          expect(launched).toEqual([`${feature}-A`, `${feature}-B`]);
+          expect(result).toMatchObject({ status: 'WAITING_HUMAN', exit_code: 3 });
+          expect(result.blocked.map((b) => b.task)).toEqual([`${feature}-A`, `${feature}-C`]);
+          expect(result.tasks.find((t) => t.key.endsWith('-B'))).toMatchObject({
+            status: 'DONE',
+            integrated: true,
+          });
+        }
+      } finally {
+        db.close();
+        store.close();
+      }
+    },
+  );
+  it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'WAITING_QUOTA'])(
+    'advances independent tasks while respecting %s',
+    async (status) => {
+      await spec();
+      await runFeatureCommand(['design', feature], repo, () => {}, options());
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      try {
+        db.prepare('DELETE FROM task_dependencies WHERE task_key = ?').run('FEAT-001-T02');
+        db.prepare('UPDATE task_dependencies SET depends_on_key = ? WHERE task_key = ?').run(
+          'FEAT-001-T01',
+          'FEAT-001-T03',
+        );
+        db.prepare('UPDATE tasks SET status = ?, blocked_reason = ? WHERE key = ?').run(
+          status,
+          'fixture gate',
+          'FEAT-001-T01',
+        );
+      } finally {
+        db.close();
+      }
+      if (status === 'WAITING_QUOTA') {
+        const file = path.join(root, '.pixel-agents/config.json');
+        const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+        config.projects.test.concurrency.perExecutor.claude = 0;
+        fs.writeFileSync(file, JSON.stringify(config));
+      }
+      const result = await run('independent');
+      expect(result.status, result.message).toBe(
+        status === 'WAITING_QUOTA' ? status : 'WAITING_HUMAN',
+      );
+      expect(result.exit_code).toBe(3);
+      const executed = rows()
+        .filter((r) => r.role === 'developer')
+        .map((r) => r.task);
+      if (status === 'WAITING_QUOTA') expect(executed).toEqual([]);
+      else {
+        expect(executed).toEqual(['FEAT-001-T02']);
+        expect(result.tasks.find((t) => t.key === 'FEAT-001-T02')).toMatchObject({
+          status: 'DONE',
+          integrated: true,
+        });
+        expect(result.blocked.map((b) => b.task)).toEqual(['FEAT-001-T01', 'FEAT-001-T03']);
+        expect(result.blocked[1].reason).toContain('Blocked dependency');
+        expect(result.message).toContain('pixel-agents task retry FEAT-001-T01');
+      }
+    },
+  );
   it('supersedes a historical QA failure after an operator reset or subsequent retry', async () => {
     const store = await storeFor();
     try {

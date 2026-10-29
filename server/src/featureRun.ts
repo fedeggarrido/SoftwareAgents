@@ -40,6 +40,7 @@ export interface FeatureRunSummary {
   message: string;
   resume: string;
   exit_code: number;
+  blocked: { task: string; reason: string; command: string }[];
 }
 
 /** Deterministic scheduler; role execution uses the existing feature commands. */
@@ -94,6 +95,40 @@ export async function runFeature(
     progress(`${action} ${task}: ${status}`);
   };
   const tasks = () => store.listTasks().filter((t) => t.feature_key === key && t.declaration);
+  const blocked = new Map<string, FeatureRunSummary['blocked'][number]>();
+  const block = (task: string, reason: string, command?: string) => {
+    blocked.set(task, {
+      task,
+      reason,
+      command:
+        command ??
+        (['WAITING_HUMAN', 'FAILED_FINAL', 'FAILED_RETRYABLE', 'QA'].includes(
+          store.getTask(task)?.status ?? '',
+        )
+          ? `pixel-agents task retry ${task} --reason <reason>`
+          : `pixel-agents feature show ${key}`),
+    });
+  };
+  const propagateBlocks = () => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const task of tasks()) {
+        if (task.status === 'DONE' || blocked.has(task.key)) continue;
+        const dependency = store
+          .listTaskDependencies(task.key)
+          .find((d) => blocked.has(d.depends_on_key));
+        if (dependency) {
+          block(
+            task.key,
+            `Blocked dependency: ${dependency.depends_on_key}`,
+            `pixel-agents feature show ${key}`,
+          );
+          changed = true;
+        }
+      }
+    }
+  };
   const stop = async (
     status: string,
     message: string,
@@ -117,6 +152,7 @@ export async function runFeature(
       message,
       resume,
       exit_code,
+      blocked: [...blocked.values()],
     };
   };
   const ref = `refs/heads/${state.branch}`;
@@ -259,6 +295,17 @@ export async function runFeature(
     }
   };
   const execute = async (action: string, taskKey: string, args: string[]) => {
+    const halt = async (status: string, message: string, exit: number) => {
+      if (
+        tasks().some((t) => t.key === taskKey) &&
+        !['WAITING_QUOTA', 'interrupted'].includes(status)
+      ) {
+        block(taskKey, message);
+        append(action, taskKey, 'blocked');
+        return;
+      }
+      return stop(status, message, exit);
+    };
     const task = store.getTask(taskKey);
     // Developer's WorkStore claim enforces tasks.attempt/max_attempts. Review and QA
     // already share validated rework rounds. Non-code proposals use task history,
@@ -278,7 +325,7 @@ export async function runFeature(
           event.to_status === 'FAILED_RETRYABLE' && !isVerifierInfrastructureFailure(event.reason),
       ).length;
     if (task && ['spec', 'design'].includes(action) && proposalFailures >= task.max_attempts)
-      return stop(
+      return halt(
         'failed',
         `${action} ${taskKey}: max_attempts exhausted; inspect feature show ${key}`,
         1,
@@ -315,27 +362,48 @@ export async function runFeature(
     await save();
     append(action, taskKey, current?.status ?? (error ? 'failed' : 'finished'));
     if (interrupted) return stopInterrupted();
-    if (isVerifierInfrastructureFailure(current?.blocked_reason))
-      return stop('WAITING_HUMAN', `${taskKey}: ${current!.blocked_reason}`, 3);
-    if (current?.status === 'WAITING_HUMAN')
+    // A failed command may have left an external push uncertain. Resolve that
+    // shared publication gate before admitting any further task.
+    if (error && state.publication) return stop('failed', (error as Error).message, 1);
+    if (current?.status === 'WAITING_QUOTA')
       return stop(
+        'WAITING_QUOTA',
+        `${taskKey}: ${current.blocked_reason ?? 'quota unavailable'}`,
+        3,
+      );
+    if (
+      current &&
+      current.status !== 'DONE' &&
+      isVerifierInfrastructureFailure(current.blocked_reason)
+    )
+      return halt('WAITING_HUMAN', `${taskKey}: ${current.blocked_reason}`, 3);
+    if (current?.status === 'WAITING_HUMAN')
+      return halt(
         'WAITING_HUMAN',
         `${taskKey}: ${current.blocked_reason ?? 'human review required'}`,
         3,
       );
-    if (current?.status === 'FAILED_RETRYABLE' && !current.review_ref) return;
-    if (exit === 3 || current?.status === 'WAITING_QUOTA')
-      return stop(
-        current && lastReviewFailure(store, current)?.reason.includes('category=invalid_report')
-          ? 'WAITING_HUMAN'
-          : 'WAITING_QUOTA',
+    if (
+      current?.status === 'FAILED_RETRYABLE' &&
+      !current.review_ref &&
+      current.version !== task?.version
+    )
+      return;
+    if (exit === 3)
+      return halt(
+        'WAITING_HUMAN',
         `${taskKey}: ${current?.blocked_reason ?? (current && lastReviewFailure(store, current)?.reason) ?? 'worker waiting; inspect feature show ' + key}`,
         3,
       );
     // A read-only worker failure retains its approval; retry only on explicit resume.
-    if (current && ['review', 'qa'].includes(action) && lastReviewFailure(store, current))
-      return stop('WAITING_HUMAN', `${taskKey}: ${lastReviewFailure(store, current)!.reason}`, 3);
-    if (error) return stop('failed', (error as Error).message, 1);
+    if (
+      current &&
+      ['REVIEW', 'QA', 'FAILED_RETRYABLE'].includes(current.status) &&
+      ['review', 'qa'].includes(action) &&
+      lastReviewFailure(store, current)
+    )
+      return halt('WAITING_HUMAN', `${taskKey}: ${lastReviewFailure(store, current)!.reason}`, 3);
+    if (error) return halt('failed', (error as Error).message, 1);
     if (
       (!current &&
         !(action === 'spec'
@@ -345,9 +413,9 @@ export async function runFeature(
             : false)) ||
       (current && current.status === task?.status && current.version === task.version)
     )
-      return stop('WAITING_HUMAN', `${action} made no progress; inspect feature show ${key}`, 3);
+      return halt('WAITING_HUMAN', `${action} made no progress; inspect feature show ${key}`, 3);
     if (action === 'qa' && current?.status === 'QA')
-      return stop(
+      return halt(
         'WAITING_HUMAN',
         `QA not_tested; inspect feature show ${key} and resolve runtime test evidence: ${
           current.test_reports
@@ -389,19 +457,26 @@ export async function runFeature(
       if (interrupted) return await stopInterrupted();
       const recovered = await store.recoverExpiredLeases();
       if (interrupted) return await stopInterrupted();
-      const infrastructure = recovered.find(
+      const infrastructureFailures = recovered.filter(
         (task) =>
           (task.key === key || task.key === `${key}-DESIGN` || task.feature_key === key) &&
           isVerifierInfrastructureFailure(
             task.blocked_reason ?? lastReviewFailure(store, task)?.reason,
           ),
       );
-      if (infrastructure)
-        return await stop(
-          'WAITING_HUMAN',
-          `${infrastructure.key}: ${infrastructure.blocked_reason ?? lastReviewFailure(store, infrastructure)?.reason}`,
-          3,
-        );
+      for (const infrastructure of infrastructureFailures) {
+        if (tasks().some((t) => t.key === infrastructure.key))
+          block(
+            infrastructure.key,
+            infrastructure.blocked_reason ?? lastReviewFailure(store, infrastructure)!.reason,
+          );
+        else
+          return await stop(
+            'WAITING_HUMAN',
+            `${infrastructure.key}: ${infrastructure.blocked_reason ?? lastReviewFailure(store, infrastructure)?.reason}`,
+            3,
+          );
+      }
       await recoverWorkerResults(store, config, key);
       if (interrupted) return await stopInterrupted();
       for (const task of tasks()) {
@@ -428,11 +503,29 @@ export async function runFeature(
         await new Promise((resolve) => setTimeout(resolve, FEATURE_RUN_POLL_MS));
         continue;
       }
-      const gatedKeys = new Set([key, `${key}-DESIGN`, ...all.map((t) => t.key)]);
+      const dagKeys = new Set(all.map((t) => t.key));
+      for (const task of all) {
+        if (['WAITING_HUMAN', 'FAILED_FINAL', 'CANCELLED', 'BLOCKED'].includes(task.status))
+          block(
+            task.key,
+            `${task.status}: ${task.blocked_reason ?? 'operator intervention required'}`,
+          );
+      }
+      const decisions = store.listDecisions().filter((d) => d.status !== 'answered');
+      for (const decision of decisions) {
+        for (const task of decision.blocks.filter((b) => dagKeys.has(b)))
+          block(
+            task,
+            `Human Decision ${decision.id}: ${decision.context}`,
+            `pixel-agents feature show ${key}`,
+          );
+      }
+      propagateBlocks();
+      const gatedKeys = new Set([key, `${key}-DESIGN`]);
       const decision = store
         .listDecisions()
         .find((d) => d.status !== 'answered' && d.blocks.some((b) => gatedKeys.has(b)));
-      const human = related.find((t) => t.status === 'WAITING_HUMAN');
+      const human = related.find((t) => !dagKeys.has(t.key) && t.status === 'WAITING_HUMAN');
       if (decision || human) {
         const response = decision?.context.startsWith('feature-requirements/')
           ? `pixel-agents feature spec ${key} --answers <file.md>`
@@ -445,8 +538,8 @@ export async function runFeature(
           3,
         );
       }
-      const failed = related.find((t) =>
-        ['FAILED_FINAL', 'CANCELLED', 'BLOCKED'].includes(t.status),
+      const failed = related.find(
+        (t) => !dagKeys.has(t.key) && ['FAILED_FINAL', 'CANCELLED', 'BLOCKED'].includes(t.status),
       );
       if (failed)
         return await stop(
@@ -460,6 +553,7 @@ export async function runFeature(
       for (const task of tasks()) {
         if (
           task.review_ref &&
+          !blocked.has(task.key) &&
           ['REVIEW', 'QA'].includes(task.status) &&
           task.review_ref.base !== state.head
         ) {
@@ -527,16 +621,24 @@ export async function runFeature(
           if (!ancestor(git(['rev-parse', 'refs/heads/main^{commit}']), state.head)) continue;
           return await stop('ready_to_merge', `Human merge required: ${state.branch} → main`, 0);
         }
-        const task = all.find(
-          (t) =>
-            t.status !== 'DONE' &&
-            store.canStart(t.key) &&
-            store.listTaskDependencies(t.key).every((d) => !!state.integrated[d.depends_on_key]),
-        );
+        // Reevaluate an existing quota gate before spending quota on other work.
+        const task = [...all]
+          .sort(
+            (a, b) => Number(b.status === 'WAITING_QUOTA') - Number(a.status === 'WAITING_QUOTA'),
+          )
+          .find(
+            (t) =>
+              t.status !== 'DONE' &&
+              !blocked.has(t.key) &&
+              store.canStart(t.key) &&
+              store.listTaskDependencies(t.key).every((d) => !!state.integrated[d.depends_on_key]),
+          );
         if (!task)
           return await stop(
             'WAITING_HUMAN',
-            'No DAG task canStart; inspect dependencies and task states',
+            blocked.size
+              ? [...blocked.values()].map((b) => `${b.task}: ${b.reason}; ${b.command}`).join('\n')
+              : 'No DAG task canStart; inspect dependencies and task states',
             3,
           );
         if (

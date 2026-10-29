@@ -811,6 +811,21 @@ la prueba real y la integración corresponden a Claude.
 
 ## Orquestador secuencial y reanudable (SA-046)
 
+Los gates locales de una tarea (WAITING_HUMAN, FAILED_FINAL, guard repetido,
+QA invalid_report o not_tested) la bloquean durante el run actual. El orquestador
+continúa secuencialmente con otras tareas que cumplen `canStart`, excluyendo las
+dependientes transitivas de las bloqueadas. Cuando no queda trabajo ejecutable,
+termina en WAITING_HUMAN (exit 3): `blocked` en JSON y el resumen de texto incluyen
+cada tarea bloqueada, su motivo y comando sugerido; las dependientes remiten a
+`feature show`. Un nuevo run reevalúa el estado actual, sin perpetuar bloqueos
+locales ni fallos históricos superados.
+
+WAITING_QUOTA detiene todo el run inmediatamente (exit 3), pues seguir requiere
+cuota. También se conservan los gates compartidos de aprobación del spec,
+recuperación SA-026, publicación, rebase e integración. No hay concurrencia ni
+resolución automática de decisiones humanas. Si todo termina, se conserva
+`ready_to_merge` con merge humano.
+
 Desde el checkout principal del Managed Project en Windows, con build y Operator
 config preparados:
 
@@ -839,9 +854,11 @@ de la tarea desde el último reset explícito a READY. No hay otro presupuesto e
 `feature_runs.state`: los contadores antiguos se descartan al reanudar, por lo que
 un reset o cambio de base no deja intentos fantasma. Las esperas sin Execution,
 los fallos de infraestructura del verificador (build, entorno, timeout) y QA
-`not_tested` no gastan intentos del agente. Detienen el run con exit 3 y diagnóstico;
-se reanudan explícitamente una vez resuelto el entorno. `FAILED_FINAL`, cancelación, bloqueo y topes
-detienen el run con exit 1 y diagnóstico. No replanifica ni ejecuta en paralelo.
+`not_tested` no gastan intentos del agente. Bloquean la tarea durante el run;
+se reanudan explícitamente una vez resuelto el entorno. `FAILED_FINAL`, cancelación,
+bloqueo y topes locales tampoco impiden avanzar a tareas independientes. Al agotar
+el trabajo ejecutable, el resumen conjunto sale con exit 3. Los fallos globales
+conservan su diagnóstico y código de salida. No replanifica ni ejecuta en paralelo.
 
 ### Rama de integración y base de tareas
 
@@ -903,8 +920,9 @@ la identidad existente de los defectos y el límite de rondas: vuelve a READY si
 Un avance posterior a READY/FAILED_RETRYABLE deja de proyectar un fallo histórico
 de Reviewer/QA como bloqueo actual; el historial permanece intacto.
 
-Una decisión abierta o expirada, `WAITING_HUMAN`, la aprobación pendiente del spec
-o un QA `not_tested` detienen el bucle con exit 3. El mensaje identifica qué falta,
+Una decisión abierta o expirada o `WAITING_HUMAN` bloquea sus tareas; un QA
+`not_tested` bloquea la tarea afectada. La aprobación pendiente del spec detiene
+todo el bucle con exit 3. El mensaje identifica qué falta,
 remite a `feature show` y da `pixel-agents feature run FEAT-001` para continuar.
 Las respuestas de Requirements/Architect se incorporan mediante sus comandos
 `--answers` existentes, y la aprobación sigue requiriendo `feature approve`.

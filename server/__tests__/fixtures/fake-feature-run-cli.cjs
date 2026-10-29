@@ -46,7 +46,7 @@ process.stdin.on('end', () => {
       fs.mkdirSync('server/src', { recursive: true });
       fs.mkdirSync('server/__tests__', { recursive: true });
       if (n < 3) fs.writeFileSync(`server/src/step${n}.ts`, `export const step${n} = ${n};\n`);
-      const previous = n === 1 ? 1 : n - 1;
+      const previous = n === 1 || scenario === 'independent' ? n : n - 1;
       const rework =
         data.reviewFindings?.length || data.qaDefects?.length
           ? `it('fixes rework', () => expect(step${previous}).toBe(${previous}));\n`

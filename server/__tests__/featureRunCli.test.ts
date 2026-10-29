@@ -272,14 +272,10 @@ describe('feature run interruption authority', () => {
     'advances independent tasks while respecting %s',
     async (status) => {
       await spec();
-      await runFeatureCommand(['design', feature], repo, () => {}, options());
+      // The design itself declares T02 independent and T03 dependent on T01.
+      await runFeatureCommand(['design', feature], repo, () => {}, options('independent'));
       const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
       try {
-        db.prepare('DELETE FROM task_dependencies WHERE task_key = ?').run('FEAT-001-T02');
-        db.prepare('UPDATE task_dependencies SET depends_on_key = ? WHERE task_key = ?').run(
-          'FEAT-001-T01',
-          'FEAT-001-T03',
-        );
         db.prepare('UPDATE tasks SET status = ?, blocked_reason = ? WHERE key = ?').run(
           status,
           'fixture gate',
@@ -304,7 +300,7 @@ describe('feature run interruption authority', () => {
         .map((r) => r.task);
       if (status === 'WAITING_QUOTA') expect(executed).toEqual([]);
       else {
-        expect(executed).toEqual(['FEAT-001-T02']);
+        expect(executed, result.message).toEqual(['FEAT-001-T02']);
         expect(result.tasks.find((t) => t.key === 'FEAT-001-T02')).toMatchObject({
           status: 'DONE',
           integrated: true,

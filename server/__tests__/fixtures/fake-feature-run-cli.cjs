@@ -94,7 +94,9 @@ process.stdin.on('end', () => {
         ? 'orchestrator-doc'
         : ['rework', 'defect', 'single', 'retry', 'always-fail'].includes(scenario)
           ? 'orchestrator-single'
-          : 'orchestrator-chain'
+          : scenario === 'independent'
+            ? 'orchestrator-independent'
+            : 'orchestrator-chain'
       : role === 'reviewer'
         ? scenario === 'rework' && !rows.some((r) => r.role === 'reviewer')
           ? 'reject'

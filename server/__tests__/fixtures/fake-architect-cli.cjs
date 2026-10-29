@@ -73,7 +73,8 @@ process.stdin.on('end', () => {
   if (
     mode === 'orchestrator-chain' ||
     mode === 'orchestrator-single' ||
-    mode === 'orchestrator-doc'
+    mode === 'orchestrator-doc' ||
+    mode === 'orchestrator-independent'
   )
     proposal.dag.tasks = [1, 2, 3].map((n) => ({
       key: `FEAT-001-T0${n}`,
@@ -88,6 +89,10 @@ process.stdin.on('end', () => {
       parallelizable: false,
     }));
   if (mode === 'orchestrator-single') proposal.dag.tasks = proposal.dag.tasks.slice(0, 1);
+  if (mode === 'orchestrator-independent') {
+    proposal.dag.tasks[1].dependsOn = [];
+    proposal.dag.tasks[2].dependsOn = ['FEAT-001-T01'];
+  }
   if (mode === 'orchestrator-doc')
     Object.assign(proposal.dag.tasks[2], {
       type: 'doc',

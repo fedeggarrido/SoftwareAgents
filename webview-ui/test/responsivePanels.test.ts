@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { build } from 'vite';
 import { expect, it, vi } from 'vitest';
 
+import { setBoardState } from '../src/office/boardStore.js';
 import { emptyExecutorStore, setExecutorStore } from '../src/office/executorStore.js';
 import viteConfig from '../vite.config.ts';
 
@@ -90,11 +91,11 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
       const panel = await page.getByRole('region').boundingBox();
       expect(panel!.x).toBeGreaterThanOrEqual(16);
       expect(panel!.x + panel!.width).toBeLessThanOrEqual(374);
-      expect(panel!.y).toBe(158);
+      expect(panel!.y).toBe(240);
       await page.evaluate(
         "document.querySelector('[data-testid=company-hud]').style.height = '200px'",
       );
-      expect((await page.getByRole('region').boundingBox())!.y).toBe(218);
+      expect((await page.getByRole('region').boundingBox())!.y).toBe(300);
       expect(
         await page.evaluate("getComputedStyle(document.querySelector('.ui-info')).fontSize"),
       ).toBe('24px');
@@ -136,6 +137,48 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
         expect(box.x).toBeGreaterThanOrEqual(16);
         expect(box.x + box.width).toBeLessThanOrEqual(374);
       }
+    }
+    // Exercise the real HUD: the old stub missed Tailwind's independent translate.
+    const hudPath = '../src/components/CompanyHud.js';
+    const zoomPath = '../src/components/ZoomControls.js';
+    const { CompanyHud } = await import(hudPath);
+    const { ZoomControls } = await import(zoomPath);
+    setBoardState({
+      project: 'Design demo with a very long project title',
+      items: [],
+      sources: { board: true },
+      summary: { total: 123, byPhase: { DONE: 12 } },
+    } as never);
+    const hud = renderToStaticMarkup(
+      createElement(CompanyHud, {
+        onOpenDecisions: noop,
+        onOpenBacklog: noop,
+        officeState: {} as never,
+        agents: [],
+      }),
+    );
+    const zoom = renderToStaticMarkup(createElement(ZoomControls, { zoom: 2, onZoomChange: noop }));
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.setContent(
+        `<style>${css}</style><div style="position:relative;width:100vw;height:100vh">${zoom}<div class="office-panels"><div class="office-panel-hud">${hud}</div>${panels[0]}</div></div>`,
+      );
+      const card = page.getByTestId('company-hud');
+      const box = (await card.boundingBox())!;
+      const panel = (await page.getByRole('region').boundingBox())!;
+      expect(box.x).toBe(panel.x);
+      expect(box.x).toBeGreaterThanOrEqual(16);
+      expect(box.x + box.width).toBeLessThanOrEqual(width - 16);
+      expect(panel.y).toBeGreaterThan(box.y + box.height);
+      expect(await card.locator('.ui-counter').textContent()).toBe('12 de 123 hechas');
+      expect(
+        await page.evaluate(
+          "(() => { const el = document.querySelector('[data-testid=company-hud]'); return el.scrollWidth <= el.clientWidth; })()",
+        ),
+      ).toBe(true);
+      const zoomBox = (await page.getByTitle('Ampliar (Ctrl + rueda)').boundingBox())!;
+      expect(zoomBox.y + zoomBox.height <= box.y || zoomBox.x + zoomBox.width <= box.x).toBe(true);
+      expect(await page.getByRole('heading', { name: 'Features solo lectura' }).count()).toBe(1);
     }
   } finally {
     await browser.close();

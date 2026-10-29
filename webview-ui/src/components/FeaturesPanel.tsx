@@ -21,6 +21,7 @@ import {
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
+import { PanelHeading } from './ui/PanelHeading.js';
 
 let requestSequence = 0;
 const subscribeTransport = (listener: () => void) => transport.onStateChange(listener);
@@ -61,10 +62,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
       data-testid="features-panel"
       className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
     >
-      <div className="panel-heading">
-        <h2 className="text-lg flex-1">
-          Features <span className="panel-qualifier">solo lectura</span>
-        </h2>
+      <PanelHeading title="Features" onClose={onClose}>
         {state !== 'read_error' && (
           <Button
             size="sm"
@@ -74,17 +72,21 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
             Actualizar
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
-          ✕
-        </Button>
-      </div>
+      </PanelHeading>
       {!projectId ? (
         <p>Sin Project seleccionado</p>
       ) : (
         <>
           <div role="status">
             {state === 'loading' && 'Cargando features…'}
-            {state === 'empty' && 'Sin features todavía. Se crean con pixel-agents feature run …'}
+            {state === 'empty' && (
+              <p>
+                Sin features todavía. Se crean con{' '}
+                <code className="feature-command">
+                  {'pixel-agents feature run <FEAT> --request <file>'}
+                </code>
+              </p>
+            )}
             {state === 'denied' && 'Acceso denegado a las features'}
           </div>
           {state === 'read_error' && (

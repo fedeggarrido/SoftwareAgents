@@ -24,6 +24,7 @@
   --color-error-bg: #301f2b;
   --panel-edge: 16px;
   --panel-width: 960px;
+  --hud-width: 460px;
   --control-target: 24px;
   --ui-info-size: 24px;
   --panel-gap: 8px;
@@ -136,7 +137,11 @@
   top: auto;
   left: auto;
   transform: none;
-  margin-inline: auto;
+  translate: none;
+  width: min(var(--hud-width), calc(100vw - 2 * var(--panel-edge)));
+  max-width: calc(100vw - 2 * var(--panel-edge));
+  margin-left: max(var(--panel-edge), calc((100vw - var(--panel-width)) / 2));
+  margin-right: var(--panel-edge);
   pointer-events: auto;
 }
 .office-panels > .read-only-panel {
@@ -166,6 +171,38 @@
   font-size: var(--ui-info-size);
   white-space: nowrap;
 }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--panel-gap);
+  flex-shrink: 0;
+}
+.feature-command {
+  font-family: ui-monospace, monospace;
+  font-size: var(--ui-info-size);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.audit-filters select {
+  border: 2px solid var(--color-text-muted);
+  background: var(--color-bg-dark);
+  padding: var(--panel-gap);
+  max-width: 100%;
+}
+[data-testid='company-hud'] > .flex:first-child > button {
+  font-size: var(--ui-info-size);
+  max-width: 100%;
+}
+[data-testid='company-hud'] .ui-counter {
+  flex-shrink: 1;
+  overflow-wrap: anywhere;
+}
+/* Reserve the top zoom row on narrow screens; panels still flow after the HUD. */
+@media (max-width: 480px) {
+  .office-panel-hud {
+    padding-top: calc(var(--zoom-stack-bottom) - var(--office-top));
+  }
+}
 @layer components {
   .read-only-panel {
     left: var(--panel-edge);
@@ -182,7 +219,7 @@
     gap: 8px;
   }
   .panel-heading h2 {
-    flex: 1 1 240px;
+    flex: 1 1 0;
     min-width: 0;
   }
   .panel-error {

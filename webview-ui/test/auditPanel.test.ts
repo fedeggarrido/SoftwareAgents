@@ -84,6 +84,11 @@ beforeEach(() => {
 });
 
 describe('FEAT-001-T04 audit panel acceptance', () => {
+  it('disables clearing default filters and enables it for an active filter', async () => {
+    expect(await render()).toMatch(/<button[^>]*disabled=""[^>]*>Quitar filtros<\/button>/);
+    setAuditStore({ ...getAuditStore(), actionFilter: 'read' });
+    expect(await render()).not.toMatch(/<button[^>]*disabled=""[^>]*>Quitar filtros<\/button>/);
+  });
   it('distinguishes read errors with a shared retry alert and preserves filters on retry', async () => {
     setExecutorStore({
       ...emptyExecutorStore(),

@@ -96,7 +96,7 @@ export function VersionIndicator({
         onClick={handleOpenChangelog}
         className="version-label absolute bottom-8 right-28 z-20 text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
       >
-        v{currentMajorMinor}
+        {currentVersion === 'demo' ? 'versión: demo' : `v${currentVersion}`}
       </div>
     </>
   );

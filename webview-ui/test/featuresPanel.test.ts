@@ -256,7 +256,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('width:100%');
   });
   it.each([
-    ['empty', 'Sin features todavía. Se crean con pixel-agents feature run'],
+    ['empty', 'pixel-agents feature run &lt;FEAT&gt; --request &lt;file&gt;'],
     ['read_error', 'Error de lectura'],
     ['denied', 'Acceso denegado'],
   ] as const)('AC-009/010 distinguishes %s without rows', async (status, text) => {
@@ -275,6 +275,10 @@ describe('FEAT-002-T06 panel acceptance', () => {
     function buttons(node: unknown): Array<{ children: unknown; onClick: () => void }> {
       if (!node || typeof node !== 'object') return [];
       if (Array.isArray(node)) return node.flatMap(buttons);
+      const element = node as ReactElement;
+      if (typeof element.type === 'function' && element.type.name === 'PanelHeading') {
+        return buttons((element.type as (props: unknown) => unknown)(element.props));
+      }
       const props = (node as ReactElement<{ children?: unknown; onClick?: () => void }>).props;
       if (!props) return [];
       return [

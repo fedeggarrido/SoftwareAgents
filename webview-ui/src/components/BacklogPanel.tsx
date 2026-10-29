@@ -6,6 +6,7 @@ import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { Button } from './ui/Button.js';
+import { PanelHeading } from './ui/PanelHeading.js';
 
 function workStatus(
   item: BoardItem,
@@ -157,8 +158,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
       role="region"
       aria-label="Backlog"
     >
-      <div className="panel-heading">
-        <span className="text-lg flex-1">Backlog {board ? `· ${board.project}` : ''}</span>
+      <PanelHeading title="Backlog" onClose={onClose}>
         <Button
           size="sm"
           variant={showDone ? 'active' : 'default'}
@@ -166,10 +166,8 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
         >
           Hechas
         </Button>
-        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
-          ✕
-        </Button>
-      </div>
+      </PanelHeading>
+      {board && <p className="ui-info">{board.project}</p>}
 
       {view.message && (
         <div className="text-xs text-text-muted">

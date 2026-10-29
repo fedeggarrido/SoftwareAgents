@@ -17,6 +17,7 @@ import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
+import { PanelHeading } from './ui/PanelHeading.js';
 
 let requestSequence = 0;
 
@@ -59,17 +60,12 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       data-testid="audit-panel"
       className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
     >
-      <div className="panel-heading">
-        <h2 className="text-lg flex-1">Auditoría · solo lectura</h2>
-        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
-          ✕
-        </Button>
-      </div>
+      <PanelHeading title="Auditoría" onClose={onClose} />
       {!store.projectId ? (
         <p>Sin Project seleccionado</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-8">
+          <div className="audit-filters flex flex-wrap gap-8">
             <label>
               Acción{' '}
               <select
@@ -110,7 +106,11 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 ))}
               </select>
             </label>
-            <Button size="sm" onClick={clearFilters}>
+            <Button
+              size="sm"
+              onClick={clearFilters}
+              disabled={store.actionFilter === null && store.outcomeFilter === null}
+            >
               Quitar filtros
             </Button>
           </div>

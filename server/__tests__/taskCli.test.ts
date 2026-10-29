@@ -132,27 +132,26 @@ function dbFile() {
   return path.join(repo, '.git/softwareagents/work.sqlite3');
 }
 
-it('imports the spec title and backfills legacy NULL titles from the registered revision on reads', async () => {
+it('imports the spec title and backfills legacy NULL titles at open from the registered revision', async () => {
   expect(cli('import', 'dag.yaml').code).toBe(0);
-  const store = await open();
-  expect(store.getFeature('FEAT-001')?.title).toBe('CLI');
+  const first = await open();
+  expect(first.getFeature('FEAT-001')?.title).toBe('CLI');
+  const docPath = first.getFeature('FEAT-001')!.doc_path;
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(dbFile());
   try {
-    expect(db.prepare('SELECT title FROM features').get()?.title).toBe('CLI');
     db.exec('UPDATE features SET title = NULL');
-    const before = db.prepare('SELECT * FROM features').get();
     // The working copy is not the registered FeatureSpec revision.
-    fs.writeFileSync(path.join(repo, store.getFeature('FEAT-001')!.doc_path), 'invalid');
-    for (let i = 0; i < 2; i++) {
-      expect(store.getFeature('FEAT-001')?.title).toBe('CLI');
-      expect(store.listFeatures()[0].title).toBe('CLI');
-    }
-    expect(db.prepare('SELECT * FROM features').get()).toEqual(before);
+    fs.writeFileSync(path.join(repo, docPath), 'invalid');
+    // Persisted once at open, so every reader (incl. the read-only panel) sees it.
+    await open();
+    expect(db.prepare('SELECT title FROM features').get()?.title).toBe('CLI');
     db.exec("UPDATE features SET title = 'Operator title'");
-    expect(store.getFeature('FEAT-001')?.title).toBe('Operator title');
+    await open();
+    expect(db.prepare('SELECT title FROM features').get()?.title).toBe('Operator title');
     db.exec("UPDATE features SET title = NULL, git_sha = 'unavailable'");
-    expect(store.getFeature('FEAT-001')?.title).toBeNull();
+    await open();
+    expect(db.prepare('SELECT title FROM features').get()?.title).toBeNull();
   } finally {
     db.close();
   }

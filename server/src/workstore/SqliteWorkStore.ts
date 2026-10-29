@@ -1194,7 +1194,7 @@ class SqliteWorkStore implements WorkStore {
   backfillFeatureTitles(): void {
     for (const feature of this.listFeatures()) {
       const title = this.withFeatureTitle(feature).title;
-      if (feature.title == null && title)
+      if ((feature.title === null || feature.title === undefined) && title)
         this.db
           .prepare(
             'UPDATE features SET title = ? WHERE project_id = ? AND key = ? AND title IS NULL',

@@ -264,6 +264,9 @@ export function ToolOverlay({
                   {companyRole?.label ?? providerName ?? 'Agente'}
                   {task ? ` · ${task}` : ''}
                 </span>
+                {/* The pill stays visually compact; the current activity remains in the
+                    accessible text (screen readers, e2e) without widening the label. */}
+                <span className="sr-only">{activityText}</span>
               </div>
             </div>
           );

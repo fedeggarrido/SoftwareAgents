@@ -27,7 +27,15 @@ function hookDrivenScenario(name: string, command: string) {
     .build();
 }
 
+// The only standalone spec that also launches the VS Code extension: without the VS Code
+// download from global-setup (`npm run e2e`) it cannot run, so say so instead of ENOENT.
+const VSCODE_PATH_FILE = path.join(__dirname, '../../../.vscode-test/vscode-executable.txt');
+
 test.describe('Standalone / multi-server hooks', () => {
+  test.skip(
+    !fs.existsSync(VSCODE_PATH_FILE),
+    'Needs the VS Code download from e2e global-setup; run through `npm run e2e`',
+  );
   test('extension and standalone both stay hook-driven without cross-contamination @area:standalone', async ({
     page,
     pixelAgents,

@@ -30,6 +30,13 @@ export async function runUsageCommand(argv: string[], cwd = process.cwd(), log =
   const { openReadOnlyWorkStore } = await import('./workstore/readOnlyWorkStore.js');
   const db = openReadOnlyWorkStore(config.repoRoot);
   try {
+    const ledger = db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
+      .get();
+    if (!ledger)
+      throw new CliUsageError(
+        'usage: the WorkStore predates the usage ledger (schema v16); run any writing command, e.g. `pixel-agents task list`, to migrate it first',
+      );
     db.exec('BEGIN');
     const entries = db
       .prepare('SELECT body FROM usage_ledger WHERE project_id = ?')

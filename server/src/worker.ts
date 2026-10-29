@@ -2001,7 +2001,9 @@ async function runWorkerExecution(
           correctionPending = false;
         }
         if (rejection) {
-          if (guardCorrection) throw rejection;
+          // One free correction per task: an attempt that already carries the
+          // previous failure was told the cause and pays for a repeat.
+          if (guardCorrection || options.developer.previousFailure) throw rejection;
           // Never relaunch over changed Git identity or an unconfirmed process close.
           if (
             git(tree.path, ['rev-parse', 'HEAD']) !== startingHead ||

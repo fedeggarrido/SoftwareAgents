@@ -1251,8 +1251,10 @@ describe.skipIf(process.platform !== 'win32')(
           scenario === 'retry' ? 'ready_to_merge' : 'WAITING_HUMAN',
         );
         const attempts = rows().filter((r) => r.role === 'developer');
-        expect(attempts).toHaveLength(2);
-        expect(attempts[1].data.previousFailure).toBeTruthy();
+        // SA-QA-54: launch 2 is the single free guard correction; always-fail then pays
+        // one more attempt (with previousFailure, no second correction) before the gate.
+        expect(attempts).toHaveLength(scenario === 'retry' ? 2 : 3);
+        expect(JSON.stringify(attempts[1].data)).toMatch(/guardCorrection|previousFailure/);
         const before = rows().length;
         if (scenario === 'always-fail') {
           expect(result.exit_code).toBe(3);

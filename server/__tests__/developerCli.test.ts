@@ -1041,9 +1041,10 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
         gate: 'repeated_guard; human review required',
       });
       expect(store.getTask(task)!.blocked_reason).toContain('outside.txt');
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(4);
+      // Attempt + its single free correction, then one paid attempt (no second correction).
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(3);
       await expect(develop()).rejects.toThrow('No eligible');
-      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(4);
+      expect(store.listExecutions().filter((e) => e.task_key === task)).toHaveLength(3);
     } finally {
       store.close();
     }

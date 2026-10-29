@@ -4,7 +4,12 @@ import { taskPath } from './commands/taskFiles.js';
 import { DEFAULT_PROTECTED_PATHS, matchesProtectedPath } from './executors/protectedPaths.js';
 
 /** Match the same zone language, including zero directories for an interior globstar. */
-export function matchesChangeZone(file: string, zone: string, directory = false): boolean {
+export function matchesChangeZone(
+  file: string,
+  zone: string,
+  directory = false,
+  caseSensitive = false,
+): boolean {
   const parts = zone.replace(/\/$/, '').split('/');
   const segments = file.split('/');
   const match = (i: number, j: number): boolean => {
@@ -16,7 +21,7 @@ export function matchesChangeZone(file: string, zone: string, directory = false)
       .join('[^/]*');
     return (
       j < segments.length &&
-      new RegExp(`^${expression}$`, 'i').test(segments[j]) &&
+      new RegExp(`^${expression}$`, caseSensitive ? '' : 'i').test(segments[j]) &&
       match(i + 1, j + 1)
     );
   };

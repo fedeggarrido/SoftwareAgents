@@ -26,6 +26,8 @@ import { WorktreeManager } from '../src/executors/worktreeManager.js';
 import * as modelCascade from '../src/modelCascade.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
+import { qaTestFiles } from '../src/qa.js';
+import type { ReviewerRequest } from '../src/reviewer.js';
 import { taskBranchBase } from '../src/taskBranchBase.js';
 import * as taskTests from '../src/taskTestRunner.js';
 import type { VerifierFailure } from '../src/verifierFeedback.js';
@@ -355,6 +357,33 @@ describe('Developer diff guard', () => {
     );
     expect(fs.readFileSync(untouched)).toEqual(before);
   });
+  it.each([
+    ['webview-ui/test/Panel.test.ts', true],
+    ['webview-ui/test/nested/Panel.test.ts', false],
+    ['server/__tests__/Panel.spec.ts', false],
+    ['e2e/outside.spec.ts', false],
+  ])('Developer guard and QA agree on discovery for %s', (file, executed) => {
+    const base = git(repo, 'rev-parse', 'HEAD');
+    const directory = detachedTree();
+    fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
+    fs.writeFileSync(
+      path.join(directory, file),
+      "import { it, expect } from 'vitest';\nit('fixture', () => expect(true).toBe(true));\n",
+    );
+    git(directory, 'add', file);
+    const input = { task: { changeZones: [file] } } as DeveloperRequest;
+    const guard = () =>
+      guardDeveloperChanges(input, loadProjectConfig(repo, true)!, directory, base);
+    const qa = () =>
+      qaTestFiles({ ...input, files: [file], worktree: directory } as ReviewerRequest);
+    if (executed) {
+      expect(guard()).toEqual([file]);
+      expect(qa()).toEqual([file]);
+    } else {
+      expect(guard).toThrow(ChangeZonesExceededError);
+      expect(qa).toThrow(file);
+    }
+  });
   it('documents exact mirror variants for literal source zones and reports all foreign paths escaped', () => {
     const base = git(repo, 'rev-parse', 'HEAD');
     const directory = detachedTree();
@@ -363,7 +392,6 @@ describe('Developer diff guard', () => {
     } as DeveloperRequest;
     expect(developerScope(input.task, repo).mirroredTestZones).toEqual([
       'server/__tests__/clientMessageHandler*.test.ts',
-      'server/__tests__/clientMessageHandler*.spec.ts',
     ]);
     // Webview tests are flat and named after the source file (same mirror as QA).
     expect(
@@ -960,7 +988,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       expect(context.allowedScope).toMatchObject({
         changeZones: ['server/src/audit*.ts'],
         testZones: [],
-        mirroredTestZones: ['server/__tests__/audit*.test.ts', 'server/__tests__/audit*.spec.ts'],
+        mirroredTestZones: ['server/__tests__/audit*.test.ts'],
       });
     } finally {
       store.close();
@@ -1152,10 +1180,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
         });
         expect(context.allowedScope).toMatchObject({
           testZones: [],
-          mirroredTestZones: [
-            'server/__tests__/core/messages*.test.ts',
-            'server/__tests__/core/messages*.spec.ts',
-          ],
+          mirroredTestZones: ['server/__tests__/core/messages*.test.ts'],
         });
         expect(context.allowedScope.coreTestRule).toContain('Never place tests in core/src/');
         expect(context.allowedScope.fileWriteRule).toContain('never through shell writes');

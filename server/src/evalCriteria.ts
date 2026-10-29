@@ -12,6 +12,7 @@ import { EvalIntegrityError } from './evalIntegrity.js';
 import { evalGit, type EvalTask } from './evalTasks.js';
 import { processCancellation } from './executors/processCancellation.js';
 import { resolveInside } from './pathGuard.js';
+import { testDiscovery } from './testRoots.js';
 import { VerifierInfrastructureError } from './verifierInfrastructure.js';
 
 export class EvalCriterionTerminationError extends Error {
@@ -167,7 +168,10 @@ export function vitestWorkspace(tree: string, file: string, test = false) {
     root: resolveInside(tree, workspace),
     environment: 'node',
     globals: workspace === 'server',
-    include: workspace === 'server' ? ['__tests__/**/*.test.ts'] : ['test/*.test.ts'],
+    include: (workspace === 'server'
+      ? testDiscovery(tree).server
+      : testDiscovery(tree).webview
+    ).map((pattern) => pattern.slice(workspace.length + 1)),
   };
 }
 

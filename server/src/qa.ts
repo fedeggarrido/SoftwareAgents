@@ -14,6 +14,7 @@ import { guardRequirementsWrites, requirementsSnapshot } from './requirements.js
 import type { ReviewerRequest } from './reviewer.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { runTaskTest, taskTestCommand, validateTaskTest } from './taskTestRunner.js';
+import { isExecutedTest, webviewTestMirrors } from './testRoots.js';
 
 const validateReport = compileSchema<TestReport>(contract);
 
@@ -153,10 +154,7 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
         /\.[cm]?[jt]sx?$/i.test(file) &&
         (input.task.changeZones ?? []).some((zone) => matchesZone(file, zone)),
     )
-    .map(
-      (file) =>
-        'webview-ui/test/' + path.posix.basename(file).replace(/\.[^.]+$/, '') + '*.test.ts',
-    );
+    .flatMap((file) => webviewTestMirrors(file, input.worktree));
   const selected = files
     .filter((file) => {
       if (!isDeveloperTest(file)) return false;
@@ -180,7 +178,7 @@ export function qaTestFiles(input: ReviewerRequest): string[] {
   for (const file of selected) {
     if (
       file.startsWith('core/') ||
-      (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) => file.startsWith(root)) &&
+      (!isExecutedTest(file, input.worktree) &&
         !(input.task.testZones ?? []).some((zone) => matchesZone(file, zone)))
     )
       throw new QaTestSelectionError('Unsupported QA test root: ' + JSON.stringify(file));

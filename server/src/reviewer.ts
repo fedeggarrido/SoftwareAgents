@@ -6,7 +6,7 @@ import type { NewHumanDecision } from '../../core/src/humanDecision.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import type { ReviewReport } from '../../core/src/reviewReport.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
-import { type DeveloperRequest, developerRequest } from './developer.js';
+import { type DeveloperRequest, developerRequest, isDeveloperTest } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executorSelection.js';
 import { featureBaseBranch } from './featureRunBase.js';
@@ -14,6 +14,7 @@ import { isFailedReview } from './reviewAttempts.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { hasCurrentApproval } from './taskRebaseHistory.js';
+import { isExecutedTest } from './testRoots.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
 
 const validateReport = compileSchema<ReviewReport>(contract);
@@ -23,6 +24,8 @@ export interface ReviewerRequest extends DeveloperRequest {
   developerExecutor: 'claude' | 'codex';
   worktree: string;
   files: string[];
+  /** Runtime Git AM selection excludes removed tests from the execution contract. */
+  changedTestFiles?: string[];
   diff: string;
 }
 
@@ -136,12 +139,27 @@ export function reviewerRequest(
     developerExecutor: execution.executor as 'claude' | 'codex',
     worktree: tree,
     files,
+    changedTestFiles: readDiff(['--name-only', '--no-renames', '--diff-filter=AM', '-z'])
+      .split('\0')
+      .filter((file) => isDeveloperTest(file)),
     diff,
   };
 }
 
 export function reviewerBrief(input: ReviewerRequest, errors: string[] = []): string {
-  return JSON.stringify({ ...input, contract, validationErrors: errors });
+  return JSON.stringify({
+    ...input,
+    taskTests: (input.changedTestFiles ?? input.files)
+      .filter((file) => isDeveloperTest(file))
+      .map((file) => ({
+        file,
+        executed: isExecutedTest(file, input.worktree),
+      })),
+    testExecutionRule:
+      'Request changes if any taskTests entry has executed=false. This flag is calculated by the runtime from test discovery configuration; do not infer or override it.',
+    contract,
+    validationErrors: errors,
+  });
 }
 
 export function validateReview(source: string, input: ReviewerRequest): ReviewReport {

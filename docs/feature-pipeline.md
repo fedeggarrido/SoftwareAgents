@@ -347,11 +347,12 @@ un test de aceptación o reproducción antes de implementar. Antes de
 verificar, después de verificar y antes del commit, el runtime comprueba el diff
 completo contra la base (índice, disco, archivos nuevos e ignorados): solo admite
 las zonas declaradas y tests JS/TS `*.test.*`/`*.spec.*` autorizados. Estos tests
-deben estar en `changeZones`, ser co-ubicados con sus archivos fuente (retirando
-`.test`/`.spec` de su nombre), ser su espejo `server/__tests__/` de `server/src/`,
-o coincidir con `testZones`. **Para `core/src/`, los tests van en
+deben estar en `changeZones`, ser su espejo `server/__tests__/` de `server/src/`,
+el espejo webview comunicado en contexto, o coincidir con `testZones`. Además deben
+coincidir con los patrones ejecutados, salvo una excepción explícita `testZones`;
+los tests co-ubicados necesitan esa excepción. **Para `core/src/`, los tests van en
 `server/__tests__/core/`, conservando el subdirectorio y el nombre de origen con
-sufijo `.test` o `.spec`** (p. ej. `core/src/messages.ts` →
+sufijo configurado (actualmente `.test.ts`)** (p. ej. `core/src/messages.ts` →
 `server/__tests__/core/messages.test.ts`). Se permiten las variantes del mismo
 nombre que anuncian los patrones de espejo. Este espejo se comunica en
 `allowedScope.mirroredTestZones` y `coreTestRule`, incluso sin `testZones`.
@@ -367,11 +368,10 @@ o modificar únicamente fixtures no satisface el contrato. Cualquier rechazo
 conserva el trabajo para inspección y no crea un commit.
 
 Regla efectiva de espejo: se conserva el subdirectorio relativo de `server/src/`
-en `server/__tests__/`, la extensión JS/TS de la fuente y el prefijo completo del
-nombre; se admiten sufijos de variante antes de `.test` o `.spec`.
+en `server/__tests__/` y el prefijo completo del nombre; el sufijo se deriva del
+include del workspace y admite variantes antes de `.test`.
 Por ejemplo, `server/src/clientMessageHandler.ts` permite
-`server/__tests__/clientMessageHandler*.test.ts` y
-`server/__tests__/clientMessageHandler*.spec.ts`, sin incluir subdirectorios nuevos.
+`server/__tests__/clientMessageHandler*.test.ts`, sin incluir subdirectorios nuevos.
 Los globs de fuente conservan su alcance al transformarse; una zona de directorio
 permite sus tests espejo descendientes. Los tests co-ubicados siguen quitando
 únicamente `.test`/`.spec` para comprobar su fuente contra `changeZones`.
@@ -1126,6 +1126,26 @@ Codex detiene la Execution: una denegación shell de esas dos categorías permit
 la misma corrección gratuita, después del cierre confirmado del proceso.
 No se corrigen gratis push/config/remote, delegación, fallos de hooks ni otras
 violaciones de seguridad. Nunca se amplían permisos ni se modifica la regla.
+
+## Descubrimiento de tests compartido (SA-QA-56)
+
+`server/src/testRoots.ts` lee estáticamente los `include` de ambos configs Vitest
+y `testDir`/`testMatch` de Playwright, sin ejecutar TypeScript del repositorio.
+Developer (guardia, contexto y espejos), QA y las raíces de autoría QA comparten
+esta fuente. La comprobación usa patrones completos: webview es plano y los
+specs Playwright pertenecen a `e2e/tests/`. Las excepciones explícitas `testZones`
+conservan su comportamiento anterior.
+
+La gramática estática admite strings/arrays literales y `path.join(__dirname, ... )`
+para `testDir`. Un config ausente o no interpretable usa los valores actuales como
+fallback explícito, listado en `testDiscovery.fallback` del contexto Developer.
+`testRoots.test.ts` exige cero fallbacks y compara con los configs reales para
+detectar drift. Cambiar la sintaxis de un config exige actualizar parser y prueba.
+
+El brief Reviewer incluye `taskTests: [{file, executed}]` de los tests cambiados.
+`executed` significa que coincide con el descubrimiento configurado, no acredita
+una ejecución ni un resultado verde. El runtime calcula el flag; el contrato
+ordena pedir cambios si alguno es falso, incluso con `testZones` explícitas.
 
 ## Próximos pasos
 

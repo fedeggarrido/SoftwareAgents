@@ -34,6 +34,12 @@ import {
   taskDeclaration,
 } from './taskDag.js';
 import { TASK_REBASE_REASON, taskRebaseHistory } from './taskRebaseHistory.js';
+import {
+  isExecutedTest,
+  serverTestMirrors,
+  testDiscovery,
+  webviewTestMirrors,
+} from './testRoots.js';
 import { verifierFailure } from './verifierFeedback.js';
 import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import type { ReviewRef, TaskRecord, WorkStore } from './workstore/WorkStore.js';
@@ -54,11 +60,12 @@ export function isDocumentationPath(file: string): boolean {
   return file.endsWith('.md') || file.startsWith('docs/');
 }
 
-/** Fixtures/helpers belong under these test roots, never under product source directories. */
+/** Fixtures/helpers belong under these test roots, never under product source directories.
+ * Wider than the executed patterns on purpose (e.g. e2e/fixtures beside e2e/tests). */
 export const QA_AUTHOR_TEST_ROOTS = ['e2e/', 'server/__tests__/', 'webview-ui/test/'] as const;
 
 export function isQaAuthorPath(file: string): boolean {
-  return QA_AUTHOR_TEST_ROOTS.some((root) => file.startsWith(root));
+  return QA_AUTHOR_TEST_ROOTS.some((prefix) => file.startsWith(prefix));
 }
 
 /** Durable failure data survives the retry claim (which clears blocked_reason). */
@@ -99,17 +106,9 @@ export function developerScope(task: DagTask, root: string) {
     // same mirror as qaTestFiles. Directories and globs imply no test files.
     if (zone.startsWith('webview-ui/src/'))
       return !directories.includes(zone) && !zone.includes('*') && /\.[cm]?[jt]sx?$/i.test(zone)
-        ? ['webview-ui/test/' + path.posix.basename(zone).replace(/\.[^.]+$/, '') + '*.test.ts']
+        ? webviewTestMirrors(zone, root)
         : [];
-    if (!zone.startsWith('server/src/') && !zone.startsWith('core/src/')) return [];
-    const mirror = zone.startsWith('core/src/')
-      ? zone.replace('core/src/', 'server/__tests__/core/')
-      : zone.replace('server/src/', 'server/__tests__/');
-    if (directories.includes(zone)) return [mirror.replace(/\/$/, '') + '/'];
-    const match = /^(.*)(\.[cm]?[jt]sx?)$/i.exec(mirror);
-    return match
-      ? ['test', 'spec'].map((kind) => `${match[1].replace(/\*+$/, '')}*.${kind}${match[2]}`)
-      : [mirror];
+    return serverTestMirrors(zone, root, directories.includes(zone));
   });
   return {
     changeZones: task.changeZones ?? [],
@@ -118,16 +117,15 @@ export function developerScope(task: DagTask, root: string) {
     directoryChangeZones: directories,
     mirroredTestZones,
     ...(isQaAuthorTask(task) ? { testRoots: QA_AUTHOR_TEST_ROOTS } : {}),
-    coreTestRule:
-      'Tests for core/src/ belong in server/__tests__/core/, mirroring source paths and .test/.spec suffixes. Never place tests in core/src/, even without testZones.',
+    testDiscovery: testDiscovery(root),
+    coreTestRule: `Tests for core/src/ belong under ${testDiscovery(root).server.join(', ')} in the core/ mirror. Use only configured suffixes. Never place tests in core/src/, even without testZones.`,
     testFrameworkRule:
       "Unit tests use Vitest (import { describe, expect, it } from 'vitest'); never node:test or another runner. The runtime only executes Vitest and Playwright specs.",
     fileWriteRule:
       'Create and edit files only with the file-edit tool (apply_patch, Edit/Write), never through shell writes (Set-Content, Out-File, >, tee, node -e). Containment rejects shell writes whose text mentions .git or .claude; use the diagnostic to correct the tool, never bypass the rule.',
     testTempRule:
       'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
-    colocatedTestRule:
-      'Tests live only in server/__tests__/ (mirroring server/src/), webview-ui/test/ (flat, named after the source: webview-ui/test/<basename>*.test.ts) or e2e/; never next to sources. Other locations never run and are rejected.',
+    colocatedTestRule: `Tests must match ${testDiscovery(root).patterns.join(', ')}; never next to sources. Webview mirrors: ${webviewTestMirrors('webview-ui/src/<basename>.ts', root).join(', ')}. Other locations never run and are rejected.`,
   };
 }
 
@@ -490,9 +488,7 @@ function checkDeveloperChanges(
       (isDeveloperTest(file) &&
         fs.existsSync(taskPath(tree, file)) &&
         (file.startsWith('core/') ||
-          (!['server/__tests__/', 'webview-ui/test/', 'e2e/'].some((root) =>
-            file.startsWith(root),
-          ) &&
+          (!isExecutedTest(file, tree) &&
             !(input.task.testZones ?? []).some((zone) =>
               file.startsWith(zone.replace(/\*.*$/, '').replace(/\/$/, '')),
             ))))

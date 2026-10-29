@@ -590,10 +590,13 @@ export function developerVerifier(config: ProjectConfig, key: string): CascadeVe
   );
 }
 
-/** Fixed repository generators, never commands supplied by the model. */
-export function developerGeneratorCommands(files: readonly string[]) {
+/** Fixed repository generators, never commands supplied by the model. A repository
+ * without the generator script (other Managed Projects, test fixtures) is skipped. */
+export function developerGeneratorCommands(files: readonly string[], tree: string) {
+  const has = (script: string) => fs.existsSync(path.join(tree, script));
   return [
-    ...(files.some((file) => ['core/asyncapi.yaml', 'core/src/messages.ts'].includes(file))
+    ...(has('scripts/generate-messages.ts') &&
+    files.some((file) => ['core/asyncapi.yaml', 'core/src/messages.ts'].includes(file))
       ? [
           {
             argv: [
@@ -605,7 +608,7 @@ export function developerGeneratorCommands(files: readonly string[]) {
           },
         ]
       : []),
-    ...(files.some((file) => file.startsWith('e2e/'))
+    ...(has('scripts/generate-e2e-inventory.mjs') && files.some((file) => file.startsWith('e2e/'))
       ? [
           {
             argv: [process.execPath, 'scripts/generate-e2e-inventory.mjs'],

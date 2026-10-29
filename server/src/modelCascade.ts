@@ -121,7 +121,7 @@ export async function checkCascadeCriteria(
   // Freeze task paths before our temporary dependency junction exists. Git's
   // untracked enumeration can otherwise walk that junction in disposable repos.
   const changedFiles = evalChangedFiles(tree, base);
-  const generators = feedback?.autoFix ? developerGeneratorCommands(changedFiles) : [];
+  const generators = feedback?.autoFix ? developerGeneratorCommands(changedFiles, tree) : [];
   if (integrity.allowedPaths)
     integrity.allowedPaths = [
       ...integrity.allowedPaths,

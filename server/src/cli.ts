@@ -50,6 +50,7 @@ import { claudeProvider, copyHookScript, hookProviderById } from './providers/in
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
 import { runTelemetryCommand } from './telemetryCommand.js';
+import { runUsageCommand } from './usageCommand.js';
 import { parseWorkerArgs, runWorker } from './worker.js';
 
 // ── Argument parsing ──────────────────────────────────────────
@@ -165,6 +166,8 @@ export async function dispatchCli(
     await handlers.worker(parseWorkerArgs(argv.slice(1)));
   } else if (argv[0] === 'telemetry') {
     await runTelemetryCommand(argv.slice(1));
+  } else if (argv[0] === 'usage') {
+    await runUsageCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {
     await runEvalCommand(argv.slice(1));
   } else if (argv[0] === 'task') {

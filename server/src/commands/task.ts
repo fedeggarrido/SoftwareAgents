@@ -19,6 +19,7 @@ import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
 import { analyzeTaskDag, parseTaskDag, taskDagDeclaration } from '../taskDag.js';
+import { aggregateUsage } from '../usageLedger.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import { isTaskStatus, type TaskStatus } from '../workstore/taskStateMachine.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
@@ -101,6 +102,7 @@ function audit(
 
 function list(store: WorkStore, status?: TaskStatus) {
   const tasks = store.listTasks();
+  const usage = store.listUsage();
   const byKey = new Map(tasks.map((task) => [task.key, task]));
   const decisions = store.listDecisions().filter((decision) => decision.status === 'open');
   return tasks
@@ -126,6 +128,10 @@ function list(store: WorkStore, status?: TaskStatus) {
         task.status === 'WAITING_HUMAN' ? store.listDomainEvents(task.key).at(-1) : undefined;
       return {
         ...task,
+        usage: aggregateUsage(
+          usage.filter((entry) => entry.taskKey === task.key),
+          [task],
+        ),
         last_review_failure: lastReviewFailure(store, task),
         last_developer_failure: lastDeveloperFailure(store, task),
         pendingDependencies,

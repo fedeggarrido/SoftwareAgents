@@ -133,6 +133,11 @@ const migrations = [
   `ALTER TABLE features ADD COLUMN title TEXT;
   ALTER TABLE features ADD COLUMN updated_at TEXT;
   ALTER TABLE feature_runs ADD COLUMN updated_at TEXT;`,
+  `CREATE TABLE usage_ledger (
+    project_id TEXT NOT NULL, execution_key TEXT NOT NULL, body TEXT NOT NULL,
+    PRIMARY KEY(project_id, execution_key),
+    FOREIGN KEY(project_id, execution_key) REFERENCES executions(project_id, key)
+  ) STRICT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

@@ -208,6 +208,8 @@ export interface DomainEventRecord {
 }
 /** One Project per handle; no SQL/connection escape hatch. */
 export interface WorkStore {
+  recordUsage(entry: import('../usageLedger.js').UsageEntry): Promise<void>;
+  listUsage(): import('../usageLedger.js').UsageEntry[];
   readonly projectId: string;
   getFeatureRun(key: string): FeatureRunRecord | undefined;
   claimFeatureRun(key: string, owner: string, initial: FeatureRunState): Promise<FeatureRunState>;

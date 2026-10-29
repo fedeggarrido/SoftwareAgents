@@ -161,6 +161,8 @@ import { compileSchema, SchemaValidationError, validateSchema } from './schemaVa
 import { taskBranchBase } from './taskBranchBase.js';
 import { taskModelInputs } from './taskModelInputs.js';
 import { ExecutionTelemetry, TelemetrySink, type TelemetrySpan } from './telemetry.js';
+import { openBudgetDecision, UsageBudgetExceeded, watchExecutionBudget } from './usageBudgets.js';
+import { admissionBudgetReason, usageEntry } from './usageLedger.js';
 import {
   styleOnlyFailures,
   type VerifierFailure,
@@ -418,6 +420,18 @@ export async function runWorker(
   const developerRetry =
     !!options.developer && store.getTask(args.task)?.status === 'FAILED_RETRYABLE';
   try {
+    const budgetReason = admissionBudgetReason(
+      config.operator.budgets,
+      store.listUsage(),
+      args.task,
+      undefined,
+      store.listExecutions().filter((execution) => execution.task_key === args.task).length,
+    );
+    if (budgetReason) {
+      await openBudgetDecision(store, args.task, budgetReason);
+      process.exitCode = 3;
+      return { branch: '', commit: null, stat: '' };
+    }
     if (options.reviewer) {
       if (
         JSON.stringify(
@@ -514,6 +528,12 @@ export async function runWorker(
       );
     return result;
   } catch (error) {
+    if (error instanceof UsageBudgetExceeded) {
+      await lifecycle.idleForDecision(error.message);
+      await openBudgetDecision(store, args.task, error.message);
+      process.exitCode = 3;
+      return { branch: '', commit: null, stat: '' };
+    }
     const executionFailure = error instanceof Error ? workerFailureReasons.get(error) : undefined;
     const guard =
       error instanceof ChangeZonesExceededError ||
@@ -822,6 +842,30 @@ async function runWorkerExecution(
   let slotFailure: unknown;
   let slot: ReturnType<typeof acquireExecutorSlot>;
   const workStore = lifecycle?.store;
+  let stopBudgetWatch = () => {};
+  let budgetExceeded = false;
+  let quotaBefore: unknown = null;
+  const persistUsage = async () => {
+    const execution = workStore?.getExecution(executionId);
+    if (!execution || (execution.pid !== null && !execution.tree_closed_at)) return;
+    const entry = usageEntry(
+      execution,
+      workStore!.getTask(args.task)!,
+      telemetry?.usageAttributes ?? {},
+      config.operator.telemetry?.prices,
+      execution.tree_closed_at ?? new Date().toISOString(),
+      quotaBefore,
+      readSelectionSnapshot(config.operator).capacities,
+    );
+    entry.attempt = workStore!.listUsage().filter((row) => row.taskKey === args.task).length + 1;
+    entry.featureKey ??=
+      options.developer?.key ??
+      options.reviewer?.key ??
+      options.architect?.key ??
+      options.requirements?.key ??
+      null;
+    await workStore!.recordUsage(entry);
+  };
   let telemetry: ExecutionTelemetry | undefined;
   let telemetryStatus: 'ok' | 'error' | 'require_human' = 'error';
   const verifierAbort = new AbortController();
@@ -1005,6 +1049,16 @@ async function runWorkerExecution(
     let transientRetries = 0;
     const quotaExecutors = new Set<string>();
     for (;;) {
+      if (workStore) {
+        const reason = admissionBudgetReason(
+          config.operator.budgets,
+          workStore.listUsage(),
+          args.task,
+          undefined,
+          workStore.listExecutions().filter((execution) => execution.task_key === args.task).length,
+        );
+        if (reason) throw new UsageBudgetExceeded(reason);
+      }
       const inputs: TierInputs =
         verifier && levels.length ? { cascadeTier: levels[tierIndex] } : normalInputs;
       tierSelection = undefined;
@@ -1284,6 +1338,10 @@ async function runWorkerExecution(
           task_version: workStore.getTask(args.task)!.version,
           tool_policy_version: TOOL_POLICY_VERSION,
         });
+        quotaBefore = readSelectionSnapshot(config.operator).capacities;
+        stopBudgetWatch = watchExecutionBudget(config.operator.budgets, cancel, () => {
+          budgetExceeded = true;
+        });
       }
       audit('quota_admitted');
       if (tierSelection)
@@ -1485,7 +1543,10 @@ async function runWorkerExecution(
       audit('agent_compiled', {
         detail: JSON.stringify({ role, toolPolicyVersion: TOOL_POLICY_VERSION }),
       });
-      if (interrupted) throw new Error('Worker interrupted');
+      if (interrupted) {
+        if (budgetExceeded) throw new UsageBudgetExceeded('execution_time');
+        throw new Error('Worker interrupted');
+      }
       /**
        * SA-090: preparation is lazy and slow, so the selection is revalidated after
        * it, immediately before the executor starts, under machine admission like
@@ -1503,6 +1564,22 @@ async function runWorkerExecution(
           ? snapshot.machinePolicy
           : legacyMachinePolicy(snapshot, selectedExecutor);
       const revalidate = (): string | undefined => {
+        if (budgetExceeded) throw new UsageBudgetExceeded('execution_time');
+        if (workStore) {
+          // The current Execution is already registered; only earlier attempts count.
+          const reason = admissionBudgetReason(
+            config.operator.budgets,
+            workStore.listUsage(),
+            args.task,
+            undefined,
+            workStore
+              .listExecutions()
+              .filter(
+                (execution) => execution.task_key === args.task && execution.key !== executionId,
+              ).length,
+          );
+          if (reason) throw new UsageBudgetExceeded(reason);
+        }
         const blocked = authorityBlock();
         if (blocked) return blocked;
         const verdict = launchBlock(spawnObservation, nowSeconds());
@@ -1534,12 +1611,16 @@ async function runWorkerExecution(
             }),
         { metricsOnly: !!options.evaluation, workStore },
       );
-      if (interrupted) throw new Error('Worker interrupted');
+      if (interrupted) {
+        if (budgetExceeded) throw new UsageBudgetExceeded('execution_time');
+        throw new Error('Worker interrupted');
+      }
       {
         let verdict: string | null | undefined;
         try {
           verdict = withMachineAdmission(`${executionId}-spawn`, () => revalidate() ?? null);
         } catch (error) {
+          if (error instanceof UsageBudgetExceeded) throw error;
           verdict = `spawn revalidation failed: ${(error as Error).message}`;
         }
         if (verdict !== null)
@@ -1558,6 +1639,11 @@ async function runWorkerExecution(
             detail: 'Removing stale worker OAuth lock after verified process absence',
           }),
         );
+      if (!workStore)
+        stopBudgetWatch = watchExecutionBudget(config.operator.budgets, cancel, () => {
+          budgetExceeded = true;
+        });
+      if (budgetExceeded) throw new UsageBudgetExceeded('execution_time');
       handle = executor.start({
         executionId,
         projectId: config.project.id,
@@ -1659,6 +1745,7 @@ async function runWorkerExecution(
           }
         }
         if (event.type === 'finished') {
+          stopBudgetWatch();
           transientFailure ||= isTransientDiagnostic(event.resultSummary);
           if (
             !options.evaluation &&
@@ -1685,6 +1772,9 @@ async function runWorkerExecution(
       }
       if (lifecycle && executionFinished)
         await workStore!.closeExecution(executionId, lifecycle.owner);
+      stopBudgetWatch();
+      await persistUsage();
+      if (budgetExceeded && executionFinished) throw new UsageBudgetExceeded('execution_time');
       if (
         oauthRefreshContention &&
         exitCode !== 0 &&
@@ -2621,7 +2711,9 @@ async function runWorkerExecution(
     if (error instanceof Error) workerFailureReasons.set(error, reason);
     throw error;
   } finally {
+    stopBudgetWatch();
     try {
+      await persistUsage();
       await telemetry?.finish(telemetryStatus);
     } finally {
       process.removeListener('SIGINT', cancel);

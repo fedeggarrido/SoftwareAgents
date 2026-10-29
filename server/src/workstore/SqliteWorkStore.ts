@@ -26,6 +26,7 @@ import {
   TASK_REBASE_REASON,
   type TaskRebase,
 } from '../taskRebaseHistory.js';
+import { type UsageEntry, usageEntry } from '../usageLedger.js';
 import {
   isVerifierInfrastructureFailure,
   VERIFIER_INFRASTRUCTURE_PREFIX,
@@ -293,9 +294,28 @@ class SqliteWorkStore implements WorkStore {
       await this.write(() => {
         this.reservedTask(task.key, token);
         this.db
-          .prepare('UPDATE executions SET tree_closed_at = ? WHERE project_id = ? AND key = ?')
+          .prepare(
+            'UPDATE executions SET tree_closed_at = coalesce(tree_closed_at, ?) WHERE project_id = ? AND key = ?',
+          )
           .run(new Date().toISOString(), this.projectId, execution.key);
       });
+    }
+    // Recovery has no live telemetry consumer. Preserve the Execution with unknown
+    // counters rather than inventing zero usage or omitting a failed/cancelled run.
+    const recovered = this.listExecutions().filter(
+      (execution) => execution.task_key === task.key && execution.task_version <= task.version,
+    );
+    for (const execution of recovered) {
+      if (execution.pid !== null && !execution.tree_closed_at) continue;
+      await this.recordUsage(
+        usageEntry(
+          execution,
+          task,
+          {},
+          undefined,
+          execution.tree_closed_at ?? new Date().toISOString(),
+        ),
+      );
     }
   }
 
@@ -1712,9 +1732,31 @@ class SqliteWorkStore implements WorkStore {
       if (!execution) throw new Error('Unknown Execution');
       this.owned(execution.task_key, owner);
       this.db
-        .prepare('UPDATE executions SET tree_closed_at = ? WHERE project_id = ? AND key = ?')
+        .prepare(
+          'UPDATE executions SET tree_closed_at = coalesce(tree_closed_at, ?) WHERE project_id = ? AND key = ?',
+        )
         .run(new Date().toISOString(), this.projectId, key);
     });
+  }
+  recordUsage(entry: UsageEntry): Promise<void> {
+    return this.write(() => {
+      const execution = this.getExecution(entry.executionId);
+      if (!execution || execution.task_key !== entry.taskKey)
+        throw new Error('Usage requires its registered Execution');
+      if (execution.pid !== null && !execution.tree_closed_at)
+        throw new Error('Usage requires confirmed process closure');
+      this.db
+        .prepare(
+          'INSERT INTO usage_ledger (project_id, execution_key, body) VALUES (?, ?, ?) ON CONFLICT(project_id, execution_key) DO NOTHING',
+        )
+        .run(this.projectId, entry.executionId, JSON.stringify(entry));
+    });
+  }
+  listUsage(): UsageEntry[] {
+    return this.db
+      .prepare('SELECT body FROM usage_ledger WHERE project_id = ? ORDER BY execution_key')
+      .all(this.projectId)
+      .map((row) => JSON.parse(row.body as string) as UsageEntry);
   }
   getExecution(key: string): ExecutionRecord | undefined {
     return this.db

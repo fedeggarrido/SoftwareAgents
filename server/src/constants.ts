@@ -269,3 +269,7 @@ export const QUOTA_BACKOFF_SECONDS = 300;
 export const EXECUTOR_TRANSIENT_RETRIES = 2;
 export const EXECUTOR_TRANSIENT_BACKOFF_MS = 1000;
 export const EXECUTOR_TRANSIENT_MAX_BACKOFF_MS = 10000;
+/** SA-037: wall-clock budget checks use the executor's verified cancellation path. */
+export const USAGE_BUDGET_MINUTE_MS = 60_000;
+export const USAGE_BUDGET_SECOND_MS = 1_000;
+export const USAGE_BUDGET_POLL_MS = 1_000;

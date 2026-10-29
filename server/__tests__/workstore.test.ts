@@ -355,10 +355,10 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 15 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 16 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
-        14,
+        15,
       );
     } finally {
       db.close();
@@ -372,7 +372,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; UPDATE schema_version SET version = 11;',
+        'DROP TABLE usage_ledger; ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; UPDATE schema_version SET version = 11;',
       );
       const migrated = await open();
       expect(migrated.getTask('historical-qa')).toEqual(before);
@@ -397,7 +397,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; ALTER TABLE technical_designs DROP COLUMN dag_declaration; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 8;',
+        'DROP TABLE usage_ledger; ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; ALTER TABLE technical_designs DROP COLUMN dag_declaration; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 8;',
       );
       const migrated = await open();
       expect(migrated.getFeature('FEAT-001')).toEqual(store.getFeature('FEAT-001'));
@@ -424,7 +424,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 9;',
+        'DROP TABLE usage_ledger; ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 9;',
       );
       const migrated = await open();
       expect(migrated.getTask('FEAT-001-T01')?.review_ref).toBeNull();
@@ -780,7 +780,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
+        'DROP TABLE usage_ledger; ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
       );
       db.prepare(
         `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
@@ -797,7 +797,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
+        'DROP TABLE usage_ledger; ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
       );
       db.exec(
         "INSERT INTO tasks VALUES ('a', NULL, 'old-running', 'dev', 'RUNNING', 0, NULL, 7, NULL, NULL, 1, 3, NULL, NULL, NULL, NULL, 'then', 'then')",
@@ -943,7 +943,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 15 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 16 }]);
     } finally {
       db.close();
     }

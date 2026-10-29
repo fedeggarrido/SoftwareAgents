@@ -205,6 +205,9 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
         maxTokens: concurrencyLimit,
         maxCostUsd: nonNegativeNumber,
         maxExecutionSeconds: nonNegativeNumber,
+        maxExecutionMinutes: nonNegativeNumber,
+        maxAttemptsPerTask: concurrencyLimit,
+        maxTokensPerDay: concurrencyLimit,
       },
     },
     autopilot: {

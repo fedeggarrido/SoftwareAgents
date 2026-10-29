@@ -1,5 +1,52 @@
 # Selección, niveles de modelo y quota gate (SA-036, SA-084, SA-QA-5)
 
+## Topes de uso (SA-037)
+
+Config exclusiva del operador, bajo `projects.<id>` en
+`~/.pixel-agents/config.json`, nunca en el Project Brain:
+
+```json
+{
+  "budgets": {
+    "maxExecutionMinutes": 30,
+    "maxAttemptsPerTask": 5,
+    "maxTokensPerDay": 1000000
+  },
+  "telemetry": {
+    "prices": {
+      "modelo-exacto-observado": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheCreate": 3.75
+      }
+    }
+  }
+}
+```
+
+Son valores de ejemplo, no defaults ni tarifas reales. Los campos son opcionales
+y no negativos; intentos y tokens diarios son enteros. Cero bloquea el recurso.
+`maxExecutionSeconds`, si está declarado, también limita el reloj; si se indican
+segundos y minutos prevalece el menor. El plazo de minutos/segundos comienza al
+registrar la Execution, incluye su preparación y emplea la cancelación existente
+del handle si ya se inició. La duración del ledger cubre ese mismo reloj.
+El límite propio del executor sigue vigente si vence antes.
+
+`maxAttemptsPerTask` cuenta Executions registradas de la tarea, incluidos fallos,
+cancelaciones, cambios de nivel y correcciones; no reutiliza el contador de
+rework. `maxTokensPerDay` suma entrada (incluida caché) y salida observadas en
+Executions cerradas del Project, por día UTC de inicio. Es orientativo: los
+contadores desconocidos y las ejecuciones aún abiertas no reservan tokens.
+`maxTokens` y `maxCostUsd` conservan su condición declarativa anterior; SA-037
+no les asigna semántica nueva.
+
+Al alcanzar un tope, la tarea espera la decisión «¿ampliar presupuesto?».
+El operador revisa `pixel-agents usage --json`, ajusta su config y responde la
+decisión para reevaluar. Responder no amplía autoridad ni cambia límites.
+Los precios son USD por millón de tokens y solo sirven para estimaciones;
+su cálculo reutiliza las reglas [SA-095](execution-telemetry.md).
+
 ## Perfil opcional de Claude para el worker
 
 Por defecto se mantiene el perfil habitual. Para aislar el refresco OAuth de las

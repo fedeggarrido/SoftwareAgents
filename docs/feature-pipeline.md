@@ -1205,6 +1205,39 @@ como agotamiento de cuota. Se auditan `quota_exhausted` y `transient_retry`, sin
 guardar el texto del diagnóstico. Los fixtures de rechazo añadidos son
 reproducciones de formato, no capturas acreditadas de una ejecución real.
 
+## Ledger de uso y topes (SA-037)
+
+Cada Execution cerrada por el worker registra una fila idempotente en
+`usage_ledger` del WorkStore (migración aditiva v16). Incluye tokens observados
+por SA-095, duración de reloj, intento, executor, modelo/nivel, caché, coste USD
+estimado con los precios declarados y snapshots de cuota disponibles. Los datos
+ausentes son `null`; no se deducen precios ni contadores. También se registra el
+uso de ejecuciones fallidas y canceladas. El ledger persiste independientemente
+de la rotación del JSONL de telemetría; no importa retrospectivamente ese JSONL.
+La recuperación SA-026 también conserva una fila por Execution cerrada: si murió
+el consumidor de telemetría antes de guardar el ledger, sus contadores quedan
+desconocidos. Nunca contabiliza como cerrada una ejecución cuyo proceso siga
+sin cierre confirmado.
+
+`pixel-agents task list --json` añade `usage` por tarea.
+`pixel-agents usage [--feature FEAT-001] [--day YYYY-MM-DD] [--json]` consulta
+sin lanzar, sondear ni migrar la base. JSON contiene `total`, `byTask`,
+`byFeature` y `byDay` del Project actual. El día es UTC de inicio de Execution.
+`costPerResolvedTaskUsd` divide el coste total del ámbito entre sus tareas
+actualmente DONE; sin tareas resueltas es `null`. El cache hit rate divide los
+tokens leídos de caché entre los tokens de entrada, sin promediar porcentajes.
+Un coste o contador desconocido mantiene desconocido su agregado.
+
+Los topes opcionales viven en `projects.<id>.budgets` de la config del operador;
+véase [referencia de config](executor-selection.md#topes-de-uso-sa-037).
+El límite de tiempo cancela mediante el handle del executor y drena sus eventos.
+Solo tras confirmar el cierre se libera la ejecución y se abre la decisión
+«¿ampliar presupuesto?», dejando la tarea en WAITING_HUMAN. Un cierre incierto
+conserva lease/slot para recuperación SA-026. Los límites de intentos y tokens
+diarios impiden nuevas admisiones. Responder la decisión no modifica la config:
+si el tope sigue alcanzado, vuelve a bloquear. No activa concurrencia 2 en
+`feature run`; admisión y executor-slots mantienen sus responsabilidades.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

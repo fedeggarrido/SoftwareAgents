@@ -40,7 +40,7 @@ export interface ProjectOperatorConfig {
   telemetry?: TelemetryConfig;
   /** Runtime-only branch publication. Absent/disabled means no push. */
   developer?: { pushBranch: { enabled: boolean; remote: string } };
-  /** Sequential feature runner; parallel scheduling is reserved for SA-037. */
+  /** Sequential feature runner; parallel scheduling is not enabled by usage budgets. */
   orchestrator?: { maxConcurrentTasks?: number };
   /**
    * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
@@ -55,7 +55,14 @@ export interface ProjectOperatorConfig {
   /** Minimum remaining quota percentages, by executor. */
   quotaThresholds?: Record<string, number>;
   concurrency?: { maxExecutions?: number; perExecutor?: Record<string, number> };
-  budgets?: { maxTokens?: number; maxCostUsd?: number; maxExecutionSeconds?: number };
+  budgets?: {
+    maxTokens?: number;
+    maxCostUsd?: number;
+    maxExecutionSeconds?: number;
+    maxExecutionMinutes?: number;
+    maxAttemptsPerTask?: number;
+    maxTokensPerDay?: number;
+  };
   autopilot?: ProjectAutopilotConfig;
 }
 

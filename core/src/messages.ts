@@ -105,6 +105,15 @@ export interface FeatureRow {
   gates: FeatureGate[];
   integration: FeatureIntegration | null;
   lastActivityAt: string | null;
+  cost: FeatureCost;
+}
+
+export interface FeatureCost {
+  executions: number;
+  costKnown: number;
+  costUsd: number | null;
+  costPerDoneTaskUsd: number | null;
+  cacheHitRate: number | null;
 }
 
 export type FeatureState =

@@ -86,6 +86,13 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
       gates: [],
       integration: null,
       lastActivityAt: null,
+      cost: {
+        executions: 1,
+        costKnown: 1,
+        costUsd: 1,
+        costPerDoneTaskUsd: null,
+        cacheHitRate: null,
+      },
     };
     vi.mocked(featuresView.readFeaturesView).mockResolvedValue({
       status: 'ok',

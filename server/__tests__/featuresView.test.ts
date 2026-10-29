@@ -24,6 +24,177 @@ describe('features view acceptance', () => {
     events: [],
   });
 
+  const ledger = (costUsd: number | null, featureKey: string | null = 'FEAT-001') => ({
+    body: JSON.stringify({
+      featureKey,
+      taskKey: 'FEAT-001-T01',
+      costUsd,
+      inputTokens: 100,
+      cacheReadTokens: 25,
+      prompt: '<private-prompt>',
+      path: 'C:\\private\\file',
+      model: 'private-model',
+      quotaBefore: 'private-quota',
+      executor: 'private-executor',
+    }),
+  });
+
+  it('FEAT-003 AC-001/002/004/005/007 aggregates only the feature and all DONE tasks', () => {
+    const data = fixture();
+    data.tasks = ['T01', 'DESIGN'].map((suffix) => ({
+      key: `FEAT-001-${suffix}`,
+      feature_key: 'FEAT-001',
+      status: 'DONE',
+    }));
+    data.ledger = [ledger(0.1), ledger(0.2), ledger(0.3), ledger(99, null), ledger(88, 'FEAT-002')];
+    const cost = projectFeatures(data)[0].cost;
+    expect(cost).toEqual({
+      executions: 3,
+      costKnown: 3,
+      costUsd: expect.closeTo(0.6),
+      costPerDoneTaskUsd: expect.closeTo(0.3),
+      cacheHitRate: 0.25,
+    });
+    const serialized = JSON.stringify(projectFeatures(data));
+    for (const secret of ['private-', 'prompt', 'quotaBefore', 'executor', 'model', 'C:'])
+      expect(serialized).not.toContain(secret);
+    data.ledger = [ledger(0.3), ledger(0.3), ledger(0.3), ledger(null), ledger(null)];
+    expect(projectFeatures(data)[0].cost).toMatchObject({
+      executions: 5,
+      costKnown: 3,
+      costUsd: expect.closeTo(0.9),
+    });
+    data.tasks = [];
+    expect(projectFeatures(data)[0].cost.costPerDoneTaskUsd).toBeNull();
+  });
+
+  it('FEAT-003 AC-003 distinguishes unknown, empty and known zero costs', () => {
+    const data = fixture();
+    data.tasks = [{ key: 'FEAT-001-T01', feature_key: 'FEAT-001', status: 'DONE' }];
+    expect(projectFeatures(data)[0].cost).toEqual({
+      executions: 0,
+      costKnown: 0,
+      costUsd: null,
+      costPerDoneTaskUsd: null,
+      cacheHitRate: null,
+    });
+    data.ledger = Array.from({ length: 4 }, () => ledger(null));
+    expect(projectFeatures(data)[0].cost).toMatchObject({
+      executions: 4,
+      costKnown: 0,
+      costUsd: null,
+      costPerDoneTaskUsd: null,
+    });
+    data.ledger = [
+      {
+        body: JSON.stringify({
+          featureKey: 'FEAT-001',
+          taskKey: 'FEAT-001-T01',
+          costUsd: 0,
+          inputTokens: null,
+          cacheReadTokens: null,
+        }),
+      },
+    ];
+    expect(projectFeatures(data)[0].cost).toEqual({
+      executions: 1,
+      costKnown: 1,
+      costUsd: 0,
+      costPerDoneTaskUsd: 0,
+      cacheHitRate: null,
+    });
+  });
+
+  it('FEAT-003 keeps cache coverage independent and sanitizes overflowing aggregates', () => {
+    const data = fixture();
+    data.ledger = [
+      ledger(1),
+      {
+        body: JSON.stringify({
+          featureKey: 'FEAT-001',
+          costUsd: 2,
+          inputTokens: null,
+          cacheReadTokens: null,
+        }),
+      },
+    ];
+    expect(projectFeatures(data)[0].cost).toMatchObject({ costUsd: 3, cacheHitRate: 0.25 });
+    data.ledger = [ledger(Number.MAX_VALUE), ledger(Number.MAX_VALUE)];
+    expect(projectFeatures(data)[0].cost).toMatchObject({
+      executions: 2,
+      costKnown: 2,
+      costUsd: null,
+    });
+  });
+
+  it.each([
+    'broken',
+    '[]',
+    'null',
+    JSON.stringify({ featureKey: 42 }),
+    ...['costUsd', 'inputTokens', 'cacheReadTokens'].flatMap((field) =>
+      [-1, '1', false].map((value) =>
+        JSON.stringify({
+          featureKey: 'FEAT-001',
+          costUsd: null,
+          inputTokens: null,
+          cacheReadTokens: null,
+          [field]: value,
+        }),
+      ),
+    ),
+  ])('FEAT-003 rejects malformed ledger data: %s', (body) => {
+    expect(() => projectFeatures({ ...fixture(), ledger: [{ body }] })).toThrow('invalid_data');
+  });
+
+  it('FEAT-003 AC-005/006 scopes ledger reads, preserves DB bytes and supports v15', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-cost-'));
+    let db: DatabaseSync | undefined;
+    try {
+      fs.mkdirSync(path.join(root, '.git', 'softwareagents'), { recursive: true });
+      const file = path.join(root, '.git', 'softwareagents', 'work.sqlite3');
+      db = new DatabaseSync(file);
+      runMigrations(db);
+      // This fixture tests read isolation; execution/task storage is not under test.
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(
+        "INSERT INTO projects VALUES ('P','now'),('Q','now'); INSERT INTO features(project_id,key,doc_path,git_sha,status) VALUES ('P','FEAT-001','doc','sha','approved'),('P','FEAT-002','doc','sha','approved'),('Q','FEAT-001','doc','sha','approved')",
+      );
+      const insert = db.prepare('INSERT INTO usage_ledger VALUES (?, ?, ?)');
+      for (const [project, id, cost, feature] of [
+        ['P', 'a', 1, 'FEAT-001'],
+        ['P', 'b', 2, 'FEAT-002'],
+        ['P', 'c', 99, null],
+        ['Q', 'd', 5, 'FEAT-001'],
+      ] as const)
+        insert.run(project, id, ledger(cost, feature).body);
+      const before = fs.readFileSync(file);
+      const result = await readFeaturesView(root, 'P');
+      expect(result.status).toBe('ok');
+      expect(result.features.map((r) => [r.key, r.cost.costUsd, r.cost.executions])).toEqual([
+        ['FEAT-001', 1, 1],
+        ['FEAT-002', 2, 1],
+      ]);
+      expect(JSON.stringify(result)).not.toContain('private-');
+      expect(fs.readFileSync(file)).toEqual(before);
+      db.exec("UPDATE usage_ledger SET body = 'broken' WHERE project_id = 'P'");
+      expect(await readFeaturesView(root, 'P')).toEqual({
+        status: 'read_error',
+        reason: 'invalid_data',
+        features: [],
+      });
+      db.exec('DROP TABLE usage_ledger; UPDATE schema_version SET version = 15');
+      const v15 = await readFeaturesView(root, 'P');
+      expect(v15.status).toBe('ok');
+      expect(v15.features.every((r) => r.cost.executions === 0 && r.cost.costUsd === null)).toBe(
+        true,
+      );
+    } finally {
+      db?.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('derives merged only for a completed DAG with integration ancestry evidence', () => {
     const data = fixture();
     const head = 'a'.repeat(40);

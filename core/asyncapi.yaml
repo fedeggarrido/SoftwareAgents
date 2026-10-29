@@ -214,7 +214,18 @@ components:
       type: object
       additionalProperties: false
       required:
-        [key, title, state, rawStatus, progress, currentTask, gates, integration, lastActivityAt]
+        [
+          key,
+          title,
+          state,
+          rawStatus,
+          progress,
+          currentTask,
+          gates,
+          integration,
+          lastActivityAt,
+          cost,
+        ]
       properties:
         key:
           type: string
@@ -242,6 +253,26 @@ components:
             - type: 'null'
         lastActivityAt:
           type: [string, 'null']
+        cost:
+          $ref: '#/components/schemas/FeatureCost'
+
+    FeatureCost:
+      type: object
+      additionalProperties: false
+      required: [executions, costKnown, costUsd, costPerDoneTaskUsd, cacheHitRate]
+      properties:
+        executions:
+          type: integer
+          minimum: 0
+        costKnown:
+          type: integer
+          minimum: 0
+        costUsd:
+          type: [number, 'null']
+        costPerDoneTaskUsd:
+          type: [number, 'null']
+        cacheHitRate:
+          type: [number, 'null']
 
     FeatureProgress:
       type: object

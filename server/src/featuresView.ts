@@ -4,6 +4,7 @@ import type {
   FeaturesReadError,
   FeatureTaskStep,
 } from '../../core/src/messages.js';
+import { aggregateUsage, type UsageEntry } from './usageLedger.js';
 import {
   FeaturesReadFailure,
   openReadOnlyWorkStore,
@@ -19,6 +20,7 @@ export interface FeaturesSource {
   decisions: Row[];
   executions: Row[];
   events: Row[];
+  ledger?: Row[];
   mainAncestors?: ReadonlySet<string>;
 }
 export interface FeaturesViewResult {
@@ -72,6 +74,7 @@ function display(value: unknown): string | null {
 
 /** Pure projection: only explicitly named display fields can escape. */
 export function projectFeatures(source: FeaturesSource): FeatureRow[] {
+  const entries = (source.ledger ?? []).map(ledgerEntry);
   return source.features
     .map((feature): FeatureRow => {
       const key = text(feature.key);
@@ -85,6 +88,13 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
           invalid();
       }
       const taskKeys = new Set(tasks.map((t) => text(t.key)));
+      const usage = aggregateUsage(
+        entries.filter((entry) => entry.featureKey === key),
+        tasks.map((task) => ({
+          key: text(task.key),
+          status: task.status === 'DONE' ? 'DONE' : 'DRAFT',
+        })),
+      );
       for (const taskKey of taskKeys)
         if (
           taskKey !== key &&
@@ -224,6 +234,13 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
         .sort();
       return {
         key,
+        cost: {
+          executions: usage.executions,
+          costKnown: usage.costCoverage,
+          costUsd: finite(usage.costUsd),
+          costPerDoneTaskUsd: finite(usage.costPerResolvedTaskUsd),
+          cacheHitRate: finite(usage.cacheHitRate),
+        },
         title: display(feature.title),
         state: merged
           ? 'merged'
@@ -286,6 +303,11 @@ export async function readFeaturesView(
       decisions: read('human_decisions', 'task_key, escalation, decided_at'),
       executions: read('executions', 'task_key, agent_role, task_version, started_at'),
       events: read('domain_events', 'task_key, created_at'),
+      ledger: db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
+        .get()
+        ? read('usage_ledger', 'body')
+        : [],
       mainAncestors: readMainAncestors(root),
     });
     return { status: features.length ? 'ok' : 'empty', reason: null, features };
@@ -298,4 +320,44 @@ export async function readFeaturesView(
   } finally {
     db?.close();
   }
+}
+
+function finite(value: number | null): number | null {
+  return value !== null && Number.isFinite(value) ? value : null;
+}
+
+function ledgerEntry(row: Row): UsageEntry {
+  if (typeof row.body !== 'string') return invalid();
+  const body = object(row.body);
+  const counter = (field: string): number | null => {
+    const value = body[field];
+    return value === null
+      ? null
+      : typeof value === 'number' && Number.isFinite(value) && value >= 0
+        ? value
+        : invalid();
+  };
+  const featureKey = body.featureKey === null ? null : text(body.featureKey);
+  // Discard all unrelated payload fields; aggregation receives only validated counters.
+  return {
+    featureKey,
+    taskKey: optional(body.taskKey) ?? '',
+    costUsd: counter('costUsd'),
+    inputTokens: counter('inputTokens'),
+    cacheReadTokens: counter('cacheReadTokens'),
+    executionId: '',
+    day: '',
+    startedAt: '',
+    endedAt: null,
+    durationMs: null,
+    attempt: null,
+    executor: '',
+    model: '',
+    tier: null,
+    outputTokens: null,
+    cacheCreateTokens: null,
+    cacheHitRate: null,
+    quotaBefore: null,
+    quotaAfter: null,
+  };
 }

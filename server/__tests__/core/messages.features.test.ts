@@ -29,6 +29,13 @@ const row = {
   ],
   integration: { branch: 'sa/FEAT-002-integration', sha: 'abcdef0' },
   lastActivityAt: null,
+  cost: {
+    executions: 0,
+    costKnown: 0,
+    costUsd: null,
+    costPerDoneTaskUsd: null,
+    cacheHitRate: null,
+  },
 };
 const snapshot = {
   type: 'featuresSnapshot',
@@ -40,6 +47,24 @@ const snapshot = {
 };
 
 describe('FEAT-002 protocol (AC-012, AC-013)', () => {
+  it('FEAT-003 AC-001/003/007 requires a closed aggregate cost contract', () => {
+    expect(validate('FeatureRow', row)).toBe(true);
+    const { cost, ...withoutCost } = row;
+    expect(validate('FeatureRow', withoutCost)).toBe(false);
+    expect(validate('FeatureCost', cost)).toBe(true);
+    expect(
+      validate('FeatureCost', { ...cost, costUsd: 0, costPerDoneTaskUsd: 0, cacheHitRate: 0 }),
+    ).toBe(true);
+    for (const field of Object.keys(cost)) {
+      const missing = { ...cost } as Record<string, unknown>;
+      delete missing[field];
+      expect(validate('FeatureCost', missing)).toBe(false);
+      expect(validate('FeatureCost', { ...cost, [field]: 'unknown' })).toBe(false);
+    }
+    expect(validate('FeatureCost', { ...cost, executions: -1 })).toBe(false);
+    expect(validate('FeatureCost', { ...cost, costKnown: 0.5 })).toBe(false);
+    expect(validate('FeatureCost', { ...cost, prompt: 'private' })).toBe(false);
+  });
   it('registers a read-only correlated request without new authority fields (AC-012)', () => {
     expect(schemas.ClientMessage.oneOf).toContainEqual({
       $ref: '#/components/schemas/RequestFeatures',
@@ -90,6 +115,7 @@ describe('FEAT-002 protocol (AC-012, AC-013)', () => {
       gates: [],
       integration: null,
       lastActivityAt: null,
+      cost: row.cost,
     };
     const request: ClientMessage = { type: 'requestFeatures', projectId: 'P', requestId: '2' };
     const response: ServerMessage = {
@@ -137,7 +163,7 @@ describe('FEAT-002 protocol (AC-012, AC-013)', () => {
       expect(
         validate('FeaturesSnapshot', { ...snapshot, features: [{ ...row, [field]: 'sensitive' }] }),
       ).toBe(false);
-      for (const nested of ['progress', 'currentTask', 'integration'] as const) {
+      for (const nested of ['progress', 'currentTask', 'integration', 'cost'] as const) {
         expect(
           validate('FeaturesSnapshot', {
             ...snapshot,

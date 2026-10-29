@@ -52,7 +52,7 @@ export async function runUsageCommand(argv: string[], cwd = process.cwd(), log =
     log(
       json
         ? JSON.stringify(summary, null, 2)
-        : `Executions: ${summary.total.executions}\nCost USD: ${summary.total.costUsd ?? 'unknown'}\nCost per DONE task USD: ${summary.total.costPerResolvedTaskUsd ?? 'unknown'}\nCache hit rate: ${summary.total.cacheHitRate ?? 'unknown'}`,
+        : `Executions: ${summary.total.executions}\nCost USD: ${summary.total.costUsd ?? 'unknown'} (known for ${summary.total.costCoverage}/${summary.total.executions})\nCost per DONE task USD: ${summary.total.costPerResolvedTaskUsd ?? 'unknown'}\nCache hit rate: ${summary.total.cacheHitRate ?? 'unknown'} (tokens known for ${summary.total.tokenCoverage}/${summary.total.executions})`,
     );
   } finally {
     db.close();

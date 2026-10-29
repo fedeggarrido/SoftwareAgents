@@ -9,7 +9,12 @@ import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionTelemetry, TelemetrySink } from '../src/telemetry.js';
 import { openBudgetDecision, watchExecutionBudget } from '../src/usageBudgets.js';
 import { runUsageCommand } from '../src/usageCommand.js';
-import { admissionBudgetReason, usageEntry, usageSummary } from '../src/usageLedger.js';
+import {
+  admissionBudgetReason,
+  aggregateUsage,
+  usageEntry,
+  usageSummary,
+} from '../src/usageLedger.js';
 import { WorkerLifecycle } from '../src/workerLifecycle.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
@@ -304,4 +309,21 @@ describe('SA-037 usage ledger and budgets', () => {
       parseProjects({ test: { ...policy, budgets: { maxAttemptsPerTask: -1 } } }).test,
     ).toBeUndefined();
   });
+});
+
+it('sums known costs and reports coverage when historical rows lack data', () => {
+  const row = (cost: number | null, input: number | null, cached: number | null) =>
+    ({ costUsd: cost, inputTokens: input, cacheReadTokens: cached }) as never;
+  const total = aggregateUsage([row(0.5, 100, 80), row(null, null, null), row(0.25, 100, 20)], [
+    { key: 'T1', status: 'DONE' },
+  ] as never);
+  expect(total).toMatchObject({
+    executions: 3,
+    costUsd: 0.75,
+    costCoverage: 2,
+    tokenCoverage: 2,
+    cacheHitRate: 0.5,
+    costPerResolvedTaskUsd: 0.75,
+  });
+  expect(aggregateUsage([], [])).toMatchObject({ costUsd: null, costPerResolvedTaskUsd: null });
 });

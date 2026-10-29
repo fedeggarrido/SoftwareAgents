@@ -61,30 +61,34 @@ export function usageEntry(
 }
 
 export function aggregateUsage(entries: UsageEntry[], tasks: Pick<TaskRecord, 'key' | 'status'>[]) {
+  // Sum what is known; null only when nothing is. Historical executions without run logs
+  // leave gaps, so *Coverage says how many executions each figure covers (a lower bound).
+  const known = (key: keyof UsageEntry) => entries.filter((entry) => entry[key] !== null);
   const sum = (
     key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreateTokens' | 'costUsd',
-  ) =>
-    !entries.length || entries.some((entry) => entry[key] === null)
-      ? null
-      : entries.reduce((n, entry) => n + entry[key]!, 0);
+  ) => {
+    const rows = known(key);
+    return rows.length ? rows.reduce((n, entry) => n + (entry[key] as number), 0) : null;
+  };
   const inputTokens = sum('inputTokens');
-  const cacheReadTokens = sum('cacheReadTokens');
   const costUsd = sum('costUsd');
+  // Hit rate only over executions that report both counters.
+  const both = entries.filter((e) => e.inputTokens !== null && e.cacheReadTokens !== null);
+  const bothInput = both.reduce((n, e) => n + e.inputTokens!, 0);
   const resolvedTasks = tasks.filter((task) => task.status === 'DONE').length;
+  const durations = known('durationMs');
   return {
     executions: entries.length,
-    durationMs: entries.some((e) => e.durationMs === null)
-      ? null
-      : entries.reduce((n, e) => n + e.durationMs!, 0),
+    durationMs: durations.length ? durations.reduce((n, e) => n + e.durationMs!, 0) : null,
     inputTokens,
     outputTokens: sum('outputTokens'),
-    cacheReadTokens,
+    cacheReadTokens: sum('cacheReadTokens'),
     cacheCreateTokens: sum('cacheCreateTokens'),
     costUsd,
+    costCoverage: known('costUsd').length,
+    tokenCoverage: known('inputTokens').length,
     cacheHitRate:
-      inputTokens !== null && inputTokens > 0 && cacheReadTokens !== null
-        ? cacheReadTokens / inputTokens
-        : null,
+      bothInput > 0 ? both.reduce((n, e) => n + e.cacheReadTokens!, 0) / bothInput : null,
     resolvedTasks,
     costPerResolvedTaskUsd: resolvedTasks && costUsd !== null ? costUsd / resolvedTasks : null,
   };

@@ -109,7 +109,7 @@ describe('Bounded Playwright runtime (fake commands)', () => {
     expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
     expect(fs.readdirSync(scratch)).toEqual([]);
   });
-  it('stops the cascade on unavailable e2e even after a product verifier failure', async () => {
+  it('defers an unrunnable e2e spec to QA instead of an infrastructure stop', async () => {
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();
     git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
@@ -121,6 +121,7 @@ describe('Bounded Playwright runtime (fake commands)', () => {
     fs.writeFileSync(path.join(tree, relative), '// mocked Electron spec');
     vi.spyOn(criteria, 'runVerifierCommand').mockResolvedValue('fail');
     const failures: import('../src/verifierFeedback.js').VerifierFailure[] = [];
+    // The Developer verifier may lack a runnable Playwright/Electron; QA runs e2e specs.
     await expect(
       checkCascadeCriteria(
         {
@@ -138,7 +139,7 @@ describe('Bounded Playwright runtime (fake commands)', () => {
         base,
         { failures },
       ),
-    ).rejects.toBeInstanceOf(VerifierInfrastructureError);
+    ).resolves.toBeDefined();
     expect(failures).toHaveLength(1);
     expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
   });

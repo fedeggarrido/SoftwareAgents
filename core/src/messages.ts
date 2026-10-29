@@ -108,14 +108,6 @@ export interface FeatureRow {
   cost: FeatureCost;
 }
 
-export interface FeatureCost {
-  executions: number;
-  costKnown: number;
-  costUsd: number | null;
-  costPerDoneTaskUsd: number | null;
-  cacheHitRate: number | null;
-}
-
 export type FeatureState =
   'merged' | 'ready_to_merge' | 'in_review' | 'in_design' | 'in_development' | 'unknown';
 
@@ -151,6 +143,14 @@ export type FeatureGateKind =
 export interface FeatureIntegration {
   branch: string;
   sha: string | null;
+}
+
+export interface FeatureCost {
+  executions: number;
+  costKnown: number;
+  costUsd: number | null;
+  costPerDoneTaskUsd: number | null;
+  cacheHitRate: number | null;
 }
 
 export interface AuditLogSnapshot {

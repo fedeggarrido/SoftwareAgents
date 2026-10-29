@@ -5,6 +5,10 @@ import { useExecutorStore } from '../office/executorStore.js';
 import {
   beginFeaturesRequest,
   emptyFeaturesStore,
+  featureCacheRateLabel,
+  featureCostLabel,
+  featureCostPerDoneLabel,
+  featureCoverageLabel,
   featureProgressLabel,
   featuresReasonText,
   featureStateLabel,
@@ -109,6 +113,13 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
                   </div>
                 )}
                 <span>{featureProgressLabel(feature.progress)}</span>
+              </div>
+              <div className="feature-cost flex flex-wrap gap-8 text-text-muted">
+                <span>Coste: {featureCostLabel(feature.cost)}</span>
+                <span>Ejecuciones: {feature.cost.executions}</span>
+                <span>Cobertura: {featureCoverageLabel(feature.cost)}</span>
+                <span>Coste/tarea DONE: {featureCostPerDoneLabel(feature.cost)}</span>
+                <span>Caché: {featureCacheRateLabel(feature.cost)}</span>
               </div>
               <div className="feature-context text-text-muted">
                 {feature.currentTask && (

@@ -67,6 +67,7 @@ const row: FeatureRow = {
   ],
   integration: { branch: 'sa/FEAT-020-integration', sha: 'abcdef0' },
   lastActivityAt: null,
+  cost: { executions: 3, costKnown: 3, costUsd: 0.6, costPerDoneTaskUsd: 0.3, cacheHitRate: 0.5 },
 };
 function respond(over: Partial<FeaturesSnapshot> = {}) {
   const store = getFeaturesStore();
@@ -92,6 +93,58 @@ beforeEach(() => {
   respond();
 });
 describe('FEAT-002-T06 panel acceptance', () => {
+  it('FEAT-003 AC-001/002/003/004/007/008 renders only cost text with explicit partial coverage', async () => {
+    const sensitive = {
+      prompt: 'PRIVATE_PROMPT',
+      output: 'PRIVATE_OUTPUT',
+      path: 'C:\\private\\ledger',
+      prices: 'PRIVATE_PRICES',
+    };
+    respond({
+      features: [
+        { ...row, ...sensitive, cost: { ...row.cost, ...sensitive, executions: 5, costUsd: 0.9 } },
+      ],
+    });
+    const html = await render();
+    const block = html.match(/<div class="feature-cost[^>]*>(.*?)<\/div>/s)?.[1];
+    expect(block).toBeDefined();
+    for (const text of [
+      'Coste: 0.90 USD (parcial)',
+      'Ejecuciones: 5',
+      'Cobertura: 3 de 5',
+      'Coste/tarea DONE: 0.30 USD',
+      'Caché: 50 %',
+    ])
+      expect(block).toContain(text);
+    expect(block).not.toMatch(/<(button|input|select|textarea|a)\b/);
+    for (const text of Object.values(sensitive)) expect(html).not.toContain(text);
+    respond({
+      features: [
+        {
+          ...row,
+          cost: {
+            ...row.cost,
+            executions: 0,
+            costKnown: 0,
+            costUsd: null,
+            costPerDoneTaskUsd: null,
+            cacheHitRate: null,
+          },
+        },
+      ],
+    });
+    const empty = await render();
+    expect(empty).toContain('Cobertura: 0 de 0');
+    expect(empty.match(/sin datos/g)).toHaveLength(3);
+    expect(empty).not.toContain('0.00 USD');
+    respond({
+      features: [{ ...row, cost: { ...row.cost, costUsd: 0.5, costPerDoneTaskUsd: null } }],
+    });
+    expect(await render()).toContain('Coste/tarea DONE: sin datos');
+    respond({ status: 'denied' });
+    expect(await render()).not.toContain('feature-cost');
+    expect(await render()).not.toContain('USD');
+  });
   it('AC-001/002/003/005/007/008/013 renders ordered rows and escaped text', async () => {
     respond({
       features: [
@@ -167,6 +220,9 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const controls = buttons(await tree());
     expect(controls.map((button) => button.children)).toEqual(['Cerrar', 'Actualizar']);
     controls[1].onClick();
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
     expect(getFeaturesStore().requestId).not.toBe('r');
     expect(await render()).toContain('Cargando');
     respond({
@@ -192,6 +248,9 @@ describe('FEAT-002-T06 panel acceptance', () => {
     setFeaturesStore(emptyFeaturesStore());
     await flush();
     const first = getFeaturesStore().requestId!;
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
     respond();
     project('Q');
     expect(await render()).not.toContain('FEAT-020');

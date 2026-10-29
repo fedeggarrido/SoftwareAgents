@@ -5,6 +5,10 @@ import {
   applyFeaturesSnapshot,
   beginFeaturesRequest,
   emptyFeaturesStore,
+  featureCacheRateLabel,
+  featureCostLabel,
+  featureCostPerDoneLabel,
+  featureCoverageLabel,
   featureProgressLabel,
   featuresReasonText,
   featureStateLabel,
@@ -25,6 +29,7 @@ const row: FeatureRow = {
   gates: [],
   integration: null,
   lastActivityAt: null,
+  cost: { executions: 3, costKnown: 3, costUsd: 0.6, costPerDoneTaskUsd: 0.3, cacheHitRate: 0.5 },
 };
 const snapshot = (over: Partial<FeaturesSnapshot> = {}): FeaturesSnapshot => ({
   type: 'featuresSnapshot',
@@ -37,6 +42,52 @@ const snapshot = (over: Partial<FeaturesSnapshot> = {}): FeaturesSnapshot => ({
 });
 
 describe('features store acceptance', () => {
+  it('FEAT-003 AC-001/002 formats full and partial known cost', () => {
+    expect(featureCostLabel(row.cost)).toBe('0.60 USD');
+    expect(featureCoverageLabel(row.cost)).toBe('3 de 3');
+    expect(featureCostPerDoneLabel(row.cost)).toBe('0.30 USD');
+    expect(featureCacheRateLabel(row.cost)).toBe('50 %');
+    const partial = { ...row.cost, executions: 5, costUsd: 0.9 };
+    expect(featureCostLabel(partial)).toBe('0.90 USD (parcial)');
+    expect(featureCoverageLabel(partial)).toBe('3 de 5');
+  });
+
+  it('FEAT-003 AC-003/004 distinguishes unknown, absent DONE tasks and known zero', () => {
+    for (const executions of [0, 4]) {
+      const cost = {
+        executions,
+        costKnown: 0,
+        costUsd: null,
+        costPerDoneTaskUsd: null,
+        cacheHitRate: null,
+      };
+      expect(featureCostLabel(cost)).toBe('sin datos');
+      expect(featureCoverageLabel(cost)).toBe(`0 de ${executions}`);
+      expect(featureCostPerDoneLabel(cost)).toBe('sin datos');
+      expect(featureCacheRateLabel(cost)).toBe('sin datos');
+    }
+    expect(featureCostLabel({ ...row.cost, costUsd: 0.5 })).toBe('0.50 USD');
+    expect(featureCostPerDoneLabel({ ...row.cost, costPerDoneTaskUsd: null })).toBe('sin datos');
+    for (const [value, label] of [
+      [0, '0.00 USD'],
+      [0.004, '<0.01 USD'],
+      [0.005, '0.01 USD'],
+    ] as const) {
+      expect(featureCostLabel({ ...row.cost, costUsd: value })).toBe(label);
+      expect(featureCostPerDoneLabel({ ...row.cost, costPerDoneTaskUsd: value })).toBe(label);
+    }
+    expect(featureCacheRateLabel({ ...row.cost, cacheHitRate: 0 })).toBe('0 %');
+    expect(featureCacheRateLabel({ ...row.cost, cacheHitRate: 0.666 })).toBe('67 %');
+    for (const value of [null, NaN, Infinity, -Infinity]) {
+      expect(featureCostLabel({ ...row.cost, costUsd: value })).toBe('sin datos');
+      expect(featureCostPerDoneLabel({ ...row.cost, costPerDoneTaskUsd: value })).toBe('sin datos');
+      expect(featureCacheRateLabel({ ...row.cost, cacheHitRate: value })).toBe('sin datos');
+    }
+    for (const value of [NaN, Infinity, -Infinity]) {
+      expect(featureCoverageLabel({ ...row.cost, executions: value })).toBe('sin datos');
+      expect(featureCoverageLabel({ ...row.cost, costKnown: value })).toBe('sin datos');
+    }
+  });
   it('AC-002 formats server DAG progress and absent tasks', () => {
     expect(featureProgressLabel(row.progress)).toBe('2/5');
     expect(featureProgressLabel(null)).toBe('sin tareas');

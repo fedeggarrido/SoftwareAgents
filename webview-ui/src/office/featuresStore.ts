@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import type {
+  FeatureCost,
   FeatureProgress,
   FeatureRow,
   FeaturesReadError,
@@ -78,6 +79,35 @@ export function featureStateLabel(feature: Pick<FeatureRow, 'state' | 'rawStatus
 
 export function featureProgressLabel(progress: FeatureProgress | null): string {
   return progress === null ? 'sin tareas' : `${progress.done}/${progress.total}`;
+}
+
+function usdLabel(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'sin datos';
+  if (value > 0 && value < 0.005) return '<0.01 USD';
+  return `${value.toFixed(2)} USD`;
+}
+
+export function featureCostLabel(cost: FeatureCost): string {
+  const label = usdLabel(cost.costUsd);
+  return label !== 'sin datos' && cost.costKnown > 0 && cost.costKnown < cost.executions
+    ? `${label} (parcial)`
+    : label;
+}
+
+export function featureCoverageLabel(cost: FeatureCost): string {
+  return Number.isFinite(cost.costKnown) && Number.isFinite(cost.executions)
+    ? `${cost.costKnown} de ${cost.executions}`
+    : 'sin datos';
+}
+
+export function featureCostPerDoneLabel(cost: FeatureCost): string {
+  return usdLabel(cost.costPerDoneTaskUsd);
+}
+
+export function featureCacheRateLabel(cost: FeatureCost): string {
+  return cost.cacheHitRate === null || !Number.isFinite(cost.cacheHitRate)
+    ? 'sin datos'
+    : `${Math.round(cost.cacheHitRate * 100)} %`;
 }
 
 /** Fixed allowlisted messages never interpolate server diagnostics or paths. */

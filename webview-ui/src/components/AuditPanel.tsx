@@ -61,7 +61,7 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
     >
       <div className="panel-heading">
         <h2 className="text-lg flex-1">Auditoría · solo lectura</h2>
-        <Button size="sm" variant="ghost" onClick={onClose} title="Cerrar auditoría">
+        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
           ✕
         </Button>
       </div>
@@ -134,7 +134,7 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
           </div>
           {state === 'read_error' && (
             <PanelError
-              cause="Error de lectura del audit log: no se pudo consultar el registro de auditoría."
+              cause="No se pudo consultar el registro de auditoría."
               disabled={!projectId || connectionState !== 'connected'}
               onRetry={() => {
                 if (projectId && connectionState === 'connected') requestAudit(projectId);

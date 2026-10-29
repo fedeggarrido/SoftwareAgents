@@ -536,28 +536,31 @@ function App() {
         workspaceFolders={workspaceFolders}
       />
 
-      <CompanyHud
-        agents={agents}
-        officeState={officeState}
-        onOpenBacklog={() => setIsBacklogOpen(true)}
-        onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
-      />
+      <div className="office-panels">
+        <div className="office-panel-hud">
+          <CompanyHud
+            agents={agents}
+            officeState={officeState}
+            onOpenBacklog={() => setIsBacklogOpen(true)}
+            onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
+          />
+        </div>
+        <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
+        <FeaturesPanel isOpen={isFeaturesOpen} onClose={() => setIsFeaturesOpen(false)} />
+
+        <BacklogPanel
+          isOpen={isBacklogOpen}
+          onClose={() => setIsBacklogOpen(false)}
+          officeState={officeState}
+          onFocusAgent={(id) => {
+            const os = getOfficeState();
+            os.selectedAgentId = id;
+            os.cameraFollowId = id;
+          }}
+        />
+      </div>
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
-      <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
-      <FeaturesPanel isOpen={isFeaturesOpen} onClose={() => setIsFeaturesOpen(false)} />
       <MeetingPanel />
-
-      <BacklogPanel
-        isOpen={isBacklogOpen}
-        onClose={() => setIsBacklogOpen(false)}
-        officeState={officeState}
-        onFocusAgent={(id) => {
-          const os = getOfficeState();
-          os.selectedAgentId = id;
-          os.cameraFollowId = id;
-        }}
-      />
-
       <VersionIndicator
         currentVersion={extensionVersion}
         lastSeenVersion={lastSeenVersion}

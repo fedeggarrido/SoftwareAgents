@@ -189,7 +189,7 @@ describe('FEAT-001-T04 audit panel acceptance', () => {
 
   it.each([
     ['empty', 'No hay entradas de auditoría'],
-    ['read_error', 'Error de lectura'],
+    ['read_error', 'No se pudo consultar el registro de auditoría.'],
     ['denied', 'Acceso denegado'],
   ] as const)('AC-007/008: distinguishes %s', async (status, text) => {
     setAuditStore({

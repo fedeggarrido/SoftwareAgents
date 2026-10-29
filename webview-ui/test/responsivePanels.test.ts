@@ -47,6 +47,8 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
     const { BottomToolbar } = await import(toolbarPath);
     const { FeaturesPanel } = await import(featuresPath);
     const { AuditPanel } = await import(auditPath);
+    const backlogPath = '../src/components/BacklogPanel.js';
+    const { BacklogPanel } = await import(backlogPath);
     setExecutorStore(emptyExecutorStore());
     const noop = () => {};
     const toolbar = renderToStaticMarkup(
@@ -67,14 +69,44 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
     );
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
     await page.route('**/*', (route) => route.abort());
-    for (const Panel of [FeaturesPanel, AuditPanel]) {
+    const panels = [FeaturesPanel, AuditPanel].map((Panel) =>
+      renderToStaticMarkup(createElement(Panel, { isOpen: true, onClose: noop })),
+    );
+    panels.push(
+      renderToStaticMarkup(
+        createElement(BacklogPanel, {
+          isOpen: true,
+          onClose: noop,
+          onFocusAgent: noop,
+          officeState: {} as never,
+        }),
+      ),
+    );
+    for (const markup of panels) {
       await page.setContent(
-        `<style>${css}\n@font-face { font-family: 'FS Pixel Sans'; src: url(data:font/ttf;base64,${font}); }</style><div style="position:relative;width:100vw;height:100vh">${toolbar}${renderToStaticMarkup(createElement(Panel, { isOpen: true, onClose: noop }))}</div>`,
+        `<style>${css}\n@font-face { font-family: 'FS Pixel Sans'; src: url(data:font/ttf;base64,${font}); }</style><div style="position:relative;width:100vw;height:100vh">${toolbar}<div class="office-panels"><div class="office-panel-hud"><div data-testid="company-hud" style="height:140px"><span class="ui-info">Manager: sin ronda activa</span><span class="ui-counter">0 de 0 hechas</span></div></div>${markup}</div></div>`,
       );
       await page.evaluate('document.fonts.ready');
       const panel = await page.getByRole('region').boundingBox();
       expect(panel!.x).toBeGreaterThanOrEqual(16);
       expect(panel!.x + panel!.width).toBeLessThanOrEqual(374);
+      expect(panel!.y).toBe(158);
+      await page.evaluate(
+        "document.querySelector('[data-testid=company-hud]').style.height = '200px'",
+      );
+      expect((await page.getByRole('region').boundingBox())!.y).toBe(218);
+      expect(
+        await page.evaluate("getComputedStyle(document.querySelector('.ui-info')).fontSize"),
+      ).toBe('24px');
+      expect(
+        await page.evaluate(
+          "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
+        ),
+      ).toContain('slashed-zero');
+      const closeBox = (await page
+        .getByRole('button', { name: 'Cerrar', exact: true })
+        .boundingBox())!;
+      expect(Math.min(closeBox.width, closeBox.height)).toBeGreaterThanOrEqual(24);
       expect(
         await page.evaluate(
           `(() => { const el = document.querySelector('[role="region"]'); return el.scrollWidth <= el.clientWidth; })()`,
@@ -97,7 +129,9 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
       }
       expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
       await page.getByRole('button', { name: 'Settings', exact: true }).tap();
-      for (const name of Panel === FeaturesPanel ? ['Cerrar', 'Actualizar'] : []) {
+      for (const name of markup.includes('features-panel')
+        ? ['Cerrar', 'Actualizar']
+        : ['Cerrar']) {
         const box = (await page.getByRole('button', { name, exact: true }).boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(16);
         expect(box.x + box.width).toBeLessThanOrEqual(374);

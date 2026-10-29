@@ -62,16 +62,20 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
       className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
     >
       <div className="panel-heading">
-        <h2 className="text-lg flex-1">Features · solo lectura</h2>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Cerrar
-        </Button>
-        <Button
-          size="sm"
-          disabled={!projectId || connectionState !== 'connected'}
-          onClick={refresh}
-        >
-          Actualizar
+        <h2 className="text-lg flex-1">
+          Features <span className="panel-qualifier">solo lectura</span>
+        </h2>
+        {state !== 'read_error' && (
+          <Button
+            size="sm"
+            disabled={!projectId || connectionState !== 'connected'}
+            onClick={refresh}
+          >
+            Actualizar
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
+          ✕
         </Button>
       </div>
       {!projectId ? (
@@ -80,7 +84,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
         <>
           <div role="status">
             {state === 'loading' && 'Cargando features…'}
-            {state === 'empty' && 'sin features'}
+            {state === 'empty' && 'Sin features todavía. Se crean con pixel-agents feature run …'}
             {state === 'denied' && 'Acceso denegado a las features'}
           </div>
           {state === 'read_error' && (

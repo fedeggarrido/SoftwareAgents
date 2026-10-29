@@ -152,10 +152,12 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
 
   return (
     <div
-      className="absolute top-10 right-10 bottom-60 z-30 w-[min(440px,92vw)] pixel-panel p-8 flex flex-col gap-8"
+      className="read-only-panel z-40 pixel-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
+      role="region"
+      aria-label="Backlog"
     >
-      <div className="flex items-center gap-8">
+      <div className="panel-heading">
         <span className="text-lg flex-1">Backlog {board ? `· ${board.project}` : ''}</span>
         <Button
           size="sm"
@@ -164,7 +166,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
         >
           Hechas
         </Button>
-        <Button size="sm" variant="ghost" onClick={onClose} title="Cerrar">
+        <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar" title="Cerrar">
           ✕
         </Button>
       </div>
@@ -199,7 +201,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
               );
             })}
           </div>
-          <div className="text-2xs text-text-muted">
+          <div className="ui-info text-text-muted">
             Manager:{' '}
             {board.manager
               ? `${board.manager.session}${board.manager.stale ? ' (reserva sin latido)' : ' (ronda reservada)'}`
@@ -208,6 +210,11 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
             {!board.sources.progress && ' · sin registro de progreso'}
           </div>
 
+          {board.items.length === 0 && (
+            <p className="ui-info">
+              Sin tareas en el backlog. Las tareas aparecen cuando el Manager inicia una ronda.
+            </p>
+          )}
           {board.summary && (
             <div
               className="flex gap-5 flex-wrap text-2xs text-text-muted"

@@ -256,7 +256,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('width:100%');
   });
   it.each([
-    ['empty', 'sin features'],
+    ['empty', 'Sin features todavía. Se crean con pixel-agents feature run'],
     ['read_error', 'Error de lectura'],
     ['denied', 'Acceso denegado'],
   ] as const)('AC-009/010 distinguishes %s without rows', async (status, text) => {
@@ -265,6 +265,10 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain(text);
     expect(html).not.toContain('<article');
     if (status !== 'empty') expect(html).not.toContain('sin features');
+    if (status === 'read_error') {
+      expect(html).toContain('Reintentar');
+      expect(html).not.toContain('Actualizar');
+    }
   });
   it('AC-006/014 only refresh and close controls; refresh requests new data', async () => {
     // Inspect actual React button props to exercise the callbacks without a DOM.
@@ -279,8 +283,8 @@ describe('FEAT-002-T06 panel acceptance', () => {
       ];
     }
     const controls = buttons(await tree());
-    expect(controls.map((button) => button.children)).toEqual(['Cerrar', 'Actualizar']);
-    controls[1].onClick();
+    expect(controls.map((button) => button.children)).toEqual(['Actualizar', '✕']);
+    controls[0].onClick();
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
     await flush();
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
@@ -299,7 +303,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('3/5');
     expect(html).toContain('FEAT-020-T03');
     expect(html).not.toContain('review');
-    controls[0].onClick();
+    controls[1].onClick();
     expect(close).toHaveBeenCalledOnce();
     expect(lifecycle.send.mock.calls.every(([message]) => message.type === 'requestFeatures')).toBe(
       true,

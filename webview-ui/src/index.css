@@ -25,6 +25,11 @@
   --panel-edge: 16px;
   --panel-width: 960px;
   --control-target: 24px;
+  --ui-info-size: 24px;
+  --panel-gap: 8px;
+  --office-top: 10px;
+  --office-bottom: 60px;
+  --zoom-stack-bottom: 92px;
 
   /* Buttons */
   --color-btn-bg: rgb(53, 52, 69);
@@ -113,6 +118,54 @@
   }
 }
 
+/* All three panels flow below the HUD and the reserved zoom stack, even when the HUD expands. */
+.office-panels {
+  position: absolute;
+  inset: var(--office-top) 0 var(--office-bottom);
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  pointer-events: none;
+}
+.office-panel-hud {
+  flex-shrink: 0;
+  min-height: calc(var(--zoom-stack-bottom) - var(--office-top));
+}
+.office-panel-hud > [data-testid='company-hud'] {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  margin-inline: auto;
+  pointer-events: auto;
+}
+.office-panels > .read-only-panel {
+  position: relative;
+  inset: auto;
+  width: calc(100% - 2 * var(--panel-edge));
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  pointer-events: auto;
+  align-self: center;
+}
+.ui-info {
+  font-size: var(--ui-info-size);
+}
+.ui-counter,
+.ui-counter * {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: var(--ui-info-size);
+}
+[data-testid='company-hud'] > .flex:first-child {
+  flex-wrap: wrap;
+}
+.panel-qualifier {
+  display: block;
+  font-size: var(--ui-info-size);
+  white-space: nowrap;
+}
 @layer components {
   .read-only-panel {
     left: var(--panel-edge);

@@ -47,7 +47,7 @@ export function QuotaRow({
 }
 
 const actionClass =
-  'shrink-0 border border-border bg-btn-bg px-7 py-3 text-2xs leading-none text-text hover:bg-btn-hover cursor-pointer';
+  'ui-info shrink-0 border border-border bg-btn-bg px-7 py-3 leading-none text-text hover:bg-btn-hover cursor-pointer';
 
 function StatusChip({ text, color }: { text: string; color: string }) {
   return (
@@ -191,7 +191,7 @@ export function CompanyHud({
           <span className="truncate">{board.project}</span>
         </button>
         <span
-          className="shrink-0 text-2xs text-text-muted"
+          className="ui-counter shrink-0 text-text-muted"
           title={`${done} de ${total} tareas hechas`}
         >
           <span className="text-text">{done}</span> de {total} hechas

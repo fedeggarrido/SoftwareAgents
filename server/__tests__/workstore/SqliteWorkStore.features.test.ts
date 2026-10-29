@@ -1,9 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../src/workstore/migrations.js';
-import { SqliteWorkStore } from '../../src/workstore/SqliteWorkStore.js';
+import { openWorkStore } from '../../src/workstore/SqliteWorkStore.js';
 import type { FeatureRunState } from '../../src/workstore/WorkStore.js';
 
 vi.mock('../../src/workstore/processRecovery.js', () => ({
@@ -43,10 +47,10 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
   });
 
   it('creates feature titles and advances feature/run activity on writes', async () => {
-    const db = new DatabaseSync(':memory:');
-    runMigrations(db);
-    db.exec("INSERT INTO projects VALUES ('p', '2026-01-01T00:00:00.000Z')");
-    const store = new SqliteWorkStore(db, 'p', process.cwd());
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-metadata-'));
+    execFileSync('git', ['init', root], { windowsHide: true, stdio: 'pipe' });
+    const store = await openWorkStore({ repositoryPath: root, projectId: 'p' });
+    const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
     const clock = vi.spyOn(Date.prototype, 'toISOString');
     try {
       clock.mockReturnValue('2026-01-01T01:00:00.000Z');
@@ -94,6 +98,8 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
     } finally {
       clock.mockRestore();
       store.close();
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

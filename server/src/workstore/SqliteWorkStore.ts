@@ -15,6 +15,7 @@ import {
 } from '../constants.js';
 import { developerGuardFailure } from '../developerFailure.js';
 import { evalGit } from '../evalTasks.js';
+import { parseFeatureSpec } from '../featureSpec.js';
 import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
@@ -143,7 +144,9 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
         .run(options.projectId, new Date().toISOString()),
     );
     db.exec(`PRAGMA busy_timeout = ${WORKSTORE_BUSY_TIMEOUT_MS}`);
-    return new SqliteWorkStore(db, options.projectId, options.repositoryPath);
+    const store = new SqliteWorkStore(db, options.projectId, options.repositoryPath);
+    store.backfillFeatureTitles();
+    return store;
   } catch (error) {
     db.close();
     throw error;
@@ -151,7 +154,7 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
 }
 
 /** Construct through openWorkStore; the connection stays private to the backend. */
-export class SqliteWorkStore implements WorkStore {
+class SqliteWorkStore implements WorkStore {
   constructor(
     private readonly db: DatabaseSync,
     readonly projectId: string,
@@ -1142,7 +1145,7 @@ export class SqliteWorkStore implements WorkStore {
         throw new Error('Requirements Execution still active');
       this.db
         .prepare(
-          'UPDATE features SET doc_path = ?, git_sha = ?, status = ?, title = ?, updated_at = ? WHERE project_id = ? AND key = ?',
+          'UPDATE features SET doc_path = ?, git_sha = ?, status = ?, title = coalesce(?, title), updated_at = ? WHERE project_id = ? AND key = ?',
         )
         .run(
           feature.doc_path,
@@ -1185,6 +1188,40 @@ export class SqliteWorkStore implements WorkStore {
     return this.db
       .prepare('SELECT * FROM features WHERE project_id = ? ORDER BY key')
       .all(this.projectId) as unknown as FeatureRecord[];
+  }
+  /** Persist legacy NULL titles once at open, so every reader (incl. the read-only
+   * features panel) sees them; idempotent, and only titled rows are written. */
+  backfillFeatureTitles(): void {
+    for (const feature of this.listFeatures()) {
+      const title = this.withFeatureTitle(feature).title;
+      if (feature.title == null && title)
+        this.db
+          .prepare(
+            'UPDATE features SET title = ? WHERE project_id = ? AND key = ? AND title IS NULL',
+          )
+          .run(title, this.projectId, feature.key);
+    }
+  }
+  private withFeatureTitle(feature: FeatureRecord): FeatureRecord {
+    if (
+      (feature.title !== null && feature.title !== undefined) ||
+      !/^[a-f0-9]{40}$/i.test(feature.git_sha)
+    )
+      return feature;
+    try {
+      // Read the registered revision, never a possibly edited working-tree spec.
+      const spec = parseFeatureSpec(
+        evalGit(this.repositoryPath, [
+          'show',
+          `${feature.git_sha}:${feature.doc_path.replace(/\\/g, '/')}`,
+        ]),
+        feature.doc_path,
+      );
+      if (spec.key === feature.key) return { ...feature, title: spec.title };
+    } catch {
+      // Legacy records may reference unavailable or invalid specs; keep them readable.
+    }
+    return feature;
   }
   getDesign(key: string): DesignRecord | undefined {
     return this.db

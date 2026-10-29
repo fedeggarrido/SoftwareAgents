@@ -254,53 +254,60 @@ describe('WorkStore (real SQLite)', () => {
       db.close();
     }
   });
-  it('fences Requirements rework and rolls back artifact registration together with decision closure', async () => {
-    const first = await open();
-    const second = await open();
-    first.createTask({
-      key: 'FEAT-001',
-      type: 'docs',
-      status: 'REVIEW',
-      agent_role: 'requirements-analyst',
-    });
-    first.createFeature({
-      key: 'FEAT-001',
-      doc_path: 'features/FEAT-001.yaml',
-      git_sha: 'old',
-      status: 'in_review',
-    });
-    await openRequirementsQuestions(first, 'FEAT-001', ['Retention?'], '1.0.0');
-    const id = first.listDecisions()[0].id;
-    await expect(first.claim('FEAT-001', 'ordinary')).rejects.toThrow();
-    await expect(
-      first.claimRequirementsRevision('FEAT-001', 'stale', id, 'operator-run'),
-    ).rejects.toThrow('revision');
-    await first.claimRequirementsRevision('FEAT-001', 'old', id, 'operator-run');
-    await expect(
-      second.claimRequirementsRevision('FEAT-001', 'old', id, 'concurrent'),
-    ).rejects.toThrow();
-    expect(second.listDecisions()[0].status).toBe('open');
-    const feature = {
-      key: 'FEAT-001',
-      doc_path: 'features/FEAT-001.yaml',
-      git_sha: 'new',
-      status: 'in_review',
-    };
-    const evidence = { version: '1.0.1', answersHash: 'digest' };
-    await expect(
-      first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {
-        throw new Error('audit unavailable');
-      }),
-    ).rejects.toThrow('audit unavailable');
-    expect(second.getFeature('FEAT-001')?.git_sha).toBe('old');
-    expect(second.listDecisions()[0].status).toBe('open');
-    await first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {});
-    expect(second.getFeature('FEAT-001')?.git_sha).toBe('new');
-    expect(JSON.parse(second.listDecisions()[0].answer!)).toEqual({ ...evidence, gitSha: 'new' });
-    const task = first.getTask('FEAT-001')!;
-    await first.transition(task.key, task.version, 'REVIEW', 'registered', 'operator-run');
-    expect(second.getTask('FEAT-001')?.lease_owner).toBeNull();
-  });
+  it.each([undefined, null, 'Revised title'])(
+    'fences Requirements rework and preserves or replaces the title (%s)',
+    async (title) => {
+      const first = await open();
+      const second = await open();
+      first.createTask({
+        key: 'FEAT-001',
+        type: 'docs',
+        status: 'REVIEW',
+        agent_role: 'requirements-analyst',
+      });
+      first.createFeature({
+        key: 'FEAT-001',
+        title: 'Original title',
+        doc_path: 'features/FEAT-001.yaml',
+        git_sha: 'old',
+        status: 'in_review',
+      });
+      await openRequirementsQuestions(first, 'FEAT-001', ['Retention?'], '1.0.0');
+      const id = first.listDecisions()[0].id;
+      await expect(first.claim('FEAT-001', 'ordinary')).rejects.toThrow();
+      await expect(
+        first.claimRequirementsRevision('FEAT-001', 'stale', id, 'operator-run'),
+      ).rejects.toThrow('revision');
+      await first.claimRequirementsRevision('FEAT-001', 'old', id, 'operator-run');
+      await expect(
+        second.claimRequirementsRevision('FEAT-001', 'old', id, 'concurrent'),
+      ).rejects.toThrow();
+      expect(second.listDecisions()[0].status).toBe('open');
+      const feature = {
+        key: 'FEAT-001',
+        title,
+        doc_path: 'features/FEAT-001.yaml',
+        git_sha: 'new',
+        status: 'in_review',
+      };
+      const evidence = { version: '1.0.1', answersHash: 'digest' };
+      await expect(
+        first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {
+          throw new Error('audit unavailable');
+        }),
+      ).rejects.toThrow('audit unavailable');
+      expect(second.getFeature('FEAT-001')?.git_sha).toBe('old');
+      expect(second.getFeature('FEAT-001')?.title).toBe('Original title');
+      expect(second.listDecisions()[0].status).toBe('open');
+      await first.reviseFeature(feature, 'old', id, 'operator-run', evidence, () => {});
+      expect(second.getFeature('FEAT-001')?.git_sha).toBe('new');
+      expect(second.getFeature('FEAT-001')?.title).toBe(title ?? 'Original title');
+      expect(JSON.parse(second.listDecisions()[0].answer!)).toEqual({ ...evidence, gitSha: 'new' });
+      const task = first.getTask('FEAT-001')!;
+      await first.transition(task.key, task.version, 'REVIEW', 'registered', 'operator-run');
+      expect(second.getTask('FEAT-001')?.lease_owner).toBeNull();
+    },
+  );
   it('recovers an expired Requirements revision lease without resolving its question gate', async () => {
     const store = await open();
     store.createTask({
@@ -348,7 +355,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 14 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 15 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
         14,
@@ -365,7 +372,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; UPDATE schema_version SET version = 11;',
+        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; UPDATE schema_version SET version = 11;',
       );
       const migrated = await open();
       expect(migrated.getTask('historical-qa')).toEqual(before);
@@ -390,7 +397,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; ALTER TABLE technical_designs DROP COLUMN dag_declaration; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 8;',
+        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; ALTER TABLE technical_designs DROP COLUMN dag_declaration; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 8;',
       );
       const migrated = await open();
       expect(migrated.getFeature('FEAT-001')).toEqual(store.getFeature('FEAT-001'));
@@ -417,7 +424,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 9;',
+        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; UPDATE schema_version SET version = 9;',
       );
       const migrated = await open();
       expect(migrated.getTask('FEAT-001-T01')?.review_ref).toBeNull();
@@ -773,7 +780,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
+        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; DROP TRIGGER tasks_status_insert; DROP TRIGGER tasks_status_update; DROP TABLE domain_events; DROP TABLE idempotency_keys; DROP INDEX tasks_lease_expiry; ALTER TABLE executions DROP COLUMN pid_started_at; UPDATE schema_version SET version = 1;',
       );
       db.prepare(
         `INSERT INTO tasks VALUES ('a', NULL, 'old', 'implementation', 'pending', 0, NULL, 4, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, 'then', 'then')`,
@@ -790,7 +797,7 @@ describe('WorkStore (real SQLite)', () => {
     const db = await inspect();
     try {
       db.exec(
-        'DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
+        'ALTER TABLE features DROP COLUMN title; ALTER TABLE features DROP COLUMN updated_at; DROP TABLE worker_publications; DROP TABLE feature_runs; DROP TABLE adr_reservations; DROP TABLE technical_designs; ALTER TABLE tasks DROP COLUMN test_reports; ALTER TABLE tasks DROP COLUMN defect_context; ALTER TABLE tasks DROP COLUMN review_reports; ALTER TABLE executions DROP COLUMN agent_role; ALTER TABLE tasks DROP COLUMN review_ref; ALTER TABLE tasks DROP COLUMN declaration; ALTER TABLE executions DROP COLUMN model_tier; ALTER TABLE executions DROP COLUMN model_effort; ALTER TABLE executions DROP COLUMN selection_reason; ALTER TABLE human_decisions DROP COLUMN escalation; ALTER TABLE human_decisions DROP COLUMN previous_states; DROP TRIGGER tasks_active_lease_insert; DROP TRIGGER tasks_active_lease_update; DROP TABLE lease_recoveries; DROP INDEX executions_task_version; ALTER TABLE executions DROP COLUMN tree_closed_at; UPDATE schema_version SET version = 3;',
       );
       db.exec(
         "INSERT INTO tasks VALUES ('a', NULL, 'old-running', 'dev', 'RUNNING', 0, NULL, 7, NULL, NULL, 1, 3, NULL, NULL, NULL, NULL, 'then', 'then')",
@@ -936,7 +943,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 14 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 15 }]);
     } finally {
       db.close();
     }

@@ -317,6 +317,7 @@ export async function runTaskCommand(
       audit(config.project.id, 'task_import', 'intent', dag);
       const created = await store.importTaskDag(dag, {
         key: dag.feature,
+        title: spec.title,
         doc_path: specRelative,
         git_sha: sha,
         status: spec.status,

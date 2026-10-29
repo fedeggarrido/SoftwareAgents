@@ -184,9 +184,20 @@ export async function runIsolatedVitest(
   signal?: AbortSignal,
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
   onOutput?: (output: string) => void,
+  prepared = false,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
   vitestWorkspace(tree, file, true);
-  return runWorkspaceVitest(tree, scratch, [file], false, timeoutMs, signal, testName, onOutput);
+  return runWorkspaceVitest(
+    tree,
+    scratch,
+    [file],
+    false,
+    timeoutMs,
+    signal,
+    testName,
+    onOutput,
+    prepared,
+  );
 }
 
 export async function runRelatedVitest(
@@ -209,6 +220,7 @@ async function runWorkspaceVitest(
   signal?: AbortSignal,
   testName?: string,
   onOutput?: (output: string) => void,
+  prepared = false,
 ): Promise<{ result: 'pass' | 'fail'; passed: number; failed: number }> {
   let workspace = vitestWorkspace(tree, files[0]);
   if (files.some((file) => vitestWorkspace(tree, file).root !== workspace.root))
@@ -225,6 +237,7 @@ async function runWorkspaceVitest(
     // Build every server invocation when this repository provides the fixed build entry.
     // Source-only repositories without esbuild.js retain the neutral Vitest profile.
     if (
+      !prepared &&
       workspace.root === resolveInside(tree, 'server') &&
       fs.existsSync(path.join(tree, 'esbuild.js'))
     ) {

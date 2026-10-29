@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 
 import { execFileSync } from 'child_process';
+import { buildSync } from 'esbuild';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
 import { AuditLog } from '../src/auditLog.js';
@@ -38,6 +39,17 @@ import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
 vi.setConfig({ testTimeout: 300_000 });
+// Fresh worktrees have dependencies through junctions, but no ignored dist output.
+// Build the real mandatory hook locally; never borrow another checkout's build.
+beforeAll(() => {
+  buildSync({
+    entryPoints: [path.resolve(__dirname, '../src/executors/containmentHook.ts')],
+    outfile: path.resolve(__dirname, '../../dist/hooks/containment-hook.js'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+  });
+});
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
@@ -697,6 +709,21 @@ it('related workspace', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)', () => {
+  it('retains attempt budget across repeated agent-reported environment blockers with exit zero', async () => {
+    await prepare();
+    for (let retry = 0; retry < 2; retry++) {
+      await expect(develop('environment-blocked')).rejects.toThrow(
+        'Verifier infrastructure: agent reported an environment blocker',
+      );
+      const store = await storeFor();
+      try {
+        expect(store.getTask(task)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+      } finally {
+        store.close();
+      }
+    }
+    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+  });
   it.each(['qa-author', 'test-author'])(
     'routes %s through the Developer lifecycle, review and QA without changing its declaration',
     async (designMode) => {

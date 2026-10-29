@@ -246,6 +246,8 @@ export const TASK_CLI_MAX_KEEP = 1000;
 export const CLAUDE_OAUTH_REFRESH_RETRIES = 2;
 export const CLAUDE_OAUTH_REFRESH_WAIT_MS = 30_000;
 export const CLAUDE_OAUTH_REFRESH_CONTENTION = 'another Claude Code process is refreshing it';
+export const CLAUDE_OAUTH_REFRESH_LOCK_FILE_NAME = '.oauth_refresh.lock';
+export const CLAUDE_OAUTH_REFRESH_LOCK_MAX_BYTES = 1024;
 
 /** Validation errors kept in an Architect/Requirements audit entry (count, chars each). */
 export const VALIDATION_AUDIT_MAX_ERRORS = 20;

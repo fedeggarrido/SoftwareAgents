@@ -30,6 +30,17 @@ Three tiers, each with its own framework.
 
 Run: `npm run test:server` (or `npm test` for all).
 
+### Fresh worktrees (SA-QA-58)
+
+`developerCli.test.ts` builds the real containment hook from the current worktree
+before launching its fake CLIs. Dependency junctions supply packages, but do not
+supply ignored `dist/` artifacts. Without `dist/hooks/containment-hook.js`,
+`ClaudeCliExecutor` refuses launch, so even `feature spec` fails with
+`category=containment` before the Developer verifier runs. This was the cause of
+the fresh-worktree failures; neither the dependency junction nor the fake CLI's
+`__dirname` escaped containment. Never borrow another checkout's hook or disable
+the mandatory check to make these tests pass.
+
 ### Webview unit (Vitest, Node runner)
 
 `webview-ui/test/` covers office state, layout editing and migration, assets, changelog behavior, and Vite/browser wiring.

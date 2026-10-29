@@ -10,6 +10,7 @@ import { developerScope, isDeveloperTest } from './developer.js';
 import { EvalCriterionTerminationError, runVerifierCommand } from './evalCriteria.js';
 import { assertEvalIntegrity } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
+import { QaSnapshot } from './qaSnapshot.js';
 import { guardRequirementsWrites, requirementsSnapshot } from './requirements.js';
 import type { ReviewerRequest } from './reviewer.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
@@ -18,6 +19,36 @@ import { isExecutedTest, webviewTestMirrors } from './testRoots.js';
 
 const validateReport = compileSchema<TestReport>(contract);
 
+interface BaselineCache {
+  snapshot?: string;
+  cleanup?: () => void;
+  session: QaSnapshot;
+  safe: boolean;
+}
+
+/** One worker QA execution, including its optional additional command batch. */
+export class QaCommandSession {
+  readonly snapshot: QaSnapshot;
+  readonly baseline: BaselineCache;
+  constructor(scratch: string) {
+    const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
+    this.snapshot = new QaSnapshot(scratch, dependencies);
+    this.baseline = { session: new QaSnapshot(scratch, dependencies, true), safe: true };
+  }
+  retain() {
+    this.snapshot.retain();
+    this.baseline.safe = false;
+    this.baseline.session.retain();
+  }
+  dispose() {
+    this.baseline.session.dispose();
+    const cleanup = this.baseline.cleanup;
+    this.baseline.cleanup = undefined;
+    cleanup?.();
+    this.snapshot.dispose();
+  }
+}
+
 /** Materialize the pinned commit with a private index, without changing any Git ref or index.
  * The shared task runner still owns builds, isolated profiles, deadlines and process closure. */
 async function qaBaseline(
@@ -25,7 +56,26 @@ async function qaBaseline(
   scratch: string,
   file: string,
   signal: AbortSignal,
+  cache: BaselineCache,
 ): Promise<NonNullable<TestReport['commands'][number]['baseline']>> {
+  if (cache.snapshot) {
+    if (!fs.existsSync(path.join(cache.snapshot, file)))
+      return {
+        result: 'not_tested',
+        passed: 0,
+        failed: 0,
+        reason: 'Test file absent in base commit',
+      };
+    return runTaskTest(
+      cache.snapshot,
+      scratch,
+      file,
+      signal,
+      QA_COMMAND_TIMEOUT_MS,
+      undefined,
+      cache.session,
+    );
+  }
   const temporary = fs.mkdtempSync(path.join(scratch, 'qa-baseline-'));
   const snapshot = path.join(temporary, 'project');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
@@ -52,13 +102,6 @@ async function qaBaseline(
     };
     await git(['read-tree', input.reviewRef.base]);
     await git(['checkout-index', '--all', '--prefix=' + snapshot.replace(/\\/g, '/') + '/']);
-    if (!fs.existsSync(path.join(snapshot, file)))
-      return {
-        result: 'not_tested',
-        passed: 0,
-        failed: 0,
-        reason: 'Test file absent in base commit',
-      };
     fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
     linked = true;
     if (signal.aborted) throw new Error('QA verifier interrupted');
@@ -69,12 +112,30 @@ async function qaBaseline(
         failed: 0,
         reason: 'Baseline preparation timed out',
       };
-    const result = await runTaskTest(snapshot, scratch, file, signal, deadline - Date.now());
+    cache.snapshot = snapshot;
+    if (!fs.existsSync(path.join(snapshot, file)))
+      return {
+        result: 'not_tested',
+        passed: 0,
+        failed: 0,
+        reason: 'Test file absent in base commit',
+      };
+    const result = await runTaskTest(
+      snapshot,
+      scratch,
+      file,
+      signal,
+      deadline - Date.now(),
+      undefined,
+      cache.session,
+    );
     if (signal.aborted) throw new Error('QA verifier interrupted');
     return result;
   } catch (error) {
     if (error instanceof EvalCriterionTerminationError) {
       safe = false;
+      cache.safe = false;
+      cache.session.retain();
       throw error;
     }
     if (signal.aborted) throw error;
@@ -85,27 +146,31 @@ async function qaBaseline(
       reason: 'Baseline verification unavailable',
     };
   } finally {
-    if (safe) {
-      if (linked) {
-        if (
-          !fs.lstatSync(link).isSymbolicLink() ||
-          fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
-        )
-          throw new Error('QA baseline dependency link changed');
-        fs.unlinkSync(link);
-      }
-      // Never traverse repository symlinks or dependency junctions during cleanup.
-      const remove = (dir: string) => {
-        for (const name of fs.readdirSync(dir)) {
-          const target = path.join(dir, name);
-          const stat = fs.lstatSync(target);
-          if (stat.isDirectory() && !stat.isSymbolicLink()) remove(target);
-          else fs.unlinkSync(target);
+    const cleanup = () => {
+      if (safe && cache.safe) {
+        if (linked) {
+          if (
+            !fs.lstatSync(link).isSymbolicLink() ||
+            fs.realpathSync.native(link) !== fs.realpathSync.native(dependencies)
+          )
+            throw new Error('QA baseline dependency link changed');
+          fs.unlinkSync(link);
         }
-        fs.rmdirSync(dir);
-      };
-      remove(temporary);
-    }
+        // Never traverse repository symlinks or dependency junctions during cleanup.
+        const remove = (dir: string) => {
+          for (const name of fs.readdirSync(dir)) {
+            const target = path.join(dir, name);
+            const stat = fs.lstatSync(target);
+            if (stat.isDirectory() && !stat.isSymbolicLink()) remove(target);
+            else fs.unlinkSync(target);
+          }
+          fs.rmdirSync(dir);
+        };
+        remove(temporary);
+      }
+    };
+    if (cache.snapshot) cache.cleanup = cleanup;
+    else cleanup();
   }
 }
 
@@ -196,6 +261,7 @@ export async function qaCommands(
   signal: AbortSignal,
   requested?: string[],
   auditBaseline?: (command: TestReport['commands'][number]) => void,
+  execution?: QaCommandSession,
 ): Promise<TestReport['commands']> {
   const tree = input.worktree;
   const integrity = {
@@ -217,6 +283,9 @@ export async function qaCommands(
     throw new Error('QA refuses existing dependency tree');
   fs.mkdirSync(scratch, { recursive: true });
   fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+  const owner = execution ?? new QaCommandSession(scratch);
+  const session = owner.snapshot;
+  const baseline = owner.baseline;
   let safe = true;
   try {
     const results: TestReport['commands'] = [];
@@ -224,10 +293,18 @@ export async function qaCommands(
       if (signal.aborted) throw new Error('QA verifier interrupted');
       const evidence: TestReport['commands'][number] = {
         command: taskTestCommand(file),
-        ...(await runTaskTest(tree, scratch, file, signal, QA_COMMAND_TIMEOUT_MS)),
+        ...(await runTaskTest(
+          tree,
+          scratch,
+          file,
+          signal,
+          QA_COMMAND_TIMEOUT_MS,
+          undefined,
+          session,
+        )),
       };
       if (evidence.result === 'fail' && input.reviewRef.base) {
-        evidence.baseline = await qaBaseline(input, scratch, file, signal);
+        evidence.baseline = await qaBaseline(input, scratch, file, signal, baseline);
         if (evidence.baseline.result === 'fail' && evidence.baseline.failed >= evidence.failed) {
           evidence.preexisting = true;
           evidence.reason =
@@ -241,9 +318,13 @@ export async function qaCommands(
     }
     return results;
   } catch (error) {
-    if (error instanceof EvalCriterionTerminationError) safe = false;
+    if (error instanceof EvalCriterionTerminationError) {
+      safe = false;
+      owner.retain();
+    }
     throw error;
   } finally {
+    if (!execution) owner.dispose();
     if (safe) {
       if (
         !fs.lstatSync(link).isSymbolicLink() ||

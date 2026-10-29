@@ -13,12 +13,14 @@ import { loadModelPolicy } from '../src/modelPolicy.js';
 import {
   qaBrief,
   qaCommands,
+  QaCommandSession,
   qaRequestedCommands,
   qaTestFiles,
   validateTestReport,
 } from '../src/qa.js';
 import { lastReviewFailure, reviewReworkRounds } from '../src/reviewAttempts.js';
 import type { ReviewerRequest } from '../src/reviewer.js';
+import * as taskTests from '../src/taskTestRunner.js';
 import { VERIFIER_INFRASTRUCTURE_PREFIX } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { DomainEventRecord, TaskRecord, WorkStore } from '../src/workstore/WorkStore.js';
@@ -149,7 +151,7 @@ describe('Shared isolated QA verifier', () => {
       expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
     },
   );
-  it('builds server hooks in a scratch snapshot and leaves the approved task tree clean', async () => {
+  it('reuses real server hook builds within QA and leaves the approved task tree clean', async () => {
     fs.unlinkSync(link);
     git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
     fs.writeFileSync(
@@ -157,6 +159,7 @@ describe('Shared isolated QA verifier', () => {
       `
 const fs = require('fs');
 const esbuild = require('esbuild');
+fs.appendFileSync(${JSON.stringify(path.join(root, 'build-count'))}, 'build\\n');
 if (fs.existsSync('.git')) throw new Error('snapshot contains Git metadata');
 esbuild.buildSync({ stdin: { contents: 'module.exports = "built hook";' }, outfile: 'dist/hooks/claude-hook.js', platform: 'node' });
 esbuild.buildSync({ stdin: { contents: 'module.exports = "built containment";' }, outfile: 'dist/hooks/containment-hook.js', platform: 'node' });
@@ -167,18 +170,74 @@ it('requires built hooks', () => {
   expect(require('../../dist/hooks/claude-hook.js')).toBe('built hook');
   expect(require('../../dist/hooks/containment-hook.js')).toBe('built containment');
 });`);
+    fs.copyFileSync(
+      path.join(tree, 'server/__tests__/check.test.ts'),
+      path.join(tree, 'server/__tests__/second.test.ts'),
+    );
     git('add', '.');
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
     const sha = git('rev-parse', 'HEAD').trim();
     const input = {
       worktree: tree,
       reviewRef: { sha },
-      files: ['server/__tests__/check.test.ts'],
+      files: ['server/__tests__/check.test.ts', 'server/__tests__/second.test.ts'],
       task: { changeZones: [], testZones: [] },
     } as unknown as ReviewerRequest;
-    expect(await qaCommands(input, scratch, new AbortController().signal)).toEqual([
+    const signal = new AbortController().signal;
+    const before = Date.now();
+    const original = taskTests.runTaskTest;
+    // Reproduce the previous preparation policy, keeping the same QA integrity checks
+    // and real subprocesses. Only discard the new shared-session argument.
+    const legacy = vi
+      .spyOn(taskTests, 'runTaskTest')
+      .mockImplementation((tree, scratch, file, signal, timeout, output) =>
+        original(tree, scratch, file, signal, timeout, output),
+      );
+    try {
+      expect(
+        (await qaCommands(input, scratch, signal)).every((command) => command.result === 'pass'),
+      ).toBe(true);
+    } finally {
+      legacy.mockRestore();
+    }
+    const beforeMs = Date.now() - before;
+    expect(fs.readFileSync(path.join(root, 'build-count'), 'utf8').trim().split('\n')).toHaveLength(
+      2,
+    );
+    fs.unlinkSync(path.join(root, 'build-count'));
+    const after = Date.now();
+    const commands = await qaCommands(input, scratch, signal);
+    console.log('QA real hook build comparison', {
+      beforeBuilds: 2,
+      afterBuilds: 1,
+      beforeMs,
+      afterMs: Date.now() - after,
+    });
+    expect(commands).toEqual([
       { command: 'vitest:server/__tests__/check.test.ts', result: 'pass', passed: 1, failed: 0 },
+      { command: 'vitest:server/__tests__/second.test.ts', result: 'pass', passed: 1, failed: 0 },
     ]);
+    expect(fs.readFileSync(path.join(root, 'build-count'), 'utf8').trim().split('\n')).toHaveLength(
+      1,
+    );
+    expect(await qaCommands(input, scratch, signal)).toEqual(commands);
+    expect(fs.readFileSync(path.join(root, 'build-count'), 'utf8').trim().split('\n')).toHaveLength(
+      2,
+    );
+    const execution = new QaCommandSession(scratch);
+    try {
+      expect(await qaCommands(input, scratch, signal, undefined, undefined, execution)).toEqual(
+        commands,
+      );
+      expect(
+        await qaCommands(input, scratch, signal, [commands[0].command], undefined, execution),
+      ).toEqual([commands[0]]);
+      expect(
+        fs.readFileSync(path.join(root, 'build-count'), 'utf8').trim().split('\n'),
+      ).toHaveLength(3);
+    } finally {
+      execution.dispose();
+    }
     expect(git('rev-parse', 'HEAD').trim()).toBe(sha);
     expect(git('status', '--porcelain', '--ignored').trim()).toBe('');
     expect(fs.existsSync(path.join(tree, 'dist'))).toBe(false);
@@ -406,9 +465,11 @@ it('utility is not an assertion', () => { new assert.AssertionError({ message: '
       const file = 'webview-ui/test/auditStore.test.ts';
       fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
       source(
-        `import { it, expect } from 'vitest'; import os from 'os';
+        `import { it, expect } from 'vitest'; import os from 'os'; import path from 'path';
 it('webview runtime', () => {
-  expect(process.cwd()).toBe(${JSON.stringify(path.join(tree, 'webview-ui'))});
+  expect(path.basename(process.cwd())).toBe('webview-ui');
+  expect(process.cwd()).not.toBe(${JSON.stringify(path.join(tree, 'webview-ui'))});
+  expect(process.cwd().startsWith(${JSON.stringify(scratch)})).toBe(true);
   expect(typeof window).toBe('undefined');
   expect(typeof globalThis.it).toBe('undefined');
   expect(os.homedir()).toBe(process.env.HOME);

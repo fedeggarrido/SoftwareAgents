@@ -1147,6 +1147,33 @@ El brief Reviewer incluye `taskTests: [{file, executed}]` de los tests cambiados
 una ejecución ni un resultado verde. El runtime calcula el flag; el contrato
 ordena pedir cambios si alguno es falso, incluso con `testZones` explícitas.
 
+## Preparación QA y bloqueos del entorno (SA-QA-58)
+
+Cada ejecución QA posee sus snapshots, incluida la tanda adicional solicitada por
+el agente, sin caché global. Los comandos
+sobre el mismo árbol reutilizan copia y build; la comparación por contenido del
+origen y del snapshot invalida la copia si alguno cambia. La base fijada tiene
+una materialización y sesión separadas. Perfiles, informes y plazos siguen siendo
+privados por comando. La limpieza retira enlaces individualmente sin recorrerlos;
+un cierre de proceso no confirmado conserva el scratch. `qaSnapshot.test.ts`
+registra la reducción de tres copias/builds a una para tres comandos idénticos
+(build simulado; mide operaciones, no el tiempo de una QA real).
+`qaVerifier.test.ts` compara además dos comandos con builds reales de hooks esbuild:
+dos builds independientes frente a uno compartido, y registra ambos tiempos sin
+imponer un umbral sensible a la carga. Una segunda invocación debe construir de nuevo.
+
+Un resultado del agente con bloqueo explícito (`environment blocked`, sandbox
+denegado o comando no disponible) produce `VerifierInfrastructureError`, incluso
+con exit 0: detiene la ejecución y permite reintento del operador sin consumir
+intentos. No sustituye una denegación de contención ni exime fallos de assertions.
+
+Antes de lanzar Claude, el worker puede retirar `.oauth_refresh.lock` únicamente
+del `executors.claude.configDir` explícito: exige fichero regular con PID conocido,
+propietario muerto y ausencia comprobada de otros procesos Claude/Node. Un PID
+vivo/reutilizado, formato desconocido, enlace o consulta incierta conserva el lock.
+La consulta es conservadora: otro Node también impide retirarlo. La auditoría
+registra el intento de limpieza antes de borrar; nunca se mata ningún proceso.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

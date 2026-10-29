@@ -12,6 +12,7 @@ import {
 } from './evalCriteria.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
 import { resolveInside } from './pathGuard.js';
+import type { QaSnapshot } from './qaSnapshot.js';
 import { VerifierInfrastructureError } from './verifierInfrastructure.js';
 
 type TestResult = Omit<TestReport['commands'][number], 'command'>;
@@ -38,11 +39,36 @@ export async function runTaskTest(
   signal: AbortSignal,
   timeoutMs = EVAL_CRITERION_TIMEOUT_MS,
   onOutput?: (output: string) => void,
+  session?: QaSnapshot,
 ): Promise<TestResult> {
   validateTaskTest(tree, file);
-  if (!isE2eTest(file)) {
+  const started = Date.now();
+  let prepared = false;
+  const prepare = async (): Promise<TestResult | undefined> => {
+    if (!session) return;
     try {
-      return await runIsolatedVitest(tree, scratch, file, undefined, signal, timeoutMs, onOutput);
+      tree = await session.prepare(tree, isE2eTest(file), signal, timeoutMs);
+      prepared = true;
+    } catch (error) {
+      if (!(error instanceof VerifierInfrastructureError)) throw error;
+      return { result: 'not_tested', passed: 0, failed: 0, reason: error.message };
+    }
+    timeoutMs = Math.max(1, timeoutMs - (Date.now() - started));
+  };
+  if (!isE2eTest(file)) {
+    const unavailable = await prepare();
+    if (unavailable) return unavailable;
+    try {
+      return await runIsolatedVitest(
+        tree,
+        scratch,
+        file,
+        undefined,
+        signal,
+        timeoutMs,
+        onOutput,
+        prepared,
+      );
     } catch (error) {
       if (!(error instanceof VerifierInfrastructureError)) throw error;
       return { result: 'not_tested', passed: 0, failed: 0, reason: error.message };
@@ -76,8 +102,10 @@ export async function runTaskTest(
     !fs.existsSync(path.join(tree, 'webview-ui/package.json'))
   )
     return unavailable('Standalone build inputs are unavailable in the task checkout.');
+  const preparationFailure = await prepare();
+  if (preparationFailure) return preparationFailure;
   const temporary = fs.mkdtempSync(path.join(scratch, 'playwright-'));
-  const snapshot = path.join(temporary, 'project');
+  const snapshot = prepared ? tree : path.join(temporary, 'project');
   const home = path.join(temporary, 'home');
   const link = path.join(snapshot, 'node_modules');
   const dependencies = path.dirname(path.dirname(require.resolve('vitest/package.json')));
@@ -90,27 +118,29 @@ export async function runTaskTest(
       : runVerifierCommand(argv, cwd, home, deadline - Date.now(), signal, onOutput);
   try {
     fs.mkdirSync(home);
-    fs.cpSync(tree, snapshot, {
-      recursive: true,
-      filter: (source) => !['.git', 'node_modules'].includes(path.basename(source)),
-    });
-    fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
-    linked = true;
-    for (const [argv, cwd] of [
-      [[process.execPath, 'esbuild.js'], snapshot],
-      [
+    if (!prepared) {
+      fs.cpSync(tree, snapshot, {
+        recursive: true,
+        filter: (source) => !['.git', 'node_modules'].includes(path.basename(source)),
+      });
+      fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+      linked = true;
+      for (const [argv, cwd] of [
+        [[process.execPath, 'esbuild.js'], snapshot],
         [
-          process.execPath,
-          path.join(dependencies, 'vite/bin/vite.js'),
-          // Default (bundle) config loader: vite.config.ts uses __dirname, which the
-          // ESM `runner` loader does not define. The snapshot is a throwaway copy.
-          'build',
+          [
+            process.execPath,
+            path.join(dependencies, 'vite/bin/vite.js'),
+            // Default (bundle) config loader: vite.config.ts uses __dirname, which the
+            // ESM `runner` loader does not define. The snapshot is a throwaway copy.
+            'build',
+          ],
+          path.join(snapshot, 'webview-ui'),
         ],
-        path.join(snapshot, 'webview-ui'),
-      ],
-    ] as [string[], string][]) {
-      if ((await run(argv, cwd)) !== 'pass')
-        return unavailable('Standalone build failed or timed out in the isolated runtime.');
+      ] as [string[], string][]) {
+        if ((await run(argv, cwd)) !== 'pass')
+          return unavailable('Standalone build failed or timed out in the isolated runtime.');
+      }
     }
     const report = path.join(temporary, 'playwright.json');
     const config = path.join(temporary, 'playwright.config.cjs');
@@ -185,6 +215,7 @@ export async function runTaskTest(
   } catch (error) {
     if (error instanceof EvalCriterionTerminationError) {
       safe = false;
+      session?.retain();
       throw error;
     }
     return unavailable('Playwright runtime failed to prepare or read execution evidence.');

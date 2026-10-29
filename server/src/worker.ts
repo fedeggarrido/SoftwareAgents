@@ -112,6 +112,7 @@ import { loadProjectConfig } from './projectConfig.js';
 import {
   qaBrief,
   qaCommands,
+  QaCommandSession,
   qaRequestedCommands,
   qaSelectionReport,
   QaTestSelectionError,
@@ -156,11 +157,13 @@ import {
   verifierFailureReason,
 } from './verifierFeedback.js';
 import {
+  isAgentEnvironmentFailure,
   isVerifierInfrastructureFailure,
   VERIFIER_INFRASTRUCTURE_PREFIX,
   VerifierInfrastructureError,
 } from './verifierInfrastructure.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
+import { clearWorkerOAuthLock } from './workerOAuthLock.js';
 import { publishWorkerResult } from './workerPublication.js';
 import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -836,6 +839,7 @@ async function runWorkerExecution(
   let requirementsAttempt = 0;
   let requirementsOutput = '';
   let qaEvidence: TestReport['commands'] | undefined;
+  let qaSession: QaCommandSession | undefined;
   let qaRequestsUsed = false;
   let featureSpec: FeatureSpec | undefined;
   let designProposal: ArchitectProposal | undefined;
@@ -1397,6 +1401,9 @@ async function runWorkerExecution(
               audit('qa_baseline', {
                 detail: JSON.stringify({ base: options.reviewer!.reviewRef.base, ...command }),
               }),
+            (qaSession ??= new QaCommandSession(
+              resolveInside(common, 'softwareagents/runtime/verifiers'),
+            )),
           );
           guardRequirementsWrites(tree.path, requirementsBefore!);
           taskData.task.brief = qaBrief(options.reviewer!, qaEvidence);
@@ -1527,6 +1534,12 @@ async function runWorkerExecution(
       telemetry.phase('execution');
       options.evaluation?.settled(undefined, false);
       await lifecycle?.running(cancel);
+      if (selectedExecutor === 'claude')
+        clearWorkerOAuthLock(config.operator.executors?.claude?.configDir, () =>
+          audit('oauth_refresh_lock_cleanup', {
+            detail: 'Removing stale worker OAuth lock after verified process absence',
+          }),
+        );
       handle = executor.start({
         executionId,
         projectId: config.project.id,
@@ -1572,6 +1585,7 @@ async function runWorkerExecution(
       containmentCorrection = undefined;
       oauthRefreshContention = false;
       eventsStarted = true;
+      let environmentBlocked = false;
       for await (const event of handle.events) {
         if (event.type === 'guardCorrection') containmentCorrection = event.diagnostic;
         if (
@@ -1620,6 +1634,7 @@ async function runWorkerExecution(
           }
         }
         if (event.type === 'finished') {
+          environmentBlocked = isAgentEnvironmentFailure(event.resultSummary);
           exitCode = event.exitCode;
           if ((options.requirements || options.architect || options.reviewer) && exitCode === 0)
             requirementsOutput = extractJsonObject(event.resultSummary);
@@ -1638,6 +1653,10 @@ async function runWorkerExecution(
         executionDiagnostic = failureDiagnostic(CLAUDE_OAUTH_REFRESH_CONTENTION, exitCode);
       if (options.requirements || options.architect || options.reviewer)
         guardRequirementsWrites(tree.path, requirementsBefore!);
+      if (environmentBlocked && !executionDiagnostic?.includes('category=containment;'))
+        throw new VerifierInfrastructureError(
+          'agent reported an environment blocker; operator retry required',
+        );
       if (runtimeQuota) {
         process.exitCode = 3;
         return { branch: tree.branch, commit: null, stat: '', quotaDecision: runtimeQuota };
@@ -1714,6 +1733,7 @@ async function runWorkerExecution(
                           ...command,
                         }),
                       }),
+                    qaSession,
                   )),
                 );
                 guardRequirementsWrites(tree.path, requirementsBefore!);
@@ -2513,7 +2533,12 @@ async function runWorkerExecution(
           }
         } else log('Lease and executor slot retained: executor termination was not confirmed.');
       } finally {
-        options.evaluation?.settled(telemetry?.rootSpan, confirmed);
+        try {
+          if (!confirmed) qaSession?.retain();
+          qaSession?.dispose();
+        } finally {
+          options.evaluation?.settled(telemetry?.rootSpan, confirmed);
+        }
       }
     }
   }

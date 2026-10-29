@@ -9,6 +9,17 @@ process.stdin.on('end', () => {
     executor === 'codex' ? prompt.split('UNTRUSTED_CONTEXT_JSON\n')[1] : prompt,
   );
   fs.appendFileSync(log, JSON.stringify({ args, context, cwd: process.cwd() }) + '\n');
+  if (mode === 'environment-blocked') {
+    console.log(
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        result: 'Environment blocked: sandbox execution denied',
+        is_error: false,
+      }),
+    );
+    return;
+  }
   fs.mkdirSync('server/src', { recursive: true });
   const {
     reviewFindings = [],

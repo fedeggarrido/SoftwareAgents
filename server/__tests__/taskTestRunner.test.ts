@@ -5,7 +5,9 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as criteria from '../src/evalCriteria.js';
+import { EvalIntegrityError } from '../src/evalIntegrity.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
+import * as taskTests from '../src/taskTestRunner.js';
 import { runTaskTest } from '../src/taskTestRunner.js';
 import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 
@@ -38,6 +40,31 @@ afterEach(() => {
 });
 
 describe('Bounded Playwright runtime (fake commands)', () => {
+  it('preserves an integrity guard rejection instead of converting it into product feedback', async () => {
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();
+    git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
+    git('add', '.');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+    const base = git('rev-parse', 'HEAD');
+    const error = new EvalIntegrityError('synthetic task guard');
+    vi.spyOn(taskTests, 'runTaskTest').mockRejectedValue(error);
+    const failures: import('../src/verifierFeedback.js').VerifierFailure[] = [];
+    await expect(
+      checkCascadeCriteria(
+        { commands: [] },
+        base,
+        tree,
+        scratch,
+        new AbortController().signal,
+        undefined,
+        [file],
+        base,
+        { failures },
+      ),
+    ).rejects.toBe(error);
+    expect(failures).toEqual([]);
+  });
   it('does not turn a verifier timeout into agent failure feedback or a cascade', async () => {
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();
@@ -82,7 +109,7 @@ describe('Bounded Playwright runtime (fake commands)', () => {
     expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
     expect(fs.readdirSync(scratch)).toEqual([]);
   });
-  it('keeps e2e out of Vitest related while retaining explicit execution evidence in the cascade', async () => {
+  it('stops the cascade on unavailable e2e even after a product verifier failure', async () => {
     const git = (...args: string[]) =>
       execFileSync('git', args, { cwd: tree, encoding: 'utf8', windowsHide: true }).trim();
     git('init', '-b', 'main', '--separate-git-dir', path.join(root, 'metadata'));
@@ -92,17 +119,27 @@ describe('Bounded Playwright runtime (fake commands)', () => {
     const relative = 'e2e/tests/claude/audit.spec.ts';
     fs.mkdirSync(path.dirname(path.join(tree, relative)), { recursive: true });
     fs.writeFileSync(path.join(tree, relative), '// mocked Electron spec');
-    expect(
-      await checkCascadeCriteria(
-        { commands: [{ vitestRelated: true, timeoutMs: 10_000 }] },
+    vi.spyOn(criteria, 'runVerifierCommand').mockResolvedValue('fail');
+    const failures: import('../src/verifierFeedback.js').VerifierFailure[] = [];
+    await expect(
+      checkCascadeCriteria(
+        {
+          commands: [
+            { argv: [process.execPath, '-e', ''], timeoutMs: 10_000 },
+            { vitestRelated: true, timeoutMs: 10_000 },
+          ],
+        },
         base,
         tree,
         scratch,
         new AbortController().signal,
         undefined,
         [relative],
+        base,
+        { failures },
       ),
-    ).toEqual(['pass', 'not_tested']);
+    ).rejects.toBeInstanceOf(VerifierInfrastructureError);
+    expect(failures).toHaveLength(1);
     expect(fs.existsSync(path.join(tree, 'node_modules'))).toBe(false);
   });
   it.each(['passed', 'failed', 'unasserted', 'skipped', 'missing', 'foreign', 'timeout'])(

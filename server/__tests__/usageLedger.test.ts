@@ -5,6 +5,7 @@ import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AuditLog } from '../src/auditLog.js';
 import { parseProjects } from '../src/configPersistence.js';
 import { ExecutionTelemetry, TelemetrySink } from '../src/telemetry.js';
 import { openBudgetDecision, watchExecutionBudget } from '../src/usageBudgets.js';
@@ -240,6 +241,41 @@ describe('SA-037 usage ledger and budgets', () => {
       'maxAttemptsPerTask',
     );
     expect(admissionBudgetReason(undefined, store.listUsage(), 'task')).toBeUndefined();
+    const entries = store.listUsage();
+    const cost = entries.reduce((n, e) => n + (e.costUsd ?? 0), 0);
+    const tokens = entries.reduce((n, e) => n + (e.inputTokens ?? 0) + (e.outputTokens ?? 0), 0);
+    // All days and all roles count for this task; other tasks and unknown counters do not.
+    const mixed = [
+      ...entries,
+      { ...entry, taskKey: 'foreign', costUsd: 100, inputTokens: 100_000 },
+      { ...entry, costUsd: null, inputTokens: null, outputTokens: null },
+    ];
+    expect(admissionBudgetReason({ maxCostUsd: cost }, mixed, 'task')).toBe('maxCostUsd');
+    expect(admissionBudgetReason({ maxCostUsd: cost + 1 }, mixed, 'task')).toBeUndefined();
+    expect(admissionBudgetReason({ maxTokens: tokens }, mixed, 'task')).toBe('maxTokens');
+    expect(admissionBudgetReason({ maxTokens: tokens + 1 }, mixed, 'task')).toBeUndefined();
+    const unknown = [{ ...entry, costUsd: null, inputTokens: null, outputTokens: null }];
+    expect(admissionBudgetReason({ maxCostUsd: 1, maxTokens: 1 }, unknown, 'task')).toBeUndefined();
+    expect(admissionBudgetReason({ maxCostUsd: 0 }, [], 'task')).toBe('maxCostUsd');
+    expect(admissionBudgetReason({ maxTokens: 0 }, [], 'task')).toBe('maxTokens');
+  });
+  it.each(['maxCostUsd', 'maxTokens'])('audits and suspends admission for %s', async (reason) => {
+    await openBudgetDecision(store, 'task', reason);
+    expect(
+      new AuditLog()
+        .read('test')
+        .some(
+          (row) =>
+            !row.corrupt &&
+            row.entry.taskKey === 'task' &&
+            row.entry.outcome.status === 'budget_exceeded' &&
+            row.entry.outcome.reason === reason,
+        ),
+    ).toBe(true);
+    expect(store.getTask('task')?.status).toBe('WAITING_HUMAN');
+    expect(
+      store.listDecisions().some((d) => d.context.includes(`usage-budget/task/${reason}`)),
+    ).toBe(true);
   });
   it('cancels a fake handle at the minute cap, drains closure, then suspends and opens a decision', async () => {
     vi.useFakeTimers();

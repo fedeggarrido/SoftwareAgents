@@ -224,6 +224,23 @@ export interface DeveloperRequest {
   allowedScope?: ReturnType<typeof developerScope>;
 }
 
+/** Keep the authoritative request intact for guards; only narrow the author's prompt. */
+export function developerBrief(input: DeveloperRequest): string {
+  if (!isQaAuthorTask(input.task)) return JSON.stringify(input);
+  const { design: _design, ...scoped } = input;
+  return JSON.stringify({
+    ...scoped,
+    approvedSpec: {
+      ...input.approvedSpec,
+      acceptance: input.approvedSpec.acceptance.filter((ac) =>
+        input.task.acceptanceRefs.includes(ac.id),
+      ),
+    },
+    contextRule:
+      'Author only the assigned acceptance tests. Inspect the task files and their fixtures/helpers, not the whole repository. The runtime executes only authored specs; do not run suites yourself. Design is referenced by designSha; task description and assigned acceptance criteria define this scope.',
+  });
+}
+
 /** Re-read registered artifacts and immutable declarations, never trust caller-supplied scope. */
 export function developerRequest(
   store: WorkStore,

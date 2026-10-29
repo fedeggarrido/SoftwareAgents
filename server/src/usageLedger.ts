@@ -129,7 +129,7 @@ export function usageSummary(
   };
 }
 
-/** Observational daily cap: unknown counters and concurrent in-flight usage are not reservations. */
+/** Observational caps: unknown counters and concurrent in-flight usage are not reservations. */
 export function admissionBudgetReason(
   budgets: ProjectOperatorConfig['budgets'],
   entries: UsageEntry[],
@@ -139,6 +139,14 @@ export function admissionBudgetReason(
 ): string | undefined {
   if (budgets?.maxAttemptsPerTask !== undefined && executionCount >= budgets.maxAttemptsPerTask)
     return 'maxAttemptsPerTask';
+  const taskEntries = entries.filter((e) => e.taskKey === task);
+  const cost = taskEntries.reduce((n, e) => n + (e.costUsd ?? 0), 0);
+  if (budgets?.maxCostUsd !== undefined && cost >= budgets.maxCostUsd) return 'maxCostUsd';
+  const taskTokens = taskEntries.reduce(
+    (n, e) => n + (e.inputTokens ?? 0) + (e.outputTokens ?? 0),
+    0,
+  );
+  if (budgets?.maxTokens !== undefined && taskTokens >= budgets.maxTokens) return 'maxTokens';
   const tokens = entries
     .filter((e) => e.day === day)
     .reduce((n, e) => n + (e.inputTokens ?? 0) + (e.outputTokens ?? 0), 0);

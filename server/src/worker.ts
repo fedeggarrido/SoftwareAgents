@@ -50,6 +50,7 @@ import {
 } from './constants.js';
 import {
   ChangeZonesExceededError,
+  developerBrief,
   type DeveloperRequest,
   developerRequest,
   developerStyleCommands,
@@ -656,7 +657,7 @@ async function runWorkerExecution(
   // Resolve/read before any launch; task data never selects executable or authority.
   const brief =
     (options.reviewer ? reviewerBrief(options.reviewer) : undefined) ??
-    (options.developer ? JSON.stringify(options.developer) : undefined) ??
+    (options.developer ? developerBrief(options.developer) : undefined) ??
     (options.architect ? architectBrief(options.architect, {}) : undefined) ??
     (options.requirements ? requirementsBrief(options.requirements) : undefined) ??
     options.evaluation?.brief ??

@@ -173,12 +173,15 @@ function enableGuardCascade() {
         'utf8',
       ),
     ).tierRule,
-    maxTier: 'economy',
-    tiers: { economy: { candidates: [{ executor: 'claude', model: 'haiku' }] } },
+    maxTier: 'standard',
+    tiers: {
+      economy: { candidates: [{ executor: 'claude', model: 'haiku' }] },
+      standard: { candidates: [{ executor: 'claude', model: 'sonnet' }] },
+    },
     cascade: {
       enabled: true,
       startTier: 'economy',
-      maxEscalations: 0,
+      maxEscalations: 1,
       verifiers: {},
       defaultVerifier: { commands: [{ vitestRelated: true, timeoutMs: 30_000 }] },
     },
@@ -301,8 +304,8 @@ describe('Developer diff guard', () => {
     const directory = detachedTree();
     const file = 'e2e/tests/standalone/hooks.spec.ts';
     vi.spyOn(taskTests, 'runTaskTest').mockResolvedValue({
-      result: 'not_tested',
-      passed: 0,
+      result: 'pass',
+      passed: 1,
       failed: 0,
     });
     fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true });
@@ -328,7 +331,7 @@ describe('Developer diff guard', () => {
         base,
         { failures },
       ),
-    ).toEqual(['pass', 'not_tested']);
+    ).toEqual(['pass', 'pass']);
     // Runtime/agent writes can introduce CRLF even though the checkout uses eol=lf.
     fs.writeFileSync(path.join(directory, file), source.replace(/\r?\n/g, '\r\n'));
     expect(
@@ -343,7 +346,7 @@ describe('Developer diff guard', () => {
         base,
         { failures },
       ),
-    ).toEqual(['fail', 'not_tested']);
+    ).toEqual(['fail', 'pass']);
     expect(failures[0]).toMatchObject({ verifier: 'prettier', files: [file] });
     const untouched = path.join(directory, 'server/src/baseline.ts');
     const before = fs.readFileSync(untouched);
@@ -363,7 +366,7 @@ describe('Developer diff guard', () => {
         base,
         { failures: [], autoFix: () => {} },
       ),
-    ).toEqual(['pass', 'pass', 'not_tested']);
+    ).toEqual(['pass', 'pass', 'pass']);
     expect(fs.readFileSync(path.join(directory, file), 'utf8')).toBe(
       "import a from 'a';\nimport z from 'z';\nexport const answer = 1;\n",
     );
@@ -711,6 +714,7 @@ it('related workspace', () => {
 describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)', () => {
   it('retains attempt budget across repeated agent-reported environment blockers with exit zero', async () => {
     await prepare();
+    enableGuardCascade();
     for (let retry = 0; retry < 2; retry++) {
       await expect(develop('environment-blocked')).rejects.toThrow(
         'Verifier infrastructure: agent reported an environment blocker',
@@ -723,6 +727,10 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       }
     }
     expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+    expect(cascadeAttempts()).toHaveLength(2);
+    expect(
+      cascadeAttempts().every((a) => a.result === 'infrastructure_error' && a.tier === 'economy'),
+    ).toBe(true);
   });
   it.each(['qa-author', 'test-author'])(
     'routes %s through the Developer lifecycle, review and QA without changing its declaration',
@@ -852,6 +860,12 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
 
   it('keeps unavailable e2e execution as not_tested in QA with its runtime reason', async () => {
     await prepare(true, true, 'qa-author-e2e');
+    // Developer has evidence; QA later observes an unavailable environment independently.
+    vi.spyOn(taskTests, 'runTaskTest').mockResolvedValueOnce({
+      result: 'pass',
+      passed: 1,
+      failed: 0,
+    });
     await develop();
     await run(['review', 'FEAT-001', '--task', task], 'reviewer', 'approve');
     await run(['qa', 'FEAT-001', '--task', task], 'qa');
@@ -1024,6 +1038,7 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
 
   it('preserves the concrete verifier infrastructure cause without consuming agent attempts', async () => {
     await prepare();
+    enableGuardCascade();
     vi.spyOn(taskTests, 'runTaskTest').mockResolvedValueOnce({
       result: 'not_tested',
       passed: 0,
@@ -1031,6 +1046,9 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
       reason: 'Verifier infrastructure: synthetic server build failed in scratch',
     });
     await expect(develop()).rejects.toThrow('synthetic server build failed in scratch');
+    expect(cascadeAttempts()).toEqual([
+      expect.objectContaining({ result: 'infrastructure_error', tier: 'economy' }),
+    ]);
     const store = await storeFor();
     try {
       expect(store.getTask(task)).toMatchObject({
@@ -1039,13 +1057,16 @@ describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)',
         blocked_reason: 'Verifier infrastructure: synthetic server build failed in scratch',
       });
       expect(
-        new AuditLog()
-          .read('test')
-          .some(
-            (row) =>
-              !row.corrupt && row.entry.outcome.reason === store.getTask(task)!.blocked_reason,
-          ),
-      ).toBe(true);
+        new AuditLog().read('test').flatMap((row) => (row.corrupt ? [] : [row.entry.outcome])),
+      ).toContainEqual(
+        expect.objectContaining({
+          status: 'cascade_attempt',
+          cascade: expect.objectContaining({
+            result: 'infrastructure_error',
+            reason: store.getTask(task)!.blocked_reason,
+          }),
+        }),
+      );
     } finally {
       store.close();
     }

@@ -255,10 +255,11 @@ export async function checkCascadeCriteria(
               },
             );
             const result = evidence.result;
+            // e2e specs may be unrunnable in the Developer verifier; QA runs them (not infra).
             if (result === 'not_tested' && !file.startsWith('e2e/'))
               throw new VerifierInfrastructureError(
                 evidence.reason?.replace(/^Verifier infrastructure: /, '') ??
-                  'Vitest execution unavailable',
+                  'Task test execution unavailable',
               );
             checks.push(result);
             report(
@@ -271,6 +272,7 @@ export async function checkCascadeCriteria(
           } catch (error) {
             if (
               error instanceof EvalCriterionTerminationError ||
+              error instanceof EvalIntegrityError ||
               error instanceof VerifierInfrastructureError
             )
               throw error;
@@ -311,6 +313,7 @@ export async function checkCascadeCriteria(
           } catch (error) {
             if (
               error instanceof EvalCriterionTerminationError ||
+              error instanceof EvalIntegrityError ||
               error instanceof VerifierInfrastructureError
             )
               throw error;

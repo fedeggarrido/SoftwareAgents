@@ -38,8 +38,12 @@ cancelaciones, cambios de nivel y correcciones; no reutiliza el contador de
 rework. `maxTokensPerDay` suma entrada (incluida caché) y salida observadas en
 Executions cerradas del Project, por día UTC de inicio. Es orientativo: los
 contadores desconocidos y las ejecuciones aún abiertas no reservan tokens.
-`maxTokens` y `maxCostUsd` conservan su condición declarativa anterior; SA-037
-no les asigna semántica nueva.
+`maxTokens` suma entrada (incluida caché) y salida del ledger de la tarea en todos
+los días, roles y niveles. `maxCostUsd` suma su coste USD conocido. Ambos bloquean
+nuevas admisiones al alcanzar el tope, igual que `maxAttemptsPerTask`. Los valores
+desconocidos no cuentan; son límites observacionales, sin reservar consumo en curso.
+Un tope de cero impide admitir incluso sin historial. No se añaden otra vez los
+contadores de caché, ya incluidos en entrada.
 
 Al alcanzar un tope, la tarea espera la decisión «¿ampliar presupuesto?».
 El operador revisa `pixel-agents usage --json`, ajusta su config y responde la

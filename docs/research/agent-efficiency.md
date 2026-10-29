@@ -9,6 +9,81 @@ secundarios y se marcan así. No se ha reproducido ningún benchmark.
 
 ## Resumen ejecutivo
 
+### FEAT-001/002 real — SA-QA-64 (2026-10-29)
+
+Fuentes locales: `usage-breakdown.txt`, export `usage-2026-10-29.json` (SA-037 con
+backfill) y lectura de `softwareagents/runs/<execution>.jsonl` en el git common
+dir. Los dos ficheros de entrada se eliminan tras el análisis. No se han lanzado
+agentes ni benchmarks reales. Los costes son estimaciones conocidas, no facturas;
+el export contiene agregados null por huecos históricos, no una tabla de
+Executions que permita atribuir todos los intentos. No se convierten null en
+costes cero para presentar una cobertura completa.
+
+- **FEAT-001-T05 completa:** 16 ejecuciones, $3,20, 21,4 min. **qa-author en
+  FEAT-001:** 9 ejecuciones, $2,70, 17,8 min; no confundir el total de la tarea
+  (incluye revisión/QA) con el del rol. FEAT-001 suma 48 ejecuciones, $6,30 y
+  51,9 min; un único claude/deep aporta $1,33 (21,1% del coste de la feature,
+  49,3% del coste del autor), 4,6 min. El desglose no permite atribuir por sí
+  solo el motivo de cada escalada ni el factor causal de cada fix anterior.
+- **FEAT-002:** 62 ejecuciones, $7,22 y 102,3 min. Developer: 35 ejecuciones,
+  $4,91 y 72,7 min (71,1% del tiempo). Codex/economy, agrupado por selección:
+  33 ejecuciones, $4,57 y 71,3 min (69,7%). No se cambia el modelo por esta
+  correlación: faltan tiempos de verificador y de admisión separados.
+
+Se identificaron seis logs de autoría de T05 por sus rutas de herramientas y
+resúmenes finales (otros logs que mencionan T05 son diseños o QA de tareas
+anteriores y se excluyen). Todos cerraron con exit 0 y describen volver a crear
+la spec de auditoría; el exit del agente no prueba que pasara el verificador.
+
+| Execution (prefijo) | Modelo observado  | Input final | Output final | Eventos usage | Herramientas                              |
+| ------------------- | ----------------- | ----------: | -----------: | ------------: | ----------------------------------------- |
+| 5af54632            | gpt-6.1-sol       |      598248 |         4269 |            17 | 14 comandos, 2 cambios                    |
+| 4bb9d084            | gpt-6.1-sol       |      433843 |         3827 |            13 | 11 comandos, 1 cambio                     |
+| 6c9fd3c3            | gpt-6.1-sol       |      711159 |         4661 |            17 | 15 comandos, 1 cambio                     |
+| 90e5289d            | claude-sonnet-5-5 |      903236 |        17511 |            44 | 13 Read, 1 Glob, 9 Grep, 2 Write, 5 Edit  |
+| 589a5d26            | claude-opus-5-5   |     1515372 |        28412 |            57 | 15 Read, 3 Glob, 10 Grep, 2 Write, 6 Edit |
+| f411ff16            | gpt-6.1-sol       |      489892 |         3778 |            15 | 12 comandos, 1 cambio                     |
+
+Los eventos usage son snapshots acumulados con duplicados, **no turnos** y nunca
+se suman. Para Sonnet/Opus hay 15/22 valores distintos de input acumulado,
+respectivamente (aproximación a rondas con contexto nuevo, no un contador exacto
+de turnos). Las primeras observaciones de ambos son 22127/22124 tokens de input:
+el contexto inicial ya ronda 22k antes de explorar. No se guarda el brief literal
+ni su tamaño en estos logs; no puede atribuirse todo ese input al brief.
+El run Opus lee e2e/README.md y hace Glob `e2e/**/*.ts` al comenzar: hay exploración
+amplia además de las ediciones. CacheRead final: 1419253/1515372 (93,7%); aun con
+caché, contexto repetido y 28412 tokens de salida tienen coste. Sus dos Write
+añaden spec y helper; el resumen deja formato, lint, tipos y Playwright al runtime.
+No hay evidencia de que el autor ejecutase la suite e2e completa.
+
+Cambios elegidos y límites de la evidencia:
+
+1. **Brief de qa-author acotado:** omitir el diseño completo y filtrar `acceptance`
+   por `task.acceptanceRefs`; conservar reglas de producto, tarea, zonas, hashes,
+   defectos, hallazgos y diagnóstico anterior. Indicar inspección de archivos y
+   fixtures de la tarea y reservar verificadores al runtime. La petición íntegra
+   sigue validándose antes del lanzamiento: reducir contexto no reduce guardas.
+   Impacto esperado: menos lectura y repetición de diseño; ahorro real pendiente
+   de medición posterior, sin inventar un porcentaje de reducción.
+2. **Infraestructura e2e corta la cascada:** `not_tested` de Playwright se convierte
+   en `VerifierInfrastructureError` igual que Vitest. Antes podía coexistir con
+   un fallo de producto y permitir escalada. Ahora detiene el intento incluso
+   con feedback de producto previo. Entorno reportado por el agente y guardas
+   también paran sin subir tier; pruebas con economy y standard disponibles.
+   Las excepciones `EvalIntegrityError` de tests explícitos o relacionados se
+   propagan como guardas: nunca se convierten en feedback de fallo de producto.
+   Esto corrige una posibilidad actual, no demuestra que originase el Opus
+   histórico: sus logs no incluyen el resultado/motivo del verificador externo.
+3. **Presupuesto por tarea:** aplicar `maxCostUsd` y `maxTokens` sobre todas sus
+   filas conocidas, incluidos reintentos, roles y escaladas. Evita repetir el
+   patrón de nueve autorías sin una decisión del operador al alcanzar el límite.
+
+El runner ya fija un `testMatch` exacto por spec, workers=1 y retries=0; los
+tests comprueban que una spec ajena no coincide. No se amplía ni se recorta de
+nuevo el set e2e. Los bloqueos históricos (~5x según el diagnóstico recibido,
+SA-QA-45..62) motivan separar infraestructura de producto; estos agregados no
+permiten recalcular por sí solos ese multiplicador.
+
 1. **Medir antes de optimizar.** El backlog decide modelo, nivel y executor
    (SA-036, SA-084, SA-090), pero no mide qué rinde. Falta un banco de tareas reales
    del repo con coste por tarea resuelta (SA-094) y telemetría estándar (SA-095).

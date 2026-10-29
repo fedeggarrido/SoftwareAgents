@@ -724,6 +724,11 @@ es distinto del autor de tests.
 El worker rechaza `qa-author` fuera de `feature develop`, para exigir siempre
 el contexto validado y las guardias de zonas de Developer.
 
+El brief de QA author incluye solo los AC de `task.acceptanceRefs` y omite el
+texto completo del diseño. Conserva reglas del FeatureSpec, tarea, zonas, hashes
+y evidencia de rework/fallos. El runtime sigue validando la petición completa;
+el recorte de contexto no cambia permisos ni guardas.
+
 La guardia exige simultáneamente las `changeZones`/`testZones` declaradas y las
 raíces cerradas `e2e/`, `server/__tests__/`, `webview-ui/test/`. Admite fixtures y
 helpers dentro de esas raíces y zonas. Ni siquiera una zona amplia autoriza
@@ -761,7 +766,10 @@ compartido con Vitest; no se reutilizan artefactos entre referencias aprobadas.
 
 Un fallo exclusivamente de Prettier/ESLint recibe un único reintento en el mismo
 nivel; si persiste se detiene sin escalar. Los fallos de tipos/tests permiten la
-cascada. Cada siguiente intento recibe `task.verifierFailures` como datos JSON no
+cascada solo con evidencia de fallo de producto. Infraestructura, entorno,
+`not_tested` (también e2e) y rechazos de integridad detienen el intento sin subir
+de nivel, incluso si otro verificador ya había fallado por producto.
+Cada siguiente intento recibe `task.verifierFailures` como datos JSON no
 confiables: comando, ficheros y primeras 32 líneas (máximo 4000 caracteres) por
 fallo, saneados y con secretos redactados. La salida no se guarda en auditoría ni
 telemetría; el motivo persistido identifica `verifier_failed: prettier|eslint|tsc|tests|e2e`
@@ -1247,8 +1255,10 @@ véase [referencia de config](executor-selection.md#topes-de-uso-sa-037).
 El límite de tiempo cancela mediante el handle del executor y drena sus eventos.
 Solo tras confirmar el cierre se libera la ejecución y se abre la decisión
 «¿ampliar presupuesto?», dejando la tarea en WAITING_HUMAN. Un cierre incierto
-conserva lease/slot para recuperación SA-026. Los límites de intentos y tokens
-diarios impiden nuevas admisiones. Responder la decisión no modifica la config:
+conserva lease/slot para recuperación SA-026. Los límites de intentos, coste USD
+y tokens por tarea, y tokens diarios del Project impiden nuevas admisiones.
+Los topes por tarea suman el ledger entre roles, niveles y días; desconocidos no
+cuentan. Responder la decisión no modifica la config:
 si el tope sigue alcanzado, vuelve a bloquear. No activa concurrencia 2 en
 `feature run`; admisión y executor-slots mantienen sus responsabilidades.
 

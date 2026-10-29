@@ -133,7 +133,7 @@ export function CompanyHud({
             aria-expanded={open}
             title={open ? 'Ocultar detalles' : 'Ver detalles de la oficina'}
           >
-            {open ? '▾' : '▸'} {board.project}
+            {open ? '▾' : '▸'} {board.project} {board.projectId ? `(${board.projectId})` : ''}
           </button>
           <button className={actionClass} onClick={onOpenBacklog}>
             Backlog

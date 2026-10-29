@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { appendFileSync } from 'node:fs';
 
 import type { StateAdapter } from '../../core/src/adapter.js';
+import { sessionProject } from './projectScope.js';
 import type { AgentState, PersistedAgent } from './types.js';
 
 /**
@@ -50,6 +51,12 @@ export class AgentStateStore {
   readonly nextAgentId = { current: 1 };
   readonly nextTerminalIndex = { current: 1 };
   private adapter: StateAdapter | undefined;
+  private projectWorkspace: string | undefined;
+
+  /** Host-supplied binding, never set from client messages. */
+  bindProjectWorkspace(workspace: string): void {
+    this.projectWorkspace = workspace;
+  }
 
   // ── Adapter ──────────────────────────────────────────────────
 
@@ -113,6 +120,13 @@ export class AgentStateStore {
   // ── Map-compatible write (emits events) ─────────────────────
 
   set(id: number, agent: AgentState): this {
+    const scope = sessionProject(
+      agent.sessionCwd ?? (agent.hooksOnly ? agent.projectDir : undefined),
+      agent.jsonlFile,
+      this.projectWorkspace,
+    );
+    if (!scope.allowed) return this;
+    agent.projectId = scope.projectId;
     const isNew = !this.agents.has(id);
     this.agents.set(id, agent);
     if (isNew) {

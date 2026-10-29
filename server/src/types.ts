@@ -3,6 +3,9 @@ import type * as vscode from 'vscode';
 import type { AgentRole } from './agentRoles.js';
 
 export interface AgentState {
+  /** Derived by the server from session location and the bound Project. */
+  projectId?: string;
+  sessionCwd?: string;
   id: number;
   sessionId: string;
   /** Terminal reference — undefined for extension panel sessions */

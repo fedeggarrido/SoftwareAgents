@@ -205,6 +205,7 @@ export interface ProviderCapabilities {
 
 export interface AgentCreated {
   type: 'agentCreated';
+  projectId?: string;
   id: number;
   folderName?: string;
   isExternal?: boolean;
@@ -231,6 +232,7 @@ export interface ExistingAgents {
 }
 
 export interface AgentSeatMeta {
+  projectId?: string;
   palette?: number;
   hueShift?: number;
   seatId?: string;

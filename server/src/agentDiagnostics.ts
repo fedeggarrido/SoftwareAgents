@@ -8,6 +8,7 @@ import type { AgentStateStore } from './agentStateStore.js';
  * the `agents` array of an `agentDiagnostics` ServerMessage.
  */
 export interface AgentDiagnosticsEntry {
+  projectId?: string;
   id: number;
   projectDir: string;
   projectDirExists: boolean;
@@ -42,6 +43,7 @@ export function buildAgentDiagnostics(store: AgentStateStore): AgentDiagnosticsE
       /* file doesn't exist */
     }
     diagnostics.push({
+      projectId: agent.projectId,
       id: agent.id,
       projectDir: agent.projectDir,
       projectDirExists: fs.existsSync(agent.projectDir),

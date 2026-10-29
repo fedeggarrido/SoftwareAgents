@@ -273,3 +273,5 @@ export const EXECUTOR_TRANSIENT_MAX_BACKOFF_MS = 10000;
 export const USAGE_BUDGET_MINUTE_MS = 60_000;
 export const USAGE_BUDGET_SECOND_MS = 1_000;
 export const USAGE_BUDGET_POLL_MS = 1_000;
+/** Maximum prefix read solely to resolve session ownership. */
+export const PROJECT_SCOPE_TRANSCRIPT_READ_BYTES = 64 * 1024;

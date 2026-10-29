@@ -27,6 +27,7 @@ import {
 } from '../../server/src/assetLoader.js';
 import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
 import { recordAudit } from '../../server/src/auditLog.js';
+import { configureCompanyControl } from '../../server/src/companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -124,6 +125,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.store.on('agentAdded', (id, agent) => {
       this.sendOrBuffer({
         type: 'agentCreated',
+        projectId: agent.projectId,
         id,
         folderName: agent.folderName,
         isExternal: agent.isExternal || undefined,
@@ -180,6 +182,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     });
 
     // Create shared runtime (owns timer Maps, scanners, hook handler, dismissal tracker)
+    const projectWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (projectWorkspace) {
+      configureCompanyControl(projectWorkspace);
+      this.store.bindProjectWorkspace(projectWorkspace);
+    }
     this.runtime = new AgentRuntime(this.store, claudeProvider);
 
     this.initServer();

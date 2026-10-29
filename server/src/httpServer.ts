@@ -180,6 +180,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     const onAgentAdded = (id: number, agent: AgentState) => {
       safeSend(socket, {
         type: 'agentCreated',
+        projectId: agent.projectId,
         id,
         folderName: agent.folderName,
         isExternal: agent.isExternal || undefined,

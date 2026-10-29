@@ -214,6 +214,8 @@ async function startServer(argv: string[]): Promise<void> {
 
   // ── Store + adapter (shared settings + standalone-scoped agents/seats) ──
   const store = new AgentStateStore();
+  configureCompanyControl(cwd, boardSelection);
+  store.bindProjectWorkspace(cwd);
   const adapter = new FileStateAdapter({ namespace: 'standalone' });
   store.setAdapter(adapter);
 
@@ -393,7 +395,6 @@ async function startServer(argv: string[]): Promise<void> {
     roleResolver.start();
 
     // The company's backlog (docs/backlog/board.json + claims + progress), if any.
-    configureCompanyControl(cwd, boardSelection);
     const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
     boardWatcher.start();
     // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).

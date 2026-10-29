@@ -6,6 +6,7 @@ import type { AgentProviderLabel } from '../../core/src/messages.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS } from './constants.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
+import { sessionProject } from './projectScope.js';
 import type { AgentState } from './types.js';
 
 /**
@@ -217,6 +218,7 @@ export class CodexWatcher {
   constructor(options: CodexWatcherOptions) {
     this.store = options.store;
     this.workspaceDir = options.workspaceDir;
+    this.store.bindProjectWorkspace(options.workspaceDir);
     this.removeAgent = options.removeAgent;
     this.sessionsRoot = options.sessionsRoot ?? path.join(os.homedir(), '.codex', 'sessions');
     this.now = options.now ?? Date.now;
@@ -307,7 +309,11 @@ export class CodexWatcher {
     const meta = readSessionMeta(file);
     if (!meta) return; // retry next tick
     const cwd = typeof meta.cwd === 'string' ? meta.cwd : '';
-    if (!cwd || !withinWorkspace(cwd, this.workspaceDir)) {
+    const scope = sessionProject(cwd, file, this.workspaceDir);
+    if (
+      !scope.allowed ||
+      (!scope.projectId && (!cwd || !withinWorkspace(cwd, this.workspaceDir)))
+    ) {
       this.ignored.add(file);
       return;
     }
@@ -321,6 +327,7 @@ export class CodexWatcher {
     const agent: AgentState = {
       id,
       sessionId,
+      sessionCwd: cwd,
       terminalRef: undefined,
       isExternal: true,
       projectDir: cwd,

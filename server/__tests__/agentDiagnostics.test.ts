@@ -52,7 +52,7 @@ describe('buildAgentDiagnostics', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('emits the exact 9-field shape for an agent with an existing jsonl file', () => {
+  it('emits connection fields and derived project membership for an existing jsonl file', () => {
     const store = new AgentStateStore();
     store.set(
       7,
@@ -79,6 +79,7 @@ describe('buildAgentDiagnostics', () => {
         'linesProcessed',
         'projectDir',
         'projectDirExists',
+        'projectId',
       ].sort(),
     );
     expect(entry.id).toBe(7);

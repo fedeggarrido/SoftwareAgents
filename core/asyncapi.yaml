@@ -523,6 +523,9 @@ components:
       properties:
         type:
           const: agentCreated
+        projectId:
+          type: string
+          description: Project membership derived by the server from session location.
         id:
           type: integer
         folderName:
@@ -1536,6 +1539,9 @@ components:
       type: object
       additionalProperties: false
       properties:
+        projectId:
+          type: string
+          description: Project membership derived by the server.
         palette:
           type: integer
         hueShift:

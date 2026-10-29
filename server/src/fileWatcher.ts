@@ -46,6 +46,7 @@ import { seedContextUsage } from './contextUsage.js';
 import type { DismissalTracker } from './dismissalTracker.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { pathsMatch } from './pathKey.js';
+import { sessionProject } from './projectScope.js';
 import type { SubagentWatch } from './subagentWatch.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
 import { getHookProvider, processTranscriptLine } from './transcriptParser.js';
@@ -153,6 +154,7 @@ export function startFileWatching(
         // The main scanner does NOT add non-adopted files to knownJsonlFiles,
         // so /clear files remain findable here.
         for (const file of dirFiles) {
+          if (!sessionProject(undefined, file).allowed) continue;
           if (deps.knownJsonlFiles.has(file)) continue;
           if (dismissalTracker!.isDismissed(file)) continue;
           let tracked = false;
@@ -392,6 +394,7 @@ export function scanForNewJsonlFiles(
 
   for (const file of files) {
     if (knownJsonlFiles.has(file)) continue;
+    if (!sessionProject(undefined, file).allowed) continue;
 
     // Main scanner does NOT do /clear detection. /clear is handled per-agent
     // in startFileWatching's poll loop (500ms, requires CURRENT terminal focus).
@@ -495,6 +498,7 @@ function adoptTerminalForFile(
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
 ): void {
+  if (!sessionProject(undefined, jsonlFile).allowed) return;
   const id = nextAgentIdRef.current++;
   const sessionId = path.basename(jsonlFile, '.jsonl');
   // Skip to end of file -- adopted terminals show live activity only, not replay history
@@ -651,6 +655,7 @@ export function scanForTeammateFiles(
 
   const parentLiveSpawnIds = parentAgent ? liveSpawnToolIds(parentAgent) : null;
   for (const { jsonlPath: file, teammateName, sessionId: ownSessionId, toolUseId } of teammates) {
+    if (!sessionProject(undefined, file).allowed) continue;
     // Live-spawn sidecars (they carry the lead's spawn toolUseId) belong to
     // scanForBackgroundAgentFiles, which classifies them by name: named
     // background -> teammate, everything else -> watched sub-agent. Adopting
@@ -843,6 +848,7 @@ export function scanForBackgroundAgentFiles(
 
   const entries = teamProvider.discoverTeammates(lead.projectDir, lead.sessionId);
   for (const entry of entries) {
+    if (!sessionProject(undefined, entry.jsonlPath).allowed) continue;
     if (!entry.toolUseId || !liveSpawnIds.has(entry.toolUseId)) continue;
 
     let alreadyTracked = subagentWatch?.isWatching(entry.jsonlPath) ?? false;
@@ -1071,6 +1077,7 @@ export function adoptExternalSessionFromHook(
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
 ): void {
+  if (!sessionProject(cwd, transcriptPath).allowed) return;
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
     // Guard: don't adopt if file is already tracked by an agent
@@ -1099,6 +1106,7 @@ export function adoptExternalSessionFromHook(
       permissionTimers,
       persistAgents,
       folderName,
+      cwd,
     );
 
     const adoptedAgent = [...agents.values()].find((a) => pathsMatch(a.jsonlFile, transcriptPath));
@@ -1167,7 +1175,9 @@ function adoptExternalSession(
 
   persistAgents: () => void,
   folderName?: string,
+  sessionCwd?: string,
 ): void {
+  if (!sessionProject(sessionCwd, jsonlFile).allowed) return;
   const id = nextAgentIdRef.current++;
   // Decide whether to replay the existing file content or skip to its end.
   //
@@ -1201,6 +1211,7 @@ function adoptExternalSession(
   const agent: AgentState = {
     id,
     sessionId: path.basename(jsonlFile, '.jsonl'),
+    sessionCwd,
     terminalRef: undefined,
     isExternal: true,
     projectDir,
@@ -1392,6 +1403,8 @@ export function scanExternalDir(
       }
     }
     if (tracked) continue;
+
+    if (!sessionProject(undefined, file).allowed) continue;
 
     // WITH HOOKS ON, teammate sessions belong to team discovery, not to generic
     // external adoption. Newer harnesses run each spawned agent as its own
@@ -1608,8 +1621,12 @@ export function reassignAgentToFile(
 
   persistAgents: () => void,
 ): void {
+  const scope = sessionProject(undefined, newFilePath);
+  if (!scope.allowed) return;
   const agent = agents.get(agentId);
   if (!agent) return;
+  agent.projectId = scope.projectId;
+  agent.sessionCwd = undefined;
 
   // Stop old file watching
   fileWatchers.get(agentId)?.close();

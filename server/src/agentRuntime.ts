@@ -38,6 +38,7 @@ import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { PathSet, pathsMatch } from './pathKey.js';
+import { sessionProject } from './projectScope.js';
 import { SessionRouter } from './sessionRouter.js';
 import { SubagentWatch } from './subagentWatch.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
@@ -154,6 +155,7 @@ export class AgentRuntime {
     // Wire hook lifecycle callbacks to shared agent operations
     this.hookEventHandler.setLifecycleCallbacks({
       onExternalSessionDetected: (sessionId, transcriptPath, cwd) => {
+        if (!sessionProject(cwd, transcriptPath).allowed) return;
         const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
         // Teammate session of a tracked lead? Attach it as a teammate character
         // instead of adopting a generic external agent -- and regardless of the
@@ -289,6 +291,16 @@ export class AgentRuntime {
 
   /** Route an incoming hook event to the appropriate agent. */
   handleHookEvent(providerId: string, event: Record<string, unknown>): void {
+    const tracked = [...this.store.values()].find((agent) => agent.sessionId === event.session_id);
+    if (
+      !sessionProject(
+        typeof event.cwd === 'string'
+          ? event.cwd
+          : (tracked?.sessionCwd ?? (tracked?.hooksOnly ? tracked.projectDir : undefined)),
+        typeof event.transcript_path === 'string' ? event.transcript_path : tracked?.jsonlFile,
+      ).allowed
+    )
+      return;
     this.hookEventHandler.handleEvent(providerId, event as HookEvent);
   }
 
@@ -466,6 +478,7 @@ export class AgentRuntime {
     let maxId = 0;
 
     for (const p of persisted) {
+      if (!sessionProject(undefined, p.jsonlFile).allowed) continue;
       if (!p.isExternal) continue;
       // Background-spawn children (a leadAgentId but no teamName) are derived
       // state: the 1s scan re-materializes them from sidecars while their spawn

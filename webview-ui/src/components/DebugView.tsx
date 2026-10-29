@@ -10,6 +10,7 @@ interface AgentDiagnostics {
   projectDir: string;
   projectDirExists: boolean;
   jsonlFile: string;
+  projectId?: string;
   jsonlExists: boolean;
   fileSize: number;
   fileOffset: number;
@@ -160,7 +161,7 @@ export function DebugView({
                 {diag.jsonlExists ? 'JSONL connected' : 'JSONL not found'}
               </span>
               {' | '}
-              Lines: {diag.linesProcessed}
+              Project: {diag.projectId ?? 'unbound'} · Lines: {diag.linesProcessed}
               {' | '}
               Last data: {formatTimeAgo(diag.lastDataAt)}
             </span>

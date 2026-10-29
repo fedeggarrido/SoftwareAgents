@@ -1106,6 +1106,28 @@ lista vacía.
   puede seguir marcando una acción activa; el panel no inspecciona procesos.
 - **Sin paginación:** la lista no tiene límite ni paginación en esta versión.
 
+## Regeneración automática del Developer (SA-QA-65)
+
+Después de la guardia del diff y antes del autofix de formato/lint y los
+verificadores, el runtime regenera los archivos derivados en el árbol de la tarea:
+si cambia `core/asyncapi.yaml` o `core/src/messages.ts`, ejecuta
+`scripts/generate-messages.ts` mediante tsx (igual que `npm run asyncapi:generate`);
+si cambia cualquier ruta bajo `e2e/`, ejecuta
+`node scripts/generate-e2e-inventory.mjs` para actualizar `e2e/README.md`.
+Sin esos cambios no ejecuta el generador correspondiente.
+
+Usa los comandos aislados existentes, con perfiles privados y dependencias
+enlazadas, sin instalaciones. El contexto Developer prohíbe editar a mano ambos
+archivos generados. Sus cambios se incluyen en el commit automático final del
+runtime, igual que el autofix de estilo, sin otro intento del modelo; la auditoría
+`generated_autofix` registra salida, cambio y resultado. Se conservan las guardias
+de integridad y rutas protegidas; el binding y el inventario se admiten como
+derivados de las fuentes autorizadas por las zonas de la tarea.
+
+Un generador que termina con error detiene Developer con comando y diagnóstico
+saneado, sin escalada del modelo. Solo la imposibilidad de iniciar el proceso se
+clasifica como infraestructura. Los drift checks de CI/pre-push siguen vigentes.
+
 ## Corrección de guardias del Developer (SA-QA-54)
 
 Antes de lanzar tsc/Vitest, el paso de precomprobación `guardDeveloperChanges`

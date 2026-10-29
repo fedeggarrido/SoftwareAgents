@@ -2294,6 +2294,11 @@ async function runWorkerExecution(
                           startingHead,
                         );
                       },
+                      generated: (file: string, changed: boolean, result: CriterionResult) => {
+                        audit('generated_autofix', {
+                          detail: JSON.stringify({ file, changed, result }),
+                        });
+                      },
                     }
                   : {}),
               },
@@ -2331,7 +2336,11 @@ async function runWorkerExecution(
           // Only deterministic verifier failures permit another admitted attempt.
           const styleOnly = styleOnlyFailures(failures);
           const retryStyle = styleOnly && styleRetries < VERIFIER_STYLE_RETRIES;
-          const escalateModel = !styleOnly && failures.length > 0 && tierIndex + 1 < levels.length;
+          const escalateModel =
+            !styleOnly &&
+            !failures.some((f) => f.verifier === 'generator') &&
+            failures.length > 0 &&
+            tierIndex + 1 < levels.length;
           if (!interrupted && exitCode === 0 && (retryStyle || escalateModel)) {
             await telemetry!.finish('error');
             options.evaluation?.settled(telemetry.rootSpan, true);
@@ -2379,7 +2388,11 @@ async function runWorkerExecution(
             (options.developer
               ? 'Developer verifier failed; changes retained for review'
               : 'Cascade failed; changes retained for review') +
-              (failures.length ? ` (${verifierFailureReason(failures)})` : ''),
+              (failures.length ? ` (${verifierFailureReason(failures)})` : '') +
+              failures
+                .filter((failure) => failure.verifier === 'generator')
+                .map((failure) => ` ${failure.command.join(' ')}: ${failure.detail}`)
+                .join(''),
           );
         }
       }

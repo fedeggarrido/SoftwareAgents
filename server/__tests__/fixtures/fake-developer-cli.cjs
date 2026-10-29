@@ -21,6 +21,10 @@ process.stdin.on('end', () => {
     return;
   }
   fs.mkdirSync('server/src', { recursive: true });
+  if (mode === 'generated') {
+    fs.mkdirSync('core', { recursive: true });
+    fs.writeFileSync('core/asyncapi.yaml', 'title: changed\n');
+  }
   const {
     reviewFindings = [],
     qaDefects = [],

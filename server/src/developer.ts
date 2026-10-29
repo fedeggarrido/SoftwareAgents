@@ -123,6 +123,8 @@ export function developerScope(task: DagTask, root: string) {
       "Unit tests use Vitest (import { describe, expect, it } from 'vitest'); never node:test or another runner. The runtime only executes Vitest and Playwright specs.",
     fileWriteRule:
       'Create and edit files only with the file-edit tool (apply_patch, Edit/Write), never through shell writes (Set-Content, Out-File, >, tee, node -e). Containment rejects shell writes whose text mentions .git or .claude; use the diagnostic to correct the tool, never bypass the rule.',
+    generatedFilesRule:
+      'Never edit core/src/messages.ts or e2e/README.md by hand. Edit core/asyncapi.yaml or e2e specs instead; the runtime regenerates these outputs automatically before verification and includes them in its commit.',
     testTempRule:
       'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
     colocatedTestRule: `Tests must match ${testDiscovery(root).patterns.join(', ')}; never next to sources. Webview mirrors: ${webviewTestMirrors('webview-ui/src/<basename>.ts', root).join(', ')}. Other locations never run and are rejected.`,
@@ -530,6 +532,10 @@ function checkDeveloperChanges(
             fs.existsSync(taskPath(config.repoRoot, literal)) &&
             fs.statSync(taskPath(config.repoRoot, literal)).isDirectory());
         const candidates = [file];
+        if (file === 'core/src/messages.ts' && files.includes('core/asyncapi.yaml'))
+          candidates.push('core/asyncapi.yaml');
+        if (file === 'e2e/README.md')
+          candidates.push(...files.filter((changed) => changed.startsWith('e2e/')));
         if (!qaAuthor && isDeveloperTest(file)) {
           const source = file.replace(/\.(test|spec)(?=\.[cm]?[jt]sx?$)/i, '');
           candidates.push(source);
@@ -582,6 +588,32 @@ export function developerVerifier(config: ProjectConfig, key: string): CascadeVe
       ],
     }
   );
+}
+
+/** Fixed repository generators, never commands supplied by the model. */
+export function developerGeneratorCommands(files: readonly string[]) {
+  return [
+    ...(files.some((file) => ['core/asyncapi.yaml', 'core/src/messages.ts'].includes(file))
+      ? [
+          {
+            argv: [
+              process.execPath,
+              'node_modules/tsx/dist/cli.mjs',
+              'scripts/generate-messages.ts',
+            ],
+            output: 'core/src/messages.ts',
+          },
+        ]
+      : []),
+    ...(files.some((file) => file.startsWith('e2e/'))
+      ? [
+          {
+            argv: [process.execPath, 'scripts/generate-e2e-inventory.mjs'],
+            output: 'e2e/README.md',
+          },
+        ]
+      : []),
+  ];
 }
 
 /** Mandatory for every Developer/cascade attempt, regardless of Operator verifier overrides. */

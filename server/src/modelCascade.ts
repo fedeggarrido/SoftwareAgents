@@ -4,7 +4,7 @@ import * as path from 'path';
 import type { CascadeVerifier, ModelTier, ModelTierPolicy } from '../../core/src/modelTier.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { EVAL_CRITERION_TIMEOUT_MS } from './constants.js';
-import { developerStyleCommands } from './developer.js';
+import { developerGeneratorCommands, developerStyleCommands } from './developer.js';
 import {
   type CriterionResult,
   EvalCriterionTerminationError,
@@ -104,6 +104,7 @@ export async function checkCascadeCriteria(
   feedback?: {
     failures: VerifierFailure[];
     autoFix?: () => void;
+    generated?: (file: string, changed: boolean, result: CriterionResult) => void;
   },
 ): Promise<CriterionResult[]> {
   const integrity = {
@@ -120,7 +121,12 @@ export async function checkCascadeCriteria(
   // Freeze task paths before our temporary dependency junction exists. Git's
   // untracked enumeration can otherwise walk that junction in disposable repos.
   const changedFiles = evalChangedFiles(tree, base);
-  const fixCommands = feedback?.autoFix ? developerStyleCommands(tree, base, true).reverse() : [];
+  const generators = feedback?.autoFix ? developerGeneratorCommands(changedFiles) : [];
+  if (integrity.allowedPaths)
+    integrity.allowedPaths = [
+      ...integrity.allowedPaths,
+      ...generators.map((entry) => entry.output),
+    ];
   const normalizedRoot = normalize(path.resolve(tree));
   const related = changedFiles
     .filter((file) => /\.[cm]?[jt]sx?$/i.test(file))
@@ -166,7 +172,43 @@ export async function checkCascadeCriteria(
   let safe = true;
   try {
     const results: CriterionResult[] = [];
+    let generatedStyleCommands: CascadeVerifier['commands'] = [];
     if (feedback?.autoFix) {
+      for (const { argv, output: file } of generators) {
+        if (signal.aborted) throw new Error('Cascade interrupted');
+        const target = resolveInside(tree, file);
+        const before = fs.existsSync(target) ? fs.readFileSync(target) : undefined;
+        let output = '';
+        const result = await runVerifierCommand(
+          argv,
+          tree,
+          fs.mkdtempSync(path.join(temporary, 'generate-')),
+          EVAL_CRITERION_TIMEOUT_MS,
+          signal,
+          (value) => {
+            output = value;
+          },
+        );
+        const after = fs.existsSync(target) ? fs.readFileSync(target) : undefined;
+        feedback.generated?.(file, !before || !after || !before.equals(after), result);
+        if (result !== 'pass') {
+          feedback.failures.push(
+            verifierFailure('generator', argv, [file], result, output, [
+              tree,
+              scratch,
+              process.env.HOME ?? '',
+              process.env.USERPROFILE ?? '',
+            ]),
+          );
+          return [result];
+        }
+      }
+      unlinkDependencies();
+      feedback.autoFix();
+      assertEvalIntegrity(integrity, tree, 'during');
+      const fixCommands = developerStyleCommands(tree, base, true).reverse();
+      fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
+      linked = true;
       // The caller has validated all changed paths against the task's zones. ESLint
       // may reorder imports; format its result before running any final verifier.
       for (const command of fixCommands) {
@@ -179,6 +221,7 @@ export async function checkCascadeCriteria(
       unlinkDependencies();
       feedback.autoFix();
       assertEvalIntegrity(integrity, tree, 'during');
+      if (generators.length) generatedStyleCommands = developerStyleCommands(tree, base);
       fs.symlinkSync(dependencies, link, process.platform === 'win32' ? 'junction' : 'dir');
       linked = true;
     }
@@ -199,9 +242,11 @@ export async function checkCascadeCriteria(
         ]),
       );
     };
+    // Generation can create an output absent from the original diff/style commands.
+    const finalCommands = [...verifier.commands, ...generatedStyleCommands];
     const commands = developerTests
-      ? [...verifier.commands, { developerTests, timeoutMs: EVAL_CRITERION_TIMEOUT_MS }]
-      : verifier.commands;
+      ? [...finalCommands, { developerTests, timeoutMs: EVAL_CRITERION_TIMEOUT_MS }]
+      : finalCommands;
     for (const command of commands) {
       if (signal.aborted) throw new Error('Cascade interrupted');
       if ('argv' in command) {

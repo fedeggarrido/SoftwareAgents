@@ -58,6 +58,7 @@ process.stdin.on('end', () => {
       testZones: ['server/__tests__/helpers/**'],
     });
   }
+  if (mode === 'generated') proposal.dag.tasks[0].changeZones.push('core/asyncapi.yaml');
   if (mode === 'core')
     proposal.dag.tasks[0].changeZones = [
       'core/asyncapi.yaml',

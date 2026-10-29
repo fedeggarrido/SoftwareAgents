@@ -366,7 +366,7 @@ describe('Developer diff guard', () => {
         base,
         { failures: [], autoFix: () => {} },
       ),
-    ).toEqual(['pass', 'pass', 'pass']);
+    ).toEqual(['pass', 'pass', 'pass', 'pass', 'pass']);
     expect(fs.readFileSync(path.join(directory, file), 'utf8')).toBe(
       "import a from 'a';\nimport z from 'z';\nexport const answer = 1;\n",
     );
@@ -712,6 +712,61 @@ it('related workspace', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Developer via worker (fake CLI)', () => {
+  it.each([false, true])(
+    'regenerates stale bindings before verification (broken=%s)',
+    async (broken) => {
+      fs.mkdirSync(path.join(repo, 'core/src'), { recursive: true });
+      fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+      fs.writeFileSync(path.join(repo, 'core/asyncapi.yaml'), 'title: original\n');
+      fs.writeFileSync(
+        path.join(repo, 'core/src/messages.ts'),
+        'export const generated = false;\n',
+      );
+      fs.writeFileSync(
+        path.join(repo, 'scripts/generate-messages.ts'),
+        broken
+          ? "throw new Error('exact generator failure: invalid FeatureCost');\n"
+          : "import fs from 'node:fs'; fs.writeFileSync('core/src/messages.ts', 'export const generated = true;\\n');\n",
+      );
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-m', 'generator fixture');
+      await prepare(true, true, 'generated');
+      if (broken) {
+        await expect(develop('generated')).rejects.toThrow(
+          'exact generator failure: invalid FeatureCost',
+        );
+        expect(git(tree(), 'show', 'HEAD:core/src/messages.ts')).toContain('false');
+      } else {
+        await develop('generated');
+        expect(git(tree(), 'show', 'HEAD:core/src/messages.ts')).toContain('true');
+        const store = await storeFor();
+        try {
+          expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
+        } finally {
+          store.close();
+        }
+        expect(
+          new AuditLog()
+            .read('test')
+            .some((row) => !row.corrupt && row.entry.outcome.status === 'generated_autofix'),
+        ).toBe(true);
+      }
+      expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+    },
+  );
+
+  it('does not launch the contract generator for an unrelated diff', async () => {
+    fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, 'scripts/generate-messages.ts'),
+      "throw new Error('must not run');\n",
+    );
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'broken unused generator');
+    await prepare();
+    await develop();
+    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+  });
   it('retains attempt budget across repeated agent-reported environment blockers with exit zero', async () => {
     await prepare();
     enableGuardCascade();

@@ -9,7 +9,7 @@ import {
 } from './constants.js';
 import type { CriterionResult } from './evalCriteria.js';
 
-export type VerifierKind = 'prettier' | 'eslint' | 'tsc' | 'tests' | 'e2e';
+export type VerifierKind = 'prettier' | 'eslint' | 'tsc' | 'tests' | 'e2e' | 'generator';
 export interface VerifierFailure {
   verifier: VerifierKind;
   command: string[];

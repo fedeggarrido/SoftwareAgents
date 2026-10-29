@@ -16,6 +16,7 @@ import {
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
+import { PanelError } from './ui/PanelError.js';
 
 let requestSequence = 0;
 
@@ -23,6 +24,12 @@ let requestSequence = 0;
 // between render and subscription, including a fast disconnect/reconnect.
 const subscribeTransport = (listener: () => void) => transport.onStateChange(listener);
 const transportState = () => transport.state;
+
+function requestAudit(projectId: string) {
+  const requestId = `audit-${++requestSequence}`;
+  setAuditStore(beginAuditRequest(getAuditStore(), projectId, requestId));
+  transport.send({ type: 'requestAuditLog', projectId, requestId });
+}
 
 export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const store = useAuditStore();
@@ -36,9 +43,7 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       return;
     }
     if (getAuditStore().projectId === projectId) return;
-    const requestId = `audit-${++requestSequence}`;
-    setAuditStore(beginAuditRequest(emptyAuditStore(), projectId, requestId));
-    transport.send({ type: 'requestAuditLog', projectId, requestId });
+    requestAudit(projectId);
   }, [isOpen, projectId, store.projectId, connectionState]);
 
   if (!isOpen) return null;
@@ -52,9 +57,9 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       role="region"
       aria-label="Auditoría"
       data-testid="audit-panel"
-      className="absolute top-60 left-1/2 -translate-x-1/2 z-40 pixel-panel p-10 flex flex-col gap-8 w-[min(960px,92vw)] max-h-[70vh] overflow-y-auto"
+      className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
     >
-      <div className="flex items-center gap-8">
+      <div className="panel-heading">
         <h2 className="text-lg flex-1">Auditoría · solo lectura</h2>
         <Button size="sm" variant="ghost" onClick={onClose} title="Cerrar auditoría">
           ✕
@@ -123,11 +128,19 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
           <div role="status">
             {state === 'loading' && 'Cargando auditoría…'}
             {state === 'empty' && 'No hay entradas de auditoría'}
-            {state === 'read_error' && 'Error de lectura del audit log'}
             {state === 'denied' && 'Acceso denegado a la auditoría'}
             {state === 'no_matches' &&
               'Ninguna entrada cumple los filtros. Usa Quitar filtros para ver todas.'}
           </div>
+          {state === 'read_error' && (
+            <PanelError
+              cause="Error de lectura del audit log: no se pudo consultar el registro de auditoría."
+              disabled={!projectId || connectionState !== 'connected'}
+              onRetry={() => {
+                if (projectId && connectionState === 'connected') requestAudit(projectId);
+              }}
+            />
+          )}
           {visibleEntries(store).map((entry) => {
             const date = formatAuditDate(entry.occurredAt);
             return (

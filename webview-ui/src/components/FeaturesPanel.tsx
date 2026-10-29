@@ -20,6 +20,7 @@ import {
 } from '../office/featuresStore.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
+import { PanelError } from './ui/PanelError.js';
 
 let requestSequence = 0;
 const subscribeTransport = (listener: () => void) => transport.onStateChange(listener);
@@ -50,14 +51,17 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
   const selectedStore =
     store.projectId === projectId && connectionState === 'connected' ? store : emptyFeaturesStore();
   const state = viewState(selectedStore);
+  const refresh = () => {
+    if (projectId && connectionState === 'connected') requestFeatures(projectId);
+  };
   return (
     <section
       role="region"
       aria-label="Features"
       data-testid="features-panel"
-      className="absolute top-60 left-1/2 -translate-x-1/2 z-40 pixel-panel p-10 flex flex-col gap-8 w-[min(960px,92vw)] max-h-[70vh] overflow-y-auto"
+      className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
     >
-      <div className="flex items-center gap-8">
+      <div className="panel-heading">
         <h2 className="text-lg flex-1">Features · solo lectura</h2>
         <Button size="sm" variant="ghost" onClick={onClose}>
           Cerrar
@@ -65,9 +69,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
         <Button
           size="sm"
           disabled={!projectId || connectionState !== 'connected'}
-          onClick={() => {
-            if (projectId && connectionState === 'connected') requestFeatures(projectId);
-          }}
+          onClick={refresh}
         >
           Actualizar
         </Button>
@@ -80,9 +82,14 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
             {state === 'loading' && 'Cargando features…'}
             {state === 'empty' && 'sin features'}
             {state === 'denied' && 'Acceso denegado a las features'}
-            {state === 'read_error' &&
-              `Error de lectura: ${featuresReasonText(selectedStore.snapshot?.reason ?? null)}`}
           </div>
+          {state === 'read_error' && (
+            <PanelError
+              cause={`Error de lectura: ${featuresReasonText(selectedStore.snapshot?.reason ?? null)}`}
+              onRetry={refresh}
+              disabled={connectionState !== 'connected'}
+            />
+          )}
           {visibleFeatures(selectedStore).map((feature) => (
             <article
               key={feature.key}

@@ -275,3 +275,5 @@ export const USAGE_BUDGET_SECOND_MS = 1_000;
 export const USAGE_BUDGET_POLL_MS = 1_000;
 /** Maximum prefix read solely to resolve session ownership. */
 export const PROJECT_SCOPE_TRANSCRIPT_READ_BYTES = 64 * 1024;
+/** Maximum wait for a rendered office frame before design evidence is invalid. */
+export const DESIGN_CANVAS_READY_TIMEOUT_MS = 15_000;

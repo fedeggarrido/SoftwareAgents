@@ -9,6 +9,7 @@ import type { DesignValidation } from '../../core/src/designReport.js';
 import type { BoardState } from '../../core/src/messages.js';
 import { buildAssetCache } from './assetReload.js';
 import type { CaptureInput, DesignEvidence } from './designCapture.js';
+import { waitForDesignCanvas } from './designCapture.js';
 import { contrastRatio } from './designer.js';
 
 const VIEW_TITLES = {
@@ -166,7 +167,7 @@ export async function captureInHost(
                 : route.abort(),
             );
             await page.goto(`http://127.0.0.1:${address.port}`, { timeout: CAPTURE_WAIT_MS });
-            await page.locator('canvas').first().waitFor({ timeout: CAPTURE_WAIT_MS });
+            await waitForDesignCanvas(page);
             await page.getByTestId('company-hud').waitFor({ timeout: CAPTURE_WAIT_MS });
             if (view in VIEW_TITLES) {
               await page

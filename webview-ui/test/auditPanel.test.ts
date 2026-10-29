@@ -84,6 +84,36 @@ beforeEach(() => {
 });
 
 describe('FEAT-001-T04 audit panel acceptance', () => {
+  it('distinguishes read errors with a shared retry alert and preserves filters on retry', async () => {
+    setExecutorStore({
+      ...emptyExecutorStore(),
+      state: { projectId: 'P' } as NonNullable<ReturnType<typeof emptyExecutorStore>['state']>,
+    });
+    setAuditStore({
+      ...getAuditStore(),
+      actionFilter: 'read',
+      snapshot: snapshot({ status: 'read_error' }),
+    });
+    const html = await render();
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('panel-error');
+    expect(html).toContain('Reintentar');
+    const { AuditPanel } = await import(panelPath);
+    function retry(node: unknown): (() => void) | undefined {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) return node.map(retry).find(Boolean);
+      const props = (node as { props?: { onRetry?: () => void; children?: unknown } }).props;
+      return props?.onRetry ?? retry(props?.children);
+    }
+    retry(AuditPanel({ isOpen: true, onClose: () => {} }))!();
+    expect(lifecycle.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'requestAuditLog', projectId: 'P' }),
+    );
+    expect(getAuditStore().actionFilter).toBe('read');
+    expect(await render()).toContain('Cargando');
+    setAuditStore({ ...getAuditStore(), loading: false, snapshot: snapshot({ status: 'empty' }) });
+    expect(await render()).not.toContain('role="alert"');
+  });
   it('AC-013/015: requests on open and reconnect, isolates Projects and rejects stale responses', async () => {
     const project = (projectId: string) =>
       setExecutorStore({

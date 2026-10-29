@@ -93,6 +93,30 @@ beforeEach(() => {
   respond();
 });
 describe('FEAT-002-T06 panel acceptance', () => {
+  it('shows a shared alert and retry only for read errors, with contained panel layout', async () => {
+    respond({ status: 'read_error', reason: 'query_failed' });
+    const html = await render();
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('panel-error');
+    expect(html).toContain('Reintentar');
+    expect(html).toContain('read-only-panel');
+    expect(html).toContain('panel-heading');
+    expect(html).not.toContain('-translate-x-1/2');
+    const node = await tree();
+    function retry(node: unknown): (() => void) | undefined {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) return node.map(retry).find(Boolean);
+      const props = (node as ReactElement<{ onRetry?: () => void; children?: unknown }>).props;
+      return props?.onRetry ?? retry(props?.children);
+    }
+    retry(node)!();
+    expect(lifecycle.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'requestFeatures', projectId: 'P' }),
+    );
+    expect(await render()).toContain('Cargando');
+    respond({ status: 'empty', features: [] });
+    expect(await render()).not.toContain('role="alert"');
+  });
   it.each([
     { executions: 4, costKnown: 0, costUsd: null, costPerDoneTaskUsd: null, cacheHitRate: null },
     { executions: 1, costKnown: 1, costUsd: 0, costPerDoneTaskUsd: 0, cacheHitRate: null },

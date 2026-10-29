@@ -15,11 +15,16 @@
   --color-bg-thumb: #2a2a3a;
   --color-border: #4a4a6a;
   --color-accent: #6030ff;
-  --color-accent-bright: #746fff;
+  --color-accent-bright: #8b87ff;
 
   /* Text */
-  --color-text: rgba(255, 255, 255, 0.9);
-  --color-text-muted: rgba(255, 255, 255, 0.5);
+  --color-text: #e9e9eb;
+  --color-text-muted: #b7b7c7;
+  --color-error-border: #f08088;
+  --color-error-bg: #301f2b;
+  --panel-edge: 16px;
+  --panel-width: 960px;
+  --control-target: 24px;
 
   /* Buttons */
   --color-btn-bg: rgb(53, 52, 69);
@@ -109,6 +114,45 @@
 }
 
 @layer components {
+  .read-only-panel {
+    left: var(--panel-edge);
+    right: var(--panel-edge);
+    width: auto;
+    max-width: min(var(--panel-width), calc(100vw - 2 * var(--panel-edge)));
+    margin-inline: auto;
+    overflow-wrap: anywhere;
+  }
+  .panel-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .panel-heading h2 {
+    flex: 1 1 240px;
+    min-width: 0;
+  }
+  .panel-error {
+    border: 2px solid var(--color-error-border);
+    background: var(--color-error-bg);
+    padding: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-error p {
+    flex: 1 1 200px;
+  }
+  .panel-heading button,
+  .panel-error button {
+    min-width: var(--control-target);
+    min-height: var(--control-target);
+  }
+  .bottom-toolbar > button:focus-visible {
+    outline: 2px solid var(--color-text);
+    outline-offset: -4px;
+  }
   .feature-row {
     --feature-state-color: var(--feature-unknown);
     display: flex;
@@ -271,6 +315,31 @@
   .pixel-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: var(--color-border) var(--color-bg-dark);
+  }
+}
+
+@media (max-width: 480px) {
+  .bottom-toolbar {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    gap: 2px;
+  }
+  .bottom-toolbar > button,
+  .bottom-toolbar > div {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .bottom-toolbar button {
+    width: 100%;
+    padding-inline: 0;
+    min-width: var(--control-target);
+    min-height: var(--control-target);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+  }
+  .version-label {
+    display: none;
   }
 }
 

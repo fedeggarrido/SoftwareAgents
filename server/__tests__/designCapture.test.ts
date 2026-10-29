@@ -34,6 +34,15 @@ it('captures real standalone SPA desktop/mobile panels and fixture states with r
     for (const png of evidence.images)
       expect(fs.readFileSync(png).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
     expect(evidence.validations.filter((v) => v.kind === 'contrast')).toHaveLength(14);
+    for (const validation of evidence.validations.filter((v) => v.kind === 'contrast')) {
+      const rows = JSON.parse(
+        fs.readFileSync(path.join(directory, validation.evidence.split(';')[0]), 'utf8'),
+      ) as Array<{ element: string; ratio: number | null; threshold: number }>;
+      expect(
+        rows.filter((row) => row.ratio !== null && row.ratio < row.threshold),
+        validation.evidence,
+      ).toEqual([]);
+    }
     expect(JSON.stringify(evidence)).not.toContain('token=');
     const rows = JSON.parse(
       fs.readFileSync(path.join(directory, 'features-1440-empty-contrast.json'), 'utf8'),

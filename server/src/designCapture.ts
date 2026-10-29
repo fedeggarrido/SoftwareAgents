@@ -3,6 +3,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { DesignValidation } from '../../core/src/designReport.js';
+import { DESIGN_CANVAS_READY_TIMEOUT_MS } from './constants.js';
+
+/** A mounted canvas alone may still be blank before its first animation frame. */
+export async function waitForDesignCanvas(page: {
+  locator: (selector: string) => { waitFor: (options: { timeout: number }) => Promise<unknown> };
+}): Promise<void> {
+  try {
+    await page
+      .locator('canvas[data-ready="true"]')
+      .waitFor({ timeout: DESIGN_CANVAS_READY_TIMEOUT_MS });
+  } catch {
+    throw new Error(
+      'Design capture infrastructure: invalid capture; office canvas was not ready before timeout',
+    );
+  }
+}
 
 export const DESIGN_VIEWS = ['office', 'features', 'audit', 'backlog', 'hud'] as const;
 export type DesignView = (typeof DESIGN_VIEWS)[number];

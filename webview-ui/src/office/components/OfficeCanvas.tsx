@@ -23,7 +23,7 @@ import type {
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
-import { EditTool, TILE_SIZE } from '../types.js';
+import { EditTool, TILE_SIZE, TileType } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
 
 interface OfficeCanvasProps {
@@ -110,6 +110,7 @@ export function OfficeCanvas({
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(rect.width * dpr);
     canvas.height = Math.round(rect.height * dpr);
+    delete canvas.dataset.ready;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     // No ctx.scale(dpr) — we render directly in device pixels
@@ -298,6 +299,14 @@ export function OfficeCanvas({
           officeState.pets,
         );
         offsetRef.current = { x: offsetX, y: offsetY };
+        // App mounts this canvas only after layoutLoaded. Publish after drawing tiles.
+        if (
+          w > 0 &&
+          h > 0 &&
+          officeState.tileMap.some((row) => row.some((tile) => tile !== TileType.VOID))
+        ) {
+          canvas.dataset.ready = 'true';
+        }
 
         // Store delete/rotate button bounds for hit-testing
         deleteButtonBoundsRef.current = editorRender?.deleteButtonBounds ?? null;
@@ -307,6 +316,7 @@ export function OfficeCanvas({
 
     return () => {
       stop();
+      delete canvas.dataset.ready;
       observer.disconnect();
     };
   }, [

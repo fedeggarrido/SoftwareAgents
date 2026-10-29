@@ -1,10 +1,12 @@
 import { CliUsageError } from './cliErrors.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { runUsageBackfill } from './usageBackfill.js';
 import { type UsageEntry, usageSummary } from './usageLedger.js';
 import type { TaskRecord } from './workstore/WorkStore.js';
 
 /** No migration, probes or writes: an older database requires an explicit writer upgrade. */
 export async function runUsageCommand(argv: string[], cwd = process.cwd(), log = console.log) {
+  if (argv[0] === 'backfill') return runUsageBackfill(argv.slice(1), cwd, log);
   let feature: string | undefined;
   let day: string | undefined;
   let json = false;

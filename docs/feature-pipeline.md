@@ -1207,13 +1207,27 @@ reproducciones de formato, no capturas acreditadas de una ejecución real.
 
 ## Ledger de uso y topes (SA-037)
 
+`pixel-agents usage backfill [--dry-run] [--json]` recupera filas ausentes de
+Executions históricas. Exige ingreso humano SA-003, igual que `task retry`.
+Antes de escribir reutiliza el backup consistente de `task backup` y audita
+intención y finalización. Nunca reemplaza filas existentes. Lee eventos de uso,
+modelo y cierre en `runs/<execution-key>.jsonl` y complementa campos ausentes
+con los spans raíz SA-095 de esa Execution. No suma ambas fuentes. Omite procesos
+sin cierre confirmado y ejecuciones sin evidencia de finalización.
+Las filas llevan `source: "backfill"`; el intento histórico, tiempos y contadores
+no acreditados quedan en `null`. Solo calcula coste con modelo, contadores y
+precios declarados suficientes. `--dry-run` abre SQLite en solo lectura, muestra
+las filas propuestas y no crea backup, auditoría ni filas. JSON incluye `entries`,
+`skipped`, `backup` y `dryRun`. Un ledger vacío muestra costes `unknown`, incluso
+si hay tareas DONE. Repetir el comando no duplica ni modifica filas.
+
 Cada Execution cerrada por el worker registra una fila idempotente en
 `usage_ledger` del WorkStore (migración aditiva v16). Incluye tokens observados
 por SA-095, duración de reloj, intento, executor, modelo/nivel, caché, coste USD
 estimado con los precios declarados y snapshots de cuota disponibles. Los datos
 ausentes son `null`; no se deducen precios ni contadores. También se registra el
 uso de ejecuciones fallidas y canceladas. El ledger persiste independientemente
-de la rotación del JSONL de telemetría; no importa retrospectivamente ese JSONL.
+de la rotación del JSONL de telemetría; solo el backfill humano explícito importa historia.
 La recuperación SA-026 también conserva una fila por Execution cerrada: si murió
 el consumidor de telemetría antes de guardar el ledger, sus contadores quedan
 desconocidos. Nunca contabiliza como cerrada una ejecución cuyo proceso siga

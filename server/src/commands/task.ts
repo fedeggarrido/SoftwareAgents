@@ -170,7 +170,7 @@ function removeBackup(root: string, name: string): void {
   fs.rmdirSync(dir);
 }
 
-async function backup(store: WorkStore, keep: number): Promise<string> {
+export async function backup(store: WorkStore, keep: number): Promise<string> {
   const home = fs.realpathSync.native(os.homedir());
   // AuditLog.file validates the Project id before it can become a path component.
   const auditFile = new AuditLog().file(store.projectId);

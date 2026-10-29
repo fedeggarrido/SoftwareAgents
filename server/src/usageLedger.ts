@@ -3,14 +3,15 @@ import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js'
 import type { ExecutionRecord, TaskRecord } from './workstore/WorkStore.js';
 
 export interface UsageEntry {
+  source?: 'backfill';
   executionId: string;
   taskKey: string;
   featureKey: string | null;
   day: string;
   startedAt: string;
-  endedAt: string;
-  durationMs: number;
-  attempt: number;
+  endedAt: string | null;
+  durationMs: number | null;
+  attempt: number | null;
   executor: string;
   model: string;
   tier: string | null;
@@ -63,7 +64,7 @@ export function aggregateUsage(entries: UsageEntry[], tasks: Pick<TaskRecord, 'k
   const sum = (
     key: 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreateTokens' | 'costUsd',
   ) =>
-    entries.some((entry) => entry[key] === null)
+    !entries.length || entries.some((entry) => entry[key] === null)
       ? null
       : entries.reduce((n, entry) => n + entry[key]!, 0);
   const inputTokens = sum('inputTokens');
@@ -72,7 +73,9 @@ export function aggregateUsage(entries: UsageEntry[], tasks: Pick<TaskRecord, 'k
   const resolvedTasks = tasks.filter((task) => task.status === 'DONE').length;
   return {
     executions: entries.length,
-    durationMs: entries.reduce((n, e) => n + e.durationMs, 0),
+    durationMs: entries.some((e) => e.durationMs === null)
+      ? null
+      : entries.reduce((n, e) => n + e.durationMs!, 0),
     inputTokens,
     outputTokens: sum('outputTokens'),
     cacheReadTokens,

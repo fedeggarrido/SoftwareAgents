@@ -60,6 +60,98 @@ describe('SA-037 usage ledger and budgets', () => {
     });
     return store.getExecution(key)!;
   }
+  it('backfills retained run evidence, previews without writes and never replaces a row', async () => {
+    for (const name of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+      vi.stubEnv(name, undefined);
+    await execution();
+    fs.mkdirSync(path.join(root, 'home'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.softwareagents'));
+    fs.writeFileSync(
+      path.join(root, '.softwareagents/project.yaml'),
+      'apiVersion: softwareagents.io/v1alpha1\nkind: Project\nid: test\nname: Test\nrepo:\n  remote: https://example.invalid/test.git\n  defaultBranch: main\nbrain:\n  path: .softwareagents/brain\n',
+    );
+    const runs = path.join(root, '.git/softwareagents/runs');
+    fs.mkdirSync(runs, { recursive: true });
+    fs.writeFileSync(
+      path.join(runs, 'execution.jsonl'),
+      [
+        { type: 'telemetry', observation: { kind: 'model', model: 'observed' } },
+        {
+          type: 'telemetry',
+          observation: { kind: 'usage', input: 100, output: 20, cacheRead: 60, cacheCreate: 10 },
+        },
+        { type: 'finished', endedAt: '2026-10-29T12:01:00.000Z' },
+      ]
+        .map((e) => JSON.stringify(e))
+        .join('\n'),
+    );
+    const output = vi.fn();
+    const database = path.join(root, '.git/softwareagents/work.sqlite3');
+    const before = fs.readFileSync(database);
+    await runUsageCommand(['backfill', '--dry-run', '--json'], root, output);
+    expect(fs.readFileSync(database)).toEqual(before);
+    expect(store.listUsage()).toEqual([]);
+    expect(fs.existsSync(path.join(root, 'home/.pixel-agents'))).toBe(false);
+    expect(JSON.parse(output.mock.calls[0][0]).entries[0]).toMatchObject({
+      source: 'backfill',
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 60,
+      model: 'observed',
+      durationMs: 60000,
+      costUsd: null,
+      attempt: null,
+    });
+    fs.mkdirSync(path.join(root, 'home/.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'home/.pixel-agents/config.json'),
+      JSON.stringify({
+        projects: {
+          test: {
+            autonomyLevel: 'A0',
+            allowedExecutors: [],
+            telemetry: {
+              prices: { observed: { input: 10, output: 20, cacheRead: 1, cacheCreate: 2 } },
+            },
+          },
+        },
+      }),
+    );
+    const second = await execution('second');
+    const telemetry = new ExecutionTelemetry(new TelemetrySink(path.join(root, '.git'), 'test'), {
+      executionId: second.key,
+      taskKey: 'task',
+      executor: 'claude',
+      agent: 'developer',
+      role: 'developer',
+      model: 'observed',
+    });
+    telemetry.observe({ kind: 'model', model: 'observed' });
+    telemetry.observe({ kind: 'usage', input: 100, output: 20, cacheRead: 60, cacheCreate: 10 });
+    await telemetry.finish('ok');
+    await runUsageCommand(['backfill', '--json'], root, output);
+    const rows = store.listUsage();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].costUsd).toBe(0.00078);
+    expect(rows[1]).toMatchObject({ source: 'backfill', inputTokens: 100, costUsd: 0.00078 });
+    const backup = JSON.parse(output.mock.calls.at(-1)![0]).backup;
+    expect(fs.existsSync(path.join(backup, 'work.sqlite3'))).toBe(true);
+    expect(
+      fs.readFileSync(path.join(root, 'home/.pixel-agents/audit/test.jsonl'), 'utf8'),
+    ).toContain('usage_backfill');
+    await runUsageCommand(['backfill', '--json'], root, output);
+    expect(store.listUsage()).toEqual(rows);
+    expect(JSON.parse(output.mock.calls.at(-1)![0]).entries).toEqual([]);
+    vi.stubEnv('SA_WORKER', '1');
+    await expect(runUsageCommand(['backfill', '--dry-run'], root, output)).rejects.toThrow(
+      'human ingress',
+    );
+  });
+  it('reports unknown costs for an empty ledger, including DONE tasks', () => {
+    const summary = usageSummary([], [{ ...store.getTask('task')!, status: 'DONE' }]);
+    expect(summary.total.costUsd).toBeNull();
+    expect(summary.total.costPerResolvedTaskUsd).toBeNull();
+  });
   it('migrates v15 without losing operational records and reads usage without migrating', async () => {
     await execution();
     store.close();

@@ -106,3 +106,12 @@ Pendiente del revisor: smoke con autenticación real, rollout conservado,
 Character Codex etiquetado con rol y SA-034 mediante sessionMap; verificar
 cancelación del árbol en Windows y capacidades efectivas. La ayuda y los
 fixtures no acreditan ese smoke ni un aislamiento completo del host.
+
+## Proyectos y cuota (SA-065)
+
+En el modelo local, un servidor corresponde a un único Managed Project. Cada
+proyecto necesita su propio proceso de servidor.
+
+La cuota de Claude Code y Codex pertenece a la cuenta del usuario: se comparte
+entre proyectos y con otros usos de esa cuenta, como Fundtrinsic. La competencia
+por esa cuota es una limitación conocida, no una fuga de sesiones ni de datos.

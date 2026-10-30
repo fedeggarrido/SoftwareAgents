@@ -176,29 +176,38 @@ export function validateReview(source: string, input: ReviewerRequest): ReviewRe
   const report = validateSchema(validateReport, value);
   const errors: string[] = [];
   const original = structuredClone(report);
+  const lineCount = (rev: string, file: string) => {
+    try {
+      const content = execFileSync('git', ['show', `${rev}:${file}`], {
+        cwd: input.worktree,
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: TASK_CLI_INPUT_BYTES,
+      });
+      return content.length ? content.split('\n').length - (content.endsWith('\n') ? 1 : 0) : 0;
+    } catch {
+      return 0; // Absent at that revision (added, deleted or renamed).
+    }
+  };
   for (const finding of report.findings) {
+    // Models on Windows may answer with backslashes or a ./ prefix.
+    finding.file = finding.file.replace(/\\/g, '/').replace(/^(\.\/)+/, '');
     if (finding.evidence !== undefined) finding.evidence = finding.evidence.trim();
     if (!['blocker', 'major'].includes(finding.severity)) continue;
     const reasons: string[] = [];
     if (!finding.evidence) reasons.push('missing evidence');
     if (!input.files.includes(finding.file)) reasons.push('file not in diff');
     if (!finding.line) reasons.push('missing line');
-    else if (input.files.includes(finding.file)) {
-      try {
-        const content = execFileSync('git', ['show', `${input.reviewRef.sha}:${finding.file}`], {
-          cwd: input.worktree,
-          encoding: 'utf8',
-          windowsHide: true,
-          maxBuffer: TASK_CLI_INPUT_BYTES,
-        });
-        const lines = content.length
-          ? content.split('\n').length - (content.endsWith('\n') ? 1 : 0)
-          : 0;
-        if (finding.line > lines) reasons.push('line out of range');
-      } catch {
-        reasons.push('line out of range');
-      }
-    }
+    // A finding may point at a removed line: accept the base or the reviewed revision.
+    else if (
+      input.files.includes(finding.file) &&
+      finding.line >
+        Math.max(
+          lineCount(input.reviewRef.sha, finding.file),
+          lineCount(input.reviewRef.base, finding.file),
+        )
+    )
+      reasons.push('line out of range');
     if (reasons.length) {
       finding.severity = 'minor';
       finding.downgradeReasons = reasons;
@@ -234,9 +243,11 @@ export function validateReview(source: string, input: ReviewerRequest): ReviewRe
       errors.push(`Unknown or duplicate task AC: ${coverage.ac}`);
     seen.add(coverage.ac);
   }
+  // Judge the model's own contradiction, not the downgraded copy: an approve that still
+  // lists blockers is rejected as before, whatever their evidence.
   if (
-    report.verdict === 'approve' &&
-    report.findings.some((f) => ['blocker', 'major'].includes(f.severity))
+    original.verdict === 'approve' &&
+    original.findings.some((f) => ['blocker', 'major'].includes(f.severity))
   )
     errors.push('approve cannot contain blocker/major findings');
   if (errors.length) throw new SchemaValidationError(errors);

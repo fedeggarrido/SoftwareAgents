@@ -14,6 +14,45 @@ const input = {
   task: { acceptanceRefs: [] },
 } as unknown as ReviewerRequest;
 describe('finding evidence', () => {
+  const major = {
+    severity: 'major',
+    file: 'a.ts',
+    line: 1,
+    evidence: 'input 1 produces incorrect output 2',
+    summary: 'bug',
+    suggestion: 'fix',
+  };
+  it('still rejects an approve that lists a blocking finding, even an unsupported one', () => {
+    expect(() =>
+      validateReview(
+        JSON.stringify({ verdict: 'approve', findings: [{ ...major, evidence: undefined }] }),
+        input,
+      ),
+    ).toThrow('approve cannot contain blocker/major findings');
+  });
+  it('normalizes Windows and ./ paths before matching the diff', () => {
+    for (const file of ['.\\a.ts', './a.ts', 'a.ts']) {
+      const report = validateReview(
+        JSON.stringify({ verdict: 'request_changes', findings: [{ ...major, file }] }),
+        input,
+      );
+      expect(report.findings[0]).toMatchObject({ file: 'a.ts', severity: 'major' });
+      expect(report.verdict).toBe('request_changes');
+    }
+  });
+  it('accepts a line that exists only in the base revision (removed code)', () => {
+    vi.mocked(execFileSync).mockImplementation(((_cmd: string, args: string[]) =>
+      args[1].startsWith('b'.repeat(40)) ? '1\n2\n3\n4\n5\n' : 'first\n') as never);
+    try {
+      const report = validateReview(
+        JSON.stringify({ verdict: 'request_changes', findings: [{ ...major, line: 5 }] }),
+        { ...input, reviewRef: { sha: 'a'.repeat(40), base: 'b'.repeat(40) } } as ReviewerRequest,
+      );
+      expect(report.findings[0].severity).toBe('major');
+    } finally {
+      vi.mocked(execFileSync).mockImplementation((() => 'first\nsecond\n') as never);
+    }
+  });
   it('keeps request_changes when the runtime knows of a missing AC despite downgrades', () => {
     const report = validateReview(
       JSON.stringify({

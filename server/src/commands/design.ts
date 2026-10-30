@@ -151,7 +151,10 @@ export async function runDesignCommand(
             validations: evidence.validations,
             instruction:
               'Read every runtime PNG and return DesignReport. Leave validations empty; runtime attaches its evidence.',
-            previousFindings: options.pipeline?.previousFindings,
+            // Compiler input is strict JSON: omit absent pipeline context instead of `undefined`.
+            ...(options.pipeline?.previousFindings
+              ? { previousFindings: options.pipeline.previousFindings }
+              : {}),
             ...task,
           },
           outputSchema,

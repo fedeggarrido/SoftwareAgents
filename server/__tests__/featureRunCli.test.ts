@@ -184,7 +184,7 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
-  it.each(['server/src', 'core/asyncapi.yaml', 'WIP', 'WIP-review', 'WIP-QA'])(
+  it.each(['server/src', 'core/asyncapi.yaml', 'WIP', 'WIP-review', 'WIP-QA', 'WIP-rework'])(
     'waits before develop for another feature, then reevaluates %s without an attempt',
     async (zone) => {
       const store = await storeFor();
@@ -210,6 +210,14 @@ describe('feature run interruption authority', () => {
           db.prepare("UPDATE tasks SET status = 'REVIEW' WHERE key = 'FEAT-001-T01'").run();
           vi.spyOn(designPipeline, 'runDesignGate').mockResolvedValue(true);
           vi.spyOn(developer, 'pushDeveloperBranch').mockResolvedValue(undefined);
+          // Rework: QA/review sent the task back; its developer branch already exists.
+          if (zone === 'WIP-rework') {
+            git('branch', 'sa/FEAT-002-T01-developer', main);
+            // Disjoint zones so only the WIP limit (not zone admission) could hold it.
+            db.prepare("UPDATE tasks SET declaration = ? WHERE key = 'FEAT-001-T01'").run(
+              JSON.stringify({ changeZones: ['docs/other'] }),
+            );
+          }
         }
         db.prepare(
           // A live orchestrator (this process) holds FEAT-001; a dead one would hold nothing.
@@ -268,8 +276,10 @@ describe('feature run interruption authority', () => {
             } else db.prepare("UPDATE tasks SET status = 'DONE' WHERE key = 'FEAT-001-T01'").run();
           },
         );
-        expect(waited).toBe(true);
+        // Rework is work in flight: the full review WIP never holds it back.
+        expect(waited).toBe(zone !== 'WIP-rework');
         expect(invoke, result.message).toHaveBeenCalledTimes(1);
+        if (zone === 'WIP-rework') expect(invoke.mock.calls[0][0][0]).toBe('develop');
         if (zone === 'WIP-review' || zone === 'WIP-QA') {
           expect(invoke.mock.calls[0][0][0]).toBe(zone === 'WIP-QA' ? 'qa' : 'review');
         }

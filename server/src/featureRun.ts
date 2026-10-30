@@ -679,7 +679,14 @@ export async function runFeature(
         if (action === 'develop') {
           // Read config and walk main's history before BEGIN IMMEDIATE, never while holding
           // the WorkStore write lock; merged heads only matter for the review limit.
-          const limits = currentWip();
+          // Rework (QA/review sent the task back) is work in flight, never new work: an
+          // existing developer branch means it already passed admission once.
+          const rework = !!git([
+            'for-each-ref',
+            '--format=%(objectname)',
+            `refs/heads/sa/${task.key}-developer`,
+          ]);
+          const limits = rework ? undefined : currentWip();
           const merged =
             limits?.review !== undefined ? readMainAncestors(config.repoRoot) : new Set<string>();
           const conflict = await store.reserveZoneTask(key, owner, state, task.key, () => {

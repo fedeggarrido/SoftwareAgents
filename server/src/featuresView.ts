@@ -305,7 +305,6 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
             (tasks as unknown as FlowTask[]).filter((t) => !!t.declaration),
             source.events as unknown as FlowEvent[],
             Date.now(),
-            ready,
           ),
         ),
         cost: {

@@ -30,12 +30,7 @@ export function distribution(values: number[]) {
   };
 }
 
-export function flowMetrics(
-  tasks: FlowTask[],
-  events: FlowEvent[],
-  now = Date.now(),
-  ready: ReadonlySet<string> = new Set(),
-) {
+export function flowMetrics(tasks: FlowTask[], events: FlowEvent[], now = Date.now()) {
   const cycle: number[] = [],
     age: number[] = [],
     review: number[] = [];
@@ -71,10 +66,8 @@ export function flowMetrics(
         measured.cycleMs = duration;
       } else unknown.push({ task: task.key, metric: 'cycle' });
     } else unknown.push({ task: task.key, metric: 'cycle' });
-    if (
-      ['LEASED', 'RUNNING', 'REVIEW', 'QA', 'WAITING_HUMAN'].includes(task.status) ||
-      (task.feature_key && ready.has(task.feature_key))
-    ) {
+    // A feature awaiting merge counts once in WIP; its DONE tasks have no WIP age of their own.
+    if (['LEASED', 'RUNNING', 'REVIEW', 'QA', 'WAITING_HUMAN'].includes(task.status)) {
       const last = history.at(-1);
       const duration = last?.to_status === task.status ? now - Date.parse(last.created_at) : NaN;
       if (Number.isFinite(duration) && duration >= 0) {

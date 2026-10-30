@@ -44,7 +44,6 @@ export async function runFlowCommand(argv: string[], cwd = process.cwd(), log = 
         tasks.filter((t) => !!t.declaration && (!feature || t.feature_key === feature)),
         events,
         Date.now(),
-        ready,
       ),
     };
     log(

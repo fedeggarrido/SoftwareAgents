@@ -125,9 +125,9 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const html = await render();
     expect(html).toContain(`Ejecuciones: ${cost.executions}`);
     expect(html).toContain(`Cobertura: ${cost.costKnown} de ${cost.executions}`);
-    expect(html).toContain(`Coste: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`);
+    expect(html).toContain(`Coste est. API: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`);
     expect(html).toContain(
-      `Coste/tarea DONE: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
+      `Coste est./tarea DONE: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
     );
     expect(html.match(/sin datos/g)).toHaveLength(cost.costUsd === null ? 3 : 1);
     expect(html).not.toMatch(/NaN|Infinity|\(parcial\)/);
@@ -136,16 +136,16 @@ describe('FEAT-002-T06 panel acceptance', () => {
 
   it('FEAT-003 AC-005 hides costs across Projects with the same feature key', async () => {
     const previousRequest = getFeaturesStore().requestId!;
-    expect(await render()).toContain('Coste: 0.60 USD');
+    expect(await render()).toContain('Coste est. API: 0.60 USD');
     project('Q');
     expect(await render()).not.toContain('USD');
     await flush();
     respond({ features: [{ ...row, cost: { ...row.cost, costUsd: 5 } }] });
-    expect(await render()).toContain('Coste: 5.00 USD');
+    expect(await render()).toContain('Coste est. API: 5.00 USD');
     respond({ projectId: 'P', requestId: previousRequest });
     const html = await render();
-    expect(html).toContain('Coste: 5.00 USD');
-    expect(html).not.toContain('Coste: 0.60 USD');
+    expect(html).toContain('Coste est. API: 5.00 USD');
+    expect(html).not.toContain('Coste est. API: 0.60 USD');
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
     expect(lifecycle.send).toHaveBeenCalledWith({
       type: 'requestFeatures',
@@ -170,10 +170,10 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const block = html.match(/<div class="feature-cost[^>]*>(.*?)<\/div>/s)?.[1];
     expect(block).toBeDefined();
     for (const text of [
-      'Coste: 0.90 USD (parcial)',
+      'Coste est. API: 0.90 USD (parcial)',
       'Ejecuciones: 5',
       'Cobertura: 3 de 5',
-      'Coste/tarea DONE: 0.30 USD',
+      'Coste est./tarea DONE: 0.30 USD',
       'Caché: 50 %',
     ])
       expect(block).toContain(text);
@@ -201,7 +201,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     respond({
       features: [{ ...row, cost: { ...row.cost, costUsd: 0.5, costPerDoneTaskUsd: null } }],
     });
-    expect(await render()).toContain('Coste/tarea DONE: sin datos');
+    expect(await render()).toContain('Coste est./tarea DONE: sin datos');
     respond({ status: 'denied' });
     expect(await render()).not.toContain('feature-cost');
     expect(await render()).not.toContain('USD');

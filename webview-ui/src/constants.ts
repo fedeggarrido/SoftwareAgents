@@ -420,3 +420,8 @@ export const EMPTY_SPRITE_THUMBNAIL_BG = '#333';
 export const MAX_PET_ID_LENGTH = 128;
 /** Features panel progress is expressed as a percentage for its pixel bar. */
 export const FEATURE_PROGRESS_PERCENT_MAX = 100;
+
+/** Feature costs are tokens reported by the local CLIs × the configured per-model price
+ * table: an API-price equivalent, not a charge (subscriptions consume quota instead). */
+export const FEATURE_COST_ESTIMATE_HINT =
+  'Estimación a precio de API: tokens informados por los CLIs × tabla de precios por modelo. No es un cargo real; con suscripción se consume cuota.';

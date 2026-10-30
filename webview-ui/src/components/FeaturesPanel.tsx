@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-import { FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
+import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import {
   beginFeaturesRequest,
@@ -127,11 +127,14 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 )}
                 <span>{featureProgressLabel(feature.progress)}</span>
               </div>
-              <div className="feature-cost flex flex-wrap gap-8 text-text-muted">
-                <span>Coste: {featureCostLabel(feature.cost)}</span>
+              <div
+                className="feature-cost flex flex-wrap gap-8 text-text-muted"
+                title={FEATURE_COST_ESTIMATE_HINT}
+              >
+                <span>Coste est. API: {featureCostLabel(feature.cost)}</span>
                 <span>Ejecuciones: {feature.cost.executions}</span>
                 <span>Cobertura: {featureCoverageLabel(feature.cost)}</span>
-                <span>Coste/tarea DONE: {featureCostPerDoneLabel(feature.cost)}</span>
+                <span>Coste est./tarea DONE: {featureCostPerDoneLabel(feature.cost)}</span>
                 <span>Caché: {featureCacheRateLabel(feature.cost)}</span>
               </div>
               <div className="feature-context text-text-muted">

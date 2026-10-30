@@ -150,9 +150,14 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 
 - **Descripción:** el CLI imprime `?token=` y la SPA lo transmite al WebSocket.
   Es una capacidad bearer reutilizable que puede quedar en historial, terminal y
-  logs de Fastify; quien la obtenga puede enviar mensajes privilegiados.
-- **Mitigación (SA-075):** redactar el token en los logs de Fastify y permitir
-  rotarlo.
+  logs de versiones anteriores a SA-075; quien la obtenga puede enviar mensajes privilegiados.
+- **Mitigación (SA-075):** Fastify redacta el query token en HTTP y upgrades WS,
+  omite Authorization del serializador y redacta cabeceras explícitas. Se elimina
+  el log de tipos WS arbitrarios; AuditLog redacta credenciales. Cada servidor
+  nuevo genera un UUID. `pixel-agents token rotate [--port PORT]` exige Bearer,
+  rechaza Origin, audita sin secretos, revoca el anterior y desconecta sockets.
+  Discovery se republica con escritura restringida y reintentos ante fallos.
+  Véase [discovery](../reference/discovery.md) y [ADR-0005](../adr/0005-server-token-transport.md).
 - **Aceptación temporal (SA-067):** aceptación explícita del transporte actual
   en uso local supervisado; tratar la URL como secreto y no compartirla. El bind
   por defecto a loopback y la comprobación del token existen, pero no evitan fugas

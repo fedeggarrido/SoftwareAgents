@@ -4,9 +4,11 @@ import fastifyWebsocket from '@fastify/websocket';
 import * as crypto from 'crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import Fastify from 'fastify';
+import type { Writable } from 'stream';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { redactAudit } from './auditLog.js';
 import type {
   AssetCache,
   ReloadAssetsSideEffect,
@@ -35,6 +37,8 @@ export interface HttpServerOptions {
   port?: number;
   /** Bearer auth token for hook and WebSocket endpoints */
   token: string;
+  onRotateToken?: () => string;
+  logStream?: Writable;
   /** AgentStateStore for WebSocket broadcast piping */
   store: AgentStateStore;
   /** Shared agent lifecycle core (for toggle side effects + standalone restore). Optional in embedded mode. */
@@ -69,7 +73,37 @@ const startTime = Date.now();
  */
 export async function createHttpServer(options: HttpServerOptions): Promise<HttpServerHandle> {
   const app = Fastify({
-    logger: !options.embedded,
+    logger: options.embedded
+      ? false
+      : {
+          ...(options.logStream ? { stream: options.logStream } : {}),
+          serializers: {
+            err: (error) => ({
+              type: error.name,
+              message: String(redactAudit(redactRequestUrl(error.message ?? ''))),
+              stack: String(redactAudit(redactRequestUrl(error.stack ?? ''))),
+            }),
+            req: (req) => ({
+              method: req.method,
+              url: redactRequestUrl(req.url ?? ''),
+              hostname: req.hostname,
+              remoteAddress: req.ip,
+            }),
+          },
+          redact: {
+            paths: ['req.headers.authorization', 'headers.authorization'],
+            censor: 'REDACTED',
+          },
+          hooks: {
+            logMethod(args, method) {
+              for (let i = 0; i < args.length; i++) {
+                if (typeof args[i] === 'string')
+                  args[i] = redactAudit(redactRequestUrl(args[i] as string)) as string;
+              }
+              method.apply(this, args);
+            },
+          },
+        },
     bodyLimit: MAX_HOOK_BODY_SIZE,
   });
 
@@ -93,6 +127,19 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHealthRoute(app);
   registerHookRoute(app, options);
   registerWebSocketRoute(app, options);
+  if (options.onRotateToken) {
+    app.post(
+      '/api/token/rotate',
+      { preHandler: bearerAuth(() => options.token) },
+      (request, reply) => {
+        // Human CLI only: browser pages must never rotate via ambient CORS access.
+        if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
+        options.token = options.onRotateToken!();
+        for (const socket of app.websocketServer.clients) socket.terminate();
+        return reply.header('Cache-Control', 'no-store').send({ status: 'rotated' });
+      },
+    );
+  }
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -124,7 +171,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
   }>(
     `${HOOK_API_PREFIX}/:providerId`,
     {
-      preHandler: bearerAuth(options.token),
+      preHandler: bearerAuth(() => options.token),
       schema: {
         params: {
           type: 'object',
@@ -173,6 +220,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     // SPA forwarded on this handshake. Nothing about a network POSITION is
     // consulted, because every position is reproducible by a forwarder.
     const privileged = options.embedded || standaloneTokenValid(request.url, options.token);
+    const connectionToken = options.token;
 
     const { store } = options;
 
@@ -223,11 +271,9 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
 
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
+      if (connectionToken !== options.token) return;
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
-        if (!options.embedded && msg.type) {
-          console.log('[Pixel Agents] WS client message:', msg.type);
-        }
         handleClientMessage(msg, send, ctx);
       } catch {
         // Malformed JSON, ignore
@@ -329,9 +375,21 @@ function timingSafeStringEqual(actual: string, expected: string): boolean {
   return actualBuf.length === expectedBuf.length && crypto.timingSafeEqual(actualBuf, expectedBuf);
 }
 
-function bearerAuth(expectedToken: string) {
+export function redactRequestUrl(url: string): string {
+  return url.replace(/([?&])([^=&#]+)=([^&#]*)/g, (match, separator: string, key: string) => {
+    try {
+      return decodeURIComponent(key.replace(/\+/g, ' ')).toLowerCase() === 'token'
+        ? `${separator}${key}=REDACTED`
+        : match;
+    } catch {
+      return match;
+    }
+  });
+}
+
+function bearerAuth(expectedToken: () => string) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${expectedToken}`)) {
+    if (!timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${expectedToken()}`)) {
       reply.code(401).send('unauthorized');
     }
   };

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { AuditLog } from './auditLog.js';
 import type {
   AssetCache,
   ReloadAssetsSideEffect,
@@ -118,6 +119,7 @@ export class PixelAgentsServer {
       host: options?.host,
       port: options?.port,
       token,
+      onRotateToken: () => this.rotateToken(),
       store: store!,
       runtime: options?.runtime,
       staticDir: options?.staticDir,
@@ -149,6 +151,32 @@ export class PixelAgentsServer {
     console.log(`[Pixel Agents] Server: listening on ${host}:${port}`);
 
     return this.config;
+  }
+
+  /** Revoke the capability and republish it through the existing restricted writer. */
+  private rotateToken(): string {
+    if (!this.config || !this.ownsServer) throw new Error('Server is not owned');
+    const token = crypto.randomUUID();
+    // Audit before changing the capability; never include either secret.
+    new AuditLog().append({
+      projectId: null,
+      actorType: 'human',
+      actorId: null,
+      action: 'server.token.rotate',
+      resourceType: 'server',
+      resourceId: `${this.config.pid}:${this.config.port}`,
+      policyDecision: null,
+      riskLevel: 'medium',
+      outcome: { status: 'authorized' },
+      taskKey: null,
+      executionId: null,
+    });
+    this.config.token = token;
+    clearTimeout(this.publicationTimer);
+    this.publicationTimer = undefined;
+    this.pendingRegistry = this.pendingLegacy = true;
+    this.publishDiscovery();
+    return token;
   }
 
   /** Stop the server and clean up its discovery records (only if we own them). */

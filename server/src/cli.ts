@@ -52,6 +52,7 @@ import { claudeProvider, copyHookScript, hookProviderById } from './providers/in
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
 import { runTelemetryCommand } from './telemetryCommand.js';
+import { runTokenCommand } from './tokenCommand.js';
 import { runUsageCommand } from './usageCommand.js';
 import { parseWorkerArgs, runWorker } from './worker.js';
 
@@ -96,7 +97,10 @@ export function parseArgs(argv: string[]): CliArgs {
 Options:
   --port, -p <number>   Port to listen on (default: OS-assigned ephemeral port)
   --host <string>       Host to bind to (default: 127.0.0.1)
-  --help                Show this help message`);
+  --help                Show this help message
+
+Commands:
+  token rotate [--port PORT]  Revoke the running server token and disconnect clients`);
       process.exit(0);
     }
   }
@@ -162,6 +166,8 @@ export async function dispatchCli(
 ): Promise<void> {
   if (argv[0] === '--design-capture-host' && process.send) {
     designCaptureHost();
+  } else if (argv[0] === 'token') {
+    await runTokenCommand(argv.slice(1));
   } else if (argv[0] === 'design') {
     await runDesignCommand(argv.slice(1));
   } else if (argv[0] === 'quota') {
@@ -325,7 +331,7 @@ async function startServer(argv: string[]): Promise<void> {
       onSetHooksEnabled,
       onReloadAssets,
     });
-    currentConfig = { port: config.port, token: config.token };
+    currentConfig = config;
 
     // Sync runtime refs with persisted settings BEFORE first scan tick. The
     // runtime's single hooksEnabled ref follows the Claude provider until the

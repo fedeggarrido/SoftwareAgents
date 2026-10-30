@@ -5,8 +5,9 @@ import { loadProjectConfig } from '../projectConfig.js';
 
 export function runLearningCommand(argv: string[], cwd = process.cwd(), log = console.log) {
   const [command, id, flag, reason] = argv;
-  if (featureIngressActor() !== 'human')
-    throw new CliUsageError('learning requires human ingress (SA-003)');
+  // Reading proposals is harmless; only approving or rejecting is a human decision.
+  if (command !== 'list' && featureIngressActor() !== 'human')
+    throw new CliUsageError('learning approve/reject requires human ingress (SA-003)');
   if (
     !(command === 'list' && argv.length === 1) &&
     !(

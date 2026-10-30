@@ -194,7 +194,7 @@ export async function dispatchCli(
   } else if (argv[0] === 'review') {
     await runReviewCommand(argv.slice(1));
   } else if (argv[0] === 'learning') {
-    runLearningCommand(argv.slice(1));
+    await runLearningCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {
     await runEvalCommand(argv.slice(1));
   } else if (argv[0] === 'task') {

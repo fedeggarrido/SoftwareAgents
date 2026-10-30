@@ -76,6 +76,29 @@ function file(root: string, state: State, id: string) {
   if (!/^[a-f0-9]{24}$/.test(id)) throw new Error('Invalid learning id');
   return resolveInside(root, `${ROOT}/${state}/${id}.json`);
 }
+/** Content fingerprint recorded with the human approval in the WorkStore. */
+export function learningHash(lesson: Learning): string {
+  const { id, title, rule, zones, role, taskType } = lesson;
+  return createHash('sha256')
+    .update(JSON.stringify({ id, title, rule, zones, role, taskType }))
+    .digest('hex');
+}
+
+/** WorkStore key of a learning approval; the file alone never proves a human decision. */
+export const learningDecisionKey = (id: string) => `learning:${id}`;
+
+/** Approved lessons whose exact content matches a recorded human approval. A file placed
+ * in approved/ by anything else (or edited after approval) is never injected. */
+export function verifiedLearnings(
+  root: string,
+  approval: (key: string) => { answer: string; actor: string } | undefined,
+): Learning[] {
+  return listLearnings(root, 'approved').filter((lesson) => {
+    const record = approval(learningDecisionKey(lesson.id));
+    return record?.actor === 'human' && record.answer === `approve:${learningHash(lesson)}`;
+  });
+}
+
 export function listLearnings(root: string, state: State): Learning[] {
   const directory = resolveInside(root, `${ROOT}/${state}`);
   if (!fs.existsSync(directory)) return [];
@@ -116,6 +139,7 @@ export function decideLearning(
     { flag: 'wx' },
   );
   fs.unlinkSync(source);
+  return lesson;
 }
 export function proposeLearnings(
   root: string,

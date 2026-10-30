@@ -102,7 +102,7 @@ import {
 import { assertTaskDependencies, featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
 import { HumanDecisions } from './humanDecisions.js';
-import { listLearnings, proposeLearnings } from './learnings.js';
+import { proposeLearnings, verifiedLearnings } from './learnings.js';
 import {
   type CascadeAttempt,
   cascadeLevels,
@@ -684,7 +684,10 @@ async function runWorkerExecution(
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
   );
   const taskData = {
-    approvedLearnings: listLearnings(config.repoRoot, 'approved'),
+    // Only lessons backed by a recorded human approval; no store means none (fail closed).
+    approvedLearnings: lifecycle?.store
+      ? verifiedLearnings(config.repoRoot, (key) => lifecycle.store.getHumanDecision(key))
+      : [],
     learningScope: {
       zones: (options.developer?.task ?? options.reviewer?.task)?.changeZones ?? [],
       role,

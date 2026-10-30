@@ -1,9 +1,10 @@
 import { CliUsageError } from '../cliErrors.js';
 import { featureIngressActor } from '../featureIngress.js';
-import { decideLearning, listLearnings } from '../learnings.js';
+import { decideLearning, learningDecisionKey, learningHash, listLearnings } from '../learnings.js';
 import { loadProjectConfig } from '../projectConfig.js';
+import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 
-export function runLearningCommand(argv: string[], cwd = process.cwd(), log = console.log) {
+export async function runLearningCommand(argv: string[], cwd = process.cwd(), log = console.log) {
   const [command, id, flag, reason] = argv;
   // Reading proposals is harmless; only approving or rejecting is a human decision.
   if (command !== 'list' && featureIngressActor() !== 'human')
@@ -35,7 +36,26 @@ export function runLearningCommand(argv: string[], cwd = process.cwd(), log = co
       ),
     );
   } else {
-    decideLearning(config.repoRoot, id, command as 'approve' | 'reject', reason);
+    const lesson = decideLearning(config.repoRoot, id, command as 'approve' | 'reject', reason);
+    // The durable human record (with the content hash) is what the worker trusts.
+    const store = await openWorkStore({
+      repositoryPath: config.repoRoot,
+      projectId: config.project.id,
+    });
+    try {
+      store.recordHumanDecision({
+        key: learningDecisionKey(id),
+        // No foreign keys: the origin Task/Execution may have been pruned or re-imported.
+        task_key: null,
+        execution_key: null,
+        question: `learning approval (origin ${lesson.origin.task}/${lesson.origin.execution})`,
+        answer: `${command}:${learningHash(lesson)}`,
+        actor: 'human',
+        decided_at: new Date().toISOString(),
+      });
+    } finally {
+      store.close();
+    }
     log(`${id}: ${command}`);
   }
 }

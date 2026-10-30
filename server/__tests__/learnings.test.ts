@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -17,7 +18,9 @@ import {
   proposeLearnings,
   selectLearnings,
   validateLearning,
+  verifiedLearnings,
 } from '../src/learnings.js';
+import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 
 let root: string;
 vi.mock('../src/projectConfig.js', () => ({
@@ -114,12 +117,14 @@ it('uses the same deterministic proposal id and truncates long rules', () => {
 });
 it.each(['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])(
   'requires human ingress for %s',
-  (key) => {
+  async (key) => {
     const lesson = proposed();
     vi.stubEnv(key, '1');
     for (const decision of ['approve', 'reject'] as const) {
       expect(() => decideLearning(root, lesson.id, decision)).toThrow('human ingress');
-      expect(() => runLearningCommand([decision, lesson.id], root)).toThrow('human ingress');
+      await expect(runLearningCommand([decision, lesson.id], root)).rejects.toThrow(
+        'human ingress',
+      );
     }
     expect(listLearnings(root, 'approved')).toEqual([]);
   },
@@ -132,16 +137,43 @@ it('rejects durably, without reproposing or injecting rejected lessons', () => {
   expect(listLearnings(root, 'approved')).toEqual([]);
   expect(listLearnings(root, 'rejected')).toEqual([lesson]);
 });
-it('lists, approves and rejects via the human CLI and preserves rejection reason', () => {
+it('lists, approves and rejects via the human CLI and preserves rejection reason', async () => {
+  // The approval is recorded in the Project's WorkStore, which lives in the Git dir.
+  execFileSync('git', ['init', '-q'], { cwd: root, windowsHide: true });
   const lesson = proposed();
   const log = vi.fn();
-  runLearningCommand(['list'], root, log);
+  await runLearningCommand(['list'], root, log);
   expect(JSON.parse(log.mock.calls[0][0]).proposed).toEqual([lesson]);
-  runLearningCommand(['approve', lesson.id], root, log);
+  await runLearningCommand(['approve', lesson.id], root, log);
   expect(listLearnings(root, 'approved')).toEqual([lesson]);
+  // Only the WorkStore record makes it injectable; a forged or edited file never is.
+  const store = await openWorkStore({ repositoryPath: root, projectId: 'test' });
+  try {
+    const approval = (key: string) => store.getHumanDecision(key);
+    expect(verifiedLearnings(root, approval)).toEqual([lesson]);
+    const approvedFile = path.join(
+      root,
+      '.softwareagents/brain/learnings/approved',
+      lesson.id + '.json',
+    );
+    const edited = {
+      ...JSON.parse(fs.readFileSync(approvedFile, 'utf8')),
+      rule: 'Edited after approval',
+    };
+    fs.writeFileSync(approvedFile, JSON.stringify(edited));
+    expect(verifiedLearnings(root, approval)).toEqual([]);
+    const forged = { ...lesson, id: 'f'.repeat(24), decision: 'approve', actor: 'human' };
+    fs.writeFileSync(
+      path.join(root, '.softwareagents/brain/learnings/approved', forged.id + '.json'),
+      JSON.stringify(forged),
+    );
+    expect(verifiedLearnings(root, approval).map((l) => l.id)).not.toContain(forged.id);
+  } finally {
+    store.close();
+  }
   proposeLearnings(root, scope, 'T2', 'E2', report);
   const second = listLearnings(root, 'proposed')[0];
-  runLearningCommand(['reject', second.id, '--reason', 'Too specific'], root, log);
+  await runLearningCommand(['reject', second.id, '--reason', 'Too specific'], root, log);
   const stored = JSON.parse(
     fs.readFileSync(
       path.join(root, '.softwareagents/brain/learnings/rejected', second.id + '.json'),

@@ -260,7 +260,14 @@ export async function runResearchCommand(
           }
           if (event.type === 'finished') {
             if (event.exitCode !== 0 && !exhausted && !abort.signal.aborted)
-              throw new Error('Research executor failed');
+              // Keep the CLI's own diagnosis (bounded): an opaque failure hid the first real cause.
+              throw new Error(
+                `Research executor failed (exit ${event.exitCode}): ${String(
+                  event.resultSummary ?? '',
+                )
+                  .replace(/\s+/g, ' ')
+                  .slice(0, 300)}`,
+              );
             if (event.exitCode === 0) output = event.resultSummary;
           }
         }

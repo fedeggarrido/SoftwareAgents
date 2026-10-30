@@ -690,36 +690,56 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
         if (cause === 'quota') await review(`fail-${cause}`);
         else await expect(review(`fail-${cause}`)).rejects.toThrow();
         expect(store.getTask(task)!).toMatchObject({
-          status: 'REVIEW',
+          // SA-038: quota parks the review in WAITING_QUOTA; the Reviewer resumes it.
+          status: cause === 'quota' ? 'WAITING_QUOTA' : 'REVIEW',
           attempt: before.attempt,
           review_ref: before.review_ref,
           review_reports: [],
           lease_owner: null,
         });
         expect(store.listDecisions()).toHaveLength(0);
-        const category = cause === 'oauth' ? 'oauth_refresh_contention' : cause;
-        const log = vi.fn();
-        await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
-        const failed = JSON.parse(log.mock.calls[0][0]).tasks.find(
-          (t: { key: string }) => t.key === task,
-        ).last_review_failure;
-        expect(failed.reason).toContain(`category=${category}`);
-        log.mockClear();
-        await runTaskCommand(['list', '--json'], repo, log);
-        expect(
-          JSON.parse(log.mock.calls[0][0]).find((t: { key: string }) => t.key === task)
-            .last_review_failure,
-        ).toEqual(failed);
-        for (const command of [['list'], ['show', 'FEAT-001']]) {
+        if (cause === 'quota') {
+          // Quota is reported as the WAITING_QUOTA state, not as a review failure.
+          const log = vi.fn();
+          await runTaskCommand(['list'], repo, log);
+          expect(log.mock.calls[0][0]).toContain('WAITING_QUOTA');
+        } else {
+          const category = cause === 'oauth' ? 'oauth_refresh_contention' : cause;
+          const log = vi.fn();
+          await runFeatureCommand(['show', 'FEAT-001', '--json'], repo, log);
+          const failed = JSON.parse(log.mock.calls[0][0]).tasks.find(
+            (t: { key: string }) => t.key === task,
+          ).last_review_failure;
+          expect(failed.reason).toContain(`category=${category}`);
           log.mockClear();
-          if (command[0] === 'list') await runTaskCommand(command, repo, log);
-          else await runFeatureCommand(command, repo, log);
-          expect(log.mock.calls[0][0]).toContain(`category=${category}`);
+          await runTaskCommand(['list', '--json'], repo, log);
+          expect(
+            JSON.parse(log.mock.calls[0][0]).find((t: { key: string }) => t.key === task)
+              .last_review_failure,
+          ).toEqual(failed);
+          for (const command of [['list'], ['show', 'FEAT-001']]) {
+            log.mockClear();
+            if (command[0] === 'list') await runTaskCommand(command, repo, log);
+            else await runFeatureCommand(command, repo, log);
+            expect(log.mock.calls[0][0]).toContain(`category=${category}`);
+          }
+          const audit = fs.readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8');
+          expect(audit).toContain(`category=${category}`);
+          expect(audit).not.toContain('SECRET_OUTPUT');
         }
-        const audit = fs.readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8');
-        expect(audit).toContain(`category=${category}`);
-        expect(audit).not.toContain('SECRET_OUTPUT');
         await review();
+        if (cause === 'quota') {
+          // Before resetsAt the resumed Reviewer is not launched; the Developer result stays.
+          expect(store.getTask(task)!).toMatchObject({
+            status: 'REVIEW',
+            attempt: before.attempt,
+            review_ref: before.review_ref,
+          });
+          expect(lastReviewFailure(store, store.getTask(task)!)?.reason).toContain(
+            'category=quota',
+          );
+          return;
+        }
         expect(store.getTask(task)!).toMatchObject({ status: 'QA', attempt: before.attempt });
         expect(lastReviewFailure(store, store.getTask(task)!)).toBeNull();
       } finally {

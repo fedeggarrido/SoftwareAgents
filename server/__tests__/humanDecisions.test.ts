@@ -36,6 +36,11 @@ describe('structured human decisions', () => {
   let service: HumanDecisions;
   beforeEach(async () => {
     vi.mocked(terminateExecutionTree).mockReset();
+    // A terminated tree is gone: later sweeps must see no live root (SA-QA-40 re-reaps a
+    // closed root whose identity still matches, which would double-count here).
+    vi.mocked(terminateExecutionTree).mockImplementation(async () => {
+      vi.mocked(processStartIdentity).mockRejectedValue(new Error('process exited'));
+    });
     vi.mocked(processStartIdentity).mockResolvedValue('identity');
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-decisions-'));
     vi.stubEnv('HOME', root);

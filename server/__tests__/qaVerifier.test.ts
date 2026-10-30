@@ -450,8 +450,19 @@ it('utility is not an assertion', () => { new assert.AssertionError({ message: '
       new AbortController().signal,
     );
     expect(commands.map((row) => row.command)).toEqual(tests.map((file) => 'vitest:' + file));
-    expect(commands).toEqual(commands.map((row) => ({ ...row, result: 'pass', failed: 0 })));
-    expect(commands.every((row) => row.passed > 0)).toBe(true);
+    // Browser-backed specs skip themselves without Playwright Chromium; the verifier must
+    // then fail closed (not_tested), never report them as passed.
+    const browserBacked = new Set(
+      tests.filter((file) =>
+        fs.readFileSync(path.join(repository, file), 'utf8').includes('context.skip('),
+      ),
+    );
+    const ran = commands.filter(
+      (row) => !(browserBacked.has(row.command.slice(7)) && row.result === 'not_tested'),
+    );
+    expect(ran).toEqual(ran.map((row) => ({ ...row, result: 'pass', failed: 0 })));
+    expect(ran.every((row) => row.passed > 0)).toBe(true);
+    expect(ran.length).toBeGreaterThanOrEqual(tests.length - browserBacked.size);
     expect(fs.existsSync(link)).toBe(false);
     expect(fs.readdirSync(scratch)).toEqual([]);
     expect(git('status', '--porcelain', '--ignored').trim()).toBe('');

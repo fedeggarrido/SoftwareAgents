@@ -285,14 +285,17 @@ it.each(['unregistered', 'registered', 'launched'])(
         // both are dead (recovery is safe), or the live supervisor retains the slot.
         const syntheticPid = Number(fs.readFileSync(path.join(home, 'launched'), 'utf8'));
         const supervisorAlive = slotProcessIdentity(supervisor!) !== null;
-        if (supervisorAlive)
+        fs.writeFileSync(path.join(home, 'finish'), 'finish');
+        if (supervisorAlive) {
           expect(
             withExecutorAdmission('codex', 'new', (owner) =>
               acquireExecutorSlot('codex', 1, owner),
             ),
           ).toBeUndefined();
-        else expect(slotProcessIdentity(syntheticPid)).toBeNull();
-        fs.writeFileSync(path.join(home, 'finish'), 'finish');
+          // A launched root outlives its disconnected worker by design (it waits for the
+          // durable-close ACK); only recovery reaps it. Simulate that reap so the slot frees.
+          process.kill(supervisor!);
+        } else expect(slotProcessIdentity(syntheticPid)).toBeNull();
       } else expect(fs.existsSync(path.join(home, 'launched'))).toBe(false);
       await vi.waitFor(() => expect(slotProcessIdentity(supervisor!)).toBeNull(), {
         timeout: 15000,

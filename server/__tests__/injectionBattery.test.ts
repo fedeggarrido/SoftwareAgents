@@ -15,6 +15,7 @@ import {
 import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import type { ExecutionEvent, ExecutionRequest, Executor } from '../src/executors/executor.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
@@ -73,10 +74,10 @@ beforeEach(() => {
   vi.stubEnv('USERPROFILE', root);
   fs.mkdirSync(path.join(root, 'worktree'));
 });
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
+  await removeTempDir(root);
+}, 30_000);
 async function run(executor: Executor, attack: InjectionCase) {
   const req: ExecutionRequest = {
     executionId: attack.id,

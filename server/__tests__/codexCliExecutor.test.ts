@@ -8,6 +8,7 @@ import { parse } from 'yaml';
 import { CodexCliExecutor, resolveCodexBinary } from '../src/executors/codexCliExecutor.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 // Native taskkill is unavailable in restricted sandboxes. Fixtures self-close in this mode;
 // executorTermination.test.ts verifies failed kills and retries with simulated processes.
@@ -48,10 +49,10 @@ beforeEach(() => {
     ),
   };
 });
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
-  fs.rmSync(root, { recursive: true, force: true });
-});
+  await removeTempDir(root);
+}, 30_000);
 function executor(mode?: string, runtimeDirectory = path.join(root, 'runtime')) {
   return new CodexCliExecutor({
     operator: { binaryPaths: { codex: process.execPath } },

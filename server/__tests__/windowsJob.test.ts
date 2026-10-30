@@ -11,6 +11,7 @@ import { processCancellation } from '../src/executors/processCancellation.js';
 import { spawnRegisteredProcess } from '../src/executors/registeredProcess.js';
 import { processStartIdentity } from '../src/workstore/processRecovery.js';
 import { windowsTerminationScript } from '../src/workstore/windowsProcessRecovery.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 it
   .skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === '1')
@@ -51,7 +52,7 @@ it
     } finally {
       if (root.exitCode === null && root.signalCode === null) root.kill();
       await exited;
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      await removeTempDir(dir);
     }
   },
   40000,
@@ -107,7 +108,7 @@ it.skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === 
     } finally {
       if (root.exitCode === null && root.signalCode === null) root.kill();
       await exited;
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      await removeTempDir(dir);
     }
   },
   40000,

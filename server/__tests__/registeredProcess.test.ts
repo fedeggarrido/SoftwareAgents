@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { processCancellation } from '../src/executors/processCancellation.js';
 import { spawnRegisteredProcess } from '../src/executors/registeredProcess.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 vi.mock('child_process', async (original) => {
   const actual = await original<typeof import('child_process')>();
@@ -16,10 +17,10 @@ let dir: string;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registered-process-'));
 });
-afterEach(() => {
+afterEach(async () => {
   vi.clearAllMocks();
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
+  await removeTempDir(dir);
+}, 30_000);
 
 /** Resolves with the events seen once 'close' arrives; rejects if it never does. */
 function settle(child: ChildProcess, timeoutMs = 8000) {

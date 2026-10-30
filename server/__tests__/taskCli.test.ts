@@ -5,7 +5,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 
+import type { AgentSpec } from '../../core/src/agentSpec.js';
+import { compileAgent } from '../src/agentCompiler.js';
 import { AuditLog } from '../src/auditLog.js';
 import { runTaskCommand } from '../src/commands/task.js';
 import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
@@ -131,6 +134,53 @@ async function open() {
 function dbFile() {
   return path.join(repo, '.git/softwareagents/work.sqlite3');
 }
+
+function developerSpec(): AgentSpec {
+  return parse(
+    fs.readFileSync(path.join(__dirname, '../../agents/templates/developer.yaml'), 'utf8'),
+  );
+}
+
+it('persists external import provenance and rejects the task before tool execution', async () => {
+  expect(cli('import', 'dag.yaml', '--origin', 'external').code).toBe(0);
+  const store = await open();
+  for (const key of [first, second]) {
+    const task = store.getTask(key)!;
+    expect(JSON.parse(JSON.parse(task.declaration!).description)).toEqual({
+      provenance: 'untrusted-external',
+      origin: 'task-import',
+      text: 'Implement',
+    });
+    expect(task.declaration).toContain('untrusted-external');
+    expect(() => compileAgent(developerSpec(), 'developer', { task })).toThrow(
+      'tool-free quarantine reader',
+    );
+  }
+  // Repeating the same import is idempotent; omitting the source cannot untaint it.
+  expect(cli('import', 'dag.yaml', '--origin', 'external').code).toBe(0);
+  expect(cli('import', 'dag.yaml').code).not.toBe(0);
+  expect(() => compileAgent(developerSpec(), 'developer', { task: store.getTask(first) })).toThrow(
+    'tool-free quarantine reader',
+  );
+});
+
+it.each([{ options: [] }, { options: ['--origin', 'local'] }])(
+  'keeps local Architect DAGs usable: $options',
+  async ({ options }) => {
+    expect(cli('import', 'dag.yaml', ...options).code).toBe(0);
+    const task = (await open()).getTask(first)!;
+    expect(JSON.parse(task.declaration!).description).toBe('Implement');
+    expect(() => compileAgent(developerSpec(), 'developer', { task })).not.toThrow();
+  },
+);
+
+it.each([['--origin'], ['--origin', 'unknown'], ['--origin', 'external', '--origin', 'local']])(
+  'rejects invalid import provenance options: %j',
+  (...options) => {
+    expect(cli('import', 'dag.yaml', ...options).code).not.toBe(0);
+    expect(fs.existsSync(dbFile())).toBe(false);
+  },
+);
 
 it('imports the spec title and backfills legacy NULL titles at open from the registered revision', async () => {
   expect(cli('import', 'dag.yaml').code).toBe(0);

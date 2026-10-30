@@ -14,12 +14,28 @@ import {
   validateAgentOutput,
 } from '../src/agentCompiler.js';
 import { CODEX_DISABLED_FEATURES } from '../src/constants.js';
+import { requirementsBrief } from '../src/requirements.js';
 
 function template(role: string): AgentSpec {
   return parse(
     fs.readFileSync(path.join(__dirname, '../../agents/templates', role + '.yaml'), 'utf8'),
   );
 }
+
+it.each(['FEAT-001', 'FEAT-002', 'FEAT-003'])(
+  'accepts the operator-authored repository brief %s',
+  (key) => {
+    const request = fs.readFileSync(
+      path.join(__dirname, '../../docs/examples', `${key}-request.md`),
+      'utf8',
+    );
+    expect(() =>
+      compileAgent(template('requirements-analyst'), 'requirements-analyst', {
+        task: requirementsBrief({ key, request }),
+      }),
+    ).not.toThrow();
+  },
+);
 for (const role of Object.keys(ROLE_PROFILES)) {
   it(`snapshots ${role} for both CLIs`, () => {
     const compiled = compileAgent(template(role), role, { task: { key: 'SA-020' } });

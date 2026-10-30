@@ -21,19 +21,65 @@ Inventario SA-102 y [mapa OWASP Agentic ASI01–ASI10](owasp-agentic.md).
 Validar la forma de un documento no acredita su contenido ni elimina instrucciones
 maliciosas. Un import humano tampoco convierte texto externo en autoridad.
 
-| Entrada y rutas reales                                                                                                                                     | Receptor actual                                                                  | Frontera y estado                                                                                                                                             |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Web/HTML/buscador: `server/src/researchAdapters/web.ts`, `server/src/researchHttp.ts`                                                                      | `researcher`, `read_only`, sin herramientas                                      | HTTP del runtime; SourceItems etiquetados, incluidos título y metadatos.                                                                                      |
-| Abstracts arXiv/Semantic Scholar: `server/src/researchAdapters/papers.ts`                                                                                  | `researcher`                                                                     | Misma cuarentena; no descarga PDFs.                                                                                                                           |
-| Libros: `server/src/researchAdapters/books.ts`                                                                                                             | `researcher`                                                                     | Solo metadatos/descripciones públicas, no obras completas.                                                                                                    |
-| Posts/comentarios: `server/src/researchAdapters/reddit.ts`                                                                                                 | `researcher`                                                                     | OAuth y red pertenecen al runtime.                                                                                                                            |
-| Adapters registrados, cache e informes: `server/src/research.ts`, `server/src/commands/research.ts`                                                        | `researcher`; posteriormente consumidores del Brain                              | Se normaliza procedencia de caches antiguos; informe completo conserva bibliografía contaminada; salida reducida en `*.handoff.json`.                         |
-| DAG YAML, FeatureSpec y declaraciones SQLite: `server/src/commands/task.ts`, `server/src/taskDag.ts`, `server/src/workstore/SqliteWorkStore.ts`            | Developer/QA author (`branch_write`), Reviewer/QA (`read_only` con herramientas) | Esquemas existentes; texto de issues/tareas copiado al YAML todavía sin lector obligatorio. **Abierto**.                                                      |
-| ClickUp/issues: `server/src/boardWatcher.ts`, `server/src/agentRoles.ts`                                                                                   | Oficina muestra espejo `docs/backlog/board.json`; briefs reconocen IDs ClickUp   | No se encontró importador nativo de cuerpos de issues GitHub/ClickUp a prompts. Copias manuales entran por DAG/request/brief. El espejo no concede autoridad. |
-| Documentos `--request`/`--answers`: `server/src/commands/feature.ts`, `server/src/requirements.ts`, `server/src/architect.ts`                              | Requirements analyst/Architect (`brain_write`, herramientas de lectura)          | pathGuard y contratos de propuesta; texto libre todavía sin etiqueta/lector previo. **Abierto**.                                                              |
-| `worker --brief`, evals y task records: `server/src/worker.ts`, `server/src/evalTasks.ts`                                                                  | Rol asignado, normalmente Developer                                              | El guard protege envelopes etiquetados, no descubre procedencia de texto plano. **Abierto**.                                                                  |
-| Brain, código, diffs, resultados: `server/src/worker.ts`, `server/src/architect.ts`, `server/src/reviewer.ts`, `server/src/qa.ts`                          | Architect, Developer, Reviewer, QA                                               | SourceItems/envelopes conservados en taskData se rechazan; copiar solo texto o leerlo por herramientas pierde la etiqueta. **Abierto**.                       |
-| Capturas PNG y texto visible: `server/src/designCaptureHost.ts`, `server/src/commands/design.ts`, `server/src/designer.ts`, `server/src/designPipeline.ts` | Product designer (`read_only`, con Read/Glob/Grep); findings al rework           | DesignReport y evidencias del runtime existentes; transporte multimodal sin herramientas y handoff acotado pendientes. **Abierto**.                           |
+| Entrada y rutas reales                                                                                                                                     | Receptor actual                                                                  | Frontera y estado                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web/HTML/buscador: `server/src/researchAdapters/web.ts`, `server/src/researchHttp.ts`                                                                      | `researcher`, `read_only`, sin herramientas                                      | HTTP del runtime; SourceItems etiquetados, incluidos título y metadatos.                                                                                                                                                                                  |
+| Abstracts arXiv/Semantic Scholar: `server/src/researchAdapters/papers.ts`                                                                                  | `researcher`                                                                     | Misma cuarentena; no descarga PDFs.                                                                                                                                                                                                                       |
+| Libros: `server/src/researchAdapters/books.ts`                                                                                                             | `researcher`                                                                     | Solo metadatos/descripciones públicas, no obras completas.                                                                                                                                                                                                |
+| Posts/comentarios: `server/src/researchAdapters/reddit.ts`                                                                                                 | `researcher`                                                                     | OAuth y red pertenecen al runtime.                                                                                                                                                                                                                        |
+| Adapters registrados, cache e informes: `server/src/research.ts`, `server/src/commands/research.ts`                                                        | `researcher`; posteriormente consumidores del Brain                              | Se normaliza procedencia de caches antiguos; informe completo conserva bibliografía contaminada; salida reducida en `*.handoff.json`.                                                                                                                     |
+| DAG YAML, FeatureSpec y declaraciones SQLite: `server/src/commands/task.ts`, `server/src/taskDag.ts`, `server/src/workstore/SqliteWorkStore.ts`            | Developer/QA author (`branch_write`), Reviewer/QA (`read_only` con herramientas) | `task import --origin external` etiqueta cada descripción antes de persistir la declaración; el guard rechaza el task record y el DAG etiquetados. Import local del Architect conservado. Origen declarado por el operador, no detectado automáticamente. |
+| ClickUp/issues: `server/src/boardWatcher.ts`, `server/src/agentRoles.ts`                                                                                   | Oficina muestra espejo `docs/backlog/board.json`; briefs reconocen IDs ClickUp   | No se encontró importador nativo de cuerpos de issues GitHub/ClickUp a prompts. Copias manuales entran por DAG/request/brief. El espejo no concede autoridad.                                                                                             |
+| Documentos `--request`/`--answers`: `server/src/commands/feature.ts`, `server/src/requirements.ts`, `server/src/architect.ts`                              | Requirements analyst/Architect (`brain_write`, herramientas de lectura)          | Briefs propios del operador (incluidos `docs/examples/*-request.md`) son peticiones humanas, sin etiqueta externa. Copias externas deben conservar el envelope JSON; texto plano sin procedencia sigue **abierto**.                                       |
+| `worker --brief`, evals y task records: `server/src/worker.ts`, `server/src/evalTasks.ts`                                                                  | Rol asignado, normalmente Developer                                              | El guard protege envelopes etiquetados, no descubre procedencia de texto plano. **Abierto**.                                                                                                                                                              |
+| Brain, código, diffs, resultados: `server/src/worker.ts`, `server/src/architect.ts`, `server/src/reviewer.ts`, `server/src/qa.ts`                          | Architect, Developer, Reviewer, QA                                               | SourceItems/envelopes conservados en taskData se rechazan; copiar solo texto o leerlo por herramientas pierde la etiqueta. **Abierto**.                                                                                                                   |
+| Capturas PNG y texto visible: `server/src/designCaptureHost.ts`, `server/src/commands/design.ts`, `server/src/designer.ts`, `server/src/designPipeline.ts` | Product designer (`read_only`, con Read/Glob/Grep); findings al rework           | PNG generado por runtime sobre la UI propia y fixtures propios; no es una importación externa. OCR/texto externo visible no queda cubierto; sigue pendiente su cuarentena si se introduce.                                                                |
+
+### Clasificación de origen (fase B)
+
+«Externo» describe la fuente del contenido, no la ubicación del archivo ni quién
+ejecuta el comando. Cuerpos de tareas/issues de ClickUp/GitHub, texto pegado de un
+issue, respuestas obtenidas de una URL y documentos de terceros son externos,
+aunque el operador los guarde o importe desde el repositorio. Una URL citada por
+el operador como referencia no convierte por sí sola su petición en externa;
+el contenido recuperado de esa URL sí lo es. No hay detección semántica de copias.
+
+`task import <dag.yaml> --origin external` declara ese origen para el lote entero.
+El runtime envuelve cada descripción como JSON con
+`provenance: untrusted-external`, `origin: task-import` y `text`, antes de crear
+las declaraciones inmutables de SQLite. La etiqueta protege también el título y
+el resto de la tarea al bloquear el objeto completo. La reimportación idéntica
+es idempotente; reimportar sin la opción no elimina la etiqueta: entra en
+conflicto con la declaración inmutable. Un diseño ya registrado tampoco puede
+reemplazarse por un import con otra declaración. No se migran tareas antiguas.
+
+Sin opción (o con `--origin local`), el contrato sigue siendo el DAG local del
+Architect o una tarea escrita por el operador; no se añade contaminación externa.
+El operador debe declarar `external` al importar copias de sistemas externos.
+Este contrato explícito no autentica al operador ni evita una declaración falsa.
+
+Los briefs propios del operador (`docs/examples/*-request.md`, `feature run
+--request`) expresan requisitos humanos y no se etiquetan como externos. Para
+texto externo pegado en un brief o documento Brain, conservar el envelope de
+`externalText` como JSON completo o bloque Markdown `json` al principio de línea:
+
+```json
+{ "kind": "untrusted-external-text", "origin": "issue", "text": "texto copiado del issue" }
+```
+
+El guard existente reconoce ese envelope dentro del brief/Brain al compilar y
+deniega roles con herramientas. Un documento Brain propio del operador no se
+etiqueta globalmente por estar en Brain. Copias antiguas sin etiqueta, texto
+plano, front matter YAML y lecturas posteriores por herramientas no permiten
+recuperar procedencia; siguen siendo huecos, no entradas automáticamente saneadas.
+
+Las capturas del diseñador se generan por `captureInHost` desde la SPA compilada
+del árbol de tarea, con fixtures del runtime, sin watchers ni WorkStore de
+producción. Su origen es la UI propia, no una web o imagen de terceros: no se
+añade etiqueta externa al PNG. Esto no acredita la seguridad semántica de sus
+píxeles ni del código del árbol. Texto OCR o contenido externo que se muestre en
+una captura queda fuera de esta clasificación y de la cobertura del guard JSON;
+si se introduce, necesita conservar procedencia y una frontera propia.
 
 ### Barrera implementada y límites
 
@@ -63,11 +109,14 @@ hechos siguen siendo datos y requieren las políticas de acciones existentes.
 Esta barrera no descubre procedencia de texto plano ni evita lecturas posteriores
 del repositorio. No se añadió un lanzamiento implícito de modelo al worker: exige
 integrar admisión, cuota, cancelación, auditoría y transporte de imágenes. SA-102
-sigue **parcial** hasta migrar las rutas abiertas. No hay cambio de rol ni recorte
-silencioso de briefs/imports existentes. No presentar el pipeline completo como
+sigue **parcial** hasta migrar las rutas abiertas. El import declarado externo se
+bloquea; briefs del operador e imports locales conservan su comportamiento.
+No presentar el pipeline completo como
 protegido por dual-LLM.
 
-Pruebas: `server/__tests__/externalContent.test.ts`,
+Pruebas: `server/__tests__/taskCli.test.ts` (import externo persistido → rechazo
+en compileAgent, idempotencia y DAG local), `server/__tests__/agentCompiler.test.ts`
+(briefs propios del operador), `server/__tests__/externalContent.test.ts`,
 `server/__tests__/research.test.ts`, `server/__tests__/injectionBattery.test.ts` y
 fixtures `server/__tests__/fixtures/injection/external-{web,paper,issue}.json`.
 Comprueban procedencia, herramientas, rechazo del compilador y ausencia del payload

@@ -29,7 +29,7 @@ import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFile
 const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
 const USAGE =
-  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | show <KEY> | backup [--keep N] | retry <KEY> --reason <text>';
+  'Usage: pixel-agents task import <dag.yaml> [--origin local|external] | list [--status S] [--json] | show <KEY> | backup [--keep N] | retry <KEY> --reason <text>';
 
 /** Keep untrusted fields on one terminal line without executing control sequences. */
 function textField(value: string): string {
@@ -56,8 +56,18 @@ function parseArgs(argv: string[]) {
     args[2].trim()
   )
     return { command, file: args[0], reason: args[2], status, json, keep };
-  if (command === 'import' && args.length === 1 && !args[0].startsWith('-'))
-    return { command, file: args[0], status, json, keep };
+  if (command === 'import') {
+    if (
+      !args[0] ||
+      args[0].startsWith('-') ||
+      !(
+        args.length === 1 ||
+        (args.length === 3 && args[1] === '--origin' && ['local', 'external'].includes(args[2]))
+      )
+    )
+      throw new CliUsageError(USAGE);
+    return { command, file: args[0], origin: args[2] ?? 'local', status, json, keep };
+  }
   if (command === 'list') {
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--json' && !json) json = true;
@@ -282,6 +292,17 @@ export async function runTaskCommand(
       if (document.errors.length)
         throw new Error(document.errors.map((error) => error.message).join('; '));
       const dag = parseTaskDag(document.toJS({ maxAliasCount: 100 }));
+      // A local file can contain copied issues. The operator declares its source;
+      // neither its filesystem location nor a human import makes it trusted.
+      // Persist taint in the description (and immutable declaration) so every
+      // existing task consumer reaches the compiler guard without a DB migration.
+      if (args.origin === 'external')
+        for (const task of dag.tasks)
+          task.description = JSON.stringify({
+            provenance: 'untrusted-external',
+            origin: 'task-import',
+            text: task.description,
+          });
       // Resolve canonical pipeline artifacts without opening/activating SQLite for invalid DAGs.
       const pipelineSpec = path.relative(
         cwd,

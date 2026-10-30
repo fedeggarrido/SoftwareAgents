@@ -164,6 +164,7 @@ export class ExecutionTelemetry {
       executor: string;
       agent: string;
       role: string;
+      prefixHash?: string;
       model?: string;
       tier?: string;
       effort?: string;
@@ -188,6 +189,7 @@ export class ExecutionTelemetry {
       'softwareagents.executor': input.executor,
       'gen_ai.agent.name': input.agent,
       'softwareagents.agent.role': input.role,
+      'softwareagents.prefix.hash': input.prefixHash,
       'gen_ai.request.model': input.model,
       'softwareagents.model.tier': input.tier,
       'softwareagents.model.effort': input.effort,
@@ -205,7 +207,9 @@ export class ExecutionTelemetry {
   }
   observe(o: TelemetryObservation): void {
     if (this.ended) return;
-    if (o.kind === 'model') {
+    if (o.kind === 'prefix') {
+      if (/^[a-f0-9]{64}$/.test(o.hash)) this.attrs['softwareagents.prefix.hash'] = o.hash;
+    } else if (o.kind === 'model') {
       const name = telemetryName(o.model);
       if (name) {
         if (this.attrs['gen_ai.response.model'] && this.attrs['gen_ai.response.model'] !== name)

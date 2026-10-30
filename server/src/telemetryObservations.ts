@@ -2,6 +2,7 @@ import { TELEMETRY_IDENTIFIER_LENGTH, TELEMETRY_MESSAGE_LIMIT } from './constant
 
 /** Content-free projection at the CLI boundary. Raw records never reach the sink. */
 export type TelemetryObservation =
+  | { kind: 'prefix'; hash: string }
   | { kind: 'model'; model: string }
   | { kind: 'usage'; input: number; output: number; cacheRead?: number; cacheCreate?: number }
   | { kind: 'tool_start'; id: string; name: string; time: number }

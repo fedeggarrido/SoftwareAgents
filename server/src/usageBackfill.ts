@@ -109,6 +109,7 @@ export async function runUsageBackfill(argv: string[], cwd: string, log: (s: str
           endedAt?: string;
           observation?: {
             kind?: string;
+            hash?: string;
             model?: string;
             input?: number;
             output?: number;
@@ -126,6 +127,8 @@ export async function runUsageBackfill(argv: string[], cwd: string, log: (s: str
             endedAt = event.endedAt;
         }
         const o = event.type === 'telemetry' ? event.observation : undefined;
+        if (o?.kind === 'prefix' && typeof o.hash === 'string' && /^[a-f0-9]{64}$/.test(o.hash))
+          attrs['softwareagents.prefix.hash'] = o.hash;
         if (o?.kind === 'model' && typeof o.model === 'string') {
           if (attrs['gen_ai.response.model'] && attrs['gen_ai.response.model'] !== o.model)
             attrs['softwareagents.model.multiple'] = 1;

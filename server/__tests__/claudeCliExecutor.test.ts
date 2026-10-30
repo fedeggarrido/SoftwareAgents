@@ -76,6 +76,48 @@ function executor(mode?: string) {
     hookCommand: 'node "trusted-hook.js"',
   });
 }
+it('pins launch inputs and requires a fresh registered execution for changed options', async () => {
+  req.model = 'initial-model';
+  req.agentSpec = parse(
+    fs.readFileSync(path.join(__dirname, '../../agents/templates/developer.yaml'), 'utf8'),
+  );
+  const binaryArgs = [path.join(__dirname, 'fixtures/fake-cli.cjs'), 'claude', '--inspect'];
+  const options = {
+    binary: process.execPath,
+    binaryArgs,
+    runtimeDirectory: path.join(root, 'runtime'),
+  };
+  const cli = new ClaudeCliExecutor(options);
+  const handle = new ExecutionRegistry(root).executor(cli).start(req);
+  req.model = 'changed-model';
+  req.effort = 'high';
+  req.flags = ['--unsafe'];
+  req.agentSpec!.permissions.profile = 'read_only';
+  options.binary = 'must-not-launch';
+  binaryArgs.push('--fail');
+  const events: ExecutionEvent[] = [];
+  for await (const event of handle.events) events.push(event);
+  const report = JSON.parse((events.find((e) => e.type === 'output') as { text: string }).text);
+  expect(report.args[report.args.indexOf('--model') + 1]).toBe('initial-model');
+  expect(report.args).not.toContain('--effort');
+  expect(report.args).not.toContain('--fail');
+  expect(report.args).not.toContain('--unsafe');
+  expect(report.args[report.args.indexOf('--tools') + 1]).toContain('Edit');
+  expect(report.mcp).toEqual({ mcpServers: {} });
+  expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
+  // Recreating the registry proves the claim survives process-local objects.
+  expect(() => new ExecutionRegistry(root).executor(cli).start(req)).toThrow();
+  const next = new ExecutionRegistry(root)
+    .executor(executor('--inspect'))
+    .start({ ...req, executionId: 'next', flags: [], effort: undefined });
+  const nextEvents: ExecutionEvent[] = [];
+  for await (const event of next.events) nextEvents.push(event);
+  const nextReport = JSON.parse(
+    (nextEvents.find((e) => e.type === 'output') as { text: string }).text,
+  );
+  expect(nextReport.args[nextReport.args.indexOf('--model') + 1]).toBe('changed-model');
+  expect(new ExecutionRegistry(root).sessionMap().size).toBe(2);
+});
 it.each(['--usage-limit', '--quota-stderr'])('normalizes quota diagnostic %s', async (mode) => {
   const events: ExecutionEvent[] = [];
   for await (const event of executor(mode).start(req).events) events.push(event);

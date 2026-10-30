@@ -11,6 +11,7 @@ import { resolveInside } from '../pathGuard.js';
 import { readRows } from '../sqliteReadOnly.js';
 import type { ExecutionRecord as StoredExecution, WorkStore } from '../workstore/WorkStore.js';
 import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './executor.js';
+import { snapshotExecutionRequest } from './executor.js';
 
 export interface SessionExecution {
   executionId: string;
@@ -134,7 +135,7 @@ export class ExecutionRegistry {
     return {
       id: inner.id,
       start(input: ExecutionRequest): ExecutionHandle {
-        const req = { ...input, flags: [...input.flags] };
+        const req = snapshotExecutionRequest(input);
         if (!/^[a-zA-Z0-9_-]+$/.test(req.executionId)) {
           throw new Error('Invalid executionId');
         }

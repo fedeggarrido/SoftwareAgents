@@ -3,6 +3,9 @@ import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js'
 import type { ExecutionRecord, TaskRecord } from './workstore/WorkStore.js';
 
 export interface UsageEntry {
+  /** Absent/null in historical rows: never infer a prefix from the old prompt hash. */
+  prefixHash?: string | null;
+  role?: string | null;
   source?: 'backfill';
   executionId: string;
   taskKey: string;
@@ -38,6 +41,15 @@ export function usageEntry(
   addTelemetryTotals(totals, { ...attributes }, prices);
   const known = (value: number | 'unknown') => (typeof value === 'number' ? value : null);
   return {
+    prefixHash:
+      typeof attributes['softwareagents.prefix.hash'] === 'string'
+        ? attributes['softwareagents.prefix.hash']
+        : null,
+    role:
+      execution.agent_role ??
+      (typeof attributes['softwareagents.agent.role'] === 'string'
+        ? attributes['softwareagents.agent.role']
+        : null),
     executionId: execution.key,
     taskKey: execution.task_key,
     featureKey: task.feature_key,
@@ -79,6 +91,8 @@ export function aggregateUsage(entries: UsageEntry[], tasks: Pick<TaskRecord, 'k
   const durations = known('durationMs');
   return {
     executions: entries.length,
+    distinctPrefixHashes: new Set(entries.map((e) => e.prefixHash).filter(Boolean)).size,
+    unknownPrefixExecutions: entries.filter((e) => !e.prefixHash).length,
     durationMs: durations.length ? durations.reduce((n, e) => n + e.durationMs!, 0) : null,
     inputTokens,
     outputTokens: sum('outputTokens'),
@@ -108,24 +122,29 @@ export function usageSummary(
       (!filter.feature || t.feature_key === filter.feature) &&
       (!filter.day || selected.some((e) => e.taskKey === t.key)),
   );
-  const groups = (key: 'taskKey' | 'featureKey' | 'day') =>
+  const groups = (key: 'taskKey' | 'featureKey' | 'day' | 'role') =>
     Object.fromEntries(
-      [...new Set(selected.map((e) => e[key] ?? 'unassigned'))].map((value) => {
-        const rows = selected.filter((e) => (e[key] ?? 'unassigned') === value);
-        return [
-          value,
-          aggregateUsage(
-            rows,
-            scopedTasks.filter((t) => rows.some((e) => e.taskKey === t.key)),
-          ),
-        ];
-      }),
+      [...new Set(selected.map((e) => e[key] ?? (key === 'role' ? 'unknown' : 'unassigned')))]
+        .sort()
+        .map((value) => {
+          const rows = selected.filter(
+            (e) => (e[key] ?? (key === 'role' ? 'unknown' : 'unassigned')) === value,
+          );
+          return [
+            value,
+            aggregateUsage(
+              rows,
+              scopedTasks.filter((t) => rows.some((e) => e.taskKey === t.key)),
+            ),
+          ];
+        }),
     );
   return {
     total: aggregateUsage(selected, scopedTasks),
     byTask: groups('taskKey'),
     byFeature: groups('featureKey'),
     byDay: groups('day'),
+    byRole: groups('role'),
   };
 }
 

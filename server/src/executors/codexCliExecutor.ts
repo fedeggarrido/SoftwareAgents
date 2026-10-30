@@ -30,6 +30,7 @@ import { CliTelemetryProjection } from '../telemetryObservations.js';
 import { auditContainmentDenial, codexItemContainment } from './agentContainment.js';
 import { codexSessionsDirectory, findSubagentRollout } from './codexSubagents.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
+import { snapshotExecutionRequest } from './executor.js';
 import { processCancellation } from './processCancellation.js';
 import { spawnRegisteredProcess } from './registeredProcess.js';
 
@@ -112,6 +113,7 @@ export class CodexCliExecutor implements Executor {
   readonly id = 'codex' as const;
   constructor(private readonly options: CodexCliExecutorOptions) {}
   start(req: ExecutionRequest): ExecutionHandle {
+    req = snapshotExecutionRequest(req);
     if (!executorSupportsRole('codex', req.role))
       throw new Error(
         'code_execution_not_mediated: Codex cannot run QA/Reviewer without shell mediation',
@@ -132,7 +134,7 @@ export class CodexCliExecutor implements Executor {
       req.taskData ?? { task: { key: req.taskKey, content: req.prompt } },
     );
     const binary = resolveCodexBinary(this.options.operator);
-    const options = this.options;
+    const options = { ...this.options, binaryArgs: [...(this.options.binaryArgs ?? [])] };
     let child: ChildProcess | undefined;
     let done = false;
     let violation: string | undefined;
@@ -231,7 +233,9 @@ export class CodexCliExecutor implements Executor {
               /* reported below */
             }
           }, req.timeoutMin * 60000);
-          const queue: ExecutionEvent[] = [];
+          const queue: ExecutionEvent[] = [
+            { type: 'telemetry', observation: { kind: 'prefix', hash: compiled.codex.prefixHash } },
+          ];
           const telemetry = new CliTelemetryProjection();
           let ownRollout: string | undefined;
           let wake: (() => void) | undefined;

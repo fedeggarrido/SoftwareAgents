@@ -104,7 +104,7 @@ it('selects newest desktop hash executable and reports missing installations', (
 });
 it('normalizes captured real startup and synthetic success with one usage event', async () => {
   const events = await collect();
-  expect(events[0]).toMatchObject({
+  expect(events.find((e) => e.type === 'started')).toMatchObject({
     type: 'started',
     sessionId: '00000000-0000-7000-a000-000000000034',
     pid: expect.any(Number),
@@ -114,6 +114,37 @@ it('normalizes captured real startup and synthetic success with one usage event'
   ]);
   expect(events.at(-1)).toEqual({ type: 'finished', exitCode: 0, resultSummary: 'Fake result' });
   expect(fs.readdirSync(path.join(root, 'runtime'))).toEqual([]);
+});
+it('snapshots model, flags, spec and operator argv before lazy launch', async () => {
+  req.model = 'initial-model';
+  const binaryArgs = [path.join(__dirname, 'fixtures/codex-cli.cjs'), '--inspect'];
+  const options = {
+    operator: { binaryPaths: { codex: process.execPath } },
+    binaryArgs,
+    runtimeDirectory: path.join(root, 'runtime'),
+    sessionsDirectory: path.join(root, 'sessions'),
+  };
+  const handle = new CodexCliExecutor(options).start(req);
+  req.model = 'changed-model';
+  req.effort = 'high';
+  req.flags = ['--unsafe'];
+  req.agentSpec!.permissions.profile = 'branch_write';
+  options.operator.binaryPaths.codex = 'must-not-launch';
+  binaryArgs.push('--fail');
+  const events: ExecutionEvent[] = [];
+  for await (const event of handle.events) events.push(event);
+  const report = JSON.parse((events.find((e) => e.type === 'output') as { text: string }).text);
+  expect(report.args[report.args.indexOf('-m') + 1]).toBe('initial-model');
+  expect(report.args[report.args.indexOf('--sandbox') + 1]).toBe('read-only');
+  expect(report.args).toContain('features.apps=false');
+  expect(report.args).not.toContain('--fail');
+  expect(report.args).not.toContain('--unsafe');
+  expect(report.args).not.toContain('model_reasoning_effort="high"');
+  expect(events).toContainEqual({
+    type: 'telemetry',
+    observation: { kind: 'prefix', hash: expect.stringMatching(/^[a-f0-9]{64}$/) },
+  });
+  expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
 });
 it('uses compiler sandbox/config/schema and optional policy model without bypass or ephemeral', async () => {
   req.model = 'policy-model';

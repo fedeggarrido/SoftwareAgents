@@ -29,6 +29,19 @@ export interface ExecutionRequest {
   persistProcessClose?: () => void | Promise<void>;
 }
 
+/** Capture launch inputs before the lazy event iterator can observe caller mutations.
+ * Callbacks retain identity; declarative data is a detached snapshot. Registered
+ * executions cannot be relaunched: ExecutionRegistry claims their ID exclusively.
+ */
+export function snapshotExecutionRequest(req: ExecutionRequest): ExecutionRequest {
+  return {
+    ...req,
+    flags: [...req.flags],
+    agentSpec: req.agentSpec ? structuredClone(req.agentSpec) : undefined,
+    taskData: req.taskData ? structuredClone(req.taskData) : undefined,
+  };
+}
+
 export type ExecutionEvent =
   /** Adapter-produced eligibility after confirmed closure, never inferred from model text. */
   | { type: 'guardCorrection'; diagnostic: string }

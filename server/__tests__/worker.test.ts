@@ -197,6 +197,19 @@ describe('worker lifecycle SA-039', () => {
     const result = await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
     expect(result.quotaDecision).toBeUndefined();
     expect(start).toHaveBeenCalledTimes(3);
+    const executionIds = start.mock.calls.map(([request]) => request.executionId);
+    expect(new Set(executionIds).size).toBe(3);
+    expect(new Set(start.mock.calls.map(([request]) => request.model)).size).toBe(1);
+    const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
+    try {
+      const usage = store.listUsage();
+      expect(usage).toHaveLength(3);
+      expect(usage.every((entry) => entry.role === 'developer')).toBe(true);
+      expect(usage.every((entry) => /^[a-f0-9]{64}$/.test(entry.prefixHash ?? ''))).toBe(true);
+      expect(new Set(usage.map((entry) => entry.prefixHash)).size).toBe(1);
+    } finally {
+      store.close();
+    }
   });
   test.each(['linux', 'darwin'])(
     'refuses %s before claiming work, preparing a worktree or spawning',

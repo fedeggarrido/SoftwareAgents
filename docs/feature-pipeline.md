@@ -1542,6 +1542,46 @@ persistido de la tarea (índice desde cero). No autoriza transiciones de la tare
 por rol, executor, modelo y severidad, con n y motivos de degradación de los
 hallazgos evaluados por humanos. Los informes históricos sin decisión no cuentan.
 
+## Contexto entre Developer, Reviewer y QA (SA-099)
+
+`developerRequest` reconstruye la FeatureSpec aprobada, sus SHA y los del diseño,
+el diseño completo, la declaración de tarea y su alcance. Incluye, cuando existen,
+findings de revisión, defectos de QA, historial de diseño y motivos de reintento o
+fallo anterior. Para Reviewer/QA añade cobertura diferida del DAG.
+`reviewerRequest` reutiliza esos datos y añade `reviewRef` (rama, base y SHA),
+worktree, executor del Developer, lista de archivos, tests cambiados y diff Git
+completo acotado a 1 MiB. `reviewerBrief` añade contrato, descubrimiento de tests
+y errores de validación. `qaBrief` añade contrato, resultados de comandos del
+runtime (incluida evidencia de baseline cuando está disponible), allowlist de
+comandos adicionales y errores de validación. No se transfieren transcripts ni
+la conversación del Developer; el receptor reconstruye el contexto desde
+artefactos y evidencia persistida. Este handoff no se modifica en SA-099.
+
+El compilador mantiene constitución, declaración de rol y reglas en un prefijo
+estable con versión `PROMPT_RULES_VERSION`. Task, Brain, repositorio, modo doc y
+schema de salida viajan después como JSON de contexto. Una huella del AgentSpec
+canónico vincula todos sus campos sin duplicar la declaración completa.
+`prefixHash` es SHA-256
+de los bytes estables escritos por el runtime; en Codex incluye el delimitador
+fijo anterior al contexto. Los dos executors tienen reglas distintas y por eso
+pueden producir dos hashes para un rol. No mide los prompts internos del CLI,
+herramientas o contexto que añada el proveedor.
+
+El ledger conserva `prefixHash` y `role` como campos opcionales de su cuerpo JSON;
+no necesita migración SQLite ni reescritura de registros históricos. Los registros
+sin hash siguen siendo desconocidos, incluso si contienen `system_prompt_hash`
+antiguo (en Codex incluía datos de tarea). `pixel-agents usage --json` expone
+`byRole`, `distinctPrefixHashes` y `unknownPrefixExecutions`; la salida de texto
+muestra los mismos indicadores por rol. `--feature FEAT-001` limita también esos
+grupos. El hit rate pondera tokens de ejecuciones con ambos contadores conocidos.
+
+Cada `start()` captura modelo, esfuerzo, AgentSpec, contexto y opciones del
+executor antes del lanzamiento diferido. El registro reclama el ID de ejecución
+en exclusiva antes de llamar al executor: reintentar/reanudar un CLI requiere un
+nuevo ID registrado. El worker ya crea IDs nuevos para sus reintentos, corrección
+de schema, lotes QA y cambios de selección. Cambiar opciones del llamador no
+modifica el proceso capturado.
+
 ## Zonas y conflictos entre features
 
 Antes de `develop`, el runner compara `changeZones` y `testZones` con las tareas

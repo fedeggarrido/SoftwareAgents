@@ -1305,6 +1305,8 @@ async function runWorkerExecution(
           executor: selectedExecutor,
           agent: spec.metadata.id,
           role,
+          prefixHash:
+            selectedExecutor === 'codex' ? compiled.codex.prefixHash : compiled.prefixHash,
           ...(reviewSelection ? { review: reviewSelection } : {}),
           model: tierSelection?.choice?.model ?? selection?.choice?.model,
           tier: tierSelection?.tier ?? undefined,

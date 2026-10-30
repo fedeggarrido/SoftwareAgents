@@ -182,6 +182,17 @@ describe('SA-037 usage ledger and budgets', () => {
     const before = fs.readFileSync(file);
     await runUsageCommand(['--feature', 'FEAT-001', '--day', '2026-10-29', '--json'], root, output);
     expect(JSON.parse(output.mock.calls[0][0]).total.executions).toBe(1);
+    expect(JSON.parse(output.mock.calls[0][0]).byRole.unknown).toMatchObject({
+      distinctPrefixHashes: 0,
+      unknownPrefixExecutions: 1,
+      cacheHitRate: null,
+    });
+    await runUsageCommand(['--feature', 'FEAT-001'], root, output);
+    expect(output.mock.calls.at(-1)![0]).toContain(
+      'Role unknown: cache hit rate unknown; distinct prefixHash 0; unknown prefix executions 1',
+    );
+    await runUsageCommand(['--feature', 'FEAT-002', '--json'], root, output);
+    expect(JSON.parse(output.mock.calls.at(-1)![0]).byRole).toEqual({});
     expect(fs.readFileSync(file)).toEqual(before);
     await expect(runUsageCommand(['--day', '2026-99-99'], root, output)).rejects.toThrow('Usage:');
     await expect(runUsageCommand(['--json', '--json'], root, output)).rejects.toThrow('Usage:');
@@ -198,6 +209,7 @@ describe('SA-037 usage ledger and budgets', () => {
     });
     telemetry.observe({ kind: 'usage', input: 100, output: 20, cacheRead: 60, cacheCreate: 10 });
     telemetry.observe({ kind: 'model', model: 'model' });
+    telemetry.observe({ kind: 'prefix', hash: 'a'.repeat(64) });
     const entry = usageEntry(
       record,
       store.getTask('task')!,
@@ -213,6 +225,8 @@ describe('SA-037 usage ledger and budgets', () => {
       attempt: 1,
       cacheHitRate: 0.6,
       costUsd: 0.00078,
+      role: 'developer',
+      prefixHash: 'a'.repeat(64),
     });
     const other = await execution('other', '2026-10-28T12:00:00.000Z');
     await store.recordUsage({ ...entry, executionId: other.key, day: '2026-10-28', costUsd: 2 });
@@ -231,6 +245,11 @@ describe('SA-037 usage ledger and budgets', () => {
     });
     expect(summary.byFeature['FEAT-001']).toEqual(summary.total);
     expect(summary.byDay['2026-10-29']).toEqual(summary.total);
+    expect(summary.byRole.developer).toMatchObject({
+      cacheHitRate: 0.6,
+      distinctPrefixHashes: 1,
+      unknownPrefixExecutions: 0,
+    });
     expect(usageSummary(store.listUsage(), tasks, { feature: 'FEAT-002' }).total.executions).toBe(
       0,
     );
@@ -345,6 +364,38 @@ describe('SA-037 usage ledger and budgets', () => {
       parseProjects({ test: { ...policy, budgets: { maxAttemptsPerTask: -1 } } }).test,
     ).toBeUndefined();
   });
+});
+
+it('groups cache measurements by role after feature filtering and leaves legacy prefixes unknown', () => {
+  const base = {
+    taskKey: 'T1',
+    featureKey: 'FEAT-001',
+    day: '2026-10-30',
+    role: 'developer',
+    prefixHash: 'a'.repeat(64),
+    inputTokens: 100,
+    cacheReadTokens: 80,
+  };
+  const entries = [
+    base,
+    { ...base, prefixHash: 'b'.repeat(64), cacheReadTokens: 20 },
+    { ...base, prefixHash: null, cacheReadTokens: null },
+    { ...base, role: 'qa', prefixHash: 'c'.repeat(64), featureKey: 'FEAT-002' },
+    { ...base, role: undefined, prefixHash: undefined },
+  ] as import('../src/usageLedger.js').UsageEntry[];
+  const summary = usageSummary(entries, [], { feature: 'FEAT-001' });
+  expect(summary.byRole.developer).toMatchObject({
+    executions: 3,
+    cacheHitRate: 0.5,
+    distinctPrefixHashes: 2,
+    unknownPrefixExecutions: 1,
+  });
+  expect(summary.byRole.unknown).toMatchObject({
+    executions: 1,
+    distinctPrefixHashes: 0,
+    unknownPrefixExecutions: 1,
+  });
+  expect(summary.byRole.qa).toBeUndefined();
 });
 
 it('sums known costs and reports coverage when historical rows lack data', () => {

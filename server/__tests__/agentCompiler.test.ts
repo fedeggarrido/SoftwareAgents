@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { expect, it } from 'vitest';
@@ -128,6 +129,54 @@ it('hashes a stable system prompt and canonicalizes schemas regardless of key or
       task: 'a',
       outputSchema: { type: 'object', additionalProperties: false },
     }),
+  );
+});
+it.each(Object.keys(ROLE_PROFILES))('keeps the %s prefix independent of all task data', (role) => {
+  const spec = template(role);
+  // The output schema is per role (part of the prefix), so both tasks share it.
+  const outputSchema = { type: 'object' };
+  const a = compileAgent(spec, role, {
+    task: { key: 'A', timestamp: 'yesterday' },
+    repository: { worktree: 'C:/one' },
+    outputSchema,
+  });
+  const b = compileAgent(spec, role, {
+    task: { key: 'B', timestamp: 'tomorrow' },
+    repository: { worktree: 'D:/two' },
+    brainContents: { 'RULES.md': 'different brain' },
+    documentationOnly: true,
+    outputSchema,
+  });
+  expect(a.context).not.toBe(b.context);
+  expect(a.systemPrompt).toBe(b.systemPrompt);
+  expect(a.prefixHash).toBe(b.prefixHash);
+  expect(a.codex.prefixHash).toBe(b.codex.prefixHash);
+  expect(a.prefixHash).toBe(createHash('sha256').update(a.systemPrompt).digest('hex'));
+  const codexPrefix = a.codex.instructions.slice(0, -a.context.length);
+  expect(a.codex.prefixHash).toBe(createHash('sha256').update(codexPrefix).digest('hex'));
+  expect(a.codex.instructions.split('\nUNTRUSTED_CONTEXT_JSON\n')[0]).toBe(
+    b.codex.instructions.split('\nUNTRUSTED_CONTEXT_JSON\n')[0],
+  );
+  const reordered = Object.fromEntries(Object.entries(spec).reverse()) as unknown as AgentSpec;
+  reordered.identity = Object.fromEntries(
+    Object.entries(spec.identity).reverse(),
+  ) as unknown as AgentSpec['identity'];
+  expect(compileAgent(reordered, role, { task: 'other', outputSchema }).prefixHash).toBe(
+    a.prefixHash,
+  );
+  const changed = structuredClone(spec);
+  changed.metadata.version += '-changed';
+  expect(compileAgent(changed, role, { task: 'other', outputSchema }).prefixHash).not.toBe(
+    a.prefixHash,
+  );
+  changed.identity.mission += ' changed';
+  expect(compileAgent(changed, role, { task: 'other' }).codex.prefixHash).not.toBe(
+    a.codex.prefixHash,
+  );
+});
+it('separates role prefixes', () => {
+  expect(compileAgent(template('developer'), 'developer', { task: '' }).prefixHash).not.toBe(
+    compileAgent(template('qa'), 'qa', { task: '' }).prefixHash,
   );
 });
 it('encodes malicious content as JSON data and includes only declared Brain paths', () => {

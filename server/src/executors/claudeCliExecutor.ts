@@ -27,6 +27,7 @@ import {
   type ContainmentVerdict,
 } from './agentContainment.js';
 import type { ExecutionEvent, ExecutionHandle, ExecutionRequest, Executor } from './executor.js';
+import { snapshotExecutionRequest } from './executor.js';
 import { processCancellation } from './processCancellation.js';
 import { spawnRegisteredProcess } from './registeredProcess.js';
 
@@ -71,9 +72,14 @@ export class ClaudeCliExecutor implements Executor {
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
   start(req: ExecutionRequest): ExecutionHandle {
+    req = snapshotExecutionRequest(req);
     const options = req.effort
-      ? { ...this.options, binary: resolveClaudeBinary(this.options.binary) }
-      : this.options;
+      ? {
+          ...this.options,
+          binaryArgs: [...(this.options.binaryArgs ?? [])],
+          binary: resolveClaudeBinary(this.options.binary),
+        }
+      : { ...this.options, binaryArgs: [...(this.options.binaryArgs ?? [])] };
     validateModelChoice(
       req,
       'claude',
@@ -252,7 +258,9 @@ export class ClaudeCliExecutor implements Executor {
               /* surfaced after the process closes */
             }
           }, req.timeoutMin * 60_000);
-          const queue: ExecutionEvent[] = [];
+          const queue: ExecutionEvent[] = [
+            { type: 'telemetry', observation: { kind: 'prefix', hash: compiled.prefixHash } },
+          ];
           const telemetry = new CliTelemetryProjection();
           let wake: (() => void) | undefined;
           const push = (event: ExecutionEvent) => {

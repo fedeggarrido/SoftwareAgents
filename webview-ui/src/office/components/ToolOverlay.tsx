@@ -19,21 +19,54 @@ import {
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOOL_OVERLAY_VERTICAL_OFFSET,
+  WORK_ICON_SIZE,
+  WORK_STATE,
+  WORK_STATE_TEXT,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import { useBoard } from '../boardStore.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { useExecutorStore } from '../executorStore.js';
 import { overlayProjection } from '../projection.js';
+import { WORK_STATE_SPRITES } from '../sprites/spriteData.js';
 import { assignmentReason, getAgentRole, getProviderLabel, modelTierLabel } from '../toolUtils.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
+import type { WorkState } from '../workState.js';
 
 // Both turn-end states show the green checkmark bubble. A finished turn (Stop)
 // shows ONLY the checkmark (the label falls through to its normal idle text);
 // going idle waiting on the user (Notification(idle_prompt)) additionally
 // surfaces this label. Driven by Character.waitingAwaitingInput.
 const WAITING_INPUT_ACTIVITY_TEXT = 'Waiting for input';
+
+function WorkBadge({ state }: { state: WorkState }) {
+  const sprite = WORK_STATE_SPRITES[state];
+  const text = WORK_STATE_TEXT[state];
+  return (
+    <span
+      className="inline-flex items-center gap-4 text-2xs"
+      aria-label={text}
+      title={text}
+      data-testid="agent-work-state"
+    >
+      <svg
+        width={WORK_ICON_SIZE}
+        height={WORK_ICON_SIZE}
+        viewBox={`0 0 ${sprite[0].length} ${sprite.length}`}
+        shapeRendering="crispEdges"
+        aria-hidden="true"
+      >
+        {sprite.flatMap((row, y) =>
+          row.map((color, x) =>
+            color ? <rect key={`${x},${y}`} x={x} y={y} width={1} height={1} fill={color} /> : null,
+          ),
+        )}
+      </svg>
+      {text}
+    </span>
+  );
+}
 
 interface ToolOverlayProps {
   officeState: OfficeState;
@@ -138,9 +171,11 @@ export function ToolOverlay({
         const isSelected = selectedId === id;
         const isHovered = hoveredId === id;
         const isSub = ch.isSubagent;
+        const workState = officeState.workStates.get(id) ?? WORK_STATE.AVAILABLE;
+        const hasWorkBadge = workState !== WORK_STATE.AVAILABLE;
 
         // Only show for hovered or selected agents (unless always-show is on)
-        if (!alwaysShowOverlay && !isSelected && !isHovered) return null;
+        if (!alwaysShowOverlay && !isSelected && !isHovered && !hasWorkBadge) return null;
 
         // Position above character
         const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
@@ -154,7 +189,7 @@ export function ToolOverlay({
         // panel back. When always-show is off, the early return above already
         // keeps the panel hidden for idle agents.
         const isDone = ch.bubbleType === 'waiting' && !ch.waitingAwaitingInput;
-        if (isDone && !isSelected && !isHovered) {
+        if (isDone && !isSelected && !isHovered && !hasWorkBadge) {
           return (
             <div
               key={id}
@@ -227,7 +262,7 @@ export function ToolOverlay({
 
         // Always-on labels stay out of the way: one small pill (role · task and
         // the status dot). The full panel is for the hovered or selected agent.
-        if (alwaysShowOverlay && !isSelected && !isHovered) {
+        if ((alwaysShowOverlay || hasWorkBadge) && !isSelected && !isHovered) {
           if (isSub) return null;
           // Show the backlog id (FT-OPP-001) rather than the ClickUp one.
           const task = boardTask?.id ?? rawTask;
@@ -267,6 +302,7 @@ export function ToolOverlay({
                 {/* The pill stays visually compact; the current activity remains in the
                     accessible text (screen readers, e2e) without widening the label. */}
                 <span className="sr-only">{activityText}</span>
+                {hasWorkBadge && <WorkBadge state={workState} />}
               </div>
             </div>
           );
@@ -294,6 +330,7 @@ export function ToolOverlay({
                 />
               )}
               <div className="flex flex-col gap-0 overflow-hidden">
+                {hasWorkBadge && <WorkBadge state={workState} />}
                 {companyRole && (
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"

@@ -24,6 +24,28 @@ Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-
 
 **Seats**: Derived from chair furniture. `layoutToSeats()` creates a seat at every footprint tile of every chair. Multi-tile chairs produce multiple seats keyed `uid` / `uid:1` / `uid:2`. Facing direction priority: 1) chair `orientation` from catalog (front→DOWN, back→UP, left→LEFT, right→RIGHT), 2) adjacent desk direction, 3) forward (DOWN). Click character → select (white outline) → click available seat → reassign.
 
+## Domain work states (SA-048)
+
+`office/workState.ts` projects the latest successful `workSnapshot` plus subsequent
+same-Project events, ignoring `eventId <= lastEventId` and older task versions.
+Association requires the exact `agentRole.detail = "tarea <WorkTask.key>"` recorded
+for a unique non-subagent Character. Generic role labels, nicknames and bare
+`executionId` values cannot identify a Session: this wire contract exposes neither
+an execution-to-session registry nor task leases. Ambiguous or absent associations
+remain AVAILABLE without a badge; no AsyncAPI change is required.
+
+RUNNING/LEASED maps to CODING (`architecture/design/spec/spike` or recorded
+`architect/requirements-analyst/planner` roles to PLANNING; `review/qa` task types
+to REVIEWING/TESTING),
+REVIEW to REVIEWING, QA to TESTING; explicit wait/block/failure statuses retain
+their meaning. DRAFT/READY/QUEUED with a known unfinished dependency maps to
+WAITING_DEPENDENCY; other ready or terminal tasks are AVAILABLE. Human answered
+uses `toStatus`, or READY when absent. ToolOverlay shows distinct pixel bubble
+shapes and short text with an accessible label/tooltip, including between turns.
+Associated work prevents wandering without changing the legacy activity signal.
+Events can introduce tasks created after the snapshot; absent type/dependency
+metadata is left unknown. Snapshots replace the base; disconnect clears domain state.
+
 ## Layout Editor
 
 Toggle via "Layout" button. Tools: SELECT (default), Floor paint, Wall paint, Erase (set tiles to VOID), Furniture place, Furniture pick (eyedropper for furniture type), Eyedropper (floor).

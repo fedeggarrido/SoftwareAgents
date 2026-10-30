@@ -198,6 +198,8 @@ export interface Character {
   wanderLimit: number;
   /** Whether the agent is actively working */
   isActive: boolean;
+  /** A reliably associated domain task keeps its character at work between turns. */
+  hasDomainWork?: boolean;
   /** A participant seated at the meeting table uses a listening pose. */
   isInMeeting?: boolean;
   /** False when this agent sits away from a PC or has no assigned desk. */

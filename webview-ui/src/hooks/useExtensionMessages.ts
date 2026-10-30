@@ -396,6 +396,10 @@ export function useExtensionMessages(
         }
         seatMeetingParticipants(os);
         setBoardState(next);
+      } else if (msg.type === 'workSnapshot') {
+        os.receiveWorkSnapshot(msg);
+      } else if (msg.type === 'domainEvent') {
+        os.receiveDomainEvent(msg.event);
       } else if (msg.type === 'agentRole') {
         setAgentRole(msg.id, {
           label: msg.label,
@@ -860,6 +864,10 @@ export function useExtensionMessages(
     const unsubscribe = transport.onMessage(handler);
     const stopLifecycle = bindExtensionTransportLifecycle(transport);
     const stopAuditLifecycle = transport.onStateChange(() => {
+      const office = getOfficeState();
+      office.workSnapshot = null;
+      office.workEvents = [];
+      office.workStates.clear();
       // Invalidate old responses on disconnect and every new connection. The
       // panel waits for a connected transport before requesting a fresh log.
       setAuditStore(emptyAuditStore());

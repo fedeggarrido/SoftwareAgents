@@ -107,7 +107,7 @@ export function updateCharacter(
         ch.frame = (ch.frame + 1) % 2;
       }
       // If no longer active, stand up and start wandering (after seatTimer expires)
-      if (!ch.isActive) {
+      if (!ch.isActive && !ch.hasDomainWork) {
         if (ch.seatTimer > 0) {
           ch.seatTimer -= dt;
           break;
@@ -128,7 +128,7 @@ export function updateCharacter(
       ch.frame = 0;
       if (ch.seatTimer < 0) ch.seatTimer = 0; // clear turn-end sentinel
       // If became active, pathfind to seat
-      if (ch.isActive) {
+      if (ch.isActive || ch.hasDomainWork) {
         if (!ch.seatId) {
           // No seat assigned — type in place
           ch.state = CharacterState.TYPE;
@@ -224,7 +224,7 @@ export function updateCharacter(
         ch.x = center.x;
         ch.y = center.y;
 
-        if (ch.isActive) {
+        if (ch.isActive || ch.hasDomainWork) {
           if (!ch.seatId) {
             // No seat — type in place
             ch.state = CharacterState.TYPE;
@@ -292,7 +292,7 @@ export function updateCharacter(
       }
 
       // If became active while wandering, repath to seat
-      if (ch.isActive && ch.seatId) {
+      if ((ch.isActive || ch.hasDomainWork) && ch.seatId) {
         const seat = seats.get(ch.seatId);
         if (seat) {
           const lastStep = ch.path[ch.path.length - 1];

@@ -1,3 +1,4 @@
+import type { DomainEventPayload, WorkSnapshot } from '../../../../core/src/messages.js';
 import { pickDiversePalette } from '../../../../core/src/paletteUtils.js';
 import {
   AUTO_ON_FACING_DEPTH,
@@ -15,6 +16,7 @@ import {
   PET_HIT_HALF_WIDTH,
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
+  WORK_STATE,
 } from '../../constants.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
@@ -27,6 +29,7 @@ import {
 import { findPath, getWalkableTiles, isWalkable } from '../layout/tileMap.js';
 import { getPetCount, getPetName } from '../sprites/petSpriteData.js';
 import { getLoadedCharacterCount } from '../sprites/spriteData.js';
+import { getAgentRole } from '../toolUtils.js';
 import type {
   Character,
   FurnitureInstance,
@@ -38,6 +41,8 @@ import type {
   TileType as TileTypeVal,
 } from '../types.js';
 import { CharacterState, Direction, PetState, TILE_SIZE } from '../types.js';
+import type { WorkState } from '../workState.js';
+import { deriveWorkStates } from '../workState.js';
 import { createCharacter, updateCharacter } from './characters.js';
 import { advanceMatrixEffect, startMatrixEffect } from './matrixEffectState.js';
 import { createPet, updatePet } from './petEntity.js';
@@ -52,6 +57,28 @@ function seatFacingOffset(direction: Direction): { dCol: number; dRow: number } 
 }
 
 export class OfficeState {
+  workSnapshot: WorkSnapshot | null = null;
+  workEvents: DomainEventPayload[] = [];
+  workStates = new Map<number, WorkState>();
+  private derivedWorkSnapshot: WorkSnapshot | null = null;
+  private derivedWorkKey = '';
+
+  receiveWorkSnapshot(snapshot: WorkSnapshot): void {
+    this.workSnapshot = snapshot;
+    this.workEvents = this.workEvents.filter(
+      (event) =>
+        event.projectId === snapshot.projectId && event.eventId > (snapshot.lastEventId ?? 0),
+    );
+  }
+
+  receiveDomainEvent(event: DomainEventPayload): void {
+    if (
+      event.projectId !== this.workSnapshot?.projectId ||
+      event.eventId <= (this.workSnapshot.lastEventId ?? 0)
+    )
+      return;
+    this.workEvents.push(event);
+  }
   layout: OfficeLayout;
   tileMap: TileTypeVal[][];
   seats: Map<string, Seat>;
@@ -1155,6 +1182,20 @@ export class OfficeState {
   }
 
   update(dt: number): void {
+    const workCharacters = [...this.characters.values()]
+      .filter((ch) => !ch.isSubagent)
+      .map((ch) => ({ id: ch.id, detail: getAgentRole(ch.id)?.detail }));
+    // update() runs every frame; derive only when the snapshot, events or roles change.
+    const workKey = JSON.stringify([this.workEvents.length, workCharacters]);
+    if (this.workSnapshot !== this.derivedWorkSnapshot || workKey !== this.derivedWorkKey) {
+      this.derivedWorkSnapshot = this.workSnapshot;
+      this.derivedWorkKey = workKey;
+      this.workStates = deriveWorkStates(this.workSnapshot, this.workEvents, workCharacters);
+      for (const ch of this.characters.values()) {
+        const state = this.workStates.get(ch.id);
+        ch.hasDomainWork = state !== undefined && state !== WORK_STATE.AVAILABLE;
+      }
+    }
     // Furniture animation cycling
     const prevFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);
     this.furnitureAnimTimer += dt;

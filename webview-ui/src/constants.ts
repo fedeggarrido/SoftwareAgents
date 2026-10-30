@@ -1,5 +1,54 @@
 import type { ColorValue } from './components/ui/types.js';
 
+export const WORK_STATE = {
+  CODING: 'CODING',
+  REVIEWING: 'REVIEWING',
+  TESTING: 'TESTING',
+  PLANNING: 'PLANNING',
+  WAITING_DEPENDENCY: 'WAITING_DEPENDENCY',
+  WAITING_QUOTA: 'WAITING_QUOTA',
+  BLOCKED: 'BLOCKED',
+  WAITING_HUMAN: 'WAITING_HUMAN',
+  FAILED: 'FAILED',
+  AVAILABLE: 'AVAILABLE',
+} as const;
+export const WORK_TASK_DETAIL_PREFIX = 'tarea ';
+export const WORK_PLANNING_TYPES: readonly string[] = ['architecture', 'design', 'spec', 'spike'];
+export const WORK_PLANNING_ROLES: readonly string[] = [
+  'architect',
+  'requirements-analyst',
+  'planner',
+];
+export const WORK_REVIEW_TYPES: readonly string[] = ['review'];
+export const WORK_TEST_TYPES: readonly string[] = ['qa'];
+export const WORK_STATE_TEXT = {
+  CODING: 'Programando',
+  REVIEWING: 'Revisando',
+  TESTING: 'Probando',
+  PLANNING: 'Planificando',
+  WAITING_DEPENDENCY: 'Espera dependencia',
+  WAITING_QUOTA: 'Espera cuota',
+  BLOCKED: 'Bloqueado',
+  WAITING_HUMAN: 'Espera humana',
+  FAILED: 'Fallido',
+  AVAILABLE: 'Disponible',
+} as const;
+export const WORK_ICON_PATTERNS = {
+  CODING: ['01010', '10001', '01010'],
+  REVIEWING: ['01110', '01010', '00101'],
+  TESTING: ['00001', '01010', '00100'],
+  PLANNING: ['11111', '10101', '11111'],
+  WAITING_DEPENDENCY: ['11011', '01110', '11011'],
+  WAITING_QUOTA: ['11111', '01110', '11111'],
+  BLOCKED: ['11111', '10001', '11111'],
+  WAITING_HUMAN: ['01110', '00100', '10101'],
+  FAILED: ['10001', '01010', '10001'],
+  AVAILABLE: ['00100', '01110', '00100'],
+} as const;
+export const WORK_ICON_X = 3;
+export const WORK_ICON_Y = 4;
+export const WORK_ICON_SIZE = 26;
+
 // ── Grid & Layout ────────────────────────────────────────────
 export const TILE_SIZE = 16;
 export const DEFAULT_COLS = 20;

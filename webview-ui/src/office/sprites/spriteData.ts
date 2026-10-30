@@ -1,8 +1,9 @@
 import type { ColorValue } from '../../components/ui/types.js';
-import { PALETTE_COUNT } from '../../constants.js';
+import { PALETTE_COUNT, WORK_ICON_PATTERNS, WORK_ICON_X, WORK_ICON_Y } from '../../constants.js';
 import { adjustSprite } from '../colorize.js';
 import type { Direction, SpriteData } from '../types.js';
 import { Direction as Dir } from '../types.js';
+import type { WorkState } from '../workState.js';
 import bubblePermissionData from './bubble-permission.json';
 import bubblePetData from './bubble-pet.json';
 import bubbleWaitingData from './bubble-waiting.json';
@@ -23,6 +24,20 @@ export const BUBBLE_PERMISSION_SPRITE: SpriteData = resolveBubbleSprite(bubblePe
 
 /** Waiting bubble: white square with green checkmark, and a tail pointer (11x13) */
 export const BUBBLE_WAITING_SPRITE: SpriteData = resolveBubbleSprite(bubbleWaitingData);
+
+/** Reuse the existing bubble frame and ink; shapes distinguish every work state. */
+export const WORK_STATE_SPRITES = Object.fromEntries(
+  Object.entries(WORK_ICON_PATTERNS).map(([state, pattern]) => {
+    const sprite = resolveBubbleSprite(bubblePermissionData);
+    for (const [y, row] of pattern.entries()) {
+      for (const [x, pixel] of [...row].entries()) {
+        sprite[y + WORK_ICON_Y][x + WORK_ICON_X] =
+          pixel === '1' ? bubblePermissionData.palette.A : bubblePermissionData.palette.F;
+      }
+    }
+    return [state, sprite];
+  }),
+) as Record<WorkState, SpriteData>;
 
 /** Heart bubble: pet petting feedback (11x13) */
 export const BUBBLE_HEART_SPRITE: SpriteData = resolveBubbleSprite(bubblePetData);

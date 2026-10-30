@@ -19,6 +19,7 @@ import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
 import { getHookScriptPath } from '../src/providers/hook/claude/claudeHookInstaller.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 vi.setConfig({ testTimeout: 300_000 });
 
@@ -76,10 +77,10 @@ beforeEach(() => {
     timeoutMin: 1,
   };
 });
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
-  fs.rmSync(root, { recursive: true, force: true });
-});
+  await removeTempDir(root);
+}, 30_000);
 
 const denials = () =>
   new AuditLog()

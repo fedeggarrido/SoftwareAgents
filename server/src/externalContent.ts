@@ -52,7 +52,8 @@ export function validateExternalReaderResult(value: unknown): ExternalReaderResu
 
 /** Inspect serialized JSON too: briefs and Brain artifacts often embed JSON in strings.
  * This is provenance enforcement, not a detector for malicious natural language. */
-const FENCED_JSON = /```(?:json)?\s*\n([\s\S]*?)```/g;
+// Fences must start a line: diff context/added lines (' ', '+', '-') never open one.
+const FENCED_JSON = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)^```/gm;
 
 export function containsExternalContent(value: unknown): boolean {
   if (typeof value === 'string') {
@@ -61,12 +62,13 @@ export function containsExternalContent(value: unknown): boolean {
     // blocks (how Markdown artifacts embed data) are parsed and inspected.
     const candidates = [value, ...[...value.matchAll(FENCED_JSON)].map((m) => m[1])];
     return candidates.some((candidate) => {
+      let parsed: unknown;
       try {
-        const parsed: unknown = JSON.parse(candidate);
-        return typeof parsed !== 'string' && containsExternalContent(parsed);
+        parsed = JSON.parse(candidate);
       } catch {
-        return false;
+        return false; // Not JSON: plain text carries no runtime provenance.
       }
+      return typeof parsed !== 'string' && containsExternalContent(parsed);
     });
   }
   if (!value || typeof value !== 'object') return false;
@@ -79,6 +81,13 @@ export function containsExternalContent(value: unknown): boolean {
     (typeof object.excerpt === 'string' && typeof object.contentHash === 'string')
   )
     return true;
-  if (object.kind === 'external-reader-result') validateExternalReaderResult(object);
+  // An invalid reader result is untrusted, never a reason to stop inspecting siblings.
+  if (object.kind === 'external-reader-result') {
+    try {
+      validateExternalReaderResult(object);
+    } catch {
+      return true;
+    }
+  }
   return Object.values(object).some(containsExternalContent);
 }

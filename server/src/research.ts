@@ -218,6 +218,17 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
   return report;
 }
 
+/** Handoff facts carry no links, quotes or code spans: a claim stays data even if a
+ * source phrased it as an instruction. */
+export function handoffText(claim: string): string {
+  return claim
+    .replace(/\b(?:https?|ftp|file):\/\/\S+|\bwww\.\S+/gi, '[link removed]')
+    .replace(/[`"\u201c\u201d\u00ab\u00bb]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, EXTERNAL_HANDOFF_TEXT_CHARS);
+}
+
 /** Revalidate the reader output and its sources before exporting a bounded handoff.
  * Full reports remain evidence artifacts and must never be supplied to a tool role. */
 export function researchHandoff(source: string, sources: SourceItem[]): ExternalReaderResult {
@@ -225,7 +236,7 @@ export function researchHandoff(source: string, sources: SourceItem[]): External
   return validateExternalReaderResult({
     kind: 'external-reader-result',
     facts: report.findings.slice(0, EXTERNAL_HANDOFF_ITEMS).map((finding) => ({
-      text: finding.claim.slice(0, EXTERNAL_HANDOFF_TEXT_CHARS),
+      text: handoffText(finding.claim),
       confidence: finding.confidence,
     })),
     insufficientEvidence: report.gaps.length > 0 || report.findings.length === 0,

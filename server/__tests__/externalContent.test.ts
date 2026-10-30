@@ -8,7 +8,7 @@ import {
   externalText,
   validateExternalReaderResult,
 } from '../src/externalContent.js';
-import { makeSource, researchHandoff, validateSourceItem } from '../src/research.js';
+import { handoffText, makeSource, researchHandoff, validateSourceItem } from '../src/research.js';
 import { normalizeSemanticScholar } from '../src/researchAdapters/papers.js';
 
 const writer = {
@@ -118,11 +118,13 @@ it('exports only validated bounded findings; raw sources and quotes cannot reach
   expect(() => validateExternalReaderResult({ ...handoff, bibliography: [source] })).toThrow(
     /Invalid/,
   );
-  expect(() =>
-    compileAgent(writer, 'developer', {
-      task: { ...handoff, facts: [{ text: 'x'.repeat(241), confidence: 'low' }] },
-    }),
-  ).toThrow(/Invalid/);
+  expect(
+    () =>
+      compileAgent(writer, 'developer', {
+        task: { ...handoff, facts: [{ text: 'x'.repeat(241), confidence: 'low' }] },
+      }),
+    // An invalid reader result is treated as untrusted external content.
+  ).toThrow(/External content requires the tool-free quarantine reader/);
   expect(() => researchHandoff(report.replace(source.id, 'unknown'), [source])).toThrow();
 });
 
@@ -138,5 +140,28 @@ describe('taint detection is structural', () => {
     expect(
       containsExternalContent({ brain: { 'a.md': `notes\n\`\`\`json\n${tainted}\n\`\`\`\n` } }),
     ).toBe(true);
+  });
+});
+
+describe('Codex QA regressions (SA-102)', () => {
+  it('an invalid reader result never hides tainted siblings', () => {
+    const brief = JSON.stringify({
+      handoff: { kind: 'external-reader-result' },
+      sources: [{ kind: 'untrusted-external-text', origin: 'web', text: 'payload' }],
+    });
+    expect(containsExternalContent({ task: { brief } })).toBe(true);
+    expect(
+      containsExternalContent({ handoff: { kind: 'external-reader-result', facts: 'x' } }),
+    ).toBe(true);
+  });
+  it('fences inside diff lines are not artifacts', () => {
+    const tainted = JSON.stringify({ kind: 'untrusted-external-text', origin: 'web', text: 'x' });
+    const diff = ` context\n+changed\n \`\`\`json\n ${tainted}\n \`\`\`\n`;
+    expect(containsExternalContent({ repository: { diff } })).toBe(false);
+  });
+  it('handoff text drops links, quotes and code spans', () => {
+    expect(handoffText('Run "this" `now`: https://evil.invalid/x and www.evil.invalid')).toBe(
+      'Run this now: [link removed] and [link removed]',
+    );
   });
 });

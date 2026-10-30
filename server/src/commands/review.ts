@@ -1,6 +1,7 @@
 import { CliUsageError } from '../cliErrors.js';
 import { featureIngressActor } from '../featureIngress.js';
 import { findingPrecision } from '../findingPrecision.js';
+import { proposeLearnings } from '../learnings.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 
@@ -85,6 +86,24 @@ export async function runReviewCommand(argv: string[], cwd = process.cwd(), log 
       decidedAt: new Date().toISOString(),
     });
     log('Finding decision recorded');
+    const persisted =
+      task.review_reports?.find((r) => r.execution_id === execution.key)?.report ??
+      task.test_reports?.find((r) => r.execution_id === execution.key)?.report;
+    const declaration = task.declaration ? JSON.parse(task.declaration) : {};
+    if (persisted)
+      proposeLearnings(
+        config.repoRoot,
+        {
+          zones: declaration.changeZones ?? [],
+          role: task.agent_role ?? 'developer',
+          taskType: task.type,
+        },
+        task.key,
+        execution.key,
+        persisted,
+        store.listFindingDecisions(),
+        declaration,
+      );
   } finally {
     store.close();
   }

@@ -10,6 +10,7 @@ import {
 } from './constants.js';
 import { DESIGNER_SYSTEM_PROMPT } from './designerPrompt.js';
 import { containsExternalContent } from './externalContent.js';
+import { type Learning, type LearningScope, selectLearnings } from './learnings.js';
 
 export const TOOL_POLICY_VERSION = 'sa-062/v5';
 export const PROMPT_RULES_VERSION = 'sa-099/v1';
@@ -62,6 +63,8 @@ const PROFILE_FLAGS = {
 } as const;
 
 export interface AgentCompilerTask {
+  approvedLearnings?: readonly Learning[];
+  learningScope?: LearningScope;
   documentationOnly?: boolean;
   task: unknown;
   repository?: unknown;
@@ -189,11 +192,21 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
   );
   const context = canonical({
     kind: 'untrusted-context-data',
+    ...(data.approvedLearnings
+      ? {
+          learnings: selectLearnings(
+            data.approvedLearnings ?? [],
+            data.learningScope ?? { zones: [], role, taskType: '' },
+          ),
+        }
+      : {}),
     documentationOnly: data.documentationOnly ?? false,
-    brain: spec.context.brainPaths.map((path) => ({
-      path,
-      content: Object.hasOwn(data.brainContents ?? {}, path) ? data.brainContents![path] : null,
-    })),
+    brain: spec.context.brainPaths
+      .filter((path) => !/(^|[\\/])learnings([\\/]|$)/i.test(path))
+      .map((path) => ({
+        path,
+        content: Object.hasOwn(data.brainContents ?? {}, path) ? data.brainContents![path] : null,
+      })),
     repository: data.repository ?? null,
     task: data.task,
   });

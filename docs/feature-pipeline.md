@@ -1600,6 +1600,27 @@ asíncrono al consultar features (intervalo `ZONES_CHECK_INTERVAL_MS`), con gate
 `zone_overlap`; `pixel-agents task show <KEY>` muestra la espera y avisos actuales.
 Los avisos de ramas son informativos y no bloquean una integración.
 
+## Aprendizajes por relevancia (SA-098)
+
+Al persistir un informe de Reviewer/QA, el runtime deriva lecciones de sus
+hallazgos sin llamar a modelos: título, regla de hasta 300 caracteres, zonas,
+rol de implementación, tipo de tarea y origen (tarea, ejecución e índice).
+Omite hallazgos degradados salvo aceptación humana SA-101 y omite los rechazados.
+También propone los degradados al aceptarlos con `review finding`.
+El contenido etiquetado como externo nunca genera propuestas.
+
+`pixel-agents learning list` muestra propuestas, aprobadas y rechazadas en
+`.softwareagents/brain/learnings/`. `learning approve <id>` mueve una propuesta
+a `approved/`; `learning reject <id> [--reason <texto>]` la archiva en `rejected/`.
+Los comandos exigen ingreso humano SA-003. Se rechaza lenguaje sobre permisos,
+perfiles y políticas antes de proponer y al aprobar; las lecciones son datos.
+
+El compilador selecciona como máximo cinco aprobadas: solape de zonas (4 puntos),
+rol (2), tipo (1), desempate por ID. Omite puntuación cero y limita el JSON de
+lecciones a 2400 caracteres, incluidos metadatos y escapes. Solo aparecen en
+`learnings` del contexto no confiable; los paths de aprendizajes quedan excluidos
+de la inyección genérica de Brain. Los prefijos y sus hashes permanecen estables.
+
 ## WIP y flujo (SA-096)
 
 El operador configura `projects.<project-id>.wip` en `~/.pixel-agents/config.json`,

@@ -102,6 +102,7 @@ import {
 import { assertTaskDependencies, featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
 import { HumanDecisions } from './humanDecisions.js';
+import { listLearnings, proposeLearnings } from './learnings.js';
 import {
   type CascadeAttempt,
   cascadeLevels,
@@ -683,6 +684,12 @@ async function runWorkerExecution(
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
   );
   const taskData = {
+    approvedLearnings: listLearnings(config.repoRoot, 'approved'),
+    learningScope: {
+      zones: (options.developer?.task ?? options.reviewer?.task)?.changeZones ?? [],
+      role,
+      taskType: (options.developer?.task ?? options.reviewer?.task)?.type ?? '',
+    },
     documentationOnly: options.developer?.task.type === 'doc',
     task: { key: args.task, brief, verifierFailures: [] as VerifierFailure[] },
     brainContents: {} as Record<string, string>,
@@ -1992,6 +1999,15 @@ async function runWorkerExecution(
                 ),
               );
               audit('test_report_persisted', { detail: JSON.stringify(record) });
+              proposeLearnings(
+                config.repoRoot,
+                { ...taskData.learningScope, role: options.reviewer!.task.agentRole },
+                args.task,
+                executionId,
+                report,
+                workStore!.listFindingDecisions(),
+                taskData,
+              );
               telemetryStatus = capped ? 'require_human' : 'ok';
               if (capped) process.exitCode = 3;
               log(
@@ -2035,6 +2051,15 @@ async function runWorkerExecution(
                 ),
               );
               audit('review_report_persisted', { detail: JSON.stringify(review) });
+              proposeLearnings(
+                config.repoRoot,
+                { ...taskData.learningScope, role: options.reviewer.task.agentRole },
+                args.task,
+                executionId,
+                report,
+                workStore!.listFindingDecisions(),
+                taskData,
+              );
               if (options.reviewer.task.type === 'doc' && report.verdict === 'approve')
                 audit('qa_not_applicable', { detail: 'QA no aplicable: tarea doc' });
               telemetryStatus = capped ? 'require_human' : 'ok';

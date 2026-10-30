@@ -286,3 +286,7 @@ export const ZONES_GIT_BUFFER_BYTES = 4 * 1024 * 1024;
 export const FLOW_P85 = 0.85;
 /** Recent activity retained by both office board sources. */
 export const BOARD_RECENT_EVENTS = 12;
+/** SA-098: bounded human-approved learning context. */
+export const LEARNING_RULE_CHARS = 300;
+export const LEARNING_LIMIT = 5;
+export const LEARNING_CONTEXT_CHARS = 2400;

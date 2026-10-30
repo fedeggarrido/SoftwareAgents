@@ -31,6 +31,7 @@ import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
 import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
+import { runLearningCommand } from './commands/learning.js';
 import { runResearchCommand } from './commands/research.js';
 import { runReviewCommand } from './commands/review.js';
 import { runTaskCommand } from './commands/task.js';
@@ -192,6 +193,8 @@ export async function dispatchCli(
     await runFlowCommand(argv.slice(1));
   } else if (argv[0] === 'review') {
     await runReviewCommand(argv.slice(1));
+  } else if (argv[0] === 'learning') {
+    runLearningCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {
     await runEvalCommand(argv.slice(1));
   } else if (argv[0] === 'task') {

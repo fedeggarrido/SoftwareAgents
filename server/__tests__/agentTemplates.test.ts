@@ -16,6 +16,8 @@ const roles = [
   { id: 'qa-author', profile: 'branch_write', outputs: ['commits', 'tests'] },
   { id: 'reviewer', profile: 'read_only', outputs: ['ReviewReport'] },
   { id: 'qa', profile: 'read_only', outputs: ['TestReport'] },
+  { id: 'product-designer', profile: 'read_only', outputs: ['DesignReport'] },
+  { id: 'researcher', profile: 'read_only', outputs: ['ResearchReport'] },
 ] as const;
 
 describe('platform AgentSpec templates', () => {
@@ -32,17 +34,24 @@ describe('platform AgentSpec templates', () => {
       expect(spec.identity.role).toBe(id);
       expect(spec.permissions.profile).toBe(profile);
       expect(spec.outputs).toEqual(outputs);
+      // Advisory roles (designer, researcher) cannot merge or touch the repo; they only
+      // escalate permission expansion (and the designer, art direction).
+      const advisory = id === 'product-designer' || id === 'researcher';
       expect(spec.escalation.humanRequired).toEqual(
-        expect.arrayContaining([
-          'irreversible_or_high_risk_decision',
-          'merge_pr',
-          'touch_protected_path',
-          'use_new_secret',
-          'change_autonomy',
-          'permission_expansion',
-        ]),
+        expect.arrayContaining(
+          advisory
+            ? ['permission_expansion']
+            : [
+                'irreversible_or_high_risk_decision',
+                'merge_pr',
+                'touch_protected_path',
+                'use_new_secret',
+                'change_autonomy',
+                'permission_expansion',
+              ],
+        ),
       );
-      if (profile === 'read_only') {
+      if (profile === 'read_only' && !advisory) {
         expect(spec.identity.principles.join(' ')).toContain('never edit project files');
         expect(spec.identity.principles.join(' ')).toContain('Execution results');
       }

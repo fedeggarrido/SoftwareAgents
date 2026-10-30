@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.clearAllMocks();
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 /** Resolves with the events seen once 'close' arrives; rejects if it never does. */

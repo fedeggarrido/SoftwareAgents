@@ -51,7 +51,7 @@ it
     } finally {
       if (root.exitCode === null && root.signalCode === null) root.kill();
       await exited;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   },
   40000,
@@ -107,7 +107,7 @@ it.skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === 
     } finally {
       if (root.exitCode === null && root.signalCode === null) root.kill();
       await exited;
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   },
   40000,

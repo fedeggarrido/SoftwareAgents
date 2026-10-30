@@ -458,7 +458,7 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
     });
   });
   describe('Developer rework', () => {
-    beforeEach(prepare, 30_000);
+    beforeEach(prepare, 60_000);
     it('rejects, passes findings into actual Developer rework and then approves into QA', async () => {
       const main = git(repo, 'rev-parse', 'main');
       await review('reject');
@@ -660,7 +660,7 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
     }
   });
   describe('invalid report recovery', () => {
-    beforeEach(prepare, 30_000);
+    beforeEach(prepare, 60_000);
     it('retains REVIEW after two invalid reports and allows another review', async () => {
       await review('invalid');
       const store = await storeFor();
@@ -746,8 +746,8 @@ describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)',
         store.close();
       }
     },
-    // oauth retries launch the fake CLI three times (~10 s each on Windows).
-    60_000,
+    // oauth retries launch the fake CLI three times (~10 s each on Windows, ~20 s under full-suite load).
+    120_000,
   );
   it('resumes a legacy FAILED_RETRYABLE Reviewer by implicit feature review', async () => {
     await prepare();

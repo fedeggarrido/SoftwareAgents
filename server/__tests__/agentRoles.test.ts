@@ -19,6 +19,18 @@ function line(obj: unknown): string {
   return JSON.stringify(obj) + '\n';
 }
 
+it('recognizes an explicit Codex QA or Reviewer identity without inferring activity', () => {
+  expect(roleFromBrief('Eres Codex y haces la QA de SA-093.', 'codex').label).toBe('QA');
+  expect(roleFromBrief('Eres Codex y actúas como Reviewer de SA-093.', 'codex').label).toBe(
+    'Reviewer',
+  );
+  expect(roleFromBrief('Eres Codex e implementas; luego haces la QA.', 'codex').label).toBe(
+    'Dueño',
+  );
+  expect(roleFromBrief('Implementa pruebas de QA y Reviewer.', 'codex').label).toBe('Dueño');
+  expect(codexRole({ agent_role: 'developer' }, 'Eres Codex y haces la QA.').label).toBe('DEV');
+});
+
 function codexUser(text: string): string {
   return line({
     type: 'response_item',

@@ -110,14 +110,47 @@ visibles. Al terminar y esperar la raíz y los descendientes capturados se guard
 Executions ya cerradas y nunca vuelve a matar sus PIDs, aunque se hayan reutilizado.
 Los consumidores no pueden importar ese campo mediante createExecution.
 
-**Límite residual:** tree_closed_at acredita el cierre del **árbol capturado**, no
+**Executors SA-093:** el supervisor registrado no lanza el CLI hasta recibir el
+ACK de registro duradero. En Windows, antes del lanzamiento, un helper PowerShell
+fijo compila mediante Add-Type el pequeño wrapper kernel32 incluido en el bundle,
+crea un Job con KILL_ON_JOB_CLOSE (sin BREAKAWAY ni SILENT_BREAKAWAY) y asigna el
+supervisor. Solo entonces confirma JOB_READY y el supervisor crea el CLI, que
+hereda el Job junto con todos sus descendientes. No hace falta lanzar código del
+modelo suspendido: el único código que corre antes de la asignación es el
+supervisor fijo, que todavía no ha creado el CLI. Si falla la asignación, no lanza.
+
+El helper conserva el único handle propietario, fuera del Job, y observa el
+handle retenido del supervisor. Su muerte o el cierre del supervisor cierra el
+Job y mata sus miembros. El nombre local deriva del PID y los ticks exactos de
+creación. Recuperación verifica primero la identidad de la raíz, abre el Job y
+lo termina, esperando ActiveProcesses=0 antes de acreditar TREE_CLOSED. No necesita
+CIM para estos procesos. Cancelación usa IPC al supervisor, que pide terminar el
+Job; nunca vuelve a abrir su PID. Una salida normal solo pide persistir el cierre
+cuando el Job contiene únicamente al supervisor; descendientes todavía vivos
+retienen la Execution hasta salir o hasta cancelación/timeout.
+
+Se elige código embebido y compilación por lanzamiento, sin caché escribible ni
+dependencias: evita sustitución de scripts/DLL cacheados y funciona también en
+el bundle. Se invoca WindowsPowerShell desde SystemRoot/System32, sin perfil,
+con comando fijo codificado y solo el PID generado por el runtime en el entorno.
+No recibe prompts, comandos ni rutas del modelo y no eleva permisos. Un fallo de
+registro mata el supervisor antes de cualquier CLI; el ledger también cancela
+el handle si falla su registro inicial. Los registros históricos sin Job siguen
+usando el helper de captura anterior y conservan su limitación residual.
+
+En Linux/macOS el lanzamiento usa un process group separado y la cancelación
+envía SIGKILL al grupo. Eso no impide setsid/escape de código adversarial. La
+recuperación persistida por identidad de WorkStore sigue requiriendo Windows y
+falla cerrada en esos SO: este cambio no inventa una identidad portable segura.
+
+**Límite residual de Executions históricas sin Job:** tree_closed_at acredita el cierre del **árbol capturado**, no
 contención del SO. CIM no puede probar que un descendiente no escapó o nació después
 de capturar su padre y antes de terminarlo. La identidad segura del handle resuelve
 la carrera de PID reciclado; no resuelve esa carrera de creación/escape. Para
 excluir cualquier escritor adversarial hace falta lanzar el Executor dentro de un
 **Windows Job Object** (sin breakaway y con asignación antes de permitir ejecución),
-o un mecanismo equivalente. Esto exige coordinar el lanzamiento con Executors y
-se propone como rediseño posterior. Un CLI ya terminado sin tree_closed_at, incluso
+o un mecanismo equivalente, como el lanzamiento de Executors SA-093 descrito arriba.
+Un CLI histórico ya terminado sin tree_closed_at, incluso
 tras una finalización normal, requiere reconciliación antes del siguiente intento.
 Los helpers tienen deadline asíncrono de 60 segundos y espera por handle de 10;
 SQLite conserva operaciones síncronas cortas y su propio busy_timeout: contención
@@ -167,6 +200,12 @@ $env:TEMP="$PWD\.vitest-tmp"; $env:TMP=$env:TEMP
 Remove-Item Env:SA_SKIP_TASKKILL_TEST -ErrorAction SilentlyContinue
 npm exec --workspace server -- vitest run __tests__/leases.test.ts __tests__/leaseProcesses.test.ts __tests__/leaseOrphan.test.ts __tests__/processRecovery.test.ts __tests__/windowsProcessRecovery.test.ts __tests__/workstore.test.ts __tests__/agentRoles.test.ts
 ```
+
+Para SA-093 añadir `__tests__/windowsJob.test.ts` y
+`__tests__/registeredProcess.test.ts`: nieto creado después de retener los handles
+de recuperación, cancelación por Job, rechazo asíncrono del registro y N1
+ACCESS_DENIED con salida/timeout/error secundario. Repetir sin
+SA_SKIP_TASKKILL_TEST fuera del sandbox; no se invocan CLIs de IA reales.
 
 La prueba de worker muerto mantiene raíz CLI y descendiente vivos. Tras el TTL,
 el siguiente claim debe terminar ambos, guardar tree_closed_at, incrementar el

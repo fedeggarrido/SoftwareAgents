@@ -1,4 +1,5 @@
 import { WORKSTORE_PROCESS_WAIT_MS } from '../constants.js';
+import { WINDOWS_JOB_API } from '../executors/windowsJob.js';
 
 /** Bundled native helper: identity, termination and wait use the same retained handle. */
 export const WINDOWS_PROCESS_HELPER = String.raw`
@@ -33,8 +34,14 @@ public class NativeRecoveryProcessApi : IRecoveryProcessApi {
     int error = Marshal.GetLastWin32Error();
     // ERROR_ACCESS_DENIED is what Windows returns for a process that is already
     // exiting (e.g. a conhost closing after its console client died): wait for it.
-    if (error == 5 && WaitForSingleObject(handle, ${WORKSTORE_PROCESS_WAIT_MS}) == 0) return;
-    if (Exited(handle)) return;
+    CheckTerminationError(error, () => WaitForSingleObject(handle, ${WORKSTORE_PROCESS_WAIT_MS}), () => Exited(handle));
+  }
+  public static void CheckTerminationError(int error, Func<uint> wait, Func<bool> exited) {
+    // Preserve the original termination error even if a follow-up query fails.
+    try {
+      if (error == 5 && wait() == 0) return;
+      if (exited()) return;
+    } catch { throw new Win32Exception(error); }
     throw new Win32Exception(error);
   }
   public void Wait(IntPtr handle) {
@@ -77,6 +84,9 @@ export function windowsTerminationScript(pid: number, identity: string): string 
 Add-Type -TypeDefinition @'
 ${WINDOWS_PROCESS_HELPER}
 '@
+Add-Type -TypeDefinition @'
+${WINDOWS_JOB_API}
+'@
 $held=New-Object 'System.Collections.Generic.List[HeldRecoveryProcess]'
 try {
   $root=[HeldRecoveryProcess]::Open(${pid})
@@ -84,6 +94,11 @@ try {
   $held.Add($root)
   if ($root.StartTicks -ne [long]'${identity}') { throw 'Executor PID reused; tree closure unproven' }
   if ($root.HasExited) { throw 'Executor root disappeared; tree closure unproven' }
+  $job=[ExecutionJob]::Open(${pid},[long]'${identity}')
+  if ($job -ne [IntPtr]::Zero) {
+    try { [ExecutionJob]::Kill($job); 'TREE_CLOSED'; return }
+    finally { [ExecutionJob]::CloseHandle($job) | Out-Null }
+  }
   for ($i=0; $i -lt $held.Count; $i++) {
     $parent=$held[$i]
     $children=@(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($parent.Pid)")

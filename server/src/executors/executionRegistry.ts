@@ -145,23 +145,31 @@ export class ExecutionRegistry {
         fs.mkdirSync(path.dirname(runPath), { recursive: true });
         fs.closeSync(fs.openSync(resolveInside(registry.root, run), 'wx', 0o600));
         const handle = inner.start(req);
-        if (handle.sessionId && !options.workStore) {
-          registry.append('softwareagents/executions.jsonl', {
-            executionId: req.executionId,
-            projectId: req.projectId,
-            role: req.role,
-            taskKey: req.taskKey,
-            executor: inner.id,
-            model: req.model ?? null,
-            tier: req.tier,
-            effort: req.effort,
-            selectionReason: req.selectionReason,
-            sessionId: handle.sessionId,
-            pid: 0,
-            startedAt: new Date().toISOString(),
-            promptHash: createHash('sha256').update(req.prompt).digest('hex'),
-            baseSha,
-          });
+        try {
+          if (handle.sessionId && !options.workStore) {
+            registry.append('softwareagents/executions.jsonl', {
+              executionId: req.executionId,
+              projectId: req.projectId,
+              role: req.role,
+              taskKey: req.taskKey,
+              executor: inner.id,
+              model: req.model ?? null,
+              tier: req.tier,
+              effort: req.effort,
+              selectionReason: req.selectionReason,
+              sessionId: handle.sessionId,
+              pid: 0,
+              startedAt: new Date().toISOString(),
+              promptHash: createHash('sha256').update(req.prompt).digest('hex'),
+              baseSha,
+            });
+          }
+        } catch (error) {
+          try {
+            handle.cancel();
+          } finally {
+            throw error;
+          }
         }
         return {
           sessionId: handle.sessionId,

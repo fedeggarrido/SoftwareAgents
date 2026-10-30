@@ -167,6 +167,18 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 
 ### 6. Sin sandbox de SO para Claude en Windows
 
+- **SA-093:** ambos Executors lanzan el CLI dentro de un Windows Job con
+  KILL_ON_JOB_CLOSE y breakaway deshabilitado, antes de ejecutar código del CLI.
+  El supervisor fijo espera registro duradero y asignación antes de lanzar.
+  Recuperación termina el Job y espera cero procesos activos; cancelación usa
+  IPC al supervisor. El helper kernel32 está embebido, sin archivos de caché ni
+  entrada del modelo, no eleva permisos y solo actúa sobre esa Execution.
+  Véase [workstore-leases](../workstore-leases.md). Contiene el ciclo de vida,
+  no filesystem, red, procesos externos ya existentes ni autoridad del usuario.
+  Un adversario con los mismos permisos del operador puede manipular procesos,
+  handles o nombres de Job: esto no sustituye el sandbox SA-058. Sin Job, los
+  registros históricos conservan el fallback CIM y su carrera de descendientes.
+
 - **SA-QA-20 (evals):** el verificador ejecuta código del agente como el operador fuera del sandbox del Executor; allowlist de entorno/rutas, temporales y timeout no confinan el host ni impiden manipular Vitest desde un fichero permitido. Solo tareas propias y agentes cooperativos; véase [Límites de seguridad](../evals.md#límites-de-seguridad).
 
 - **Descripción:** el único aislamiento de trabajo es el worktree; Claude puede

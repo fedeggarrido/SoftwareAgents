@@ -22,6 +22,12 @@ vi.mock('child_process', async (original) => ({
   spawn: vi.fn(),
   execFileSync: vi.fn(),
 }));
+// These regressions exercise legacy taskkill/process-group retries. Managed Job
+// cancellation has real-process coverage in registeredProcess/windowsJob tests.
+vi.mock('../src/executors/registeredProcess.js', async (original) => ({
+  ...(await original<typeof import('../src/executors/registeredProcess.js')>()),
+  cancelRegisteredProcess: () => false,
+}));
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: () => process.env.HOME ?? actual.homedir() };

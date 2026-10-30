@@ -54,6 +54,22 @@ it('a failed registration still closes, so executors release their slot and lock
   expect(fs.existsSync(marker())).toBe(false);
 });
 
+it('an asynchronous registration rejection leaves no supervisor or CLI alive', async () => {
+  const failure = new Error('durable registration failed');
+  let observed: Error | undefined;
+  const child = spawnRegisteredProcess(process.execPath, command(), dir, async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    throw failure;
+  });
+  child.on('error', (error) => {
+    observed = error;
+  });
+  await settle(child);
+  expect(observed).toBe(failure);
+  expect(() => process.kill(child.pid!, 0)).toThrow();
+  expect(fs.existsSync(marker())).toBe(false);
+});
+
 it('a registered process launches the CLI and closes with its exit code', async () => {
   let registered: number | undefined;
   const child = spawnRegisteredProcess(process.execPath, command(), dir, (pid) => {

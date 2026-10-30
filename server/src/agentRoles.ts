@@ -106,6 +106,9 @@ export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'c
   const text = brief ?? '';
   const explicit =
     /^(?:Rol|Role):\s*(qa|reviewer|product-designer)\b/im.exec(text)?.[1]?.toLowerCase() ??
+    (provider === 'codex'
+      ? /^Eres Codex y (?:haces la|actúas como)\s+(qa|reviewer)\b/im.exec(text)?.[1]?.toLowerCase()
+      : undefined) ??
     /(?:Actúa como|Tu rol es)\s+(qa|reviewer)\b/i.exec(text)?.[1]?.toLowerCase();
   if (explicit) return specialistRole(explicit)!;
   const manager =

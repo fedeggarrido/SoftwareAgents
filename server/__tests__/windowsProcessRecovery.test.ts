@@ -8,6 +8,36 @@ import { processStartIdentity } from '../src/workstore/processRecovery.js';
 import { WINDOWS_PROCESS_HELPER } from '../src/workstore/windowsProcessRecovery.js';
 
 it.skipIf(process.platform !== 'win32')(
+  'ACCESS_DENIED waits for exit and preserves the original error on timeout or query failure',
+  async () => {
+    const fixture = `
+public static class DeniedRegression {
+  public static void Run() {
+    NativeRecoveryProcessApi.CheckTerminationError(5, () => 0, () => { throw new System.Exception("must not query"); });
+    foreach(bool broken in new bool[]{false,true}) {
+      try {
+        NativeRecoveryProcessApi.CheckTerminationError(5, () => 258, () => { if(broken) throw new System.Exception("query failed"); return false; });
+        throw new System.Exception("expected denial");
+      } catch(System.ComponentModel.Win32Exception e) { if(e.NativeErrorCode!=5) throw; }
+    }
+  }
+}`;
+    const { stdout } = await promisify(execFile)(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$ErrorActionPreference='Stop'; Add-Type -TypeDefinition @'\n${WINDOWS_PROCESS_HELPER}\n${fixture}\n'@\n[DeniedRegression]::Run(); 'DENIED_OK'`,
+      ],
+      { windowsHide: true, timeout: 20000 },
+    );
+    expect(stdout.trim()).toBe('DENIED_OK');
+  },
+  25000,
+);
+
+it.skipIf(process.platform !== 'win32')(
   'native helper verifies, terminates and waits for a real fixture through one retained handle',
   async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {

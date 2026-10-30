@@ -5,6 +5,7 @@ import {
   EXECUTOR_TERMINATION_RETRY_MS,
   EXECUTOR_TERMINATION_TIMEOUT_MS,
 } from '../constants.js';
+import { cancelRegisteredProcess } from './registeredProcess.js';
 
 /** Request cancellation independently of process-close confirmation. Failed kills retry within
  * a bounded window; later cancel/timeout requests start another window. Only close finishes a run. */
@@ -26,6 +27,7 @@ export function processCancellation(child: () => ChildProcess | undefined) {
     if (process.platform === 'win32' && Date.now() + EXECUTOR_TASKKILL_TIMEOUT_MS > deadline)
       return;
     try {
+      if (cancelRegisteredProcess(proc)) return;
       if (process.platform === 'win32')
         execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
           windowsHide: true,

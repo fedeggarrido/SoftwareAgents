@@ -26,6 +26,8 @@ export interface FeatureRecord {
 export interface FeatureRunState {
   startedAt?: string;
   zoneWait?: { task: string; reason: string };
+  /** Task admitted under zone admission; holds its zones until DONE (SA-097). */
+  zoneHold?: string;
   designReviews?: Record<
     string,
     {
@@ -233,6 +235,14 @@ export interface WorkStore {
   getFeatureRun(key: string): FeatureRunRecord | undefined;
   claimFeatureRun(key: string, owner: string, initial: FeatureRunState): Promise<FeatureRunState>;
   saveFeatureRun(key: string, owner: string, state: FeatureRunState): Promise<void>;
+  /** Atomically re-checks `conflict` and, when clear, saves `state` holding `task`'s zones. */
+  reserveZoneTask(
+    key: string,
+    owner: string,
+    state: FeatureRunState,
+    task: string,
+    conflict: () => string | null,
+  ): Promise<string | null>;
   releaseFeatureRun(key: string, owner: string): Promise<void>;
   prepareWorkerPublication(publication: WorkerPublication, owner: string): Promise<void>;
   listWorkerPublications(feature: string): WorkerPublication[];

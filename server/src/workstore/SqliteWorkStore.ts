@@ -1115,6 +1115,30 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
+  reserveZoneTask(
+    key: string,
+    owner: string,
+    state: FeatureRunState,
+    task: string,
+    conflict: () => string | null,
+  ): Promise<string | null> {
+    // BEGIN IMMEDIATE serializes this check with every other run's reservation.
+    return this.write(() => {
+      if (this.getFeatureRun(key)?.owner !== owner)
+        throw new Error('Feature orchestrator ownership lost');
+      const reason = conflict();
+      if (reason) return reason;
+      state.zoneHold = task;
+      delete state.zoneWait;
+      this.db
+        .prepare(
+          'UPDATE feature_runs SET state = ?, updated_at = ? WHERE project_id = ? AND feature_key = ? AND owner = ?',
+        )
+        .run(JSON.stringify(state), new Date().toISOString(), this.projectId, key, owner);
+      return null;
+    });
+  }
+
   saveFeatureRun(key: string, owner: string, state: FeatureRunState): Promise<void> {
     return this.write(() => {
       if (this.getFeatureRun(key)?.owner !== owner)

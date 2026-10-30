@@ -658,7 +658,9 @@ export async function runFeature(
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
         if (action === 'qa' && !(await runDesignGate(store, config, state, task, save))) continue;
         if (action === 'develop') {
-          const conflict = zoneConflict(store, task);
+          const conflict = await store.reserveZoneTask(key, owner, state, task.key, () =>
+            zoneConflict(store, task),
+          );
           if (conflict) {
             state.zoneWait = { task: task.key, reason: conflict };
             state.message = conflict;
@@ -667,7 +669,6 @@ export async function runFeature(
             await new Promise((resolve) => setTimeout(resolve, FEATURE_RUN_POLL_MS));
             continue;
           }
-          delete state.zoneWait;
           state.message = '';
           await save();
           const branch = `refs/heads/sa/${task.key}-developer`;

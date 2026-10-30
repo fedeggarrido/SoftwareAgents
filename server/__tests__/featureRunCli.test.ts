@@ -201,10 +201,13 @@ describe('feature run interruption authority', () => {
         }
         db.prepare('UPDATE tasks SET declaration = ?').run(JSON.stringify({ changeZones: [zone] }));
         db.prepare(
-          'INSERT INTO feature_runs (project_id, feature_key, state) VALUES (?, ?, ?)',
+          // A live orchestrator (this process) holds FEAT-001; a dead one would hold nothing.
+          'INSERT INTO feature_runs (project_id, feature_key, owner, pid, state) VALUES (?, ?, ?, ?, ?)',
         ).run(
           'test',
           'FEAT-001',
+          'feature-run-other',
+          process.pid,
           JSON.stringify({
             branch: 'sa/FEAT-001-integration',
             head: main,

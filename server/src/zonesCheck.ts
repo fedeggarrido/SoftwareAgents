@@ -21,6 +21,8 @@ export interface BranchZones {
 }
 export interface ZonesReport {
   branches: BranchZones[];
+  /** Branches that could not be diffed this scan (deleted, no merge base, limits). */
+  skipped?: { branch: string; reason: string }[];
   overlaps: { file: string; branches: string[] }[];
 }
 export interface ZoneTask {
@@ -57,11 +59,20 @@ export async function checkZones(root: string, tasks: ZoneTask[] = []): Promise<
     .map((name) => name.trim())
     .filter(Boolean);
   const branches: BranchZones[] = [];
+  const skipped: { branch: string; reason: string }[] = [];
   for (const branch of names) {
-    const base = (await git('merge-base', 'refs/heads/main', `refs/heads/${branch}`)).trim();
-    const files = (await git('diff', '--name-only', '-z', `${base}..refs/heads/${branch}`))
-      .split('\0')
-      .filter(Boolean);
+    // One branch deleted mid-scan, without a merge base or over the limits must not
+    // hide the overlaps of every other branch.
+    let files: string[];
+    try {
+      const base = (await git('merge-base', 'refs/heads/main', `refs/heads/${branch}`)).trim();
+      files = (await git('diff', '--name-only', '-z', `${base}..refs/heads/${branch}`))
+        .split('\0')
+        .filter(Boolean);
+    } catch (error) {
+      skipped.push({ branch, reason: (error as Error).message.split('\n')[0].slice(0, 200) });
+      continue;
+    }
     const declarations = tasks.filter(
       (task) =>
         task.branch === branch ||
@@ -90,6 +101,7 @@ export async function checkZones(root: string, tasks: ZoneTask[] = []): Promise<
       touched.set(file, [...(touched.get(file) ?? []), branch.branch]);
   return {
     branches,
+    ...(skipped.length ? { skipped } : {}),
     overlaps: [...touched]
       .filter(([, refs]) => refs.length > 1)
       .map(([file, refs]) => ({ file, branches: refs })),
@@ -116,9 +128,9 @@ export async function monitoredZones(
           .then((report) => {
             monitor!.report = report;
           })
-          .catch(() => {
-            monitor!.report = undefined;
-          })
+          // Branch failures are isolated in checkZones; if listing itself fails, keep the
+          // last good report rather than silently dropping every warning.
+          .catch(() => {})
           .finally(() => {
             monitor!.pending = undefined;
           });

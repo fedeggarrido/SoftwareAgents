@@ -14,6 +14,8 @@ function fixture(zone: string) {
     tasks.map((task, i) => [
       task.feature_key,
       {
+        owner: `feature-run-${i}`,
+        pid: process.pid,
         state: { status: 'running', startedAt: `2026-10-30T00:00:0${i}Z` },
       },
     ]),
@@ -22,6 +24,19 @@ function fixture(zone: string) {
   return { tasks, runs, store };
 }
 describe('cross-feature admission', () => {
+  it('a dead orchestrator (status still running) holds no zones', () => {
+    const { tasks, runs, store } = fixture('server/src');
+    runs['FEAT-001'].pid = 2 ** 22 + 12345; // no such process
+    expect(zoneConflict(store, tasks[1])).toBeNull();
+    runs['FEAT-001'].owner = null;
+    runs['FEAT-001'].pid = process.pid;
+    expect(zoneConflict(store, tasks[1])).toBeNull();
+  });
+  it('a newer run holding an admitted task blocks a resumed older run', () => {
+    const { tasks, runs, store } = fixture('core/asyncapi.yaml');
+    runs['FEAT-002'].state.zoneHold = 'FEAT-002-T01';
+    expect(zoneConflict(store, tasks[0])).toContain('FEAT-002-T01 of FEAT-002');
+  });
   it.each(['server/src', 'core/asyncapi.yaml', 'core/**'])(
     'oldest advances without deadlock for %s',
     (zone) => {

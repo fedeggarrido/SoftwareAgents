@@ -14,6 +14,66 @@ Executor/herramientas, rama → CI y propuesta → Human Decision.
 
 ## Riesgos principales
 
+Inventario SA-102 y [mapa OWASP Agentic ASI01–ASI10](owasp-agentic.md).
+
+## Inventario SA-102 de contenido externo (2026-10-30)
+
+Validar la forma de un documento no acredita su contenido ni elimina instrucciones
+maliciosas. Un import humano tampoco convierte texto externo en autoridad.
+
+| Entrada y rutas reales                                                                                                                                     | Receptor actual                                                                  | Frontera y estado                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web/HTML/buscador: `server/src/researchAdapters/web.ts`, `server/src/researchHttp.ts`                                                                      | `researcher`, `read_only`, sin herramientas                                      | HTTP del runtime; SourceItems etiquetados, incluidos título y metadatos.                                                                                      |
+| Abstracts arXiv/Semantic Scholar: `server/src/researchAdapters/papers.ts`                                                                                  | `researcher`                                                                     | Misma cuarentena; no descarga PDFs.                                                                                                                           |
+| Libros: `server/src/researchAdapters/books.ts`                                                                                                             | `researcher`                                                                     | Solo metadatos/descripciones públicas, no obras completas.                                                                                                    |
+| Posts/comentarios: `server/src/researchAdapters/reddit.ts`                                                                                                 | `researcher`                                                                     | OAuth y red pertenecen al runtime.                                                                                                                            |
+| Adapters registrados, cache e informes: `server/src/research.ts`, `server/src/commands/research.ts`                                                        | `researcher`; posteriormente consumidores del Brain                              | Se normaliza procedencia de caches antiguos; informe completo conserva bibliografía contaminada; salida reducida en `*.handoff.json`.                         |
+| DAG YAML, FeatureSpec y declaraciones SQLite: `server/src/commands/task.ts`, `server/src/taskDag.ts`, `server/src/workstore/SqliteWorkStore.ts`            | Developer/QA author (`branch_write`), Reviewer/QA (`read_only` con herramientas) | Esquemas existentes; texto de issues/tareas copiado al YAML todavía sin lector obligatorio. **Abierto**.                                                      |
+| ClickUp/issues: `server/src/boardWatcher.ts`, `server/src/agentRoles.ts`                                                                                   | Oficina muestra espejo `docs/backlog/board.json`; briefs reconocen IDs ClickUp   | No se encontró importador nativo de cuerpos de issues GitHub/ClickUp a prompts. Copias manuales entran por DAG/request/brief. El espejo no concede autoridad. |
+| Documentos `--request`/`--answers`: `server/src/commands/feature.ts`, `server/src/requirements.ts`, `server/src/architect.ts`                              | Requirements analyst/Architect (`brain_write`, herramientas de lectura)          | pathGuard y contratos de propuesta; texto libre todavía sin etiqueta/lector previo. **Abierto**.                                                              |
+| `worker --brief`, evals y task records: `server/src/worker.ts`, `server/src/evalTasks.ts`                                                                  | Rol asignado, normalmente Developer                                              | El guard protege envelopes etiquetados, no descubre procedencia de texto plano. **Abierto**.                                                                  |
+| Brain, código, diffs, resultados: `server/src/worker.ts`, `server/src/architect.ts`, `server/src/reviewer.ts`, `server/src/qa.ts`                          | Architect, Developer, Reviewer, QA                                               | SourceItems/envelopes conservados en taskData se rechazan; copiar solo texto o leerlo por herramientas pierde la etiqueta. **Abierto**.                       |
+| Capturas PNG y texto visible: `server/src/designCaptureHost.ts`, `server/src/commands/design.ts`, `server/src/designer.ts`, `server/src/designPipeline.ts` | Product designer (`read_only`, con Read/Glob/Grep); findings al rework           | DesignReport y evidencias del runtime existentes; transporte multimodal sin herramientas y handoff acotado pendientes. **Abierto**.                           |
+
+### Barrera implementada y límites
+
+`server/src/externalContent.ts` define `UntrustedExternalText` serializable con
+origen explícito. `SourceItem.provenance = untrusted-external` etiqueta el objeto
+entero. Es opcional en el contrato para leer informes antiguos; `validateSourceItem`
+lo devuelve siempre etiquetado. Todos los adapters pasan por `makeSource`.
+La etiqueta sobrevive a persistencia, JSON y structuredClone.
+
+`server/src/agentCompiler.ts` inspecciona task, repository y brainContents, incluidos
+anidados, JSON serializado y etiquetas dentro de Markdown. Rechaza contenido
+externo para todos los roles con herramientas, también read_only y perfiles
+reducidos. Solo researcher con read_only y esquema de salida puede recibirlo.
+Claude recibe herramientas vacías, sin shell, red, MCP ni delegación; Codex no
+admite ese rol porque su shell no cumple la frontera. Ambos Executors compilan
+antes de lanzar el proceso. No es confinamiento de SO.
+
+`researchHandoff` revalida ResearchReport, SourceItems y referencias antes de
+proyectar como máximo 12 hechos de 240 caracteres, confianza enumerada y bandera
+de evidencia insuficiente. No transfiere bibliografía, extractos, citas, títulos,
+URLs, razones ni campos adicionales del modelo. `research run` conserva evidencia
+original y escribe además `<id>.handoff.json`. El compilador revalida envelopes de
+handoff, rechazando campos desconocidos y límites excedidos. Estos límites reducen
+el canal copiado: **240 caracteres todavía pueden contener una inyección**. Los
+hechos siguen siendo datos y requieren las políticas de acciones existentes.
+
+Esta barrera no descubre procedencia de texto plano ni evita lecturas posteriores
+del repositorio. No se añadió un lanzamiento implícito de modelo al worker: exige
+integrar admisión, cuota, cancelación, auditoría y transporte de imágenes. SA-102
+sigue **parcial** hasta migrar las rutas abiertas. No hay cambio de rol ni recorte
+silencioso de briefs/imports existentes. No presentar el pipeline completo como
+protegido por dual-LLM.
+
+Pruebas: `server/__tests__/externalContent.test.ts`,
+`server/__tests__/research.test.ts`, `server/__tests__/injectionBattery.test.ts` y
+fixtures `server/__tests__/fixtures/injection/external-{web,paper,issue}.json`.
+Comprueban procedencia, herramientas, rechazo del compilador y ausencia del payload
+de los campos eliminados en el handoff. No acreditan resistencia de un modelo real
+ni seguridad semántica de sus resúmenes.
+
 ### 1. Contenido no confiable
 
 - **Descripción:** repo, web, Tasks y FeatureSpecs son datos, nunca instrucciones

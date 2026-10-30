@@ -9,6 +9,7 @@ import {
   CODEX_WEB_SEARCH_MODE,
 } from './constants.js';
 import { DESIGNER_SYSTEM_PROMPT } from './designerPrompt.js';
+import { containsExternalContent } from './externalContent.js';
 
 export const TOOL_POLICY_VERSION = 'sa-062/v5';
 export const PROMPT_RULES_VERSION = 'sa-099/v1';
@@ -104,6 +105,15 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
   )
     throw new Error('Permission profile exceeds role ceiling');
   const profile = PROFILE_FLAGS[spec.permissions.profile];
+  const external = containsExternalContent({
+    task: data.task,
+    repository: data.repository ?? null,
+    brain: data.brainContents ?? {},
+  });
+  if (external && (role !== 'researcher' || spec.permissions.profile !== 'read_only'))
+    throw new Error('External content requires the tool-free quarantine reader');
+  if (external && data.outputSchema?.type !== 'object')
+    throw new Error('Quarantine reader requires an object output schema');
   // Bind every spec field without duplicating the full declaration in each prompt.
   const specHash = createHash('sha256').update(canonical(spec)).digest('hex');
   const outputSchema = data.outputSchema

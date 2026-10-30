@@ -6,6 +6,8 @@ export const RESEARCH_HTTP_BYTES = 1048576;
 export const RESEARCH_HTTP_MS = 10000;
 export type SourceKind = 'video' | 'thread' | 'book' | 'article' | 'paper' | 'podcast' | 'web';
 export interface SourceItem {
+  /** Optional for legacy persisted reports; runtime normalizes it at ingress. */
+  provenance?: 'untrusted-external';
   id: string;
   adapter: string;
   url?: string;

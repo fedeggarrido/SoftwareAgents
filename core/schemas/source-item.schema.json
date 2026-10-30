@@ -3,6 +3,7 @@
   "required": ["id", "adapter", "title", "retrievedAt", "kind", "excerpt", "language", "contentHash"],
   "anyOf": [{"required": ["url"], "properties": {"url": {}}}, {"required": ["citation"], "properties": {"citation": {}}}],
   "properties": {
+    "provenance": {"const": "untrusted-external"},
     "id": {"type": "string", "minLength": 1, "maxLength": 200},
     "adapter": {"type": "string", "minLength": 1, "maxLength": 100},
     "url": {"type": "string", "pattern": "^https?://", "maxLength": 4096},

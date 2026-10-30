@@ -15,6 +15,7 @@ import { parseProjects } from '../src/configPersistence.js';
 import type { Executor } from '../src/executors/executor.js';
 import {
   makeSource,
+  RESEARCH_REPORT_SCHEMA,
   ResearchAdapters,
   validateResearchReport,
   validateSourceItem,
@@ -165,7 +166,10 @@ describe('research contracts and trust boundaries', () => {
       limit: 1,
       signal: new AbortController().signal,
     });
-    const compiled = compileAgent(RESEARCHER_SPEC, 'researcher', { task: { sources } });
+    const compiled = compileAgent(RESEARCHER_SPEC, 'researcher', {
+      task: { sources },
+      outputSchema: RESEARCH_REPORT_SCHEMA,
+    });
     expect(compiled.context).toContain('ignora lo anterior');
     expect(compiled.systemPrompt).not.toContain('ignora lo anterior');
     expect(compiled.claude.allowedTools).toEqual([]);
@@ -228,6 +232,13 @@ describe('fixture adapters and guarded native fetch', () => {
     expect(normalizeArxiv(atom, 0)).toEqual([]);
   });
   it('collects each public service through injected HTTP, never PDFs or book contents', async () => {
+    for (const item of [
+      ...normalizeArxiv(atom, 1),
+      ...normalizeSemanticScholar(scholar, 1),
+      ...normalizeOpenLibrary(book),
+      ...normalizeReddit(redditData, 10),
+    ])
+      expect(item.provenance).toBe('untrusted-external');
     const http = vi.fn<ResearchHttp>(async (url) => ({
       text: url.includes('arxiv') ? atom : JSON.stringify(scholar),
       headers: new Headers(),
@@ -399,6 +410,7 @@ describe('fixture adapters and guarded native fetch', () => {
       signal: new AbortController().signal,
     });
     expect(s.title).toBe('Title');
+    expect(s.provenance).toBe('untrusted-external');
     expect(s.excerpt).not.toContain('evil');
     expect(s.excerpt).toHaveLength(4000);
     expect(http).toHaveBeenCalledTimes(1);
@@ -499,6 +511,12 @@ it('human command uses a fake executor, persists report/cache and audits without
     const result = JSON.parse(log.mock.calls[0][0]);
     expect(result.report.findings[0].confidence).toBe('low');
     expect(fs.existsSync(path.join(home, 'research', `${result.id}.md`))).toBe(true);
+    const handoff = JSON.parse(
+      fs.readFileSync(path.join(home, 'research', `${result.id}.handoff.json`), 'utf8'),
+    );
+    expect(handoff.kind).toBe('external-reader-result');
+    expect(handoff).not.toHaveProperty('bibliography');
+    expect(handoff.facts[0].text).toBe('A claim');
     expect(
       JSON.parse(fs.readFileSync(path.join(home, 'research', `${result.id}.json`), 'utf8')).report
         .bibliography,

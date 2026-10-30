@@ -10,6 +10,12 @@ import {
   type SourceItem,
   type SourceKind,
 } from '../../core/src/research.js';
+import {
+  EXTERNAL_HANDOFF_ITEMS,
+  EXTERNAL_HANDOFF_TEXT_CHARS,
+  type ExternalReaderResult,
+  validateExternalReaderResult,
+} from './externalContent.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
 const sourceValidator = compileSchema<SourceItem>(sourceContract);
@@ -80,7 +86,7 @@ export function validateSourceItem(value: unknown): SourceItem {
       throw new Error('Invalid source URL');
   }
   if (item.contentHash !== sourceHash(item.excerpt)) throw new Error('Source hash mismatch');
-  return item;
+  return { ...item, provenance: 'untrusted-external' };
 }
 export function makeSource(
   input: Omit<SourceItem, 'id' | 'contentHash' | 'retrievedAt'>,
@@ -210,4 +216,18 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
   if (report.bibliography.length) throw new Error('Bibliography is runtime-owned; return []');
   report.bibliography = structuredClone(sources);
   return report;
+}
+
+/** Revalidate the reader output and its sources before exporting a bounded handoff.
+ * Full reports remain evidence artifacts and must never be supplied to a tool role. */
+export function researchHandoff(source: string, sources: SourceItem[]): ExternalReaderResult {
+  const report = validateResearchReport(source, sources);
+  return validateExternalReaderResult({
+    kind: 'external-reader-result',
+    facts: report.findings.slice(0, EXTERNAL_HANDOFF_ITEMS).map((finding) => ({
+      text: finding.claim.slice(0, EXTERNAL_HANDOFF_TEXT_CHARS),
+      confidence: finding.confidence,
+    })),
+    insufficientEvidence: report.gaps.length > 0 || report.findings.length === 0,
+  });
 }

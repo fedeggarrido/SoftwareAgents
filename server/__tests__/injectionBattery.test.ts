@@ -15,6 +15,7 @@ import {
 import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import { CodexCliExecutor } from '../src/executors/codexCliExecutor.js';
 import type { ExecutionEvent, ExecutionRequest, Executor } from '../src/executors/executor.js';
+import { EXTERNAL_HANDOFF_SCHEMA, externalText } from '../src/externalContent.js';
 import { removeTempDir } from './helpers/removeTempDir.js';
 
 vi.mock('os', async (importOriginal) => {
@@ -99,6 +100,22 @@ it('loads at least the web-exfiltration case', () => {
   expect(cases.map((attack) => attack.id)).toContain('web-exfiltration');
 });
 for (const attack of cases) {
+  if (attack.id.startsWith('external-')) {
+    it(`${attack.id}: runtime taint blocks every tool role`, () => {
+      const task = externalText(
+        attack.id.slice('external-'.length) as 'web' | 'paper' | 'issue',
+        attack.payload,
+      );
+      for (const role of Object.keys(ROLE_PROFILES)) {
+        if (role === 'researcher') {
+          expect(
+            compileAgent(template(role), role, { task, outputSchema: EXTERNAL_HANDOFF_SCHEMA })
+              .claude.allowedTools,
+          ).toEqual([]);
+        } else expect(() => compileAgent(template(role), role, { task })).toThrow(/quarantine/);
+      }
+    });
+  }
   it.each(Object.keys(ROLE_PROFILES))(
     `${attack.id}: keeps the payload as data and grants %s no web tool or connector`,
     (role) => {

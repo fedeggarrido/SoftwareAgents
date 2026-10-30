@@ -22,6 +22,7 @@ import { loadProjectConfig } from '../projectConfig.js';
 import {
   RESEARCH_MODEL_SCHEMA,
   ResearchAdapters,
+  researchHandoff,
   sourceHash,
   validateResearchReport,
   validateSourceItem,
@@ -344,6 +345,21 @@ export async function runResearchCommand(
     if (!report.findings.length)
       report.gaps.push('Insufficient evidence; no validated claims produced.');
     const result = { id, partial: report.gaps.length > 0, report };
+    // Separate, bounded artifact for downstream tool roles. The full report/cache
+    // stays tainted evidence; stripping bibliography alone would retain long quotes.
+    const handoff = researchHandoff(
+      JSON.stringify({
+        summary: 'Bounded findings for downstream use.',
+        findings: report.findings,
+        contradictions: [],
+        gaps: [],
+        discardedSources: [],
+        bibliography: [],
+      }),
+      sources,
+    );
+    handoff.insufficientEvidence ||= result.partial;
+    fs.writeFileSync(resolveInside(directory, `${id}.handoff.json`), JSON.stringify(handoff));
     fs.writeFileSync(resolveInside(directory, `${id}.json`), JSON.stringify(result, null, 2));
     // JSON code block keeps untrusted markdown/HTML as literal data when rendered.
     const literal = JSON.stringify(result, null, 2)

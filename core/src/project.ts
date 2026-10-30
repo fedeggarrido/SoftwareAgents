@@ -41,7 +41,11 @@ export interface ProjectOperatorConfig {
   /** Runtime-only branch publication. Absent/disabled means no push. */
   developer?: { pushBranch: { enabled: boolean; remote: string } };
   /** Sequential feature runner; parallel scheduling is not enabled by usage budgets. */
-  orchestrator?: { maxConcurrentTasks?: number };
+  orchestrator?: {
+    maxConcurrentTasks?: number;
+    designMaxRounds?: number;
+    designMaxTokens?: number;
+  };
   /**
    * SA-092: tiers each Executor may run, narrowing what modelTiers offers. Absent
    * (or no entry) = every catalog tier; an empty list blocks that Executor.

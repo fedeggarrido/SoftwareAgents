@@ -26,6 +26,7 @@ export function taskDeclaration(feature: string, task: TaskDag['tasks'][number])
     ...(task.changeZones ? { changeZones: [...task.changeZones].sort() } : {}),
     ...(task.testZones ? { testZones: [...task.testZones].sort() } : {}),
     ...(task.parallelizable !== undefined ? { parallelizable: task.parallelizable } : {}),
+    ...(task.needsDesignReview !== undefined ? { needsDesignReview: task.needsDesignReview } : {}),
   });
 }
 

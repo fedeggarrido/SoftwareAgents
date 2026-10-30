@@ -5,6 +5,7 @@ import type { ProjectConfig } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
 import { FEATURE_RUN_POLL_MS } from './constants.js';
+import { runDesignGate } from './designPipeline.js';
 import { pushDeveloperBranch } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
@@ -654,6 +655,7 @@ export async function runFeature(
         // Approved doc tasks are DONE atomically in completeReview; publish them above
         // exactly like runtime-QA tasks, without scheduling a synthetic QA execution.
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
+        if (action === 'qa' && !(await runDesignGate(store, config, state, task, save))) continue;
         if (action === 'develop') {
           const branch = `refs/heads/sa/${task.key}-developer`;
           assertDirectRef(config.repoRoot, branch);

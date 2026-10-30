@@ -13,6 +13,7 @@ import {
   WORKSTORE_INITIAL_TASK_STATUS,
   WORKSTORE_RECONCILE_REASON_PREFIX,
 } from '../constants.js';
+import { needsDesignReview } from '../designReviewLoop.js';
 import { developerGuardFailure } from '../developerFailure.js';
 import { evalGit } from '../evalTasks.js';
 import { parseFeatureSpec } from '../featureSpec.js';
@@ -698,6 +699,18 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
+  requestDesignRework(taskId: string, version: number): Promise<void> {
+    return this.write(() => {
+      const task = this.getTask(taskId);
+      if (!task || task.status !== 'QA' || task.lease_owner)
+        throw new Error('Design rework requires idle QA task');
+      this.change(taskId, version, 'READY', 'Designer requested changes', 'product-designer');
+      this.db
+        .prepare('UPDATE tasks SET review_ref = NULL WHERE project_id = ? AND key = ?')
+        .run(this.projectId, taskId);
+    });
+  }
+
   completeReview(
     taskId: string,
     owner: string,
@@ -742,7 +755,10 @@ class SqliteWorkStore implements WorkStore {
             JSON.stringify({ [taskId]: 'REVIEW' }),
           );
       } else if (review.report.verdict === 'approve') {
-        if (task.type === 'doc') {
+        if (
+          task.type === 'doc' &&
+          (!task.declaration || !needsDesignReview(JSON.parse(task.declaration)))
+        ) {
           this.change(taskId, task.version, 'DONE', 'QA no aplicable: tarea doc', owner);
           for (const dependent of this.listTasks())
             if (

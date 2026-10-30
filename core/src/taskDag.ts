@@ -21,6 +21,7 @@ export interface DagTask {
   testZones?: string[];
   /** A scheduling hint, never authorization to run concurrently. */
   parallelizable?: boolean;
+  needsDesignReview?: boolean;
 }
 
 /** Task DAG produced by the Architect for one FeatureSpec. Not persisted by itself. */

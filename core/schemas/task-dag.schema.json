@@ -69,6 +69,9 @@
           },
           "parallelizable": {
             "type": "boolean"
+          },
+          "needsDesignReview": {
+            "type": "boolean"
           }
         },
         "required": [

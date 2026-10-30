@@ -41,6 +41,32 @@ describe('WorkStore (real SQLite)', () => {
     const { DatabaseSync } = await import('node:sqlite');
     return new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
   }
+  it('atomically returns idle QA to design rework and clears the reviewed revision', async () => {
+    const store = await open();
+    store.createTask({ key: 'FEAT-105-T01', type: 'code', status: 'QA' });
+    const db = await inspect();
+    try {
+      db.prepare('UPDATE tasks SET review_ref = ? WHERE project_id = ? AND key = ?').run(
+        JSON.stringify({ branch: 'sa/task', sha: 'a'.repeat(40), base: 'b'.repeat(40) }),
+        'a',
+        'FEAT-105-T01',
+      );
+      await expect(store.requestDesignRework('FEAT-105-T01', 99)).rejects.toThrow(/version/);
+      expect(store.getTask('FEAT-105-T01')!.review_ref).not.toBeNull();
+      await store.requestDesignRework('FEAT-105-T01', 1);
+      expect(store.getTask('FEAT-105-T01')).toMatchObject({
+        status: 'READY',
+        review_ref: null,
+        version: 2,
+      });
+      expect(store.listDomainEvents('FEAT-105-T01').at(-1)!.reason).toBe(
+        'Designer requested changes',
+      );
+      await expect(store.requestDesignRework('FEAT-105-T01', 2)).rejects.toThrow(/idle QA/);
+    } finally {
+      db.close();
+    }
+  });
   it('fences feature locks by exact process creation identity and retains uncertain locks', async () => {
     const store = await open();
     const initial = {
@@ -456,6 +482,58 @@ describe('WorkStore (real SQLite)', () => {
       db.close();
     }
   });
+  it.each([false, true])(
+    'routes doc review through design only when requested (%s)',
+    async (needsDesign) => {
+      const store = await open();
+      store.createTask({ key: 'doc', type: 'doc', status: 'READY' });
+      const claimed = await store.claim('doc', 'developer');
+      await store.setTaskWorktree('doc', 'developer', 'branch', 'tree');
+      const ref = { branch: 'branch', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
+      await store.setTaskReview('doc', 'developer', ref);
+      const running = await store.transition('doc', claimed.version, 'RUNNING', '', 'developer');
+      const ready = await store.transition('doc', running.version, 'REVIEW', '', 'developer');
+      const task = await store.claimReview('doc', ready.version, 'reviewer');
+      const db = await inspect();
+      try {
+        db.prepare('UPDATE tasks SET declaration = ? WHERE key = ?').run(
+          JSON.stringify({ needsDesignReview: needsDesign }),
+          'doc',
+        );
+      } finally {
+        db.close();
+      }
+      await store.createExecution({
+        key: 'doc-review',
+        task_key: 'doc',
+        agent_template_version: '1.0.0',
+        executor: 'codex',
+        agent_role: 'reviewer',
+        model_id: 'test',
+        session_id: null,
+        pid: null,
+        started_at: new Date().toISOString(),
+        system_prompt_hash: 'hash',
+        project_brain_sha: 'sha',
+        task_version: task.version,
+        tool_policy_version: 'test',
+      });
+      await store.closeExecution('doc-review', 'reviewer');
+      await store.completeReview(
+        'doc',
+        'reviewer',
+        {
+          execution_id: 'doc-review',
+          review_ref: ref,
+          developer_executor: 'claude',
+          reviewer_executor: 'codex',
+          report: { verdict: 'approve', findings: [] },
+        },
+        () => {},
+      );
+      expect(store.getTask('doc')!.status).toBe(needsDesign ? 'QA' : 'DONE');
+    },
+  );
   it('rolls back a ReviewReport with its rework transition and preserves the Developer attempt while reviewing', async () => {
     const store = await open();
     store.createTask({ key: 'task', type: 'code', status: 'READY' });

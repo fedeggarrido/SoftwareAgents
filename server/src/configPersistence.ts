@@ -178,7 +178,11 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
     orchestrator: {
       type: 'object',
       additionalProperties: false,
-      properties: { maxConcurrentTasks: { type: 'integer', minimum: 1 } },
+      properties: {
+        maxConcurrentTasks: { type: 'integer', minimum: 1 },
+        designMaxRounds: { type: 'integer', minimum: 1 },
+        designMaxTokens: { type: 'integer', minimum: 1 },
+      },
     },
     binaryPaths: numberMap(nonEmptyString),
     executors: {

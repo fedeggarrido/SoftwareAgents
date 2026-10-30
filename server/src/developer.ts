@@ -211,6 +211,9 @@ export function resetDeveloperWorktree(
 }
 
 export interface DeveloperRequest {
+  designReviewHistory?: NonNullable<
+    import('./workstore/WorkStore.js').FeatureRunState['designReviews']
+  >[string]['history'];
   key: string;
   approvedSpec: FeatureSpec;
   featureSha: string;
@@ -328,6 +331,7 @@ export function developerRequest(
         }
       : {}),
     previousFailure: lastDeveloperFailure(store, record),
+    designReviewHistory: store.getFeatureRun(key)?.state.designReviews?.[record.key]?.history,
     retryReason:
       store
         .listDomainEvents(record.key)

@@ -24,6 +24,21 @@ export interface FeatureRecord {
 
 /** Runtime checkpoints. Git publication is prepared here before a compare-and-swap. */
 export interface FeatureRunState {
+  designReviews?: Record<
+    string,
+    {
+      rounds: number;
+      tokens: number;
+      approvedSha?: string;
+      pending?: boolean;
+      pendingEvidenceDirectory?: string;
+      history: {
+        sha: string;
+        report: import('../../../core/src/designReport.js').DesignReport;
+        evidenceDirectory: string;
+      }[];
+    }
+  >;
   branch: string;
   initial_main: string;
   head: string;
@@ -253,6 +268,7 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
+  requestDesignRework(task: string, version: number): Promise<void>;
   /** Validated DAG ingress. Existing keys are immutable; the entire batch is atomic. */
   importTaskDag(
     dag: TaskDag,

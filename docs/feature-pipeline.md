@@ -1284,10 +1284,10 @@ cuentan. Responder la decisión no modifica la config:
 si el tope sigue alcanzado, vuelve a bloquear. No activa concurrencia 2 en
 `feature run`; admisión y executor-slots mantienen sus responsabilidades.
 
-## Principal Product Designer — SA-105, fase 1
+## Principal Product Designer — SA-105, fase 2
 
 La fuente de verdad del rol es [product-designer.md](agents/product-designer.md).
-El digest estable `phase1/v1.0.0` vive en `server/src/designerPrompt.ts`: incluye
+El digest estable `phase2/v2.0.0` vive en `server/src/designerPrompt.ts`: incluye
 las diez preguntas UX, los antipatrones de la sección 12, rúbrica de aspecto IA,
 WCAG 2.2 AA y la prohibición de inventar validaciones. AgentSpec usa `read_only`
 y capability `review`; Claude recibe solo Read/Glob/Grep (Read abre los PNG).
@@ -1309,9 +1309,14 @@ dependencias ni navegadores. No ejecutarlo desde un worker o un Agent.
 El runtime arranca un proceso con HOME/USERPROFILE/APPDATA/TEMP privados, un
 servidor standalone de fixture que sirve la SPA compilada del árbol de la tarea,
 en 127.0.0.1 y puerto efímero. El fixture de protocolo suministra el Project demo,
-HUD y backlog vacío; Features y Auditoría tienen estados vacío/error. No conecta
+HUD y backlog; Features tiene estados vacío/error/poblado y Auditoría vacío/error. No conecta
 WorkStore de producción, watchers, hooks ni handlers de operador. No hay tokens
-en la URL. Captura las cinco vistas a 1440×1000 y 390×844: catorce PNGs por defecto.
+en la URL. Captura las cinco vistas a 1440×1000 y 390×844: dieciocho PNGs base
+y capturas adicionales de interacción por defecto.
+Se añaden estados poblados con feature/tarea y capturas hover/focus-visible de
+botones de toolbar y panel. Se verifica el pseudoestado antes de capturarlo;
+controles ausentes o estados no activados quedan `not_tested`. Las capturas de
+interacción no acreditan contraste no textual ni accesibilidad completa.
 El servidor y Chromium se cierran en finally; el timeout solicita cancelación y
 espera el cierre antes de recurrir a terminar el proceso.
 
@@ -1326,7 +1331,7 @@ datos ni de las operaciones de la oficina del operador.
 `core/schemas/design-report.schema.json` valida verdict, findings
 (severity/screen/area/problem/principle/fix), siete puntuaciones enteras 1–5 y
 validations (kind/tool/result/evidence). Un blocker/major o un contraste fallido
-impide approve. Las validations deben coincidir exactamente con las del runtime;
+impide approve. El runtime reemplaza las validations del modelo por su propia evidencia;
 no se acepta contraste atribuido al modelo, evidencia vacía ni informe sin captura.
 Se guardan `report.json`, `evidence.json`, PNGs y contrastes bajo
 `<Brain>/design-reviews/<uuid>/`; auditoría registra inicio, resultado o fallo.
@@ -1337,10 +1342,76 @@ __tests__/designCapture.test.ts` (compilar antes). La prueba de capturas levanta
 servidor real y Chromium; solo omite con motivo explícito si no puede lanzar el
 navegador. La prueba del comando usa un executor fake y no lanza CLIs de IA.
 
-TODO fase 2: tres direcciones artísticas distintas y matriz ponderada; HumanDecision
-de dirección; materialización de docs/design/* y tokens; integración en feature run;
-bucle de corrección y seguimiento de hallazgos. Los puntos de extensión son el
-contrato DesignReport, AgentSpec, compilador, evidencia y el comando separado.
+### Dirección artística y decisión humana (SA-028)
+
+```sh
+pixel-agents design direction --json
+# Responder en Decisions con el id exacto de una opción (ingreso humano autenticado).
+pixel-agents design apply-direction --decision <id> --json
+```
+
+Ambos comandos exigen ingreso humano y capturas reales del runtime. El rol sigue
+siendo de solo lectura: devuelve datos estructurados; el runtime escribe únicamente
+`docs/design/**` y declaraciones del primer `:root` de `webview-ui/src/index.css`.
+No añade dependencias, cambia lógica, aprueba su propuesta ni integra.
+
+`ArtDirectionProposal` exige diagnóstico, al menos tres alternativas con nombre,
+estilo/influencias, personalidad, composición, estrategia cromática, tipografía e
+iconografía, ventajas/limitaciones/riesgos, encaje y complejidad; recomendación e
+inconvenientes. La matriz contiene seis enteros 1–5. El runtime reemplaza cualquier
+total del modelo por la suma ponderada: adecuación 25, usabilidad 20, accesibilidad
+15, personalidad 15, coherencia/escalabilidad 15 y viabilidad 10 (resultado 1–5).
+Heurística deliberadamente simple: normalizar mayúsculas, acentos y puntuación de
+estilo/composición/estrategia cromática; dos ejes idénticos entre dos propuestas
+exigen reexplorar **una sola vez**; otra coincidencia falla. No garantiza diversidad
+semántica: la comparación artística final corresponde al humano.
+
+Se crea `sa/design-<uuid>` en `.worktrees/design-<uuid>` desde HEAD. El checkout
+origen permanece intacto incluso si está en main. Los tres documentos son borradores
+sin commit y la HumanDecision «Dirección artística» contiene alternativas,
+recomendación y rutas de capturas/propuesta. La respuesta no ejecuta el diseño:
+`apply-direction` comprueba decisión contestada, autor humano y opción válida,
+y crea **otra rama de revisión** con los documentos y tokens. Claude revisa,
+prueba e integra por el flujo habitual; ningún comando hace merge ni push.
+
+La aplicación documenta armonía, roles, escalas y combinaciones prohibidas; las
+aprobadas referencian tokens HEX opacos. El runtime calcula cada contraste WCAG
+(4.5 texto normal; 3 texto grande/no textual), rechaza incumplimientos y anota
+ratios y umbrales en `color-system.md`. Añade equivalentes OKLCH calculados desde
+los HEX sRGB. Solo reemplaza nombres existentes en `:root` (`--color-*` y los
+demás tokens del proyecto); rechaza nombres nuevos sin consumidores. Valores CSS
+con declaraciones, URLs o funciones se rechazan.
+
+### Design review entre Reviewer y QA
+
+`feature run` revisa tareas cuyo DAG declare `needsDesignReview: true` o changeZones
+en `webview-ui/`, incluidas tareas doc marcadas explícitamente (no se cierran antes
+del gate de diseño). Las demás conservan su ruta habitual a QA o cierre documental.
+Después del Reviewer aprobado,
+prepara un snapshot privado del árbol de Developer, compila CLI/SPA con dependencias
+existentes (sin instalar) y pide un DesignReport con sus capturas. El cargador runner
+de Vite evita cachés en junctions; HOME y temporales del build son privados. Los
+fallos de infraestructura bloquean con decisión humana. HEAD, limpieza y versión
+de tarea se comprueban antes y después de ejecutar el rol.
+Una aprobación vale solo para ese SHA; un rebase/cambio obliga a revisar de nuevo.
+
+`request_changes` guarda findings y capturas en el historial persistido del runner,
+retira `review_ref` atómicamente y devuelve la tarea a READY. Developer recibe ese
+historial, corrige y vuelve por Reviewer → Designer → QA. Cada finding del bucle
+debe tener `id` estable; un major nuevo sin regresión requiere `majorJustification`.
+Un minor/nit ya aceptado solo puede subir con `regression: true` y justificación
+explícita. Cada ronda recibe todos los findings anteriores.
+
+Operator config por Project permite `orchestrator.designMaxRounds` (default **3**)
+y `orchestrator.designMaxTokens` (default **100000**, coste en tokens de entrada +
+salida reportados por el Executor; no estimación monetaria). Se reserva la ronda
+antes de ejecutar y se persiste consumo observado. Al alcanzar un límite se
+cancela/escala, con rutas de capturas anteriores y posteriores en HumanDecision.
+El CLI comunica uso al final: el límite evita otra ejecución, pero no garantiza
+evitar sobrepaso dentro de la llamada en curso. Uso desconocido o crash pendiente
+falla cerrado y exige reconciliación humana. Reanudar o responder una decisión no
+resetea presupuestos ni aprueba hallazgos automáticamente. El diseñador no responde
+decisiones y nunca hay bucle infinito. Los límites de Reviewer/QA siguen vigentes.
 
 ## Próximos pasos
 

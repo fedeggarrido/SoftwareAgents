@@ -30,10 +30,17 @@ it('captures real standalone SPA desktop/mobile panels and fixture states with r
       directory,
       views: ['office', 'features', 'audit', 'backlog', 'hud'],
     });
-    expect(evidence.images).toHaveLength(14);
+    expect(
+      evidence.images.length,
+      JSON.stringify(evidence.validations.filter((v) => v.kind === 'interaction')),
+    ).toBeGreaterThan(18);
+    expect(evidence.images.some((p) => p.endsWith('features-1440-populated.png'))).toBe(true);
+    for (const scope of ['toolbar', 'panel'])
+      for (const state of ['hover', 'focus-visible'])
+        expect(evidence.images.some((p) => p.endsWith(`${scope}-${state}.png`))).toBe(true);
     for (const png of evidence.images)
       expect(fs.readFileSync(png).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-    expect(evidence.validations.filter((v) => v.kind === 'contrast')).toHaveLength(14);
+    expect(evidence.validations.filter((v) => v.kind === 'contrast')).toHaveLength(18);
     for (const validation of evidence.validations.filter((v) => v.kind === 'contrast')) {
       const rows = JSON.parse(
         fs.readFileSync(path.join(directory, validation.evidence.split(';')[0]), 'utf8'),

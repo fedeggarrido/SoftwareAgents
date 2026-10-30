@@ -22,6 +22,9 @@ export interface DesignReport {
     problem: string;
     principle: string;
     fix: string;
+    id?: string;
+    regression?: boolean;
+    majorJustification?: string;
   }[];
   rubric: Record<(typeof DESIGN_RUBRIC)[number], number>;
   validations: DesignValidation[];

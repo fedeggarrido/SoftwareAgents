@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { DesignValidation } from '../../core/src/designReport.js';
-import type { BoardState } from '../../core/src/messages.js';
+import type { BoardState, FeatureRow } from '../../core/src/messages.js';
 import { buildAssetCache } from './assetReload.js';
 import type { CaptureInput, DesignEvidence } from './designCapture.js';
 import { waitForDesignCanvas } from './designCapture.js';
@@ -40,7 +40,25 @@ export async function captureInHost(
     void app.close();
   };
   signal?.addEventListener('abort', cancel, { once: true });
-  let state: 'empty' | 'error' = 'empty';
+  let state: 'empty' | 'error' | 'populated' = 'empty';
+  const featureFixture: FeatureRow = {
+    key: 'FEAT-105',
+    title: 'Dirección artística del espacio de trabajo',
+    state: 'in_development',
+    rawStatus: 'approved',
+    progress: { done: 2, total: 5 },
+    currentTask: { key: 'FEAT-105-T03', step: 'develop', others: 1 },
+    gates: [],
+    integration: { branch: 'sa/FEAT-105-integration', sha: null },
+    lastActivityAt: '2026-10-29T12:00:00Z',
+    cost: {
+      executions: 3,
+      costKnown: 0,
+      costUsd: null,
+      costPerDoneTaskUsd: null,
+      cacheHitRate: null,
+    },
+  };
   const validations: DesignValidation[] = [];
   const images: string[] = [];
   try {
@@ -103,12 +121,23 @@ export async function captureInHost(
             mode: 'project',
             project: 'Design demo',
             projectId: 'design-demo',
-            items: [],
+            items:
+              state === 'populated'
+                ? [
+                    {
+                      id: 'FEAT-105-T03',
+                      title: 'Implementar estados de foco y navegación',
+                      phase: 'implementing',
+                      agentIds: [],
+                      size: 'M',
+                    },
+                  ]
+                : [],
             recent: [],
             sources: { board: true, claims: true, progress: true },
             quota: { claude: quota('claude'), codex: quota('codex') },
             gate: [],
-            summary: { total: 0, byPhase: {}, byEpic: {} },
+            summary: { total: state === 'populated' ? 1 : 0, byPhase: {}, byEpic: {} },
             waiting: [],
             decisions: [],
             generatedAt: Date.now(),
@@ -118,9 +147,9 @@ export async function captureInHost(
             type: 'featuresSnapshot',
             projectId: msg.projectId,
             requestId: msg.requestId,
-            status: state === 'error' ? 'read_error' : 'empty',
+            status: state === 'error' ? 'read_error' : state === 'populated' ? 'ok' : 'empty',
             reason: state === 'error' ? 'query_failed' : null,
-            features: [],
+            features: state === 'populated' ? [featureFixture] : [],
           });
         } else if (msg.type === 'requestAuditLog') {
           send({
@@ -154,8 +183,12 @@ export async function captureInHost(
       for (const view of input.views) {
         if (signal?.aborted) throw new Error('Design capture infrastructure: interrupted');
         for (const fixture of view === 'features' || view === 'audit'
-          ? (['empty', 'error'] as const)
-          : (['empty'] as const)) {
+          ? view === 'features'
+            ? (['empty', 'error', 'populated'] as const)
+            : (['empty', 'error'] as const)
+          : view === 'backlog'
+            ? (['empty', 'populated'] as const)
+            : (['empty'] as const)) {
           state = fixture;
           const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
           try {
@@ -178,7 +211,13 @@ export async function captureInHost(
                   ? page.getByRole('region', { name: 'Auditoría', exact: true })
                   : page.getByTestId(`${view}-panel`);
               await panel.waitFor({ timeout: CAPTURE_WAIT_MS });
-              if (view === 'features')
+              if (fixture === 'populated')
+                await (
+                  view === 'features'
+                    ? panel.getByTitle(featureFixture.title!, { exact: true })
+                    : panel.getByText('FEAT-105-T03', { exact: true })
+                ).waitFor({ timeout: CAPTURE_WAIT_MS });
+              if (view === 'features' && fixture !== 'populated')
                 await panel
                   .getByText(fixture === 'error' ? /No se|Error|error|consulta/ : 'sin features')
                   .first()
@@ -201,6 +240,59 @@ export async function captureInHost(
               result: 'pass',
               evidence: `${id}.png (demo fixture: ${fixture})`,
             });
+            const toolbarButton = page.getByTitle(VIEW_TITLES.features, { exact: true });
+            const panelButton = page.locator('[role="region"] button:enabled').first();
+            for (const [scope, button] of [
+              ['toolbar', toolbarButton],
+              ['panel', panelButton],
+            ] as const) {
+              if (!(await button.count()) || !(await button.isVisible())) {
+                validations.push({
+                  kind: 'interaction',
+                  tool: 'playwright/v1',
+                  result: 'not_tested',
+                  evidence: `${id}: ${scope} hover/focus-visible unavailable`,
+                });
+                continue;
+              }
+              for (const interaction of ['hover', 'focus-visible'] as const) {
+                await page.mouse.move(0, 0);
+                if (interaction === 'hover') await button.hover();
+                else {
+                  await page.keyboard.press('Tab');
+                  await button.focus();
+                }
+                const verified = await button.evaluate(
+                  (el, pseudo) =>
+                    (el as unknown as { matches(selector: string): boolean }).matches(`:${pseudo}`),
+                  interaction,
+                );
+                if (!verified) {
+                  validations.push({
+                    kind: 'interaction',
+                    tool: 'playwright/v1',
+                    result: 'not_tested',
+                    evidence: `${id}: ${scope} ${interaction} did not activate`,
+                  });
+                  continue;
+                }
+                const file = `${id}-${scope}-${interaction}.png`;
+                await page.screenshot({
+                  path: path.join(input.directory, file),
+                  fullPage: true,
+                  animations: 'disabled',
+                });
+                images.push(path.join(input.directory, file));
+                validations.push({
+                  kind: 'interaction',
+                  tool: 'playwright/v1',
+                  result: 'pass',
+                  evidence: `${file}; pseudo-state verified; interaction contrast not verified`,
+                });
+              }
+            }
+            await page.mouse.move(0, 0);
+            await page.evaluate('document.activeElement?.blur?.()');
             // eslint-disable-next-line pixel-agents/no-inline-colors -- Matches computed transparent backgrounds; does not style UI.
             const pairs = (await page.evaluate(`(() => {
             const rows = [];

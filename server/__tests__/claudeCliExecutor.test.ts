@@ -10,6 +10,7 @@ import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
 import { getHookScriptPath } from '../src/providers/hook/claude/claudeHookInstaller.js';
 import { RESEARCH_MODEL_SCHEMA } from '../src/research.js';
+import { removeTempDir } from './helpers/removeTempDir.js';
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
@@ -64,10 +65,10 @@ beforeEach(() => {
   };
   fs.mkdirSync(req.worktreePath);
 });
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllEnvs();
-  fs.rmSync(root, { recursive: true, force: true });
-});
+  await removeTempDir(root);
+}, 30_000);
 function executor(mode?: string) {
   return new ClaudeCliExecutor({
     binary: process.execPath,

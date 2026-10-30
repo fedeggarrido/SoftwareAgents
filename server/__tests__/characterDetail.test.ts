@@ -142,3 +142,13 @@ describe('character detail allow-list', () => {
     );
   });
 });
+
+it('redacts secrets in titles and never sends absolute log paths', () => {
+  const detail = projectCharacterDetail({
+    task_title:
+      'Fix token=abc123 and AKIAABCDEFGHIJKLMNOP and password: hunter2 and ' + 'a'.repeat(40),
+    log: String.raw`C:\Users\someone\.pixel-agents\runs\run.jsonl`,
+  });
+  expect(detail.taskTitle).not.toMatch(/abc123|AKIA|hunter2|a{40}/);
+  expect(detail.log).toBe('run.jsonl');
+});

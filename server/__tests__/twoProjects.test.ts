@@ -208,8 +208,10 @@ it('isolates two standalone Managed Projects with Watch All and foreign hooks', 
       const existing = server.messages.filter((msg) => msg.type === 'existingAgents').at(-1)!;
       for (const meta of Object.values(existing.agentMeta))
         expect(meta).toMatchObject({ projectId: id });
+      // With a WorkStore the board is fed by it (SA-030) and titles are Task keys;
+      // what matters here is that each server only shows its own Project's task.
       expect(server.messages.find((msg) => msg.type === 'boardState')?.items).toEqual([
-        expect.objectContaining({ id: `task-${id}`, title: `title-${id}` }),
+        expect.objectContaining({ id: `task-${id}` }),
       ]);
       const work = server.messages.find((msg) => msg.type === 'workSnapshot')!;
       expect(JSON.stringify(work)).toContain(`task-${id}`);

@@ -395,8 +395,12 @@ export class RoleResolver {
           : (base ?? OWNER_SESSION);
       if (role?.detail?.startsWith(CHARACTER_DETAIL_TASK_PREFIX)) {
         const key = role.detail.slice(CHARACTER_DETAIL_TASK_PREFIX.length);
+        // The server's Project is a fallback only for Sessions this server's registry
+        // recorded: a key guessed from another repository's cwd must not read our Tasks.
         const project =
-          agent.projectId ?? recorded?.characterDetail?.projectId ?? this.defaultProject;
+          agent.projectId ??
+          recorded?.characterDetail?.projectId ??
+          (recorded ? this.defaultProject : undefined);
         const newer = [...this.store].some(
           ([otherId, other]) =>
             otherId > id &&

@@ -1,5 +1,3 @@
-import * as path from 'path';
-
 import type { CharacterDetail } from '../../core/src/messages.js';
 import { ROLE_PROFILES } from './agentCompiler.js';
 import { CHARACTER_DETAIL_SECOND_MS, CHARACTER_DETAIL_UNKNOWN } from './constants.js';
@@ -32,6 +30,15 @@ export function readCharacterDetail(
   )?.[0];
   return row ? projectCharacterDetail(row) : undefined;
 }
+/** Last path segment for Windows or POSIX paths, whatever platform the server runs on. */
+function fileName(value: string): string {
+  return (
+    value
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || CHARACTER_DETAIL_UNKNOWN
+  );
+}
 function text(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value : CHARACTER_DETAIL_UNKNOWN;
 }
@@ -52,7 +59,14 @@ export function projectCharacterDetail(row: Row, now = Date.now()): CharacterDet
     taskTitle: text(row.task_title)
       .replace(/[\u0000-\u001f\u007f]/g, '')
       .replace(/(?:https?:\/\/|[a-z]:[\\/]|(?<![<\w])\/)[^\s<>]+/gi, '[redacted]')
-      .replace(/(?:sk-|ghp_|github_pat_)[a-z0-9_-]+/gi, '[redacted]'),
+      .replace(/(?:sk-|ghp_|github_pat_)[a-z0-9_-]+/gi, '[redacted]')
+      // key=value secrets, AWS access keys and long opaque tokens (hex/base64).
+      .replace(
+        /\b(?:token|secret|password|passwd|pwd|api[_-]?key|auth)\s*[=:]\s*\S+/gi,
+        '[redacted]',
+      )
+      .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[redacted]')
+      .replace(/\b[A-Za-z0-9+/_-]{32,}={0,2}/g, '[redacted]'),
     taskStatus: text(row.status),
     executor: text(row.executor),
     model: text(row.model_id),
@@ -66,7 +80,7 @@ export function projectCharacterDetail(row: Row, now = Date.now()): CharacterDet
     worktree:
       text(row.worktree_ref) === CHARACTER_DETAIL_UNKNOWN
         ? CHARACTER_DETAIL_UNKNOWN
-        : path.basename(String(row.worktree_ref).replace(/[\\/]+$/, '')),
+        : fileName(String(row.worktree_ref)),
     branch: text(row.branch),
     pr: text(row.pr_ref),
     selectionReason: text(row.selection_reason),
@@ -74,6 +88,10 @@ export function projectCharacterDetail(row: Row, now = Date.now()): CharacterDet
     permissions: Object.hasOwn(ROLE_PROFILES, String(row.execution_role))
       ? `${ROLE_PROFILES[String(row.execution_role) as keyof typeof ROLE_PROFILES]} (techo del rol)`
       : CHARACTER_DETAIL_UNKNOWN,
-    log: text(row.log),
+    // File name only: an absolute path would expose the operator's directories.
+    log:
+      text(row.log) === CHARACTER_DETAIL_UNKNOWN
+        ? CHARACTER_DETAIL_UNKNOWN
+        : fileName(String(row.log)),
   };
 }

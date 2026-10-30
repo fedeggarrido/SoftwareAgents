@@ -175,6 +175,31 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
       ),
     },
     protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
+    research: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxSources: { type: 'integer', minimum: 1, maximum: 100 },
+        maxTokens: { type: 'integer', minimum: 1, maximum: 1000000 },
+        maxSeconds: { type: 'integer', minimum: 1, maximum: 3600 },
+        search: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['endpoint'],
+          properties: { endpoint: nonEmptyString, apiKey: nonEmptyString },
+        },
+        reddit: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['clientId', 'clientSecret', 'userAgent'],
+          properties: {
+            clientId: nonEmptyString,
+            clientSecret: nonEmptyString,
+            userAgent: nonEmptyString,
+          },
+        },
+      },
+    },
     orchestrator: {
       type: 'object',
       additionalProperties: false,

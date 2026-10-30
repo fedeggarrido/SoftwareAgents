@@ -41,6 +41,7 @@ export type Department =
   'Dirección' | 'Ingeniería' | 'Diseño' | 'Calidad' | 'Análisis' | 'Sesiones';
 
 const SPECIALISTS: Record<string, [string, Department]> = {
+  researcher: ['Investigador', 'Análisis'],
   'product-designer': ['Principal Product Designer', 'Diseño'],
   qa: ['QA', 'Calidad'],
   'qa-author': ['QA Tests', 'Calidad'],
@@ -105,7 +106,9 @@ export function specialistRole(name: string | undefined, detail?: string): Agent
 export function roleFromBrief(brief: string | undefined, provider: 'claude' | 'codex'): AgentRole {
   const text = brief ?? '';
   const explicit =
-    /^(?:Rol|Role):\s*(qa|reviewer|product-designer)\b/im.exec(text)?.[1]?.toLowerCase() ??
+    /^(?:Rol|Role):\s*(qa|reviewer|product-designer|researcher)\b/im
+      .exec(text)?.[1]
+      ?.toLowerCase() ??
     (provider === 'codex'
       ? /^Eres Codex y (?:haces la|actúas como)\s+(qa|reviewer)\b/im.exec(text)?.[1]?.toLowerCase()
       : undefined) ??

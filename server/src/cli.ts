@@ -31,6 +31,7 @@ import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
 import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
+import { runResearchCommand } from './commands/research.js';
 import { runTaskCommand } from './commands/task.js';
 import { configureCompanyControl } from './companyControl.js';
 import {
@@ -170,6 +171,8 @@ export async function dispatchCli(
     await runTokenCommand(argv.slice(1));
   } else if (argv[0] === 'design') {
     await runDesignCommand(argv.slice(1));
+  } else if (argv[0] === 'research') {
+    await runResearchCommand(argv.slice(1));
   } else if (argv[0] === 'quota') {
     process.exitCode = runQuotaCheck(parseQuotaArgs(argv.slice(1)));
   } else if (argv[0] === 'executors') {

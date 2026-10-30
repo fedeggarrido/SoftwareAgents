@@ -1413,6 +1413,90 @@ falla cerrado y exige reconciliación humana. Reanudar o responder una decisión
 resetea presupuestos ni aprueba hallazgos automáticamente. El diseñador no responde
 decisiones y nunca hay bucle infinito. Los límites de Reviewer/QA siguen vigentes.
 
+## Investigador fase A (SA-106)
+
+Ingreso humano explícito:
+
+```sh
+pixel-agents research run --question "¿Qué evidencia existe?" --depth quick --source https://example.org/article --json
+pixel-agents research run --question "Pregunta" --since 2026-01-01 --source https://www.reddit.com/r/example/comments/abc/title/
+```
+
+El runtime recopila primero usando pregunta y fuentes semilla del operador; el modelo
+no planifica consultas ni recibe credenciales. Después ejecuta una única síntesis con
+AgentSpec `researcher`, `read_only`, exclusivamente con Claude autorizado y **cero
+herramientas**, sin shell, red, MCP ni delegación. SA-102 delimita pregunta y SourceItems
+como JSON no confiable; las instrucciones dentro de títulos, autores o extractos no
+conceden autoridad. Ningún adapter ejecuta contenido, scripts ni subrecursos.
+
+En `~/.pixel-agents/config.json`, bajo `projects.<project-id>`, configurar:
+
+```json
+{
+  "autonomyLevel": "A0",
+  "allowedExecutors": ["claude"],
+  "research": {
+    "maxSources": 12,
+    "maxTokens": 16000,
+    "maxSeconds": 120,
+    "search": { "endpoint": "https://provider.example/search", "apiKey": "OPERATOR_SECRET" },
+    "reddit": {
+      "clientId": "APP_ID",
+      "clientSecret": "OPERATOR_SECRET",
+      "userAgent": "my-research-app/1.0 by operator"
+    }
+  }
+}
+```
+
+`search` y `reddit` son opcionales. Sin proveedor contratado, búsqueda web no disponible:
+solo URLs explícitas. El proveedor configurable recibe GET con `q` y Bearer opcional;
+debe devolver `{ "urls": ["https://..."] }`. No se scrapean buscadores. La lectura web
+acepta HTTP(S) sin credenciales, texto/HTML; usa fetch nativo con transporte fijado a
+DNS público validado y TLS normal. Rechaza redirecciones, localhost, IP privada/reservada
+y resoluciones mixtas; máximo 1 MiB de respuesta y 10 s por petición, dentro del plazo
+global. Extracción conservadora de texto, título, autor y lenguaje; no ejecuta JavaScript.
+Algunas páginas legítimas que redirigen o requieren JavaScript no estarán disponibles.
+
+Reddit usa API oficial, OAuth app-only y credenciales solo del Operator config; sin ellas
+informa no disponible. Normaliza hilos y comentarios con autor, canal, fecha y puntuación.
+Pausa con cabeceras `x-ratelimit-*`, espacia peticiones y suspende el adapter tras errores
+(incluido 429); nunca reintenta en bucle. No expone token ni secretos en contexto,
+informes o auditoría. El operador debe tener acceso autorizado a la API/proveedor.
+
+`ResearchAdapter` declara `id`, `kinds`, `search` y/o `fetch`. `ResearchAdapters.register`
+acepta módulos externos sin modificar el núcleo; fixture `exampleAdapter.ts` lo demuestra.
+La composición CLI registra web y Reddit. Cada resultado se valida contra SourceItem
+y su hash SHA-256 del extracto; máximo `RESEARCH_EXCERPT_CHARS` (4000), no obras completas.
+
+ResearchReport exige findings con tipo fact/opinion/anecdote, motivo y referencias
+existentes; referencias inexistentes fallan cerrado. Confianza high/medium requiere dos
+fuentes con extractos diferentes, autor/canal identificable distinto **y** dominio
+distinto; esta heurística conservadora rebaja a low con motivo si no hay independencia
+demostrable. No garantiza independencia editorial ni verdad semántica. Contradicciones
+también citan fuentes. Citas exactas, atribuidas y limitadas a `RESEARCH_QUOTE_CHARS`
+(300 caracteres acumulados por fuente). La bibliografía la adjunta exclusivamente el
+runtime con metadatos normalizados. El resumen describe alcance; afirmaciones de
+contenido deben ir en findings citados. Evidencia insuficiente es un resultado válido.
+
+Presupuestos por ejecución: fuentes 12, tokens observados de entrada+salida 16000,
+tiempo global 120 s por defecto; `quick` limita fuentes a 4. Al agotarse, cancela y
+persiste fuentes y lagunas como entrega parcial, sin inventar síntesis. Si falta uso
+de tokens se descarta la síntesis y marca laguna. El Executor comunica uso después
+del consumo: el límite observado cancela, pero no garantiza evitar un sobrepaso en
+la llamada en curso. `--since` excluye también fuentes sin fecha de publicación
+verificable y lo señala. Las fallas de recopilación son lagunas; informe inválido falla.
+
+Brain guarda `research/<uuid>.json` y `.md` (datos literales protegidos contra markdown
+inyectado), auditados como `research_run` started/completed/partial/failed, sin contenido.
+`research/cache/<sha256>.json` reutiliza normalización idéntica por adapter, referencia,
+hash del extracto y día UTC de recuperación. Se vuelve a consultar el origen para
+detectar cambios; no es una caché HTTP ni evita consumo de red. Nada de esto integra
+ramas ni concede aprobación de producto.
+
+TODO fase B: YouTube, libros, papers y podcasts con APIs/licencias y fixtures propios.
+TODO fase C: integraciones de investigación con Features, otros roles y UI.
+
 ## Próximos pasos
 
 | Paso                 | Estado y contrato pendiente                                                     |

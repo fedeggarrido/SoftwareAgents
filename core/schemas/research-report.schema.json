@@ -1,0 +1,20 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["summary", "findings", "contradictions", "gaps", "discardedSources", "bibliography"],
+  "properties": {
+    "summary": {"$ref": "#/definitions/text"},
+    "findings": {"type": "array", "maxItems": 100, "items": {
+      "type": "object", "additionalProperties": false, "required": ["claim", "type", "confidence", "reason", "sources"],
+      "properties": {
+        "claim": {"$ref": "#/definitions/text"}, "type": {"enum": ["fact", "opinion", "anecdote"]},
+        "confidence": {"enum": ["high", "medium", "low"]}, "reason": {"$ref": "#/definitions/text"}, "sources": {"$ref": "#/definitions/sources"},
+        "quotes": {"type": "array", "maxItems": 10, "items": {"type": "object", "additionalProperties": false, "required": ["sourceId", "text"], "properties": {"sourceId": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1, "maxLength": 300}}}}
+      }
+    }},
+    "contradictions": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["claim", "sources"], "properties": {"claim": {"$ref": "#/definitions/text"}, "sources": {"$ref": "#/definitions/sources"}}}},
+    "gaps": {"type": "array", "maxItems": 200, "items": {"$ref": "#/definitions/text"}},
+    "discardedSources": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["id", "reason"], "properties": {"id": {"type": "string", "minLength": 1}, "reason": {"$ref": "#/definitions/text"}}}},
+    "bibliography": {"type": "array", "maxItems": 100, "items": {"type": "object"}}
+  },
+  "definitions": {"text": {"type": "string", "minLength": 1, "maxLength": 4000}, "sources": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}
+}

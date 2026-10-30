@@ -1,0 +1,4 @@
+[
+  {"data":{"children":[{"kind":"t3","data":{"id":"abc","title":"Fixture thread","selftext":"A personal opinion","author":"alice","subreddit":"fixtures","permalink":"/r/fixtures/comments/abc/title/","score":15,"created_utc":1700000000}}]}},
+  {"data":{"children":[{"kind":"t1","data":{"id":"def","body":"An anecdote","author":"bob","subreddit":"fixtures","permalink":"/r/fixtures/comments/abc/title/def/","score":3,"created_utc":1700000010}}]}}
+]

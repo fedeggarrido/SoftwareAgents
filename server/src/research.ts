@@ -45,6 +45,7 @@ export function makeSource(
   });
 }
 export interface ResearchSearchOptions {
+  question?: string;
   limit: number;
   since?: string;
   signal: AbortSignal;

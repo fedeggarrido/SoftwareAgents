@@ -27,6 +27,7 @@ import {
 } from '../research.js';
 import { redditAdapter } from '../researchAdapters/reddit.js';
 import { webAdapter } from '../researchAdapters/web.js';
+import { researchFailureReason } from '../researchHttp.js';
 
 interface ResearchCommandOptions {
   config?: ProjectConfig;
@@ -98,6 +99,7 @@ export async function runResearchCommand(
     throw new Error('Invalid research budgets');
   const maxSources = depth === 'quick' ? Math.min(4, policy.maxSources) : policy.maxSources;
   const id = randomUUID(),
+    discardedSources: ResearchReport['discardedSources'] = [],
     gaps: string[] = [],
     sources: SourceItem[] = [];
   const directory = resolveInside(config.paths.brain, 'research');
@@ -165,23 +167,28 @@ export async function runResearchCommand(
       );
       const operations = [
         ...(adapter.fetch
-          ? refs.map(
-              (ref) => () =>
+          ? refs.map((ref) => ({
+              ref,
+              run: () =>
                 adapter.fetch!(ref, {
+                  question,
                   limit: maxSources - sources.length,
                   since,
                   signal: abort.signal,
                 }),
-            )
+            }))
           : []),
         ...(adapter.search
           ? [
-              () =>
-                adapter.search!(question, {
-                  limit: maxSources - sources.length,
-                  since,
-                  signal: abort.signal,
-                }),
+              {
+                ref: undefined,
+                run: () =>
+                  adapter.search!(question, {
+                    limit: maxSources - sources.length,
+                    since,
+                    signal: abort.signal,
+                  }),
+              },
             ]
           : []),
       ];
@@ -191,12 +198,14 @@ export async function runResearchCommand(
           break;
         }
         try {
-          const items = await operation();
+          const items = await operation.run();
           if (items.some((s) => s.adapter !== adapter.id || !adapter.kinds.includes(s.kind)))
             throw new Error('Adapter result identity mismatch');
           add(items);
-        } catch {
-          gaps.push(`${adapter.id}: collection failed or rate/size/time limit reached.`);
+        } catch (error) {
+          const reason = researchFailureReason(error);
+          gaps.push(`${adapter.id}: ${reason}.`);
+          if (operation.ref) discardedSources.push({ id: operation.ref, reason });
         }
       }
     }
@@ -231,7 +240,15 @@ export async function runResearchCommand(
         timeoutMin: policy.maxSeconds / 60,
         prompt: '',
         taskData: {
-          task: { question, depth, ...(since ? { since } : {}), sources },
+          task: {
+            question,
+            depth,
+            ...(since ? { since } : {}),
+            sources,
+            discardedSources,
+            collectionNote:
+              'Failed seed URLs are runtime-owned discardedSources. You may mention these failures in the summary; return only bibliography source IDs in your discardedSources.',
+          },
           outputSchema: RESEARCH_REPORT_SCHEMA,
         },
       });
@@ -287,6 +304,7 @@ export async function runResearchCommand(
     }
     if (abort.signal.aborted) gaps.push('Time budget exhausted.');
     report.gaps.push(...new Set(gaps));
+    report.discardedSources.push(...discardedSources);
     if (!report.findings.length)
       report.gaps.push('Insufficient evidence; no validated claims produced.');
     const result = { id, partial: report.gaps.length > 0, report };

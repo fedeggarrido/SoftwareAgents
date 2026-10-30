@@ -20,7 +20,7 @@ import {
   validateSourceItem,
 } from '../src/research.js';
 import { normalizeReddit, redditAdapter } from '../src/researchAdapters/reddit.js';
-import { webAdapter } from '../src/researchAdapters/web.js';
+import { relevantExcerpts, webAdapter } from '../src/researchAdapters/web.js';
 import { publicAddress, type ResearchHttp, researchHttp } from '../src/researchHttp.js';
 import { exampleAdapter } from './fixtures/research/exampleAdapter.js';
 import * as redditFixture from './fixtures/research/reddit.json';
@@ -144,6 +144,53 @@ describe('research contracts and trust boundaries', () => {
   });
 });
 describe('fixture adapters and guarded native fetch', () => {
+  it('selects relevant sections after a long document preamble', () => {
+    const html = `<h1>Introduction</h1><p>${'Unrelated introduction. '.repeat(500)}</p>
+      <h2 id="contrast-minimum">Contrast minimum</h2><p>Text contrast requires 4.5:1.</p>
+      <h2 id="contrast-ratio">Contrast ratio</h2><p>Contrast ratio uses relative luminance: (L1 + 0.05) / (L2 + 0.05).</p>`;
+    const excerpt = relevantExcerpts(html, 'requisitos de contraste de texto y contrast ratio');
+    expect(excerpt).toContain('#contrast-minimum');
+    expect(excerpt).toContain('4.5:1');
+    expect(excerpt).toContain('(L1 + 0.05)');
+    expect(excerpt.length).toBeLessThanOrEqual(RESEARCH_EXCERPT_CHARS);
+  });
+  it('follows an MDN canonical path redirect and revalidates DNS at each hop', async () => {
+    vi.mocked(lookup).mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 301,
+          headers: {
+            location:
+              '/en-US/docs/Web/Accessibility/Guides/Understanding_WCAG/Perceivable/Color_contrast',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('Canonical MDN fixture'));
+    vi.stubGlobal('fetch', fetch);
+    expect(
+      (
+        await researchHttp(
+          'https://developer.mozilla.org/en-US/docs/Web/Accessibility/Understanding_WCAG/Perceivable/Color_contrast',
+        )
+      ).text,
+    ).toContain('MDN');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    vi.mocked(lookup)
+      .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }] as never)
+      .mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }] as never);
+    fetch.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: '/canonical' } }),
+    );
+    await expect(researchHttp('https://developer.mozilla.org/old')).rejects.toThrow('destination');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    for (const location of ['https://other.example/path', 'http://developer.mozilla.org/path']) {
+      vi.mocked(lookup).mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
+      fetch.mockResolvedValueOnce(new Response(null, { status: 302, headers: { location } }));
+      await expect(researchHttp('https://developer.mozilla.org/old')).rejects.toThrow('redirect');
+    }
+  });
   it('aborts an unresolved DNS lookup at the HTTP deadline without opening a connection', async () => {
     const controller = new AbortController();
     vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
@@ -252,7 +299,7 @@ describe('fixture adapters and guarded native fetch', () => {
       .mockResolvedValueOnce(new Response('x'.repeat(RESEARCH_HTTP_BYTES + 1)));
     vi.stubGlobal('fetch', fetch);
     expect((await researchHttp('https://example.com')).text).toBe('ok');
-    expect(fetch.mock.calls[0][1].redirect).toBe('error');
+    expect(fetch.mock.calls[0][1].redirect).toBe('manual');
     expect(fetch.mock.calls[0][1].dispatcher.dispatch).toBeTypeOf('function');
     expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     await expect(researchHttp('https://example.com')).rejects.toThrow('size limit');
@@ -314,6 +361,29 @@ it('human command uses a fake executor, persists report/cache and audits without
     ).toHaveLength(1);
     expect(fs.readdirSync(path.join(home, 'research', 'cache'))).toHaveLength(1);
     expect(append).toHaveBeenCalledTimes(2);
+    adapters.register({
+      id: 'broken',
+      kinds: ['web'],
+      fetch: async () => {
+        throw new Error('Research HTTP status 403');
+      },
+    });
+    log.mockClear();
+    await runResearchCommand(
+      ['run', '--question', 'Question', '--source', 'https://example.org/failed', '--json'],
+      home,
+      log,
+      {
+        config,
+        adapters,
+        executor: { id: 'claude', start },
+        audit: { append },
+      },
+    );
+    expect(JSON.parse(log.mock.calls[0][0]).report.discardedSources).toContainEqual({
+      id: 'https://example.org/failed',
+      reason: 'HTTP status 403',
+    });
     config.operator.research!.maxTokens = 1;
     log.mockClear();
     await runResearchCommand(['run', '--question', 'Question', '--json'], home, log, {

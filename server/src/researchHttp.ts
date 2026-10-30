@@ -32,19 +32,29 @@ export type ResearchHttp = (
 
 /** Native fetch, pinned to a vetted DNS result via its dispatcher interface.
  * The minimal dispatcher uses Node's TLS/HTTP transport with an immutable lookup;
- * a second DNS resolution cannot rebind to a private host. Redirects fail closed.
+ * a second DNS resolution cannot rebind to a private host.
+ * Canonical redirects are limited to the same hostname, never HTTPS downgrades;
+ * each hop resolves and pins public addresses again, under one shared deadline.
  */
 export const researchHttp: ResearchHttp = async (ref, init = {}) => {
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(RESEARCH_HTTP_MS),
+    ...(init.signal ? [init.signal] : []),
+  ]);
+  return requestHop(ref, { ...init, signal }, 0);
+};
+async function requestHop(
+  ref: string,
+  init: RequestInit,
+  redirects: number,
+): ReturnType<ResearchHttp> {
   const url = new URL(ref);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
     throw new Error('HTTP(S) URL without credentials required');
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (host === 'localhost' || host.endsWith('.localhost'))
     throw new Error('Private research destination rejected');
-  const signal = AbortSignal.any([
-    AbortSignal.timeout(RESEARCH_HTTP_MS),
-    ...(init.signal ? [init.signal] : []),
-  ]);
+  const signal = init.signal!;
   signal.throwIfAborted();
   const addresses = await Promise.race([
     lookup(host, { all: true }),
@@ -108,9 +118,22 @@ export const researchHttp: ResearchHttp = async (ref, init = {}) => {
   const response = await fetch(url, {
     ...init,
     signal,
-    redirect: 'error',
+    redirect: 'manual',
     dispatcher,
   } as RequestInit);
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    await response.body?.cancel();
+    const location = response.headers.get('location');
+    if (!location || redirects >= 3) throw new Error('Research redirect limit or missing location');
+    const next = new URL(location, url);
+    if (
+      next.hostname !== url.hostname ||
+      (url.protocol === 'https:' && next.protocol !== 'https:') ||
+      next.port !== url.port
+    )
+      throw new Error('Research redirect destination rejected');
+    return requestHop(next.href, init, redirects + 1);
+  }
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(`Research HTTP status ${response.status}`);
@@ -135,4 +158,19 @@ export const researchHttp: ResearchHttp = async (ref, init = {}) => {
     await reader?.cancel();
   }
   return { text: Buffer.concat(chunks).toString('utf8'), headers: response.headers };
-};
+}
+
+/** Never expose arbitrary adapter/transport messages (which can include credentials or bodies). */
+export function researchFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  const status = /^Research HTTP status (\d{3})$/.exec(message);
+  if (status) return `HTTP status ${status[1]}`;
+  if (/redirect/i.test(message)) return 'Redirect rejected or redirect limit reached';
+  if (/private|reserved|destination|credentials required/i.test(message))
+    return 'Unsafe destination rejected';
+  if (/size limit/i.test(message)) return 'Response size limit exceeded';
+  if (/content type/i.test(message)) return 'Unsupported content type';
+  if (/timeout|abort/i.test(message)) return 'Request timed out or cancelled';
+  if (error instanceof SyntaxError) return 'Response parse failed';
+  return 'Source collection or parsing failed';
+}

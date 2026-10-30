@@ -303,9 +303,11 @@ class SqliteWorkStore implements WorkStore {
     }
     // Recovery has no live telemetry consumer. Preserve the Execution with unknown
     // counters rather than inventing zero usage or omitting a failed/cancelled run.
-    const recovered = this.listExecutions().filter(
-      (execution) => execution.task_key === task.key && execution.task_version <= task.version,
-    );
+    const recovered = this.db
+      .prepare(
+        'SELECT * FROM executions WHERE project_id = ? AND task_key = ? AND task_version <= ? ORDER BY key',
+      )
+      .all(this.projectId, task.key, task.version) as unknown as ExecutionRecord[];
     for (const execution of recovered) {
       if (execution.pid !== null && !execution.tree_closed_at) continue;
       await this.recordUsage(

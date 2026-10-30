@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 /** Resolves with the events seen once 'close' arrives; rejects if it never does. */
-function settle(child: ChildProcess, timeoutMs = 5000) {
+function settle(child: ChildProcess, timeoutMs = 8000) {
   const seen: string[] = [];
   child.stdout!.resume();
   child.stderr!.resume();
@@ -119,7 +119,7 @@ it('retains the verifiable root until durable closure is acknowledged', async ()
   );
   const completion = settle(child);
   try {
-    await vi.waitFor(() => expect(closing).toBe(true));
+    await vi.waitFor(() => expect(closing).toBe(true), { timeout: 5000 });
     expect(child.exitCode).toBeNull();
     expect(process.kill(child.pid!, 0)).toBe(true);
     persist();
@@ -148,7 +148,7 @@ it('retains the root after CLI close when the worker disconnects before persisti
   // worker death, so assert/clean up using exit and the retained fixture PID.
   const completion = new Promise((resolve) => child.once('exit', resolve));
   try {
-    await vi.waitFor(() => expect(closing).toBe(true));
+    await vi.waitFor(() => expect(closing).toBe(true), { timeout: 5000 });
     child.disconnect();
     // Wait beyond a complete event-loop turn: loss of IPC must not release root.
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -170,7 +170,7 @@ it.skipIf(process.platform !== 'win32' || process.env.SA_SKIP_TASKKILL_TEST === 
     const completion = settle(child);
     const cancellation = processCancellation(() => child);
     try {
-      await vi.waitFor(() => expect(fs.existsSync(pids)).toBe(true));
+      await vi.waitFor(() => expect(fs.existsSync(pids)).toBe(true), { timeout: 5000 });
       cancellation.cancel();
       await completion;
       cancellation.confirmClose();

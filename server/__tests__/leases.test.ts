@@ -276,6 +276,8 @@ describe('WorkStore leases and durable idempotency', () => {
     await expect(execution(store)).rejects.toThrow('recovery reserved');
     finish();
     expect(await sweep).toMatchObject([{ key: 'task', status: 'FAILED_RETRYABLE' }]);
+    expect(store.listLeaseRecoveries()).toEqual([]);
+    expect(store.listUsage()).toMatchObject([{ executionId: 'run', taskKey: 'task' }]);
   });
   it('persists errors per task across reopen without blocking other recoveries or claims', async () => {
     const store = await open();

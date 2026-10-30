@@ -9,9 +9,9 @@ import type {
 import { createCharacter, updateCharacter } from '../src/office/engine/characters.js';
 import { WORK_STATE_SPRITES } from '../src/office/sprites/spriteData.js';
 import { CharacterState } from '../src/office/types.js';
-import { deriveWorkStates } from '../src/office/workState.js';
+import { deriveWorkStates, type WorkCharacter } from '../src/office/workState.js';
 
-const character = [{ id: 1, detail: 'tarea SA-048' }];
+const character: WorkCharacter[] = [{ id: 1, detail: 'tarea SA-048' }];
 const task: WorkTask = {
   key: 'SA-048',
   type: 'IMPLEMENTATION',

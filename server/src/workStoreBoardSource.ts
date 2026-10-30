@@ -64,7 +64,8 @@ function readInWorker(): void {
         SELECT key FROM executions WHERE project_id = t.project_id AND task_key = t.key
         AND (t.lease_owner IS NULL OR task_version >= COALESCE((
           SELECT task_version FROM domain_events WHERE project_id = t.project_id AND task_key = t.key
-          AND to_status = 'LEASED' ORDER BY id DESC LIMIT 1
+          AND (to_status = 'LEASED' OR (to_status = 'RUNNING' AND from_status IN ('REVIEW', 'QA')))
+          ORDER BY id DESC LIMIT 1
         ), t.version))
         ORDER BY started_at DESC, key DESC LIMIT 1
       ) WHERE t.project_id = ? ORDER BY t.key`,
@@ -77,7 +78,13 @@ function readInWorker(): void {
       WHERE project_id = ? AND (id IN (
         SELECT MAX(id) FROM domain_events WHERE project_id = ? GROUP BY task_key
       ) OR id IN (
-        SELECT id FROM domain_events WHERE project_id = ? ORDER BY id DESC LIMIT ?
+        -- Limit after excluding FEAT-n / -DESIGN / -REQUIREMENTS documents (same rule as
+        -- projectBoard), so document churn never pushes work events out of the history.
+        SELECT id FROM domain_events WHERE project_id = ?
+        AND NOT (task_key GLOB 'FEAT-[0-9]*' AND (
+          task_key NOT GLOB 'FEAT-*-*' OR task_key GLOB 'FEAT-*-DESIGN' OR task_key GLOB 'FEAT-*-REQUIREMENTS'
+        ))
+        ORDER BY id DESC LIMIT ?
       )) ORDER BY id DESC`,
       )
       .all(project, project, project, workerData.recentEvents);
@@ -171,12 +178,27 @@ function projectBoard(snapshot: Snapshot, now: number): WorkStoreBoard {
     readable: true,
     decisions: snapshot.decisions
       .map((row) => JSON.parse(row.escalation) as HumanDecision)
-      .filter((d) => ['open', 'expired', 'answered'].includes(d.status))
+      // Same allow-list as the domain relay's workSnapshot: pending gates only, never the
+      // answer, who answered, or other free-form escalation fields (the office can be
+      // viewed without the privileged token).
+      .filter((d) => d.status === 'open' || d.status === 'expired')
       .map((d) => ({
-        ...d,
+        id: d.id,
+        status: d.status,
         question: d.context,
         options: d.options.map((o) => o.id),
-        structuredOptions: d.options,
+        structuredOptions: d.options.map(({ id, label, benefit, cost, risk }) => ({
+          id,
+          label,
+          benefit,
+          cost,
+          risk,
+        })),
+        recommendation: d.recommendation,
+        urgency: d.urgency,
+        impact: d.impact,
+        requestedBy: d.requestedBy,
+        blocks: [...d.blocks],
       })),
     recent: events.slice(0, BOARD_RECENT_EVENTS),
     items: tasks.map((t) => {

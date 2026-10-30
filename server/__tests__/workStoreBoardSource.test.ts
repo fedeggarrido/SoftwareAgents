@@ -275,3 +275,55 @@ it('keeps a registered empty WorkStore empty instead of falling back to legacy',
   await poll();
   expect(watcher.build()).toMatchObject({ items: [], sources: { board: true, workStore: true } });
 });
+
+it('sends only pending decisions with allow-listed fields, never answers or actors', async () => {
+  const store = await imported();
+  await store.openDecision({
+    id: 'decision',
+    context: 'Choose a strategy',
+    options: [
+      { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+    ],
+    recommendation: 'Review',
+    disagreement: [{ role: 'developer', position: 'private disagreement' }],
+    impact: 'Blocks work',
+    urgency: 'high',
+    requestedBy: 'developer',
+    blocks: [first],
+  });
+  await poll();
+  const [pending] = watcher.build()!.decisions!;
+  expect(Object.keys(pending).sort()).toEqual(
+    [
+      'blocks',
+      'id',
+      'impact',
+      'options',
+      'question',
+      'recommendation',
+      'requestedBy',
+      'status',
+      'structuredOptions',
+      'urgency',
+    ].sort(),
+  );
+  expect(JSON.stringify(pending)).not.toContain('private disagreement');
+  const db = new DatabaseSync(file);
+  try {
+    const row = db.prepare('SELECT escalation FROM human_decisions').get() as {
+      escalation: string;
+    };
+    const answered = {
+      ...JSON.parse(row.escalation),
+      status: 'answered',
+      answer: 'secret answer',
+      answeredBy: 'fede',
+    };
+    db.prepare('UPDATE human_decisions SET escalation = ?').run(JSON.stringify(answered));
+  } finally {
+    db.close();
+  }
+  await poll();
+  expect(watcher.build()!.decisions ?? []).toEqual([]);
+  expect(JSON.stringify(watcher.build())).not.toContain('secret answer');
+});

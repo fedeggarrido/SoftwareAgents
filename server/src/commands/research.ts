@@ -172,8 +172,12 @@ export async function runResearchCommand(
   };
   record('started');
   try {
-    for (const adapter of registry.all()) {
-      if (kinds && !adapter.kinds.some((kind) => kinds.includes(kind))) continue;
+    const selected = registry
+      .all()
+      .filter((adapter) => !kinds || adapter.kinds.some((kind) => kinds.includes(kind)));
+    // Share the source budget so the first adapter (arXiv) cannot starve the others.
+    const searchShare = Math.max(1, Math.ceil(maxSources / Math.max(1, selected.length)));
+    for (const adapter of selected) {
       if (adapter.unavailable) gaps.push(adapter.unavailable);
       const refs = seeds.filter((ref) =>
         adapter.id === 'reddit'
@@ -201,7 +205,7 @@ export async function runResearchCommand(
                 ref: undefined,
                 run: () =>
                   adapter.search!(question, {
-                    limit: maxSources - sources.length,
+                    limit: Math.min(searchShare, maxSources - sources.length),
                     since,
                     signal: abort.signal,
                   }),

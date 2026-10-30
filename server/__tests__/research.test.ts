@@ -559,3 +559,14 @@ it('human command uses a fake executor, persists report/cache and audits without
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+describe('arXiv query', () => {
+  it('uses content keywords joined with AND, not the raw sentence', async () => {
+    const { arxivQuery } = await import('../src/researchAdapters/papers.js');
+    expect(
+      arxivQuery(
+        'Does a lower temperature setting reduce hallucinations in large language models?',
+      ),
+    ).toBe('all:hallucinations AND all:temperature AND all:language');
+  });
+});

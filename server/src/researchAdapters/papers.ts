@@ -12,6 +12,30 @@ const date = (value?: string) =>
   value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined;
 
 /** Atom metadata only. No PDF links are followed; entities never resolve external resources. */
+const STOP_WORDS = new Set(
+  'a an and are as at be by can do does for from how in is it of on or that the this to was what when which who why will with'.split(
+    ' ',
+  ),
+);
+
+/** arXiv applies a field prefix to one term only: `all:Does a lower temperature …` matched
+ * physics papers on "temperature". Use content keywords joined with AND instead. */
+export function arxivQuery(question: string): string {
+  const terms = [
+    ...new Set(
+      question
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}-]+/u)
+        .filter((w) => w.length > 2 && !STOP_WORDS.has(w)),
+    ),
+  ]
+    // Six ANDed terms returned nothing in the real run; the longest terms are the most
+    // distinctive (e.g. hallucinations, temperature, language), so AND only three.
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3);
+  return terms.length ? terms.map((t) => `all:${t}`).join(' AND ') : `all:${question}`;
+}
+
 export function normalizeArxiv(atom: string, limit: number) {
   return [...atom.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/g)]
     .slice(0, limit)
@@ -105,7 +129,7 @@ export function paperAdapter(
       const limit = Math.min(options.limit, 100);
       const url =
         service === 'arxiv'
-          ? `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(`all:${query}`)}&max_results=${limit}`
+          ? `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(arxivQuery(query))}&max_results=${limit}`
           : `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=title,authors,abstract,publicationDate,year,venue,citationCount,externalIds`;
       try {
         const response = await http(url, {

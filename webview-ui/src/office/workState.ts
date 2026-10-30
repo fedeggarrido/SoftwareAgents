@@ -12,18 +12,23 @@ export type WorkState = (typeof WORK_STATE)[keyof typeof WORK_STATE];
 export interface WorkCharacter {
   id: number;
   detail?: string;
+  /** Project the Session belongs to, when the transport reported it. */
+  projectId?: string;
 }
 type ProjectedTask = Pick<WorkTask, 'key'> & Partial<WorkTask>;
 
-/** Exact recorded task key, unique among characters. A role label or execution id
- * alone cannot identify a Session in the current wire protocol. */
+/** Exact recorded task key of a Session in the snapshot's Project. A role label or
+ * execution id alone cannot identify a Session in the current wire protocol. When
+ * several open Sessions recorded the same task (Developer, then Reviewer), only the
+ * newest one (highest id) is doing its current step; older ones get no badge. */
 export function deriveWorkStates(
   snapshot: WorkSnapshot | null,
   events: readonly DomainEventPayload[],
   characters: readonly WorkCharacter[],
 ): Map<number, WorkState> {
   const result = new Map(characters.map((ch) => [ch.id, WORK_STATE.AVAILABLE as WorkState]));
-  if (!snapshot || snapshot.source !== 'ok') return result;
+  // 'missing' is a real, empty WorkStore: events after it still describe new work.
+  if (!snapshot || (snapshot.source !== 'ok' && snapshot.source !== 'missing')) return result;
   const tasks = new Map<string, ProjectedTask>(
     snapshot.tasks.map((task) => [task.key, { ...task }]),
   );
@@ -50,16 +55,16 @@ export function deriveWorkStates(
     else if (event.kind === 'qa.requested') task.status = 'QA';
     if (event.taskVersion !== undefined) task.version = event.taskVersion;
   }
-  const associations = characters.map((ch) => ({
-    id: ch.id,
-    key: ch.detail?.startsWith(WORK_TASK_DETAIL_PREFIX)
-      ? ch.detail.slice(WORK_TASK_DETAIL_PREFIX.length)
-      : undefined,
-  }));
-  for (const ch of associations) {
-    if (!ch.key || associations.filter((other) => other.key === ch.key).length !== 1) continue;
-    const task = tasks.get(ch.key);
-    if (task) result.set(ch.id, taskState(task, tasks));
+  const newest = new Map<string, number>();
+  for (const ch of characters) {
+    if (ch.projectId !== undefined && ch.projectId !== snapshot.projectId) continue;
+    if (!ch.detail?.startsWith(WORK_TASK_DETAIL_PREFIX)) continue;
+    const key = ch.detail.slice(WORK_TASK_DETAIL_PREFIX.length);
+    newest.set(key, Math.max(newest.get(key) ?? ch.id, ch.id));
+  }
+  for (const [key, id] of newest) {
+    const task = tasks.get(key);
+    if (task) result.set(id, taskState(task, tasks));
   }
   return result;
 }

@@ -92,14 +92,26 @@ describe('domain character work states', () => {
     ).toBe('CODING');
     expect(s.tasks[0].status).toBe('RUNNING');
   });
-  it('requires a unique exact recorded task association', () => {
+  it('requires an exact recorded task association in the same Project', () => {
     expect(state(snapshot(), [], [{ id: 1, detail: 'developer' }])).toBe('AVAILABLE');
     expect(state(snapshot(), [], [{ id: 1, detail: 'tarea missing' }])).toBe('AVAILABLE');
-    expect(state(snapshot(), [], [...character, { id: 2, detail: 'tarea SA-048' }])).toBe(
-      'AVAILABLE',
-    );
+    expect(state(snapshot(), [], [{ ...character[0], projectId: 'other' }])).toBe('AVAILABLE');
+    expect(state(snapshot(), [], [{ ...character[0], projectId: 'project' }])).toBe('CODING');
     expect(state({ ...snapshot(), source: 'unreadable' })).toBe('AVAILABLE');
     expect(deriveWorkStates(null, [], character).get(1)).toBe('AVAILABLE');
+  });
+  it('gives a shared task to the newest Session only (Developer, then Reviewer)', () => {
+    const both = deriveWorkStates(
+      snapshot({ status: 'REVIEW' }),
+      [],
+      [...character, { id: 2, detail: 'tarea SA-048' }],
+    );
+    expect(both.get(1)).toBe('AVAILABLE');
+    expect(both.get(2)).toBe('REVIEWING');
+  });
+  it('applies events after a missing (empty) WorkStore snapshot', () => {
+    const empty = { ...snapshot(), source: 'missing' as const, tasks: [], lastEventId: null };
+    expect(state(empty, [event({ toStatus: 'RUNNING' })])).toBe('CODING');
   });
   it('enters and leaves human wait in event order', () => {
     const required = event({ kind: 'human.decision.required' });

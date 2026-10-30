@@ -27,9 +27,12 @@ Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-
 ## Domain work states (SA-048)
 
 `office/workState.ts` projects the latest successful `workSnapshot` plus subsequent
-same-Project events, ignoring `eventId <= lastEventId` and older task versions.
-Association requires the exact `agentRole.detail = "tarea <WorkTask.key>"` recorded
-for a unique non-subagent Character. Generic role labels, nicknames and bare
+same-Project events (a `missing` snapshot is an empty store, so its events apply),
+ignoring `eventId <= lastEventId` and older task versions. Association requires the
+exact `agentRole.detail = "tarea <WorkTask.key>"` on a non-subagent Character of the
+snapshot's Project (when `agentCreated` reported one). When several open Sessions
+recorded the same task (Developer, then Reviewer), only the newest Character (highest
+id) carries the badge. Generic role labels, nicknames and bare
 `executionId` values cannot identify a Session: this wire contract exposes neither
 an execution-to-session registry nor task leases. Ambiguous or absent associations
 remain AVAILABLE without a badge; no AsyncAPI change is required.

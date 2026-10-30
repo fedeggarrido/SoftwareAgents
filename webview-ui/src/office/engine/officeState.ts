@@ -60,6 +60,8 @@ export class OfficeState {
   workSnapshot: WorkSnapshot | null = null;
   workEvents: DomainEventPayload[] = [];
   workStates = new Map<number, WorkState>();
+  /** Project reported with each agentCreated, for work-state association. */
+  agentProjects = new Map<number, string>();
   private derivedWorkSnapshot: WorkSnapshot | null = null;
   private derivedWorkKey = '';
 
@@ -1184,7 +1186,11 @@ export class OfficeState {
   update(dt: number): void {
     const workCharacters = [...this.characters.values()]
       .filter((ch) => !ch.isSubagent)
-      .map((ch) => ({ id: ch.id, detail: getAgentRole(ch.id)?.detail }));
+      .map((ch) => ({
+        id: ch.id,
+        detail: getAgentRole(ch.id)?.detail,
+        projectId: this.agentProjects.get(ch.id),
+      }));
     // update() runs every frame; derive only when the snapshot, events or roles change.
     const workKey = JSON.stringify([this.workEvents.length, workCharacters]);
     if (this.workSnapshot !== this.derivedWorkSnapshot || workKey !== this.derivedWorkKey) {

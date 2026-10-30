@@ -324,6 +324,7 @@ export function useExtensionMessages(
         const teammateName = msg.teammateName as string | undefined;
         const teammateParentId = msg.parentAgentId as number | undefined;
         const teamName = msg.teamName as string | undefined;
+        if (typeof msg.projectId === 'string') os.agentProjects.set(id, msg.projectId);
         setAgents((prev) => (prev.includes(id) ? prev : [...prev, id]));
         // Don't auto-select teammates (keep focus on lead)
         if (!isTeammate) {
@@ -416,6 +417,7 @@ export function useExtensionMessages(
         meetingSeats.delete(id);
         clearProviderLabel(id);
         clearAgentRole(id);
+        os.agentProjects.delete(id);
         setAgents((prev) => prev.filter((a) => a !== id));
         setSelectedAgent((prev) => (prev === id ? null : prev));
         setAgentTools((prev) => {

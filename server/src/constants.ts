@@ -284,3 +284,5 @@ export const ZONES_CHECK_INTERVAL_MS = 60_000;
 export const ZONES_GIT_TIMEOUT_MS = 10_000;
 export const ZONES_GIT_BUFFER_BYTES = 4 * 1024 * 1024;
 export const FLOW_P85 = 0.85;
+/** Recent activity retained by both office board sources. */
+export const BOARD_RECENT_EVENTS = 12;

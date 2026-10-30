@@ -200,12 +200,15 @@ export function CompanyHud({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-10 gap-y-5">
         <div className="flex min-w-0 flex-wrap items-center gap-4">
-          {(by.ACTIVE ?? 0) > 0 && (
-            <StatusChip text={`${by.ACTIVE} en curso`} color={PHASE_COLORS.ACTIVE} />
-          )}
-          {(by.AWAITING_REVIEW ?? 0) > 0 && (
+          {(by.ACTIVE ?? 0) + (by.LEASED ?? 0) + (by.RUNNING ?? 0) > 0 && (
             <StatusChip
-              text={`${by.AWAITING_REVIEW} en revisión`}
+              text={`${(by.ACTIVE ?? 0) + (by.LEASED ?? 0) + (by.RUNNING ?? 0)} en curso`}
+              color={PHASE_COLORS.ACTIVE}
+            />
+          )}
+          {(by.AWAITING_REVIEW ?? 0) + (by.REVIEW ?? 0) + (by.QA ?? 0) > 0 && (
+            <StatusChip
+              text={`${(by.AWAITING_REVIEW ?? 0) + (by.REVIEW ?? 0) + (by.QA ?? 0)} en revisión`}
               color={PHASE_COLORS.AWAITING_REVIEW}
             />
           )}

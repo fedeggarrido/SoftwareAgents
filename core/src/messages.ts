@@ -506,6 +506,7 @@ export interface BoardEvent {
 }
 
 export interface BoardSources {
+  workStore?: boolean;
   board: boolean;
   claims: boolean;
   progress: boolean;

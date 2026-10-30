@@ -250,7 +250,9 @@ export function ToolOverlay({
         const providerName = isSub ? null : getProviderLabel(id);
         const companyRole = isSub ? undefined : getAgentRole(id);
         const rawTask = companyRole?.detail?.replace(/^tarea\s+/, '');
-        const boardTask = board?.items.find((i) => i.clickupId === rawTask || i.id === rawTask);
+        const boardTask =
+          board?.items.find((i) => i.agentIds.includes(id)) ??
+          board?.items.find((i) => i.clickupId === rawTask || i.id === rawTask);
         const taskDetail = boardTask ? `${boardTask.id} · ${boardTask.title}` : companyRole?.detail;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel || providerName || companyRole);
 

@@ -1939,6 +1939,9 @@ components:
         - claims
         - progress
       properties:
+        workStore:
+          type: boolean
+          description: Selected Project uses WorkStore; board indicates whether its snapshot was readable.
         board:
           type: boolean
         claims:

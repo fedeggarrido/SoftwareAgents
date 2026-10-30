@@ -13,8 +13,10 @@ import type {
 import type { AgentStateStore } from './agentStateStore.js';
 import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { readAutopilot } from './companyControl.js';
+import { BOARD_RECENT_EVENTS } from './constants.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
 import { readRows } from './sqliteReadOnly.js';
+import { type WorkStoreBoard, WorkStoreBoardSource } from './workStoreBoardSource.js';
 
 /**
  * The agent company's backlog, as the office shows it: which task is in which
@@ -139,7 +141,6 @@ const CLAIM_PHASE: Record<string, string> = {
 /** A claim whose heartbeat is older than this is shown as stale (never released). */
 const STALE_AFTER_S = 1800;
 const POLL_MS = 3000;
-const RECENT_EVENTS = 12;
 
 let latest: BoardState | undefined;
 
@@ -179,6 +180,9 @@ export class BoardWatcher {
   private lastSent = '';
   private commonDir: string | undefined;
   private readonly sources: BoardSources;
+  private readonly workStoreSource = new WorkStoreBoardSource();
+  private workBoard: WorkStoreBoard | null = null;
+  private generation = 0;
 
   constructor(
     private readonly store: AgentStateStore,
@@ -198,10 +202,26 @@ export class BoardWatcher {
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.generation++;
+    this.workStoreSource.dispose();
   }
 
   /** Build the board; broadcast it only when something visible changed. */
-  tick(): void {
+  async tick(): Promise<void> {
+    const selection = this.sources.selection;
+    if (selection.kind === 'project') {
+      const file = this.sources.source(this.commonDir, 'softwareagents/work.sqlite3');
+      const generation = this.generation;
+      if (file && fs.existsSync(file)) {
+        const safe = ['-wal', '-shm', '-journal'].every((suffix) =>
+          this.sources.source(this.commonDir, `softwareagents/work.sqlite3${suffix}`),
+        );
+        this.workBoard = safe
+          ? await this.workStoreSource.read(file, selection.project.project.id, this.now())
+          : { items: [], recent: [], decisions: [], readable: false };
+      } else this.workBoard = null;
+      if (generation !== this.generation) return;
+    }
     const message = this.build();
     if (!message) return;
     const { generatedAt: _ignored, ...visible } = message;
@@ -213,6 +233,7 @@ export class BoardWatcher {
   }
 
   build(): BoardState | undefined {
+    if (this.workBoard) return this.buildWorkStoreBoard(this.workBoard);
     let board: BoardFile = {};
     let hasBoard = false;
     try {
@@ -336,7 +357,7 @@ export class BoardWatcher {
         : undefined,
       items: view,
       manager: manager && manager.state === 'active' ? ownerOf(manager) : undefined,
-      recent: (events ?? []).slice(0, RECENT_EVENTS).map(eventView),
+      recent: (events ?? []).slice(0, BOARD_RECENT_EVENTS).map(eventView),
       sources: { board: hasBoard, claims: claims !== undefined, progress: events !== undefined },
       quota: {
         claude: claudeQuota(this.sources.runsDir(dir, board.runsDir), nowS),
@@ -362,6 +383,52 @@ export class BoardWatcher {
       ],
       meeting: latestMeeting(this.sources.source(dir, board.meetingsDir), nowS),
       autopilot: hasBoard ? (readAutopilot() as AutopilotState | undefined) : undefined,
+      generatedAt: this.now(),
+    };
+  }
+
+  private buildWorkStoreBoard(board: WorkStoreBoard): BoardState {
+    const selection = this.sources.selection;
+    if (selection.kind !== 'project') throw new Error('WorkStore requires a Project');
+    const project = selection.project.project;
+    const items = board.items.map((item) => ({
+      ...item,
+      agentIds: [...this.store]
+        .filter(
+          ([, agent]) =>
+            agent.role?.detail?.split(/\s+/).includes(item.id) ||
+            (!!item.owner?.session && agent.sessionId === item.owner.session),
+        )
+        .map(([id]) => id),
+    }));
+    const byPhase: Record<string, number> = {};
+    const byEpic: BoardState['summary']['byEpic'] = {};
+    for (const item of items) {
+      byPhase[item.phase] = (byPhase[item.phase] ?? 0) + 1;
+      const epic = item.epic ?? '—';
+      byEpic[epic] ??= { done: 0, total: 0 };
+      byEpic[epic].total++;
+      if (item.phase === 'DONE') byEpic[epic].done++;
+    }
+    return {
+      type: 'boardState',
+      project: project.name,
+      projectId: project.id,
+      mode: 'project',
+      clickupFolderUrl: project.clickup
+        ? `https://app.clickup.com/${encodeURIComponent(project.clickup.workspaceId)}/v/f/${encodeURIComponent(project.clickup.folderId)}`
+        : undefined,
+      items,
+      recent: board.recent,
+      sources: { board: board.readable, claims: false, progress: false, workStore: true },
+      quota: {
+        claude: claudeQuota(this.sources.runsDir(this.commonDir, undefined), this.now() / 1000),
+        codex: codexQuota(this.now() / 1000),
+      },
+      summary: { total: items.length, byPhase, byEpic },
+      gate: [],
+      waiting: [],
+      decisions: board.decisions,
       generatedAt: this.now(),
     };
   }

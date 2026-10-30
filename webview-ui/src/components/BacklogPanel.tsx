@@ -23,6 +23,17 @@ function workStatus(
 }
 
 const PHASE_LABELS: Record<string, string> = {
+  DRAFT: 'Borrador',
+  QUEUED: 'En cola',
+  LEASED: 'Reservada',
+  RUNNING: 'En ejecución',
+  REVIEW: 'En revisión',
+  QA: 'En QA',
+  WAITING_HUMAN: 'Esperando decisión',
+  WAITING_QUOTA: 'Esperando cuota',
+  FAILED_RETRYABLE: 'Reintento pendiente',
+  FAILED_FINAL: 'Fallida',
+  CANCELLED: 'Cancelada',
   ACTIVE: 'En curso',
   AWAITING_REVIEW: 'En revisión',
   READY: 'Listo',
@@ -200,17 +211,25 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
             })}
           </div>
           <div className="ui-info text-text-muted">
-            Manager:{' '}
-            {board.manager
-              ? `${board.manager.session}${board.manager.stale ? ' (reserva sin latido)' : ' (ronda reservada)'}`
-              : 'sin ronda activa'}
-            {!board.sources.claims && ' · reservas no disponibles'}
-            {!board.sources.progress && ' · sin registro de progreso'}
+            {board.sources.workStore ? (
+              'WorkStore · solo lectura'
+            ) : (
+              <>
+                Manager:{' '}
+                {board.manager
+                  ? `${board.manager.session}${board.manager.stale ? ' (reserva sin latido)' : ' (ronda reservada)'}`
+                  : 'sin ronda activa'}
+                {!board.sources.claims && ' · reservas no disponibles'}
+                {!board.sources.progress && ' · sin registro de progreso'}
+              </>
+            )}
           </div>
 
           {board.items.length === 0 && (
             <p className="ui-info">
-              Sin tareas en el backlog. Las tareas aparecen cuando el Manager inicia una ronda.
+              {board.sources.workStore
+                ? 'Sin tareas de trabajo. Importa un DAG con task import.'
+                : 'Sin tareas en el backlog. Las tareas aparecen cuando el Manager inicia una ronda.'}
             </p>
           )}
           {board.summary && (

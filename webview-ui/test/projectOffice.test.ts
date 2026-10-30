@@ -30,6 +30,17 @@ function board(mode: 'project' | 'invalid' | 'legacy'): BoardState {
   };
 }
 describe('office without a board', () => {
+  it('reports an unreadable WorkStore without suggesting legacy or ClickUp configuration', () => {
+    const state = board('project');
+    state.sources.workStore = true;
+    expect(backlogView(state)).toMatchObject({
+      message: expect.stringContaining('WorkStore no disponible'),
+      configurationHint: null,
+    });
+    state.sources.board = true;
+    expect(backlogView(state).message).toBeNull();
+    expect(capacityHudView(state).minimal).toBe(false);
+  });
   it.each([false, true])(
     'shows decisions independently of the legacy board source (board=%s)',
     (hasBoard) => {

@@ -1,5 +1,7 @@
 /** QA content; commands are runtime evidence, never executable model instructions. */
 export interface TestReport {
+  originalReport?: TestReport;
+  runtimeNotes?: string[];
   verdict: 'pass' | 'fail' | 'not_tested';
   /** For deferred criteria, evidence explains why coverage belongs to a downstream task. */
   acceptance: {
@@ -28,5 +30,6 @@ export interface TestReport {
     severity: 'blocker' | 'major' | 'minor' | 'nit';
     summary: string;
     reproduction: string;
+    downgradeReasons?: string[];
   }[];
 }

@@ -25,6 +25,8 @@ process.stdin.on('end', () => {
                 ? 'server/src/audit.ts'
                 : data.files[0],
               line: 1,
+              evidence:
+                'Request audit with 10001 rows: returns every row instead of a bounded page',
               summary: 'Missing pagination',
               suggestion: 'Add bounded pagination',
             },

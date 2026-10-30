@@ -223,6 +223,8 @@ export interface DomainEventRecord {
 }
 /** One Project per handle; no SQL/connection escape hatch. */
 export interface WorkStore {
+  recordFindingDecision(entry: import('../findingPrecision.js').FindingDecision): Promise<void>;
+  listFindingDecisions(): import('../findingPrecision.js').FindingDecision[];
   recordUsage(entry: import('../usageLedger.js').UsageEntry): Promise<void>;
   listUsage(): import('../usageLedger.js').UsageEntry[];
   readonly projectId: string;

@@ -92,9 +92,7 @@
             "pattern": "\\S"
           },
           "reproduction": {
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
+            "type": "string"
           }
         }
       }

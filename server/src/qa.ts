@@ -348,6 +348,8 @@ export function qaBrief(
     ...input,
     contract,
     commands,
+    defectEvidenceRule:
+      'Blocking defects require an assigned AC and concrete reproduction with input, steps and incorrect result or a failing test. Generic reproduction is downgraded by the runtime.',
     baselineInstruction:
       'Only runtime preexisting=true identifies a failure reproduced on the pinned base with at least as many failed tests. These failures alone do not block pass; preserve all baseline, preexisting and reason fields exactly. New failures and unavailable task commands still block pass. Independently assess every AC.',
     commandAllowlist: requestsUsed ? [] : commands.map((c) => c.command),
@@ -402,6 +404,40 @@ export function validateTestReport(
     throw new SchemaValidationError(['QA must return a JSON object']);
   }
   const report = validateSchema(validateReport, value);
+  const original = structuredClone(report);
+  for (const defect of report.defects) {
+    if (!['blocker', 'major'].includes(defect.severity)) continue;
+    const reasons: string[] = [];
+    if (!input.task.acceptanceRefs.includes(defect.ac)) reasons.push('unknown AC');
+    const reproduction = defect.reproduction.trim();
+    if (
+      reproduction.length < 20 ||
+      /^(n\/?a|none|unknown|todo|test fails|fails|reproduce|see above)[.!]?$/i.test(reproduction)
+    )
+      reasons.push('missing concrete reproduction');
+    if (reasons.length) {
+      defect.severity = 'minor';
+      defect.downgradeReasons = reasons;
+      defect.summary += ` [downgraded: ${reasons.join('|')}]`;
+    }
+  }
+  const filtered = report.defects.some((defect) => defect.downgradeReasons);
+  if (filtered) {
+    report.originalReport = original;
+    report.runtimeNotes = [
+      'Unsupported blocking defects downgraded; unverified acceptance remains not_tested',
+    ];
+    for (const ac of report.acceptance) {
+      if (
+        ac.status === 'fail' &&
+        !report.defects.some(
+          (defect) => defect.ac === ac.ac && ['blocker', 'major'].includes(defect.severity),
+        )
+      )
+        ac.status = 'not_tested';
+    }
+    if (!report.acceptance.some((ac) => ac.status === 'fail')) report.verdict = 'not_tested';
+  }
   const errors: string[] = [];
   const seen = new Set<string>();
   for (const ac of report.acceptance) {
@@ -414,7 +450,10 @@ export function validateTestReport(
   if (seen.size !== input.task.acceptanceRefs.length)
     errors.push('TestReport must cover every assigned AC');
   for (const defect of report.defects)
-    if (!report.acceptance.some((ac) => ac.ac === defect.ac && ac.status === 'fail'))
+    if (
+      !defect.downgradeReasons &&
+      !report.acceptance.some((ac) => ac.ac === defect.ac && ac.status === 'fail')
+    )
       errors.push('Defect requires a failed assigned AC');
   const proposedPass = report.verdict === 'pass';
   let downgraded = false;

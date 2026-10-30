@@ -138,6 +138,12 @@ const migrations = [
     PRIMARY KEY(project_id, execution_key),
     FOREIGN KEY(project_id, execution_key) REFERENCES executions(project_id, key)
   ) STRICT;`,
+  `CREATE TABLE IF NOT EXISTS finding_decisions (
+    project_id TEXT NOT NULL, execution_key TEXT NOT NULL, finding_index INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY(project_id, execution_key, finding_index),
+    FOREIGN KEY(project_id, execution_key) REFERENCES executions(project_id, key)
+  ) STRICT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

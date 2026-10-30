@@ -32,6 +32,7 @@ import { CodexWatcher } from './codexWatcher.js';
 import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
 import { runResearchCommand } from './commands/research.js';
+import { runReviewCommand } from './commands/review.js';
 import { runTaskCommand } from './commands/task.js';
 import { configureCompanyControl } from './companyControl.js';
 import {
@@ -183,6 +184,8 @@ export async function dispatchCli(
     await runTelemetryCommand(argv.slice(1));
   } else if (argv[0] === 'usage') {
     await runUsageCommand(argv.slice(1));
+  } else if (argv[0] === 'review') {
+    await runReviewCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {
     await runEvalCommand(argv.slice(1));
   } else if (argv[0] === 'task') {

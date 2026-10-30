@@ -16,6 +16,7 @@
           "severity": { "enum": ["blocker", "major", "minor", "nit"] },
           "file": { "type": "string", "minLength": 1 },
           "line": { "type": "integer", "minimum": 1 },
+          "evidence": { "type": "string", "maxLength": 4000 },
           "summary": { "type": "string", "minLength": 1, "pattern": "\\S" },
           "suggestion": { "type": "string", "minLength": 1, "pattern": "\\S" }
         }
@@ -33,22 +34,5 @@
         }
       }
     }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "verdict": { "const": "request_changes" } } },
-      "then": {
-        "properties": {
-          "findings": {
-            "type": "array",
-            "contains": {
-              "type": "object",
-              "required": ["severity"],
-              "properties": { "severity": { "enum": ["blocker", "major"] } }
-            }
-          }
-        }
-      }
-    }
-  ]
+  }
 }

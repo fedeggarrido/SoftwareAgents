@@ -139,6 +139,16 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
       () => db.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode,
     );
     if (mode !== 'wal') throw new Error('WorkStore requires SQLite WAL journal mode');
+    const version = db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_version'").get()
+      ? Number(db.prepare('SELECT version FROM schema_version WHERE singleton = 1').get()?.version)
+      : 0;
+    if (version > 0 && version < 17) {
+      const destination = resolveInside(
+        commonDir,
+        `softwareagents/work.pre-v17-${randomUUID()}.sqlite3`,
+      );
+      await sqlite.backup(db, destination);
+    }
     await retryBusy(db, deadline, () => runMigrations(db));
     await retryBusy(db, deadline, () =>
       db
@@ -1769,6 +1779,40 @@ class SqliteWorkStore implements WorkStore {
         )
         .run(this.projectId, entry.executionId, JSON.stringify(entry));
     });
+  }
+  recordFindingDecision(entry: import('../findingPrecision.js').FindingDecision): Promise<void> {
+    return this.write(() => {
+      if (entry.actor !== 'human') throw new Error('Finding decisions require a human');
+      const task = this.getTask(entry.task);
+      const execution = this.getExecution(entry.execution);
+      const review = task?.review_reports?.find((row) => row.execution_id === entry.execution);
+      const qa = task?.test_reports?.find((row) => row.execution_id === entry.execution);
+      const finding = review?.report.findings[entry.index] ?? qa?.report.defects[entry.index];
+      if (!task || !execution || execution.task_key !== task.key || !finding)
+        throw new Error('Finding requires a persisted report and execution');
+      const body = {
+        ...entry,
+        feature: task.feature_key,
+        role: execution.agent_role ?? (review ? 'reviewer' : 'qa'),
+        executor: execution.executor,
+        model: execution.model_id,
+        severity: finding.severity,
+        downgradeReasons: finding.downgradeReasons ?? [],
+      };
+      this.db
+        .prepare(
+          'INSERT INTO finding_decisions(project_id, execution_key, finding_index, body) VALUES (?, ?, ?, ?)',
+        )
+        .run(this.projectId, entry.execution, entry.index, JSON.stringify(body));
+    });
+  }
+  listFindingDecisions(): import('../findingPrecision.js').FindingDecision[] {
+    return this.db
+      .prepare(
+        'SELECT body FROM finding_decisions WHERE project_id = ? ORDER BY execution_key, finding_index',
+      )
+      .all(this.projectId)
+      .map((row) => JSON.parse(row.body as string));
   }
   listUsage(): UsageEntry[] {
     return this.db

@@ -158,6 +158,8 @@ export function reviewerBrief(input: ReviewerRequest, errors: string[] = []): st
     testExecutionRule:
       'Request changes if any taskTests entry has executed=false. This flag is calculated by the runtime from test discovery configuration; do not infer or override it.',
     contract,
+    evidenceRule:
+      'Every blocker/major requires a line in a changed file and concrete evidence (reproduction, input and incorrect output, or failing test). Unsupported findings are downgraded by the runtime.',
     validationErrors: errors,
   });
 }
@@ -173,9 +175,59 @@ export function validateReview(source: string, input: ReviewerRequest): ReviewRe
   }
   const report = validateSchema(validateReport, value);
   const errors: string[] = [];
-  for (const finding of report.findings)
-    if (!input.files.includes(finding.file))
-      errors.push(`Finding file outside diff: ${finding.file}`);
+  const original = structuredClone(report);
+  for (const finding of report.findings) {
+    if (finding.evidence !== undefined) finding.evidence = finding.evidence.trim();
+    if (!['blocker', 'major'].includes(finding.severity)) continue;
+    const reasons: string[] = [];
+    if (!finding.evidence) reasons.push('missing evidence');
+    if (!input.files.includes(finding.file)) reasons.push('file not in diff');
+    if (!finding.line) reasons.push('missing line');
+    else if (input.files.includes(finding.file)) {
+      try {
+        const content = execFileSync('git', ['show', `${input.reviewRef.sha}:${finding.file}`], {
+          cwd: input.worktree,
+          encoding: 'utf8',
+          windowsHide: true,
+          maxBuffer: TASK_CLI_INPUT_BYTES,
+        });
+        const lines = content.length
+          ? content.split('\n').length - (content.endsWith('\n') ? 1 : 0)
+          : 0;
+        if (finding.line > lines) reasons.push('line out of range');
+      } catch {
+        reasons.push('line out of range');
+      }
+    }
+    if (reasons.length) {
+      finding.severity = 'minor';
+      finding.downgradeReasons = reasons;
+      finding.summary += ` [downgraded: ${reasons.join('|')}]`;
+    }
+  }
+  if (
+    report.findings.some((finding) => finding.downgradeReasons) ||
+    (report.verdict === 'request_changes' &&
+      !report.findings.some((finding) => ['blocker', 'major'].includes(finding.severity)))
+  ) {
+    report.originalReport = original;
+    // Runtime-known blockers never depend on model evidence: an unexecuted task test
+    // or an AC the Reviewer marked missing keeps request_changes.
+    const runtimeBlock =
+      (input.changedTestFiles ?? input.files).some(
+        (file) => isDeveloperTest(file) && !isExecutedTest(file, input.worktree),
+      ) || (report.acCoverage ?? []).some((coverage) => coverage.status === 'missing');
+    if (
+      report.verdict === 'request_changes' &&
+      !runtimeBlock &&
+      !report.findings.some((finding) => ['blocker', 'major'].includes(finding.severity))
+    ) {
+      report.verdict = 'approve';
+      report.runtimeNotes = [
+        'Effective verdict: approve; request_changes had no supported blocking findings after downgrade',
+      ];
+    }
+  }
   const seen = new Set<string>();
   for (const coverage of report.acCoverage ?? []) {
     if (!input.task.acceptanceRefs.includes(coverage.ac) || seen.has(coverage.ac))

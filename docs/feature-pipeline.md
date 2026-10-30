@@ -1526,3 +1526,18 @@ TODO fase C: integraciones de investigación con Features, otros roles y UI.
 
 El importador [task CLI](task-cli.md) usa `features/<FEAT-ID>.yaml` si existe;
 mantiene `features/requests/` como alternativa para documentos históricos.
+
+# Precisión de hallazgos (SA-101)
+
+Reviewer requiere `evidence` concreta (hasta 4000 caracteres), `line` válida en el
+SHA revisado y un fichero del diff para bloquear con blocker/major. El runtime
+degrada los demás a minor, conserva `originalReport` y explica la degradación;
+request_changes sin bloqueantes válidos pasa a approve efectivo. QA degrada
+reproducciones genéricas o AC inexistentes; los AC sin verificar quedan not_tested.
+
+`pixel-agents review finding <TASK> <index> --accept|--reject [--reason texto]`
+registra una decisión humana inmutable sobre el último informe de verificación
+persistido de la tarea (índice desde cero). No autoriza transiciones de la tarea.
+`pixel-agents review precision [--feature FEAT-001] [--json]` muestra aceptación
+por rol, executor, modelo y severidad, con n y motivos de degradación de los
+hallazgos evaluados por humanos. Los informes históricos sin decisión no cuentan.

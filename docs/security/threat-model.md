@@ -278,3 +278,21 @@ ni seguridad semántica de sus resúmenes.
   Ningún Agent ejecutado por la Platform recibe autoridad de merge autónomo.
 - **Revisit when:** cambien permisos Git/CI, reglas de integración o se proponga
   automatizar el merge; requerir una Human Decision antes de cambiar este Gate.
+
+### 9. Ingreso humano inferido por ausencia de marcadores (SA-003)
+
+- **Descripción:** los comandos de decisión humana (`feature run`, `review finding`,
+  `learning approve|reject`, respuestas a Human Decisions) consideran humano a quien
+  los lanza si no existe ninguno de `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`,
+  `SA_WORKER` o `CLAUDECODE` (`server/src/featureIngress.ts`). Un agente con shell
+  podría borrar esas variables y presentarse como humano; no hay autenticación del
+  operador. Detectado por la QA de Codex de SA-098 (2026-10-30).
+- **Mitigación actual:** los Executors de la Platform se lanzan con su entorno
+  marcado y la contención (SA-062) restringe comandos y rutas; las decisiones quedan
+  auditadas con actor y momento; las lecciones aprobadas se anclan en el WorkStore
+  con hash de contenido (SA-098), de modo que un fichero falsificado no basta.
+- **Aceptación temporal:** riesgo residual conocido mientras el operador y los
+  Agents compartan identidad de host.
+- **Revisit when:** se automatice cualquier aprobación, se ejecuten Agents con shell
+  sin contención, o antes de SA-058 (sandbox). Opción: confirmar decisiones con el
+  token privilegiado del servidor o una confirmación interactiva fuera del proceso.

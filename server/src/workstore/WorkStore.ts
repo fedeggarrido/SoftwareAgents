@@ -26,6 +26,7 @@ export interface FeatureRecord {
 export interface FeatureRunState {
   startedAt?: string;
   zoneWait?: { task: string; reason: string };
+  wipWait?: { task: string; reason: string };
   /** Task admitted under zone admission; holds its zones until DONE (SA-097). */
   zoneHold?: string;
   designReviews?: Record<

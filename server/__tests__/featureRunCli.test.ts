@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as architect from '../src/architect.js';
 import { AuditLog } from '../src/auditLog.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
+import * as designPipeline from '../src/designPipeline.js';
+import * as developer from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { assertFeatureRunIngress, type FeatureRunSummary, runFeature } from '../src/featureRun.js';
 import { assertTaskDependencies } from '../src/featureRunBase.js';
@@ -182,7 +184,7 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
-  it.each(['server/src', 'core/asyncapi.yaml'])(
+  it.each(['server/src', 'core/asyncapi.yaml', 'WIP', 'WIP-review', 'WIP-QA'])(
     'waits before develop for another feature, then reevaluates %s without an attempt',
     async (zone) => {
       const store = await storeFor();
@@ -200,6 +202,15 @@ describe('feature run interruption authority', () => {
           });
         }
         db.prepare('UPDATE tasks SET declaration = ?').run(JSON.stringify({ changeZones: [zone] }));
+        if (zone.startsWith('WIP')) {
+          const file = path.join(root, '.pixel-agents/config.json');
+          const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+          config.projects.test.wip = { review: 1 };
+          fs.writeFileSync(file, JSON.stringify(config));
+          db.prepare("UPDATE tasks SET status = 'REVIEW' WHERE key = 'FEAT-001-T01'").run();
+          vi.spyOn(designPipeline, 'runDesignGate').mockResolvedValue(true);
+          vi.spyOn(developer, 'pushDeveloperBranch').mockResolvedValue(undefined);
+        }
         db.prepare(
           // A live orchestrator (this process) holds FEAT-001; a dead one would hold nothing.
           'INSERT INTO feature_runs (project_id, feature_key, owner, pid, state) VALUES (?, ?, ?, ?, ?)',
@@ -226,7 +237,7 @@ describe('feature run interruption authority', () => {
           git_sha: main,
           feature_sha: main,
         });
-        const invoke = vi.fn(async () => {
+        const invoke = vi.fn(async (_args: string[]) => {
           db.prepare("UPDATE tasks SET status = 'WAITING_HUMAN' WHERE key = 'FEAT-002-T01'").run();
         });
         let waited = false;
@@ -237,16 +248,31 @@ describe('feature run interruption authority', () => {
           undefined,
           invoke,
           (line) => {
-            if (!line.startsWith('zone conflict:')) return;
+            if (!line.startsWith(zone.startsWith('WIP') ? 'WIP limit:' : 'zone conflict:')) return;
             waited = true;
             expect(invoke).not.toHaveBeenCalled();
             expect(store.getTask('FEAT-002-T01')!.attempt).toBe(0);
-            expect(store.getFeatureRun('FEAT-002')!.state.zoneWait?.reason).toBe(line);
-            db.prepare("UPDATE tasks SET status = 'DONE' WHERE key = 'FEAT-001-T01'").run();
+            expect(
+              store.getFeatureRun('FEAT-002')!.state[
+                zone.startsWith('WIP') ? 'wipWait' : 'zoneWait'
+              ]?.reason,
+            ).toBe(line);
+            if (zone === 'WIP-review' || zone === 'WIP-QA') {
+              const branch = 'sa/FEAT-002-T01-developer';
+              git('branch', branch, main);
+              db.prepare('UPDATE tasks SET status = ?, review_ref = ? WHERE key = ?').run(
+                zone === 'WIP-QA' ? 'QA' : 'REVIEW',
+                JSON.stringify({ branch, sha: main, base: main }),
+                'FEAT-002-T01',
+              );
+            } else db.prepare("UPDATE tasks SET status = 'DONE' WHERE key = 'FEAT-001-T01'").run();
           },
         );
         expect(waited).toBe(true);
-        expect(invoke).toHaveBeenCalledTimes(1);
+        expect(invoke, result.message).toHaveBeenCalledTimes(1);
+        if (zone === 'WIP-review' || zone === 'WIP-QA') {
+          expect(invoke.mock.calls[0][0][0]).toBe(zone === 'WIP-QA' ? 'qa' : 'review');
+        }
         expect(result.status).toBe('WAITING_HUMAN');
         expect(store.getFeatureRun('FEAT-002')!.state.zoneWait).toBeUndefined();
       } finally {

@@ -106,6 +106,7 @@ export interface FeatureRow {
   integration: FeatureIntegration | null;
   lastActivityAt: string | null;
   cost: FeatureCost;
+  flow?: string;
 }
 
 export type FeatureState =

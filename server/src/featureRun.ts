@@ -3,18 +3,20 @@ import { randomUUID } from 'crypto';
 
 import type { ProjectConfig } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
-import { companyAutopilotKey, readConfig } from './configPersistence.js';
+import { companyAutopilotKey, projectConfigError, readConfig } from './configPersistence.js';
 import { FEATURE_RUN_POLL_MS } from './constants.js';
 import { runDesignGate } from './designPipeline.js';
 import { pushDeveloperBranch } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
 import { assertTaskDependencies } from './featureRunBase.js';
+import { wipConflict } from './flow.js';
 import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { lastReviewFailure } from './reviewAttempts.js';
 import { rebaseFeatureTask, recoverFeatureTaskRebase } from './taskRebase.js';
 import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import { recoverWorkerResults } from './workerPublication.js';
+import { readMainAncestors } from './workstore/readOnlyWorkStore.js';
 import type { TaskRecord, WorkStore } from './workstore/WorkStore.js';
 import { zoneConflict } from './zoneAdmission.js';
 
@@ -97,6 +99,12 @@ export async function runFeature(
     progress(`${action} ${task}: ${status}`);
   };
   const tasks = () => store.listTasks().filter((t) => t.feature_key === key && t.declaration);
+  const currentWip = () => {
+    const projects = readConfig().projects;
+    const error = projectConfigError(projects, config.project.id);
+    if (error) throw error;
+    return projects[config.project.id]?.wip;
+  };
   const blocked = new Map<string, FeatureRunSummary['blocked'][number]>();
   const block = (task: string, reason: string, command?: string) => {
     blocked.set(task, {
@@ -624,9 +632,15 @@ export async function runFeature(
           return await stop('ready_to_merge', `Human merge required: ${state.branch} → main`, 0);
         }
         // Reevaluate an existing quota gate before spending quota on other work.
+        const wipLimits = currentWip();
         const task = [...all]
           .sort(
             (a, b) => Number(b.status === 'WAITING_QUOTA') - Number(a.status === 'WAITING_QUOTA'),
+          )
+          .sort((a, b) =>
+            wipLimits?.running !== undefined || wipLimits?.review !== undefined
+              ? Number(!!b.review_ref) - Number(!!a.review_ref)
+              : 0,
           )
           .find(
             (t) =>
@@ -656,13 +670,27 @@ export async function runFeature(
         // Approved doc tasks are DONE atomically in completeReview; publish them above
         // exactly like runtime-QA tasks, without scheduling a synthetic QA execution.
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
+        if (action !== 'develop' && state.wipWait) {
+          delete state.wipWait;
+          state.message = '';
+          await save();
+        }
         if (action === 'qa' && !(await runDesignGate(store, config, state, task, save))) continue;
         if (action === 'develop') {
-          const conflict = await store.reserveZoneTask(key, owner, state, task.key, () =>
-            zoneConflict(store, task),
-          );
+          // Read config and walk main's history before BEGIN IMMEDIATE, never while holding
+          // the WorkStore write lock; merged heads only matter for the review limit.
+          const limits = currentWip();
+          const merged =
+            limits?.review !== undefined ? readMainAncestors(config.repoRoot) : new Set<string>();
+          const conflict = await store.reserveZoneTask(key, owner, state, task.key, () => {
+            const reason = wipConflict(store, task.key, limits, merged);
+            if (reason) state.wipWait = { task: task.key, reason };
+            else delete state.wipWait;
+            delete state.zoneWait;
+            return reason ?? zoneConflict(store, task);
+          });
           if (conflict) {
-            state.zoneWait = { task: task.key, reason: conflict };
+            if (!state.wipWait) state.zoneWait = { task: task.key, reason: conflict };
             state.message = conflict;
             await save();
             progress(conflict);

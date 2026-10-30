@@ -12,8 +12,36 @@ import { runMigrations } from '../src/workstore/migrations.js';
 import { readMainAncestors } from '../src/workstore/readOnlyWorkStore.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));
 
 describe('features view acceptance', () => {
+  it('shows WIP and its explicit wait in the office projection', () => {
+    const rows = projectFeatures({
+      features: [{ key: 'FEAT-001', status: 'approved' }],
+      designs: [],
+      tasks: [
+        { key: 'FEAT-001-T01', feature_key: 'FEAT-001', status: 'REVIEW', declaration: '{}' },
+      ],
+      runs: [
+        {
+          feature_key: 'FEAT-001',
+          state: {
+            status: 'running',
+            wipWait: { task: 'FEAT-001-T02', reason: 'WIP limit: review 1/1 (FEAT-001-T01)' },
+          },
+        },
+      ],
+      decisions: [],
+      executions: [],
+      events: [],
+      wip: { review: 1 },
+    });
+    expect(rows[0].flow).toContain('review 1/1');
+    expect(rows[0].gates[0].reason).toBe('WIP limit: review 1/1 (FEAT-001-T01)');
+  });
   it('projects declared waits and real branch overlap warnings as visible gates', () => {
     const source: FeaturesSource = {
       features: [{ key: 'FEAT-001', status: 'approved' }],

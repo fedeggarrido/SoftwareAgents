@@ -1599,3 +1599,24 @@ zonas conocidas. No consulta remotos ni modifica ramas. La oficina inicia un mon
 asíncrono al consultar features (intervalo `ZONES_CHECK_INTERVAL_MS`), con gates
 `zone_overlap`; `pixel-agents task show <KEY>` muestra la espera y avisos actuales.
 Los avisos de ramas son informativos y no bloquean una integración.
+
+## WIP y flujo (SA-096)
+
+El operador configura `projects.<project-id>.wip` en `~/.pixel-agents/config.json`,
+fuera del repositorio. Valores iniciales recomendados: `{"running": 2, "review": 3}`.
+Cada campo ausente significa **sin límite** (compatibilidad con proyectos existentes);
+los valores configurados deben ser enteros positivos. El runner relee los límites
+en cada admisión. Running cuenta LEASED/RUNNING del proyecto, incluidas reservas
+pendientes; review cuenta REVIEW/QA y tareas que esperan merge humano en una run
+`ready_to_merge`, sin duplicarlas ni contar ramas ya integradas en main.
+Al alcanzar el límite solo espera `develop`; review/QA tienen prioridad y avanzan.
+La oficina muestra el motivo `WIP limit: review 3/3 (...)` y WIP actual/límite.
+
+`pixel-agents flow [--feature FEAT-001] [--json]` lee una instantánea del WorkStore
+sin migraciones ni escrituras. El filtro afecta métricas; WIP siempre es del proyecto.
+Cycle time: primera entrada RUNNING hasta DONE; throughput: DONE por día UTC;
+edad: última entrada real al estado WIP; espera de revisión: suma de intervalos
+REVIEW/QA/WAITING_HUMAN, incluido el intervalo abierto. Duraciones en milisegundos;
+mediana convencional, p85 por rango más próximo (`ceil(0.85*n)`), n de muestras
+conocidas y tareas sin datos como desconocidas. El JSON incluye duraciones por tarea.
+La oficina resume las distribuciones por feature y los límites del proyecto.

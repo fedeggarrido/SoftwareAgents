@@ -15,7 +15,9 @@ export function gitObjectReader(common: string): (sha: string) => Buffer {
   const packDir = resolveInside(objects, 'pack');
   if (fs.existsSync(packDir)) {
     for (const name of fs.readdirSync(packDir)) {
-      if (!/^pack-[a-f0-9]{40}\.idx$/.test(name)) continue;
+      // `git maintenance` (loose-objects task) writes loose-<hash>.pack beside pack-<hash>.pack;
+      // ignoring it hid merged commits, so merged features looked unmerged.
+      if (!/^(?:pack|loose)-[a-f0-9]{40}\.idx$/.test(name)) continue;
       const index = fs.readFileSync(resolveInside(packDir, name));
       if (index.readUInt32BE(0) !== 0xff744f63 || index.readUInt32BE(4) !== 2) continue;
       indexes.push(index);

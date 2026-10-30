@@ -4,6 +4,10 @@ import type {
   FeaturesReadError,
   FeatureTaskStep,
 } from '../../core/src/messages.js';
+import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { readConfig } from './configPersistence.js';
+import { type FlowEvent, flowMetrics, type FlowTask, wipSnapshot } from './flow.js';
+import { flowLabel } from './flowCommand.js';
 import { aggregateUsage, type UsageEntry } from './usageLedger.js';
 import {
   FeaturesReadFailure,
@@ -14,6 +18,7 @@ import { monitoredZones, type ZonesReport, type ZoneTask } from './zonesCheck.js
 
 type Row = Record<string, unknown>;
 export interface FeaturesSource {
+  wip?: ProjectOperatorConfig['wip'];
   features: Row[];
   designs: Row[];
   tasks: Row[];
@@ -77,6 +82,15 @@ function display(value: unknown): string | null {
 /** Pure projection: only explicitly named display fields can escape. */
 export function projectFeatures(source: FeaturesSource): FeatureRow[] {
   const entries = (source.ledger ?? []).map(ledgerEntry);
+  const ready = new Set(
+    source.runs
+      .filter((row) => {
+        const run = object(row.state);
+        return run.status === 'ready_to_merge' && !source.mainAncestors?.has(String(run.head));
+      })
+      .map((row) => text(row.feature_key)),
+  );
+  const wip = wipSnapshot(source.tasks as unknown as FlowTask[], ready, source.wip);
   return source.features
     .map((feature): FeatureRow => {
       const key = text(feature.key);
@@ -137,6 +151,16 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
         related.push({ ...decision, data });
       }
       const gates: FeatureGate[] = [];
+      if (run?.wipWait) {
+        const waiting = object(run.wipWait);
+        gates.push({
+          kind: 'waiting_human',
+          task: text(waiting.task),
+          expired: false,
+          command: 'pixel-agents flow',
+          reason: display(waiting.reason) ?? '',
+        });
+      }
       const gate = (
         kind: FeatureGate['kind'],
         task: string | null,
@@ -275,6 +299,15 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
         .sort();
       return {
         key,
+        flow: flowLabel(
+          wip,
+          flowMetrics(
+            (tasks as unknown as FlowTask[]).filter((t) => !!t.declaration),
+            source.events as unknown as FlowEvent[],
+            Date.now(),
+            ready,
+          ),
+        ),
         cost: {
           executions: usage.executions,
           costKnown: usage.costCoverage,
@@ -339,6 +372,7 @@ export async function readFeaturesView(
     ) as unknown as ZoneTask[];
     const zones = await monitoredZones(root, zoneTasks);
     const features = projectFeatures({
+      wip: readConfig().projects[projectId]?.wip,
       zones,
       features: read('features', 'key, title, status, updated_at'),
       designs: read('technical_designs', 'feature_key'),
@@ -349,7 +383,7 @@ export async function readFeaturesView(
       runs: read('feature_runs', 'feature_key, state, updated_at'),
       decisions: read('human_decisions', 'task_key, escalation, decided_at'),
       executions: read('executions', 'task_key, agent_role, task_version, started_at'),
-      events: read('domain_events', 'task_key, created_at'),
+      events: read('domain_events', 'task_key, from_status, to_status, created_at'),
       ledger: db
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
         .get()

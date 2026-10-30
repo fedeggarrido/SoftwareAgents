@@ -49,6 +49,7 @@ import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
@@ -187,6 +188,8 @@ export async function dispatchCli(
     await runTelemetryCommand(argv.slice(1));
   } else if (argv[0] === 'usage') {
     await runUsageCommand(argv.slice(1));
+  } else if (argv[0] === 'flow') {
+    await runFlowCommand(argv.slice(1));
   } else if (argv[0] === 'review') {
     await runReviewCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {

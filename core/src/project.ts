@@ -34,6 +34,7 @@ export interface TelemetryConfig {
 
 /** Operator-owned policy in ~/.pixel-agents/config.json, never in Project Brain. */
 export interface ProjectOperatorConfig {
+  wip?: { running?: number; review?: number };
   research?: import('./research.js').ResearchOperatorConfig;
   autonomyLevel: AutonomyLevel;
   allowedExecutors: string[];

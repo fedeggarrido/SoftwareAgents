@@ -127,6 +127,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 )}
                 <span>{featureProgressLabel(feature.progress)}</span>
               </div>
+              {feature.flow && <div className="text-text-muted">{feature.flow}</div>}
               <div
                 className="feature-cost flex flex-wrap gap-8 text-text-muted"
                 title={FEATURE_COST_ESTIMATE_HINT}

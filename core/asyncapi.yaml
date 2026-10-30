@@ -255,6 +255,8 @@ components:
           type: [string, 'null']
         cost:
           $ref: '#/components/schemas/FeatureCost'
+        flow:
+          type: string
 
     FeatureCost:
       type: object

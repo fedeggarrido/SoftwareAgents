@@ -227,6 +227,14 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
       additionalProperties: false,
       properties: { maxExecutions: concurrencyLimit, perExecutor: numberMap(concurrencyLimit) },
     },
+    wip: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        running: { type: 'integer', minimum: 1 },
+        review: { type: 'integer', minimum: 1 },
+      },
+    },
     budgets: {
       type: 'object',
       additionalProperties: false,

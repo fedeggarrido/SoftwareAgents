@@ -140,6 +140,7 @@ const CLAIM_PHASE: Record<string, string> = {
 
 /** A claim whose heartbeat is older than this is shown as stale (never released). */
 const STALE_AFTER_S = 1800;
+const BOARD_TERMINAL_PHASES: readonly string[] = ['DONE', 'CANCELLED', 'FAILED_FINAL'];
 const POLL_MS = 3000;
 
 let latest: BoardState | undefined;
@@ -393,13 +394,17 @@ export class BoardWatcher {
     const project = selection.project.project;
     const items = board.items.map((item) => ({
       ...item,
-      agentIds: [...this.store]
-        .filter(
-          ([, agent]) =>
-            agent.role?.detail?.split(/\s+/).includes(item.id) ||
-            (!!item.owner?.session && agent.sessionId === item.owner.session),
-        )
-        .map(([id]) => id),
+      // Finished work claims no character: the Session that once ran it (often the
+      // operator's own terminal) has moved on (seen in the office: "Dueño · FEAT-001-T01").
+      agentIds: BOARD_TERMINAL_PHASES.includes(item.phase)
+        ? []
+        : [...this.store]
+            .filter(
+              ([, agent]) =>
+                agent.role?.detail?.split(/\s+/).includes(item.id) ||
+                (!!item.owner?.session && agent.sessionId === item.owner.session),
+            )
+            .map(([id]) => id),
     }));
     const byPhase: Record<string, number> = {};
     const byEpic: BoardState['summary']['byEpic'] = {};

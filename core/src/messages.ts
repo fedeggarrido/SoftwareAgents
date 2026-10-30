@@ -648,9 +648,30 @@ export interface AgentRole {
   model?: string;
   effort?: string;
   selectionReason?: string;
+  characterDetail?: CharacterDetail;
 }
 
 export type ModelTier = 'economy' | 'standard' | 'deep';
+
+export interface CharacterDetail {
+  projectId: string;
+  spec: string;
+  role: string;
+  taskKey: string;
+  taskTitle: string;
+  taskStatus: string;
+  executor: string;
+  model: string;
+  tier: string;
+  effort: string;
+  elapsed: string;
+  worktree: string;
+  branch: string;
+  pr: string;
+  selectionReason: string;
+  permissions: string;
+  log: string;
+}
 
 export interface AgentProviderLabel {
   type: 'agentProviderLabel';

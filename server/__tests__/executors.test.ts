@@ -92,9 +92,9 @@ describe('Execution contract and transitional registry', () => {
         'output',
         'finished',
       ]);
-      expect(new ExecutionRegistry(root).sessionMap().get(`fake-${id}-${req.executionId}`)).toEqual(
-        { executionId: req.executionId, role: req.role, taskKey: req.taskKey },
-      );
+      expect(
+        new ExecutionRegistry(root).sessionMap().get(`fake-${id}-${req.executionId}`),
+      ).toMatchObject({ executionId: req.executionId, role: req.role, taskKey: req.taskKey });
       expect(() => registry.executor(new FakeExecutor(id)).start(req)).toThrow();
     },
   );
@@ -213,7 +213,7 @@ it('persists the real Codex thread before delivering started for office role res
   expect(handle.sessionId).toBeUndefined();
   for await (const event of handle.events) {
     if (event.type === 'started')
-      expect(registry.sessionMap().get(event.sessionId)).toEqual({
+      expect(registry.sessionMap().get(event.sessionId)).toMatchObject({
         executionId: req.executionId,
         role: 'architect',
         taskKey: 'SA-034',

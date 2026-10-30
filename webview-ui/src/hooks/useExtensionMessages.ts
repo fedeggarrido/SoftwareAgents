@@ -410,6 +410,7 @@ export function useExtensionMessages(
           model: msg.model,
           effort: msg.effort,
           selectionReason: msg.selectionReason,
+          characterDetail: msg.characterDetail,
         });
         seatMeetingParticipants(os);
       } else if (msg.type === 'agentClosed') {

@@ -2078,6 +2078,67 @@ components:
           type: string
         selectionReason:
           type: string
+        characterDetail:
+          $ref: '#/components/schemas/CharacterDetail'
+    CharacterDetail:
+      description: Server allow-list of recorded character facts. Missing facts are explicitly desconocido.
+      type: object
+      additionalProperties: false
+      required:
+        [
+          projectId,
+          spec,
+          role,
+          taskKey,
+          taskTitle,
+          taskStatus,
+          executor,
+          model,
+          tier,
+          effort,
+          elapsed,
+          worktree,
+          branch,
+          pr,
+          selectionReason,
+          permissions,
+          log,
+        ]
+      properties:
+        projectId:
+          type: string
+        spec:
+          type: string
+        role:
+          type: string
+        taskKey:
+          type: string
+        taskTitle:
+          type: string
+        taskStatus:
+          type: string
+        executor:
+          type: string
+        model:
+          type: string
+        tier:
+          type: string
+        effort:
+          type: string
+        elapsed:
+          type: string
+        worktree:
+          type: string
+        branch:
+          type: string
+        pr:
+          type: string
+        selectionReason:
+          type: string
+        permissions:
+          type: string
+        log:
+          type: string
     ModelTier:
       type: string
       enum: [economy, standard, deep]

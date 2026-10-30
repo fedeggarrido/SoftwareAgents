@@ -447,3 +447,23 @@ export const FEATURE_PROGRESS_PERCENT_MAX = 100;
  * table: an API-price equivalent, not a charge (subscriptions consume quota instead). */
 export const FEATURE_COST_ESTIMATE_HINT =
   'Estimación a precio de API: tokens informados por los CLIs × tabla de precios por modelo. No es un cargo real; con suscripción se consume cuota.';
+export const CHARACTER_DETAIL_UNKNOWN = 'desconocido';
+export const CHARACTER_DETAIL_SECOND_MS = 1000;
+export const CHARACTER_DETAIL_FIELDS = [
+  ['spec', 'AgentSpec id@versión'],
+  ['role', 'Rol'],
+  ['taskKey', 'Tarea'],
+  ['taskTitle', 'Título'],
+  ['taskStatus', 'Estado'],
+  ['executor', 'Executor'],
+  ['model', 'Modelo'],
+  ['tier', 'Tier'],
+  ['effort', 'Esfuerzo'],
+  ['elapsed', 'Tiempo transcurrido'],
+  ['worktree', 'Worktree'],
+  ['branch', 'Rama'],
+  ['pr', 'PR'],
+  ['selectionReason', 'Razón de selección'],
+  ['permissions', 'Perfil de permisos'],
+  ['log', 'Log de ejecución'],
+] as const;

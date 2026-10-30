@@ -70,6 +70,24 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
     );
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
     await page.route('**/*', (route) => route.abort());
+    const detailPath = '../src/components/CharacterDetailPanel.js';
+    const { CharacterDetailPanel } = await import(detailPath);
+    const detailMarkup = renderToStaticMarkup(
+      createElement(CharacterDetailPanel, {
+        detail: { taskTitle: 'long'.repeat(200), worktree: 'path/'.repeat(100) } as never,
+      }),
+    );
+    await page.setContent(
+      `<style>${css}</style><div style="position:relative;width:100vw;height:100vh">${detailMarkup}</div>`,
+    );
+    const detailBox = (await page.getByRole('region').boundingBox())!;
+    expect(detailBox.x).toBeGreaterThanOrEqual(0);
+    expect(detailBox.x + detailBox.width).toBeLessThanOrEqual(390);
+    expect(
+      await page.evaluate(
+        `(() => { const el = document.querySelector('[data-testid="character-detail-panel"]'); return el.scrollWidth <= el.clientWidth; })()`,
+      ),
+    ).toBe(true);
     const panels = [FeaturesPanel, AuditPanel].map((Panel) =>
       renderToStaticMarkup(createElement(Panel, { isOpen: true, onClose: noop })),
     );

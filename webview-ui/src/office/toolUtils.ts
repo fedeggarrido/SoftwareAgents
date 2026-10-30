@@ -72,6 +72,7 @@ export function getProviderLabel(id: number): string {
 // role yet means unknown, never a default: nothing is shown until it arrives.
 
 export interface AgentRoleView {
+  characterDetail?: import('../../../core/src/messages.js').CharacterDetail;
   label: string;
   department: string;
   detail?: string;

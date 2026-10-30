@@ -3,7 +3,9 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import type { CharacterDetail } from '../../../core/src/messages.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
+import { projectCharacterDetail, readCharacterDetail } from '../characterDetail.js';
 import { EXECUTION_REGISTRY_LOCK_TIMEOUT_MS } from '../constants.js';
 import { contentionNow, contentionPause, isFileContention } from '../fileContention.js';
 import type { CascadeAttempt } from '../modelCascade.js';
@@ -14,6 +16,7 @@ import type { ExecutionHandle, ExecutionRequest, Executor, ExecutorId } from './
 import { snapshotExecutionRequest } from './executor.js';
 
 export interface SessionExecution {
+  characterDetail?: CharacterDetail;
   executionId: string;
   role: string;
   taskKey: string;
@@ -41,6 +44,15 @@ function git(worktree: string, args: string[]): string {
 /** Local transitional ledger. A held/crashed lock fails closed; never steal it. */
 export class ExecutionRegistry {
   private readonly root: string;
+
+  characterDetail(project: string, task: string, session: string): CharacterDetail | undefined {
+    return readCharacterDetail(
+      resolveInside(this.root, 'softwareagents/work.sqlite3'),
+      project,
+      task,
+      session,
+    );
+  }
 
   constructor(worktreePath: string) {
     this.root = path.resolve(worktreePath, git(worktreePath, ['rev-parse', '--git-common-dir']));
@@ -95,6 +107,21 @@ export class ExecutionRegistry {
       .filter(Boolean)) {
       const record = JSON.parse(line) as ExecutionRecord;
       result.set(record.sessionId, {
+        characterDetail: projectCharacterDetail({
+          project_id: record.projectId,
+          task_key: record.taskKey,
+          execution_role: record.role,
+          executor: record.executor,
+          model_id: record.model,
+          model_tier: record.tier,
+          model_effort: record.effort,
+          selection_reason: record.selectionReason,
+          log: fs.existsSync(
+            resolveInside(this.root, `softwareagents/runs/${record.executionId}.jsonl`),
+          )
+            ? resolveInside(this.root, `softwareagents/runs/${record.executionId}.jsonl`)
+            : undefined,
+        }),
         executionId: record.executionId,
         role: record.role,
         taskKey: record.taskKey,
@@ -111,10 +138,22 @@ export class ExecutionRegistry {
     // SQLite is authoritative for new worker runs; legacy JSONL remains readable.
     const rows = readRows<StoredExecution & { role: string | null }>(
       resolveInside(this.root, 'softwareagents/work.sqlite3'),
-      'SELECT e.*, t.agent_role AS role FROM executions e JOIN tasks t ON t.project_id = e.project_id AND t.key = e.task_key WHERE e.session_id IS NOT NULL ORDER BY e.started_at, e.key',
+      `SELECT e.key, e.project_id, e.task_key, e.agent_template_version, e.executor,
+        e.agent_role AS execution_role, e.model_id, e.model_tier, e.model_effort,
+        e.selection_reason, e.session_id, e.started_at, t.agent_role AS role,
+        t.status, t.branch, t.worktree_ref, t.pr_ref,
+        CASE WHEN json_valid(t.declaration) THEN json_extract(t.declaration, '$.title') END AS task_title
+       FROM executions e JOIN tasks t ON t.project_id = e.project_id AND t.key = e.task_key
+       WHERE e.session_id IS NOT NULL ORDER BY e.started_at, e.key`,
     );
     for (const row of rows ?? [])
       result.set(row.session_id!, {
+        characterDetail: projectCharacterDetail({
+          ...row,
+          log: fs.existsSync(resolveInside(this.root, `softwareagents/runs/${row.key}.jsonl`))
+            ? resolveInside(this.root, `softwareagents/runs/${row.key}.jsonl`)
+            : undefined,
+        }),
         executionId: row.key,
         taskKey: row.task_key,
         role: row.role ?? 'developer',

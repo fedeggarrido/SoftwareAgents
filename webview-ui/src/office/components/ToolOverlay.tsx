@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { CharacterDetailPanel } from '../../components/CharacterDetailPanel.js';
 import { Button } from '../../components/ui/Button.js';
 import {
   CHARACTER_SITTING_OFFSET_PX,
@@ -134,7 +135,8 @@ export function ToolOverlay({
 }: ToolOverlayProps) {
   const board = useBoard();
   // A Project whose server announces executor state manages its launches (SA-091).
-  const managedProject = useExecutorStore().state !== null;
+  const executorState = useExecutorStore().state;
+  const managedProject = executorState !== null;
   const [, setTick] = useState(0);
   useEffect(() => {
     let rafId = 0;
@@ -164,6 +166,13 @@ export function ToolOverlay({
 
   return (
     <>
+      {selectedId !== null && officeState.characters.has(selectedId) && (
+        <CharacterDetailPanel
+          detail={getAgentRole(selectedId)?.characterDetail}
+          executorState={executorState}
+          board={board}
+        />
+      )}
       {allIds.map((id) => {
         const ch = officeState.characters.get(id);
         if (!ch) return null;

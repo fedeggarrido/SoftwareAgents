@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import type { AgentRole as AgentRoleMessage } from '../../core/src/messages.js';
 import type { ModelTier } from '../../core/src/modelTier.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { projectCharacterDetail } from './characterDetail.js';
+import { CHARACTER_DETAIL_TASK_PREFIX, CHARACTER_DETAIL_UNKNOWN } from './constants.js';
 import type { SessionExecution } from './executors/executionRegistry.js';
 
 /**
@@ -25,6 +27,7 @@ import type { SessionExecution } from './executors/executionRegistry.js';
  */
 
 export interface AgentRole {
+  characterDetail?: AgentRoleMessage['characterDetail'];
   /** What the character does, in Spanish ("QA Código"). */
   label: string;
   /** Department, used for color and grouping. */
@@ -303,6 +306,15 @@ export function roleMessage(id: number, role: AgentRole): AgentRoleMessage {
     model: role.model,
     effort: role.effort,
     selectionReason: role.selectionReason,
+    characterDetail:
+      role.characterDetail ??
+      projectCharacterDetail({
+        execution_role: role.label,
+        model_id: role.model,
+        model_tier: role.tier,
+        model_effort: role.effort,
+        selection_reason: role.selectionReason,
+      }),
   };
 }
 
@@ -321,6 +333,13 @@ export class RoleResolver {
     private readonly store: AgentStateStore,
     private readonly intervalMs = 2000,
     private readonly sessions: () => ReadonlyMap<string, SessionExecution> = () => new Map(),
+    private readonly detailSource?: (
+      project: string,
+      task: string,
+      session: string,
+    ) => AgentRoleMessage['characterDetail'],
+    /** The server's own Project: sessions carry no projectId without a company workspace. */
+    private readonly defaultProject?: string,
   ) {}
 
   start(): void {
@@ -342,7 +361,13 @@ export class RoleResolver {
       sessions = new Map();
     }
     for (const [id, agent] of this.store) {
-      const recorded = sessions.get(agent.sessionId);
+      const candidate = sessions.get(agent.sessionId);
+      const recorded =
+        candidate?.characterDetail &&
+        agent.projectId !== undefined &&
+        candidate.characterDetail.projectId !== agent.projectId
+          ? undefined
+          : candidate;
       if (!agent.jsonlFile && !recorded) continue;
       if (agent.spawnToolUseId || agent.leadAgentId !== undefined) continue;
       const base =
@@ -358,6 +383,7 @@ export class RoleResolver {
             model: recorded.model ?? undefined,
             effort: recorded.effort,
             selectionReason: recorded.selectionReason,
+            characterDetail: recorded.characterDetail,
           }
         : task
           ? {
@@ -367,6 +393,35 @@ export class RoleResolver {
               detail: `tarea ${task}`,
             }
           : (base ?? OWNER_SESSION);
+      if (role?.detail?.startsWith(CHARACTER_DETAIL_TASK_PREFIX)) {
+        const key = role.detail.slice(CHARACTER_DETAIL_TASK_PREFIX.length);
+        const project =
+          agent.projectId ?? recorded?.characterDetail?.projectId ?? this.defaultProject;
+        const newer = [...this.store].some(
+          ([otherId, other]) =>
+            otherId > id &&
+            (other.projectId ?? sessions.get(other.sessionId)?.characterDetail?.projectId) ===
+              project &&
+            !other.spawnToolUseId &&
+            other.leadAgentId === undefined &&
+            (sessions.get(other.sessionId)?.taskKey === key ||
+              sessionTask(other.jsonlFile, other.providerId) === key),
+        );
+        const projected = project ? this.detailSource?.(project, key, agent.sessionId) : undefined;
+        // A legacy registry may know execution facts absent from the WorkStore.
+        if (projected && role.characterDetail) {
+          for (const field of Object.keys(projected) as (keyof typeof projected)[]) {
+            if (projected[field] === CHARACTER_DETAIL_UNKNOWN) {
+              projected[field] = role.characterDetail[field];
+            }
+          }
+        }
+        role.characterDetail = newer
+          ? undefined
+          : projected
+            ? { ...projected, log: role.characterDetail?.log ?? projected.log }
+            : role.characterDetail;
+      }
       if (
         !role ||
         (agent.role?.label === role.label &&
@@ -375,7 +430,8 @@ export class RoleResolver {
           agent.role.tier === role.tier &&
           agent.role.model === role.model &&
           agent.role.effort === role.effort &&
-          agent.role.selectionReason === role.selectionReason)
+          agent.role.selectionReason === role.selectionReason &&
+          JSON.stringify(agent.role.characterDetail) === JSON.stringify(role.characterDetail))
       )
         continue;
       agent.role = role;

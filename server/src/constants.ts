@@ -290,3 +290,6 @@ export const BOARD_RECENT_EVENTS = 12;
 export const LEARNING_RULE_CHARS = 300;
 export const LEARNING_LIMIT = 5;
 export const LEARNING_CONTEXT_CHARS = 2400;
+export const CHARACTER_DETAIL_UNKNOWN = 'desconocido';
+export const CHARACTER_DETAIL_TASK_PREFIX = 'tarea ';
+export const CHARACTER_DETAIL_SECOND_MS = 1000;

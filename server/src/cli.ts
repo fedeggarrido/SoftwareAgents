@@ -52,6 +52,7 @@ import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
+import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
 import { PixelAgentsServer } from './server.js';
@@ -415,10 +416,22 @@ async function startServer(argv: string[]): Promise<void> {
 
     // Who each character is (Manager, Analista, DEV, QA...).
     let executionRegistry: ExecutionRegistry | undefined;
-    const roleResolver = new RoleResolver(store, 2000, () => {
-      executionRegistry ??= new ExecutionRegistry(cwd);
-      return executionRegistry.sessionMap();
-    });
+    const roleResolver = new RoleResolver(
+      store,
+      2000,
+      () => {
+        executionRegistry ??= new ExecutionRegistry(cwd);
+        return executionRegistry.sessionMap();
+      },
+      (project, task, session) => executionRegistry?.characterDetail(project, task, session),
+      (() => {
+        try {
+          return loadProjectConfig(cwd)?.project.id;
+        } catch {
+          return undefined; // An invalid project.yaml only loses the detail fallback.
+        }
+      })(),
+    );
     roleResolver.start();
 
     // The company's backlog (docs/backlog/board.json + claims + progress), if any.

@@ -9,6 +9,7 @@
 }
 
 :root {
+  --character-detail-width: 380px;
   /* Core palette */
   --color-bg: #1e1e2e;
   --color-bg-dark: #181828;
@@ -441,4 +442,23 @@
   50% {
     opacity: 0.3;
   }
+}
+.character-detail-panel {
+  /* A side card, not a full-width panel: the selected character must stay visible. */
+  width: min(var(--character-detail-width), calc(100% - 2 * var(--panel-edge)));
+  max-height: 70%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+.character-detail-panel dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px;
+  margin-block: 3px;
+  min-width: 0;
+}
+.character-detail-panel dd {
+  margin: 0;
+  white-space: normal;
 }

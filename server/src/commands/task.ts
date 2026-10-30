@@ -23,12 +23,13 @@ import { aggregateUsage } from '../usageLedger.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import { isTaskStatus, type TaskStatus } from '../workstore/taskStateMachine.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
+import { checkZones } from '../zonesCheck.js';
 import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFiles.js';
 
 const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
 const USAGE =
-  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | backup [--keep N] | retry <KEY> --reason <text>';
+  'Usage: pixel-agents task import <dag.yaml> | list [--status S] [--json] | show <KEY> | backup [--keep N] | retry <KEY> --reason <text>';
 
 /** Keep untrusted fields on one terminal line without executing control sequences. */
 function textField(value: string): string {
@@ -45,6 +46,8 @@ function parseArgs(argv: string[]) {
   let status: TaskStatus | undefined;
   let json = false;
   let keep = TASK_CLI_DEFAULT_KEEP;
+  if (command === 'show' && args.length === 1 && !args[0].startsWith('-'))
+    return { command, file: args[0], status, json: true, keep };
   if (
     command === 'retry' &&
     args.length === 3 &&
@@ -334,7 +337,29 @@ export async function runTaskCommand(
       );
     } else {
       store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-      if (args.command === 'retry') {
+      if (args.command === 'show') {
+        const task = store.getTask(args.file!);
+        if (!task) throw new CliUsageError('Unknown task');
+        const report = await checkZones(config.repoRoot, store.listTasks());
+        const branch = task.branch ?? `sa/${task.key}-developer`;
+        log(
+          JSON.stringify(
+            {
+              ...task,
+              zoneWait: task.feature_key
+                ? store.getFeatureRun(task.feature_key)?.state.zoneWait
+                : null,
+              zoneWarnings: {
+                overlaps: report.overlaps.filter((item) => item.branches.includes(branch)),
+                outsideZones:
+                  report.branches.find((item) => item.branch === branch)?.outsideZones ?? [],
+              },
+            },
+            null,
+            2,
+          ),
+        );
+      } else if (args.command === 'retry') {
         const task = store.getTask(args.file!);
         if (!task) throw new Error('Unknown task');
         const destination = await backup(store, args.keep);

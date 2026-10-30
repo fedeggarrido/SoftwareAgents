@@ -16,6 +16,7 @@ import { rebaseFeatureTask, recoverFeatureTaskRebase } from './taskRebase.js';
 import { isVerifierInfrastructureFailure } from './verifierInfrastructure.js';
 import { recoverWorkerResults } from './workerPublication.js';
 import type { TaskRecord, WorkStore } from './workstore/WorkStore.js';
+import { zoneConflict } from './zoneAdmission.js';
 
 export function assertFeatureRunIngress(config: ProjectConfig, argv: string[]): void {
   if (featureIngressActor() === 'human') return;
@@ -657,6 +658,18 @@ export async function runFeature(
         const action = task.review_ref ? (task.status === 'QA' ? 'qa' : 'review') : 'develop';
         if (action === 'qa' && !(await runDesignGate(store, config, state, task, save))) continue;
         if (action === 'develop') {
+          const conflict = zoneConflict(store, task);
+          if (conflict) {
+            state.zoneWait = { task: task.key, reason: conflict };
+            state.message = conflict;
+            await save();
+            progress(conflict);
+            await new Promise((resolve) => setTimeout(resolve, FEATURE_RUN_POLL_MS));
+            continue;
+          }
+          delete state.zoneWait;
+          state.message = '';
+          await save();
           const branch = `refs/heads/sa/${task.key}-developer`;
           assertDirectRef(config.repoRoot, branch);
           const head = git(['for-each-ref', '--format=%(objectname)', branch]) || state.head;

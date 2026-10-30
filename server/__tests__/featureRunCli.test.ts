@@ -182,6 +182,76 @@ afterEach(() => {
 // Exercise the scheduler without an Executor or Windows process helpers, so the
 // distinction between a worker diagnostic and a runner signal is always tested.
 describe('feature run interruption authority', () => {
+  it.each(['server/src', 'core/asyncapi.yaml'])(
+    'waits before develop for another feature, then reevaluates %s without an attempt',
+    async (zone) => {
+      const store = await storeFor();
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      try {
+        const main = git('rev-parse', 'main');
+        for (const key of ['FEAT-001', 'FEAT-002']) {
+          store.createFeature({ key, doc_path: 'request.md', git_sha: main, status: 'approved' });
+          store.createTask({
+            key: `${key}-T01`,
+            feature_key: key,
+            type: 'code',
+            status: 'READY',
+            declaration: JSON.stringify({ changeZones: [zone] }),
+          });
+        }
+        db.prepare('UPDATE tasks SET declaration = ?').run(JSON.stringify({ changeZones: [zone] }));
+        db.prepare(
+          'INSERT INTO feature_runs (project_id, feature_key, state) VALUES (?, ?, ?)',
+        ).run(
+          'test',
+          'FEAT-001',
+          JSON.stringify({
+            branch: 'sa/FEAT-001-integration',
+            head: main,
+            initial_main: main,
+            request: 'request.md',
+            integrated: {},
+            status: 'running',
+            startedAt: '2020-01-01T00:00:00Z',
+          }),
+        );
+        vi.spyOn(store, 'getDesign').mockReturnValue({
+          project_id: 'test',
+          feature_key: 'FEAT-002',
+          doc_path: 'design.md',
+          dag_path: 'dag.yaml',
+          git_sha: main,
+          feature_sha: main,
+        });
+        const invoke = vi.fn(async () => {
+          db.prepare("UPDATE tasks SET status = 'WAITING_HUMAN' WHERE key = 'FEAT-002-T01'").run();
+        });
+        let waited = false;
+        const result = await runFeature(
+          store,
+          loadProjectConfig(repo, true)!,
+          'FEAT-002',
+          undefined,
+          invoke,
+          (line) => {
+            if (!line.startsWith('zone conflict:')) return;
+            waited = true;
+            expect(invoke).not.toHaveBeenCalled();
+            expect(store.getTask('FEAT-002-T01')!.attempt).toBe(0);
+            expect(store.getFeatureRun('FEAT-002')!.state.zoneWait?.reason).toBe(line);
+            db.prepare("UPDATE tasks SET status = 'DONE' WHERE key = 'FEAT-001-T01'").run();
+          },
+        );
+        expect(waited).toBe(true);
+        expect(invoke).toHaveBeenCalledTimes(1);
+        expect(result.status).toBe('WAITING_HUMAN');
+        expect(store.getFeatureRun('FEAT-002')!.state.zoneWait).toBeUndefined();
+      } finally {
+        db.close();
+        store.close();
+      }
+    },
+  );
   it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'WAITING_QUOTA', 'DONE'])(
     'schedules A to C and independent B after current A becomes %s',
     async (status) => {

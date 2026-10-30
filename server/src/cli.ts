@@ -57,6 +57,7 @@ import { runTelemetryCommand } from './telemetryCommand.js';
 import { runTokenCommand } from './tokenCommand.js';
 import { runUsageCommand } from './usageCommand.js';
 import { parseWorkerArgs, runWorker } from './worker.js';
+import { runZonesCommand } from './zonesCheck.js';
 
 // ── Argument parsing ──────────────────────────────────────────
 
@@ -176,6 +177,8 @@ export async function dispatchCli(
     await runResearchCommand(argv.slice(1));
   } else if (argv[0] === 'quota') {
     process.exitCode = runQuotaCheck(parseQuotaArgs(argv.slice(1)));
+  } else if (argv[0] === 'zones') {
+    await runZonesCommand(argv.slice(1));
   } else if (argv[0] === 'executors') {
     runExecutorsCommand(argv.slice(1));
   } else if (argv[0] === 'worker') {

@@ -1097,6 +1097,7 @@ class SqliteWorkStore implements WorkStore {
       if (current?.owner && previous === current.pid_started_at)
         throw new Error(`feature run ${key}: another orchestrator is running`);
       const state = current?.state ?? initial;
+      state.startedAt ??= new Date().toISOString();
       this.db
         .prepare(
           'INSERT INTO feature_runs (project_id,feature_key,owner,pid,state,pid_started_at,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(project_id,feature_key) DO UPDATE SET owner=excluded.owner,pid=excluded.pid,pid_started_at=excluded.pid_started_at,updated_at=excluded.updated_at',

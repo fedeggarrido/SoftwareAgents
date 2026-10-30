@@ -1541,3 +1541,21 @@ persistido de la tarea (índice desde cero). No autoriza transiciones de la tare
 `pixel-agents review precision [--feature FEAT-001] [--json]` muestra aceptación
 por rol, executor, modelo y severidad, con n y motivos de degradación de los
 hallazgos evaluados por humanos. Los informes históricos sin decisión no cuentan.
+
+## Zonas y conflictos entre features
+
+Antes de `develop`, el runner compara `changeZones` y `testZones` con las tareas
+no DONE de otras runs no terminadas. El trabajo en ejecución conserva la propiedad;
+entre trabajos pendientes gana la run creada antes (desempate por clave de feature).
+Esto evita esperas circulares y aplica también al contrato `core/asyncapi.yaml`.
+La comparación es conservadora: los prefijos literales incluyen descendientes.
+La espera `zone conflict: <TASK> of <FEAT> overlaps <zona>` se guarda en la run,
+aparece en la oficina y se reevalúa en la siguiente iteración, sin consumir intentos.
+El orden secuencial dentro de una feature no cambia.
+
+`pixel-agents zones check [--json]` compara cada rama local `sa/*` no integrada
+con su merge-base de `main`. Informa ficheros compartidos y cambios fuera de las
+zonas conocidas. No consulta remotos ni modifica ramas. La oficina inicia un monitor
+asíncrono al consultar features (intervalo `ZONES_CHECK_INTERVAL_MS`), con gates
+`zone_overlap`; `pixel-agents task show <KEY>` muestra la espera y avisos actuales.
+Los avisos de ramas son informativos y no bloquean una integración.

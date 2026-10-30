@@ -14,6 +14,47 @@ import { readMainAncestors } from '../src/workstore/readOnlyWorkStore.js';
 vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
 
 describe('features view acceptance', () => {
+  it('projects declared waits and real branch overlap warnings as visible gates', () => {
+    const source: FeaturesSource = {
+      features: [{ key: 'FEAT-001', status: 'approved' }],
+      designs: [],
+      tasks: [
+        {
+          key: 'FEAT-001-T01',
+          feature_key: 'FEAT-001',
+          status: 'READY',
+          branch: 'sa/FEAT-001-T01-developer',
+        },
+      ],
+      runs: [
+        {
+          feature_key: 'FEAT-001',
+          state: {
+            status: 'running',
+            zoneWait: {
+              task: 'FEAT-001-T01',
+              reason: 'zone conflict: FEAT-002-T01 of FEAT-002 overlaps core/asyncapi.yaml',
+            },
+          },
+        },
+      ],
+      decisions: [],
+      executions: [],
+      events: [],
+      zones: {
+        branches: [],
+        overlaps: [{ file: 'shared.ts', branches: ['sa/FEAT-001-T01-developer', 'sa/other'] }],
+      },
+    };
+    const gates = projectFeatures(source)[0].gates;
+    expect(gates).toHaveLength(2);
+    expect(gates[0]).toMatchObject({
+      kind: 'zone_overlap',
+      task: 'FEAT-001-T01',
+      reason: expect.stringContaining('zone conflict: FEAT-002-T01'),
+    });
+    expect(gates[1].command).toBe('pixel-agents zones check');
+  });
   const fixture = (): FeaturesSource => ({
     features: [{ key: 'FEAT-001', status: 'approved' }],
     designs: [],

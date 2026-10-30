@@ -24,6 +24,8 @@ export interface FeatureRecord {
 
 /** Runtime checkpoints. Git publication is prepared here before a compare-and-swap. */
 export interface FeatureRunState {
+  startedAt?: string;
+  zoneWait?: { task: string; reason: string };
   designReviews?: Record<
     string,
     {

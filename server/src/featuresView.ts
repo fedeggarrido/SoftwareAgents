@@ -10,6 +10,7 @@ import {
   openReadOnlyWorkStore,
   readMainAncestors,
 } from './workstore/readOnlyWorkStore.js';
+import { monitoredZones, type ZonesReport, type ZoneTask } from './zonesCheck.js';
 
 type Row = Record<string, unknown>;
 export interface FeaturesSource {
@@ -22,6 +23,7 @@ export interface FeaturesSource {
   events: Row[];
   ledger?: Row[];
   mainAncestors?: ReadonlySet<string>;
+  zones?: ZonesReport;
 }
 export interface FeaturesViewResult {
   status: 'ok' | 'empty' | 'read_error';
@@ -142,6 +144,45 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
         expired = false,
       ) => gates.push({ kind, task, expired, command: `pixel-agents feature ${command}` });
       const covered = new Set<string>();
+      if (run?.zoneWait) {
+        const waiting = object(run.zoneWait);
+        gates.push({
+          kind: 'zone_overlap',
+          task: text(waiting.task),
+          expired: false,
+          command: 'pixel-agents zones check',
+          reason: display(waiting.reason) ?? '',
+        });
+      }
+      for (const task of tasks) {
+        const branches = [
+          optional(task.branch),
+          `sa/${text(task.key)}-developer`,
+          `sa/${key}-integration`,
+        ];
+        const warnings =
+          source.zones?.overlaps.filter((overlap) =>
+            overlap.branches.some((branch) => branches.includes(branch)),
+          ) ?? [];
+        const outside =
+          source.zones?.branches
+            .filter((branch) => branches.includes(branch.branch))
+            .flatMap((branch) => branch.outsideZones) ?? [];
+        if (warnings.length || outside.length)
+          gates.push({
+            kind: 'zone_overlap',
+            task: text(task.key),
+            expired: false,
+            command: 'pixel-agents zones check',
+            reason:
+              display(
+                [
+                  ...warnings.map((warning) => `${warning.file}: ${warning.branches.join(', ')}`),
+                  ...outside.map((file) => `outside declared zones: ${file}`),
+                ].join('; '),
+              ) ?? '',
+          });
+      }
       for (const decision of related) {
         const d = decision.data;
         if (!d) continue;
@@ -292,12 +333,18 @@ export async function readFeaturesView(
     db.exec('BEGIN');
     const read = (table: string, columns: string) =>
       db!.prepare(`SELECT ${columns} FROM ${table} WHERE project_id = ?`).all(projectId);
+    const zoneTasks = read(
+      'tasks',
+      'key, branch, feature_key, declaration',
+    ) as unknown as ZoneTask[];
+    const zones = await monitoredZones(root, zoneTasks);
     const features = projectFeatures({
+      zones,
       features: read('features', 'key, title, status, updated_at'),
       designs: read('technical_designs', 'feature_key'),
       tasks: read(
         'tasks',
-        'key, feature_key, status, declaration, version, review_ref, updated_at',
+        'key, branch, feature_key, status, declaration, version, review_ref, updated_at',
       ),
       runs: read('feature_runs', 'feature_key, state, updated_at'),
       decisions: read('human_decisions', 'task_key, escalation, decided_at'),

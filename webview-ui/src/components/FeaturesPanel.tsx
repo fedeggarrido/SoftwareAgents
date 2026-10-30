@@ -148,6 +148,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
                       {gate.expired && ' · expirado'}
                     </span>
                     <code>{gate.command}</code>
+                    {gate.reason && <span>{gate.reason}</span>}
                   </div>
                 ))}
               </div>

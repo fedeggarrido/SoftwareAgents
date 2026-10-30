@@ -129,6 +129,7 @@ export interface FeatureGate {
   task: string | null;
   expired: boolean;
   command: string;
+  reason?: string;
 }
 
 export type FeatureGateKind =
@@ -138,7 +139,8 @@ export type FeatureGateKind =
   | 'human_decision'
   | 'waiting_human'
   | 'quota'
-  | 'qa_not_tested';
+  | 'qa_not_tested'
+  | 'zone_overlap';
 
 export interface FeatureIntegration {
   branch: string;

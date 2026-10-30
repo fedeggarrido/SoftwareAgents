@@ -278,3 +278,6 @@ export const USAGE_BUDGET_POLL_MS = 1_000;
 export const PROJECT_SCOPE_TRANSCRIPT_READ_BYTES = 64 * 1024;
 /** Maximum wait for a rendered office frame before design evidence is invalid. */
 export const DESIGN_CANVAS_READY_TIMEOUT_MS = 15_000;
+export const ZONES_CHECK_INTERVAL_MS = 60_000;
+export const ZONES_GIT_TIMEOUT_MS = 10_000;
+export const ZONES_GIT_BUFFER_BYTES = 4 * 1024 * 1024;

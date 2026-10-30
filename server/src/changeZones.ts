@@ -3,6 +3,53 @@ import * as fs from 'fs';
 import { taskPath } from './commands/taskFiles.js';
 import { DEFAULT_PROTECTED_PATHS, matchesProtectedPath } from './executors/protectedPaths.js';
 
+/** Intersection of two wildcard languages, using a finite product automaton. */
+function segmentOverlap(a: string, b: string): boolean {
+  const seen = new Set<string>();
+  const visit = (i: number, j: number): boolean => {
+    const key = `${i}:${j}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (i === a.length && j === b.length) return true;
+    if (a[i] === '*' && visit(i + 1, j)) return true;
+    if (b[j] === '*' && visit(i, j + 1)) return true;
+    return (
+      i < a.length &&
+      j < b.length &&
+      (a[i] === '*' || b[j] === '*' || a[i].toLowerCase() === b[j].toLowerCase()) &&
+      visit(a[i] === '*' ? i : i + 1, b[j] === '*' ? j : j + 1)
+    );
+  };
+  return visit(0, 0);
+}
+
+/** Pure, conservative directory intersection. Literal prefixes include descendants. */
+export function zonesOverlap(a: string, b: string): boolean {
+  const parts = (zone: string) => {
+    const result = zone.replace(/\/$/, '').split('/');
+    if (zone.endsWith('/') || !zone.includes('*')) result.push('**');
+    return result;
+  };
+  const left = parts(a),
+    right = parts(b);
+  const seen = new Set<string>();
+  const visit = (i: number, j: number): boolean => {
+    const key = `${i}:${j}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (i === left.length && j === right.length) return true;
+    if (left[i] === '**' && visit(i + 1, j)) return true;
+    if (right[j] === '**' && visit(i, j + 1)) return true;
+    return (
+      i < left.length &&
+      j < right.length &&
+      (left[i] === '**' || right[j] === '**' || segmentOverlap(left[i], right[j])) &&
+      visit(left[i] === '**' ? i : i + 1, right[j] === '**' ? j : j + 1)
+    );
+  };
+  return visit(0, 0);
+}
+
 /** Match the same zone language, including zero directories for an interior globstar. */
 export function matchesChangeZone(
   file: string,

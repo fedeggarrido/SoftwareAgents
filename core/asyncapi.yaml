@@ -315,6 +315,9 @@ components:
         command:
           description: Relative command for the operator to run manually; answers use the literal <fichero-de-respuestas> placeholder.
           type: string
+        reason:
+          description: Sanitized display-only explanation of a gate or advisory.
+          type: string
 
     FeatureIntegration:
       type: object
@@ -353,6 +356,7 @@ components:
           waiting_human,
           quota,
           qa_not_tested,
+          zone_overlap,
         ]
 
     RequestAuditLog:

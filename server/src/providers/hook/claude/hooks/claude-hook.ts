@@ -14,6 +14,7 @@ import { sameServerGeneration } from '../../../../discoveryRecords.js';
 import type { ServerConfig, ServerTarget } from '../../../../serverConfig.js';
 import { isServerConfig, isServerTarget } from '../../../../serverConfig.js';
 import { probeServer } from '../../../../serverProbe.js';
+import { hookBody } from './hookBody.js';
 
 const SERVER_JSON = path.join(os.homedir(), SERVER_JSON_DIR, SERVER_JSON_NAME);
 const SERVERS_REGISTRY_DIR = path.join(os.homedir(), SERVER_JSON_DIR, SERVERS_DIR);
@@ -206,7 +207,7 @@ async function main(): Promise<void> {
     if (withDebugLog?.debugLog) debugLogPath = withDebugLog.debugLog;
   }
 
-  const body = JSON.stringify(data);
+  const body = hookBody(data);
   await Promise.all(servers.map((server) => postToServer(server, body, eventName, sid)));
 }
 

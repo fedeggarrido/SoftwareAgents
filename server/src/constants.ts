@@ -112,6 +112,8 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
  *  the agent is cleaned up instead of staying as a zombie with pendingClear forever. */
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
+/** Per-string cap applied to tool_input only when a hook body would exceed MAX_HOOK_BODY_SIZE. */
+export const HOOK_INPUT_STRING_MAX_CHARS = 2_000;
 
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';

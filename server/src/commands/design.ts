@@ -215,6 +215,44 @@ export async function runDesignCommand(
           fs.mkdirSync(path.dirname(target), { recursive: true });
           fs.writeFileSync(target, body);
         };
+        const commitProposal = (tree: string, decision: string, applied: boolean) => {
+          const files = ['visual-direction', 'color-system', 'design-system'].map(
+            (name) => `docs/design/${name}.md`,
+          );
+          if (applied) files.push('webview-ui/src/index.css');
+          const prettier = path.join(config.repoRoot, 'node_modules/prettier/bin/prettier.cjs');
+          if (fs.existsSync(prettier))
+            execFileSync(process.execPath, [prettier, '--write', ...files], {
+              cwd: tree,
+              windowsHide: true,
+            });
+          const run = (args: string[]) =>
+            execFileSync('git', args, {
+              cwd: tree,
+              windowsHide: true,
+              env: {
+                ...process.env,
+                GIT_AUTHOR_NAME: 'SoftwareAgents Runtime',
+                GIT_AUTHOR_EMAIL: 'runtime@softwareagents.local',
+                GIT_COMMITTER_NAME: 'SoftwareAgents Runtime',
+                GIT_COMMITTER_EMAIL: 'runtime@softwareagents.local',
+              },
+            });
+          run(['add', '--', ...files]);
+          // --only keeps unrelated staged changes out of the runtime's proposal commit.
+          run([
+            '-c',
+            'core.hooksPath=',
+            '-c',
+            'commit.gpgSign=false',
+            'commit',
+            '--only',
+            '-m',
+            `docs(SA-105): ${applied ? 'apply' : 'draft'} art direction decision ${decision}`,
+            '--',
+            ...files,
+          ]);
+        };
         if (mode === 'direction') {
           let proposal;
           for (let attempt = 0; attempt < 2; attempt++) {
@@ -252,6 +290,7 @@ export async function runDesignCommand(
               name,
               `# ${name}\n\nBorrador: pendiente de Dirección artística y materialización.\n`,
             );
+          commitProposal(tree, id, false);
           const decision = await store.openDecision({
             id,
             context: `art-direction/${id}\nDirección artística\nPropuesta: ${tree}\nCapturas: ${directory}`,
@@ -321,6 +360,7 @@ export async function runDesignCommand(
           );
           write(tree, 'design-system', system.designSystem);
           fs.writeFileSync(cssPath, css);
+          commitProposal(tree, decisionId!, true);
           audit.append(entry('direction_review_required'));
           log(JSON.stringify({ tree, decisionId, contrasts, status: 'review_required' }));
         }
@@ -329,7 +369,9 @@ export async function runDesignCommand(
       }
       return;
     }
-    const source = await execute({}, contract);
+    // ESM loaders wrap JSON in a module namespace; the compiler requires the JSON object.
+    const schema = ('default' in contract ? contract.default : contract) as Record<string, unknown>;
+    const source = await execute({}, schema);
     options.pipeline?.assertRevision?.();
     const report = validateDesignReport(source, evidence.validations);
     fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2));

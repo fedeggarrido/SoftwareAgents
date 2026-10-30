@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import type { HumanDecision, NewHumanDecision } from '../../core/src/humanDecision.js';
 import type { ProjectConfig } from '../../core/src/project.js';
+import { compileAgent } from '../src/agentCompiler.js';
 import { DIRECTION_WEIGHTS } from '../src/artDirection.js';
 import { runDesignCommand } from '../src/commands/design.js';
 import type { Executor } from '../src/executors/executor.js';
@@ -31,6 +32,8 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   const brain = path.join(root, 'brain'),
     tree = path.join(root, 'proposal');
   fs.mkdirSync(brain);
+  fs.mkdirSync(path.join(root, 'node_modules/prettier/bin'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'node_modules/prettier/bin/prettier.cjs'), '');
   fs.mkdirSync(path.join(tree, 'webview-ui/src'), { recursive: true });
   fs.writeFileSync(
     path.join(tree, 'webview-ui/src/index.css'),
@@ -75,37 +78,40 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   let calls = 0;
   const executor: Executor = {
     id: 'claude',
-    start: vi.fn((req) => ({
-      cancel() {},
-      events: (async function* () {
-        calls++;
-        const operation = (req.taskData!.task as { operation: string }).operation;
-        const result =
-          operation === 'apply-direction'
-            ? {
-                colorSystem: 'Harmony, HEX + OKLCH, roles, scales and prohibited combinations',
-                designSystem: 'Typography, components and states',
-                tokens: [
-                  { name: '--color-bg', value: '#000000' },
-                  { name: '--color-text', value: '#ffffff' },
-                ],
-                approved: [
-                  { foreground: '--color-text', background: '--color-bg', usage: 'normal' },
-                ],
-              }
-            : calls === 1
+    start: vi.fn((req) => {
+      compileAgent(req.agentSpec!, req.role!, req.taskData!);
+      return {
+        cancel() {},
+        events: (async function* () {
+          calls++;
+          const operation = (req.taskData!.task as { operation: string }).operation;
+          const result =
+            operation === 'apply-direction'
               ? {
-                  ...proposal,
-                  directions: proposal.directions.map((d) => ({
-                    ...d,
-                    style: 'same',
-                    composition: 'same',
-                  })),
+                  colorSystem: 'Harmony, HEX + OKLCH, roles, scales and prohibited combinations',
+                  designSystem: 'Typography, components and states',
+                  tokens: [
+                    { name: '--color-bg', value: '#000000' },
+                    { name: '--color-text', value: '#ffffff' },
+                  ],
+                  approved: [
+                    { foreground: '--color-text', background: '--color-bg', usage: 'normal' },
+                  ],
                 }
-              : proposal;
-        yield { type: 'finished' as const, exitCode: 0, resultSummary: JSON.stringify(result) };
-      })(),
-    })),
+              : calls === 1
+                ? {
+                    ...proposal,
+                    directions: proposal.directions.map((d) => ({
+                      ...d,
+                      style: 'same',
+                      composition: 'same',
+                    })),
+                  }
+                : proposal;
+          yield { type: 'finished' as const, exitCode: 0, resultSummary: JSON.stringify(result) };
+        })(),
+      };
+    }),
   };
   const options = {
     config,
@@ -128,6 +134,36 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   };
   await runDesignCommand(['direction', '--json'], root, vi.fn(), options);
   expect(calls).toBe(2);
+  const docs = ['visual-direction', 'color-system', 'design-system'].map(
+    (name) => `docs/design/${name}.md`,
+  );
+  expect(git).toHaveBeenCalledWith(
+    process.execPath,
+    [path.join(root, 'node_modules/prettier/bin/prettier.cjs'), '--write', ...docs],
+    expect.objectContaining({ cwd: tree }),
+  );
+  expect(git).toHaveBeenCalledWith(
+    'git',
+    ['add', '--', ...docs],
+    expect.objectContaining({ cwd: tree }),
+  );
+  expect(git).toHaveBeenCalledWith(
+    'git',
+    expect.arrayContaining([
+      'commit',
+      '--only',
+      `docs(SA-105): draft art direction decision ${decision!.id}`,
+      '--',
+      ...docs,
+    ]),
+    expect.objectContaining({
+      cwd: tree,
+      env: expect.objectContaining({
+        GIT_AUTHOR_NAME: 'SoftwareAgents Runtime',
+        GIT_COMMITTER_NAME: 'SoftwareAgents Runtime',
+      }),
+    }),
+  );
   expect(decision!.options).toHaveLength(3);
   expect(decision!.context).toContain('Dirección artística');
   expect(fs.existsSync(path.join(root, 'docs'))).toBe(false);
@@ -141,6 +177,18 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   decision!.answer = 'retro';
   decision!.answeredBy = 'operator';
   await runDesignCommand(['apply-direction', '--decision', decision!.id], root, vi.fn(), options);
+  expect(git).toHaveBeenCalledWith(
+    'git',
+    expect.arrayContaining([
+      'commit',
+      '--only',
+      `docs(SA-105): apply art direction decision ${decision!.id}`,
+      '--',
+      ...docs,
+      'webview-ui/src/index.css',
+    ]),
+    expect.objectContaining({ cwd: tree }),
+  );
   expect(fs.readFileSync(path.join(tree, 'docs/design/color-system.md'), 'utf8')).toContain(
     '21.000:1',
   );
@@ -148,7 +196,15 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
     'button { display: flex; }',
   );
   git.mockReturnValue('main');
+  git.mockClear();
   await expect(runDesignCommand(['direction'], root, vi.fn(), options)).rejects.toThrow(
     /proposal branch/,
   );
+  expect(
+    git.mock.calls.some(
+      (call) =>
+        (call as unknown[])[1] instanceof Array &&
+        ((call as unknown[])[1] as string[]).includes('commit'),
+    ),
+  ).toBe(false);
 });

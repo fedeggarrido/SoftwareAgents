@@ -95,49 +95,56 @@ describe('Designer phase 1', () => {
       'Principal Product Designer',
     );
   });
-  it('command uses fake executor and persists validated report and audit', async () => {
-    for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
-      vi.stubEnv(key, undefined);
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'designer-command-'));
-    dirs.push(root);
-    const brain = path.join(root, 'brain');
-    fs.mkdirSync(brain);
-    const config = {
-      project: { id: 'demo' },
-      repoRoot: root,
-      paths: { brain },
-      operator: { allowedExecutors: ['claude'], autonomyLevel: 'A0' },
-    } as ProjectConfig;
-    const append = vi.fn(),
-      log = vi.fn();
-    const executor: Executor = {
-      id: 'claude',
-      start: vi.fn((req) => {
-        expect(req.agentSpec?.permissions.profile).toBe('read_only');
-        expect(req.taskData?.task).toMatchObject({ views: ['office'], images: ['office.png'] });
-        return {
-          cancel() {},
-          events: (async function* () {
-            yield {
-              type: 'finished' as const,
-              exitCode: 0,
-              resultSummary: JSON.stringify(report()),
-            };
-          })(),
-        };
-      }),
-    };
-    await runDesignCommand(['review', '--views', 'office', '--json'], root, log, {
-      config,
-      executor,
-      capture: async () => ({ images: ['office.png'], validations }),
-      audit: { append },
-      runtimeDirectory: path.join(root, 'runtime'),
-    });
-    const output = JSON.parse(log.mock.calls[0][0]);
-    expect(
-      JSON.parse(fs.readFileSync(path.join(output.evidenceDirectory, 'report.json'), 'utf8')),
-    ).toEqual(report());
-    expect(append.mock.calls.map((c) => c[0].outcome.status)).toEqual(['started', 'approve']);
-  });
+  it.each([false, true])(
+    'command compiles real input with pipeline=%s and persists report',
+    async (pipeline) => {
+      for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+        vi.stubEnv(key, undefined);
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'designer-command-'));
+      dirs.push(root);
+      const brain = path.join(root, 'brain');
+      fs.mkdirSync(brain);
+      const config = {
+        project: { id: 'demo' },
+        repoRoot: root,
+        paths: { brain },
+        operator: { allowedExecutors: ['claude'], autonomyLevel: 'A0' },
+      } as ProjectConfig;
+      const append = vi.fn(),
+        log = vi.fn();
+      const executor: Executor = {
+        id: 'claude',
+        start: vi.fn((req) => {
+          compileAgent(req.agentSpec!, req.role!, req.taskData!);
+          expect(req.agentSpec?.permissions.profile).toBe('read_only');
+          expect(req.taskData?.task).toMatchObject({ views: ['office'], images: ['office.png'] });
+          return {
+            cancel() {},
+            events: (async function* () {
+              yield {
+                type: 'finished' as const,
+                exitCode: 0,
+                resultSummary: JSON.stringify(report()),
+              };
+            })(),
+          };
+        }),
+      };
+      await runDesignCommand(['review', '--views', 'office', '--json'], root, log, {
+        config,
+        executor,
+        capture: async () => ({ images: ['office.png'], validations }),
+        audit: { append },
+        runtimeDirectory: path.join(root, 'runtime'),
+        ...(pipeline
+          ? { pipeline: { previousFindings: [], maxTokens: 1000, onUsage: async () => {} } }
+          : {}),
+      });
+      const output = JSON.parse(log.mock.calls[0][0]);
+      expect(
+        JSON.parse(fs.readFileSync(path.join(output.evidenceDirectory, 'report.json'), 'utf8')),
+      ).toEqual(report());
+      expect(append.mock.calls.map((c) => c[0].outcome.status)).toEqual(['started', 'approve']);
+    },
+  );
 });

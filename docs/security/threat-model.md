@@ -53,6 +53,14 @@ es idempotente; reimportar sin la opción no elimina la etiqueta: entra en
 conflicto con la declaración inmutable. Un diseño ya registrado tampoco puede
 reemplazarse por un import con otra declaración. No se migran tareas antiguas.
 
+**Salida segura (hoy, manual):** una tarea importada como externa no puede
+desarrollarse: es el comportamiento buscado (fail closed). Para trabajarla, el
+operador la reescribe con sus propias palabras en un brief o DAG local con otra
+key (`--origin local`) y cancela la externa; el texto externo nunca se copia tal
+cual. Pendiente (SA-102 fase C): un lector en cuarentena que convierta la tarea
+externa en una especificación estructurada y validada, revisada por el humano,
+como hace `researchHandoff` con las fuentes de Research.
+
 Sin opción (o con `--origin local`), el contrato sigue siendo el DAG local del
 Architect o una tarea escrita por el operador; no se añade contaminación externa.
 El operador debe declarar `external` al importar copias de sistemas externos.

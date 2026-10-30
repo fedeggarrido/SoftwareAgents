@@ -101,7 +101,7 @@ describe('research contracts and trust boundaries', () => {
       RESEARCH_EXCERPT_CHARS,
     );
   });
-  it('downgrades one source, rejects missing citations and fabricated quotes', () => {
+  it('downgrades one source, rejects missing citations and drops fabricated or overlong quotes', () => {
     const s = source();
     expect(validateResearchReport(JSON.stringify(report(s.id)), [s]).findings[0].confidence).toBe(
       'low',
@@ -111,7 +111,18 @@ describe('research contracts and trust boundaries', () => {
     );
     const invalid = report(s.id);
     invalid.findings[0].quotes[0].text = 'fabricated';
-    expect(() => validateResearchReport(JSON.stringify(invalid), [s])).toThrow('quote');
+    // A fabricated quote never survives, but it no longer discards the whole report.
+    const dropped = validateResearchReport(JSON.stringify(invalid), [s]).findings[0];
+    expect(dropped.quotes).toEqual([]);
+    expect(dropped.reason).toContain('removed quotes');
+    const overlong = report(s.id);
+    overlong.findings[0].quotes[0].text = 'x'.repeat(400);
+    expect(validateResearchReport(JSON.stringify(overlong), [s]).findings[0].quotes).toEqual([]);
+    const extra = report(s.id) as unknown as { contradictions: unknown[] };
+    extra.contradictions = [{ claim: 'c', sources: [s.id], explanation: 'model extra' }];
+    expect(validateResearchReport(JSON.stringify(extra), [s]).contradictions[0]).not.toHaveProperty(
+      'explanation',
+    );
   });
   it('accepts independent evidence, but duplicate author or domain is insufficient', () => {
     const a = source(),
@@ -127,6 +138,19 @@ describe('research contracts and trust boundaries', () => {
     const c = makeSource({ ...b, author: 'Alice' });
     r.findings[0].sources = [a.id, c.id];
     expect(validateResearchReport(JSON.stringify(r), [a, c]).findings[0].confidence).toBe('low');
+    // Real case (W3C + MDN): different domains and content, authors unknown → independent.
+    const anonA = makeSource({ ...a, author: undefined, channel: undefined });
+    const anonB = makeSource({ ...b, author: undefined, channel: undefined });
+    r.findings[0].sources = [anonA.id, anonB.id];
+    expect(validateResearchReport(JSON.stringify(r), [anonA, anonB]).findings[0].confidence).toBe(
+      'high',
+    );
+    // Same domain stays dependent even without authors.
+    const sameDomain = makeSource({ ...anonB, url: 'https://example.com/other' });
+    r.findings[0].sources = [anonA.id, sameDomain.id];
+    expect(
+      validateResearchReport(JSON.stringify(r), [anonA, sameDomain]).findings[0].confidence,
+    ).toBe('low');
   });
   it('registers an external adapter and keeps injected source text in data with zero tools', async () => {
     const registry = new ResearchAdapters();

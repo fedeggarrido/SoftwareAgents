@@ -19,7 +19,7 @@ import { resolveClaudeBinary } from '../modelTiers.js';
 import { resolveInside } from '../pathGuard.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import {
-  RESEARCH_REPORT_SCHEMA,
+  RESEARCH_MODEL_SCHEMA,
   ResearchAdapters,
   sourceHash,
   validateResearchReport,
@@ -249,7 +249,7 @@ export async function runResearchCommand(
             collectionNote:
               'Failed seed URLs are runtime-owned discardedSources. You may mention these failures in the summary; return only bibliography source IDs in your discardedSources.',
           },
-          outputSchema: RESEARCH_REPORT_SCHEMA,
+          outputSchema: RESEARCH_MODEL_SCHEMA,
         },
       });
       const cancel = () => handle.cancel();

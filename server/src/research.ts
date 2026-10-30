@@ -17,6 +17,55 @@ const reportValidator = compileSchema<ResearchReport>(reportContract);
 export const RESEARCH_REPORT_SCHEMA = (
   'default' in reportContract ? reportContract.default : reportContract
 ) as Record<string, unknown>;
+/** What the CLI enforces on the model: same shape, no length/extra-field limits, so one
+ * overlong quote or an explanatory field cannot discard the whole report (it did, twice).
+ * The runtime normalizes and enforces the strict contract afterwards. */
+export const RESEARCH_MODEL_SCHEMA = (function relax(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(relax);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !['maxLength', 'maxItems', 'additionalProperties'].includes(key))
+      .map(([key, child]) => [key, relax(child)]),
+  );
+})(RESEARCH_REPORT_SCHEMA) as Record<string, unknown>;
+
+/** Keep only contract fields; model extras (e.g. a contradiction explanation) are dropped. */
+function normalizeReport(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const r = raw as Record<string, unknown>;
+  const pick = (value: unknown, keys: string[]) =>
+    value && typeof value === 'object'
+      ? Object.fromEntries(
+          keys
+            .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
+            .map((k) => [k, (value as Record<string, unknown>)[k]]),
+        )
+      : value;
+  const list = (value: unknown) => (Array.isArray(value) ? value : value);
+  return {
+    summary: r.summary,
+    findings: Array.isArray(r.findings)
+      ? r.findings.map((f) => {
+          const finding = pick(f, ['claim', 'type', 'confidence', 'reason', 'sources', 'quotes']);
+          const quotes = (finding as Record<string, unknown>).quotes;
+          if (Array.isArray(quotes))
+            (finding as Record<string, unknown>).quotes = quotes.map((q) =>
+              pick(q, ['sourceId', 'text']),
+            );
+          return finding;
+        })
+      : r.findings,
+    contradictions: Array.isArray(r.contradictions)
+      ? r.contradictions.map((c) => pick(c, ['claim', 'sources']))
+      : r.contradictions,
+    gaps: list(r.gaps),
+    discardedSources: Array.isArray(r.discardedSources)
+      ? r.discardedSources.map((d) => pick(d, ['id', 'reason']))
+      : r.discardedSources,
+    bibliography: list(r.bibliography),
+  };
+}
 export const sourceHash = (text: string) => createHash('sha256').update(text).digest('hex');
 export function validateSourceItem(value: unknown): SourceItem {
   const item = validateSchema(sourceValidator, value);
@@ -76,7 +125,14 @@ export class ResearchAdapters {
 }
 export function validateResearchReport(source: string, sources: SourceItem[]): ResearchReport {
   if (Buffer.byteLength(source) > RESEARCH_HTTP_BYTES) throw new Error('ResearchReport too large');
-  const report = validateSchema(reportValidator, JSON.parse(source));
+  const parsed = normalizeReport(JSON.parse(source)) as Record<string, unknown>;
+  // Overlong or unverifiable quotes are dropped below with a note, never the whole report.
+  for (const finding of Array.isArray(parsed.findings) ? parsed.findings : [])
+    if (Array.isArray((finding as { quotes?: unknown[] }).quotes))
+      (finding as { quotes: { text?: unknown }[] }).quotes = (
+        finding as { quotes: { text?: unknown }[] }
+      ).quotes.filter((q) => typeof q.text === 'string' && q.text.length <= RESEARCH_QUOTE_CHARS);
+  const report = validateSchema(reportValidator, parsed);
   const byId = new Map(sources.map((s) => [s.id, validateSourceItem(s)]));
   if (byId.size !== sources.length) throw new Error('Duplicate source IDs');
   const lookup = (id: string) => {
@@ -87,7 +143,9 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
   const quotedCharacters = new Map<string, number>();
   for (const finding of report.findings) {
     const evidence = finding.sources.map(lookup);
-    // Conservative independence: both identifiable authors/channels AND domains must differ.
+    // Independence (spec: not the same author/channel/repost): different content and
+    // different registrable domains; authors/channels must also differ when both are known.
+    // Web pages often omit an author, which must not make W3C + MDN look dependent.
     const independent = evidence.some((a) =>
       evidence.some((b) => {
         const identity = (s: SourceItem) => (s.author ?? s.channel ?? '').trim().toLowerCase();
@@ -97,12 +155,10 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
           s.url ? new URL(s.url).hostname.toLowerCase().split('.').slice(-2).join('.') : '';
         return (
           a.contentHash !== b.contentHash &&
-          identity(a) &&
-          identity(b) &&
-          identity(a) !== identity(b) &&
           domain(a) &&
           domain(b) &&
-          domain(a) !== domain(b)
+          domain(a) !== domain(b) &&
+          !(identity(a) && identity(b) && identity(a) === identity(b))
         );
       }),
     );
@@ -110,16 +166,25 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
       finding.confidence = 'low';
       finding.reason = `${finding.reason.slice(0, 3800)}; runtime: fewer than two independent sources.`;
     }
+    // Copyright and attribution limits stay strict: a quote that is too long, over the
+    // per-source budget, unattributed or not verbatim in the excerpt is removed, not kept.
+    const kept: NonNullable<typeof finding.quotes> = [];
     for (const quote of finding.quotes ?? []) {
       const total = (quotedCharacters.get(quote.sourceId) ?? 0) + quote.text.length;
-      quotedCharacters.set(quote.sourceId, total);
       if (
         total > RESEARCH_QUOTE_CHARS ||
         !finding.sources.includes(quote.sourceId) ||
         quote.text.length > RESEARCH_QUOTE_CHARS ||
+        !byId.has(quote.sourceId) ||
         !lookup(quote.sourceId).excerpt.includes(quote.text)
       )
-        throw new Error('Invalid attributed quote');
+        continue;
+      quotedCharacters.set(quote.sourceId, total);
+      kept.push(quote);
+    }
+    if (finding.quotes && kept.length !== finding.quotes.length) {
+      finding.reason = `${finding.reason.slice(0, 3800)}; runtime: removed quotes over the limit or not verbatim.`;
+      finding.quotes = kept;
     }
   }
   for (const contradiction of report.contradictions) contradiction.sources.forEach(lookup);

@@ -43,14 +43,20 @@ export async function runReviewCommand(argv: string[], cwd = process.cwd(), log 
       log(
         json
           ? JSON.stringify(summary, null, 2)
-          : summary.groups
-              .map(
-                (row) =>
-                  `${row.role} ${row.executor}/${row.model} ${row.severity}: ${row.acceptanceRate * 100}% (n=${row.n})`,
-              )
-              .join('\n') +
-              '\nDowngraded: ' +
-              JSON.stringify(summary.downgraded),
+          : summary.groups.length === 0
+            ? 'No human finding decisions recorded yet (pixel-agents review finding <TASK> <index> --accept|--reject).'
+            : summary.groups
+                .map(
+                  (row) =>
+                    `${row.role} ${row.executor}/${row.model} ${row.severity}: ${Math.round(row.acceptanceRate * 100)}% accepted (n=${row.n})`,
+                )
+                .join('\n') +
+              (Object.keys(summary.downgraded).length
+                ? '\nDowngraded by reason: ' +
+                  Object.entries(summary.downgraded)
+                    .map(([reason, n]) => `${reason}=${n}`)
+                    .join(', ')
+                : ''),
       );
       return;
     }

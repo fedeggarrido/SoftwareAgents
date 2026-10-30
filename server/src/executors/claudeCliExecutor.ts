@@ -11,6 +11,7 @@ import {
   compileAgent,
   validateAgentOutput,
 } from '../agentCompiler.js';
+import { extractJsonObject } from '../agentOutput.js';
 import { claudeConfigEnvironment } from '../claudeConfig.js';
 import { isQuotaDiagnostic } from '../executorQuotaState.js';
 import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from '../modelTiers.js';
@@ -429,7 +430,10 @@ export class ClaudeCliExecutor implements Executor {
                     push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
                   if (compiled.outputSchema && !resultError) {
                     try {
-                      const output = record.structured_output ?? JSON.parse(summary);
+                      // Models sometimes return the JSON as a ```json text block instead of
+                      // structured output (the researcher did, every run); extract it.
+                      const output =
+                        record.structured_output ?? JSON.parse(extractJsonObject(summary));
                       if (!validateAgentOutput(compiled.outputSchema, output))
                         throw new Error('Schema mismatch');
                       summary = JSON.stringify(output);

@@ -25,7 +25,9 @@ export const RESEARCH_MODEL_SCHEMA = (function relax(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => !['maxLength', 'maxItems', 'additionalProperties'].includes(key))
+      .filter(
+        ([key]) => !['maxLength', 'maxItems', 'minItems', 'additionalProperties'].includes(key),
+      )
       .map(([key, child]) => [key, relax(child)]),
   );
 })(RESEARCH_REPORT_SCHEMA) as Record<string, unknown>;
@@ -132,6 +134,21 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
       (finding as { quotes: { text?: unknown }[] }).quotes = (
         finding as { quotes: { text?: unknown }[] }
       ).quotes.filter((q) => typeof q.text === 'string' && q.text.length <= RESEARCH_QUOTE_CHARS);
+  // A claim with no cited source is not a finding: it becomes a gap (spec: every claim cites).
+  if (Array.isArray(parsed.findings)) {
+    const unsourced = (parsed.findings as { claim?: unknown; sources?: unknown }[]).filter(
+      (f) => !Array.isArray(f.sources) || f.sources.length === 0,
+    );
+    if (unsourced.length) {
+      parsed.findings = (parsed.findings as unknown[]).filter(
+        (f) => !unsourced.includes(f as never),
+      );
+      parsed.gaps = [
+        ...(Array.isArray(parsed.gaps) ? parsed.gaps : []),
+        ...unsourced.map((f) => `Unsupported claim (no cited source): ${String(f.claim ?? '')}`),
+      ];
+    }
+  }
   const report = validateSchema(reportValidator, parsed);
   const byId = new Map(sources.map((s) => [s.id, validateSourceItem(s)]));
   if (byId.size !== sources.length) throw new Error('Duplicate source IDs');

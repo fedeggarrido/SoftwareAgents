@@ -229,77 +229,92 @@ export async function runResearchCommand(
         });
       if (executor.id !== 'claude')
         throw new Error('Researcher requires a read-tools-only Claude executor');
-      const handle = executor.start({
-        executionId: id,
-        projectId: config.project.id,
-        taskKey: `research-${id}`,
-        role: 'researcher',
-        agentSpec: RESEARCHER_SPEC,
-        flags: [],
-        worktreePath: config.repoRoot,
-        timeoutMin: policy.maxSeconds / 60,
-        prompt: '',
-        taskData: {
-          task: {
-            question,
-            depth,
-            ...(since ? { since } : {}),
-            sources,
-            discardedSources,
-            collectionNote:
-              'Failed seed URLs are runtime-owned discardedSources. You may mention these failures in the summary; return only bibliography source IDs in your discardedSources.',
-          },
-          outputSchema: RESEARCH_MODEL_SCHEMA,
-        },
-      });
-      const cancel = () => handle.cancel();
-      abort.signal.addEventListener('abort', cancel, { once: true });
-      let tokens = 0,
-        output: string | undefined,
-        exhausted = false,
-        usageObserved = false;
-      try {
-        for await (const event of handle.events) {
-          if (event.type === 'usage') {
-            usageObserved = true;
-            if (
-              !Number.isFinite(event.inputTokens) ||
-              event.inputTokens < 0 ||
-              !Number.isFinite(event.outputTokens) ||
-              event.outputTokens < 0
-            )
-              throw new Error('Invalid research usage');
-            tokens += event.inputTokens + event.outputTokens;
-            if (tokens >= policy.maxTokens) {
-              exhausted = true;
-              handle.cancel();
-            }
-          }
-          if (event.type === 'finished') {
-            if (event.exitCode !== 0 && !exhausted && !abort.signal.aborted)
-              // Keep the CLI's own diagnosis (bounded): an opaque failure hid the first real cause.
-              throw new Error(
-                `Research executor failed (exit ${event.exitCode}): ${String(
-                  event.resultSummary ?? '',
+      // The CLI's own structured-output check is not deterministic for the model: one retry
+      // on a schema rejection (as the Architect corrects validation errors once).
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const handle = executor.start({
+            executionId: id,
+            projectId: config.project.id,
+            taskKey: `research-${id}`,
+            role: 'researcher',
+            agentSpec: RESEARCHER_SPEC,
+            flags: [],
+            worktreePath: config.repoRoot,
+            timeoutMin: policy.maxSeconds / 60,
+            prompt: '',
+            taskData: {
+              task: {
+                question,
+                depth,
+                ...(since ? { since } : {}),
+                sources,
+                discardedSources,
+                collectionNote:
+                  'Failed seed URLs are runtime-owned discardedSources. You may mention these failures in the summary; return only bibliography source IDs in your discardedSources.',
+              },
+              outputSchema: RESEARCH_MODEL_SCHEMA,
+            },
+          });
+          const cancel = () => handle.cancel();
+          abort.signal.addEventListener('abort', cancel, { once: true });
+          let tokens = 0,
+            output: string | undefined,
+            exhausted = false,
+            usageObserved = false;
+          try {
+            for await (const event of handle.events) {
+              if (event.type === 'usage') {
+                usageObserved = true;
+                if (
+                  !Number.isFinite(event.inputTokens) ||
+                  event.inputTokens < 0 ||
+                  !Number.isFinite(event.outputTokens) ||
+                  event.outputTokens < 0
                 )
-                  .replace(/\s+/g, ' ')
-                  .slice(0, 300)}`,
-              );
-            if (event.exitCode === 0) output = event.resultSummary;
+                  throw new Error('Invalid research usage');
+                tokens += event.inputTokens + event.outputTokens;
+                if (tokens >= policy.maxTokens) {
+                  exhausted = true;
+                  handle.cancel();
+                }
+              }
+              if (event.type === 'finished') {
+                if (event.exitCode !== 0 && !exhausted && !abort.signal.aborted)
+                  // Keep the CLI's own diagnosis (bounded): an opaque failure hid the first real cause.
+                  throw new Error(
+                    `Research executor failed (exit ${event.exitCode}): ${String(
+                      event.resultSummary ?? '',
+                    )
+                      .replace(/\s+/g, ' ')
+                      .slice(0, 300)}`,
+                  );
+                if (event.exitCode === 0) output = event.resultSummary;
+              }
+            }
+            if (!usageObserved) {
+              exhausted = true;
+              gaps.push('Executor token usage unavailable; synthesis discarded.');
+            }
+            if (exhausted || abort.signal.aborted)
+              gaps.push('Token/time budget exhausted; synthesis is partial.');
+            else if (!output) throw new Error('Researcher returned no report');
+            if (output && !exhausted && !abort.signal.aborted)
+              report = validateResearchReport(output, sources);
+          } finally {
+            handle.cancel();
+            abort.signal.removeEventListener('abort', cancel);
           }
+          break;
+        } catch (error) {
+          if (
+            attempt === 0 &&
+            !abort.signal.aborted &&
+            /schema validation/i.test((error as Error).message)
+          )
+            continue;
+          throw error;
         }
-        if (!usageObserved) {
-          exhausted = true;
-          gaps.push('Executor token usage unavailable; synthesis discarded.');
-        }
-        if (exhausted || abort.signal.aborted)
-          gaps.push('Token/time budget exhausted; synthesis is partial.');
-        else if (!output) throw new Error('Researcher returned no report');
-        if (output && !exhausted && !abort.signal.aborted)
-          report = validateResearchReport(output, sources);
-      } finally {
-        handle.cancel();
-        abort.signal.removeEventListener('abort', cancel);
       }
     }
     if (abort.signal.aborted) gaps.push('Time budget exhausted.');

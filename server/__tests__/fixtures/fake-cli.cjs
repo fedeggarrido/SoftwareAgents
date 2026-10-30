@@ -294,7 +294,18 @@ if (!valid) {
           {
             type: 'result',
             subtype: 'success',
-            result: 'Fake result',
+            result: args.includes('--typed-fenced-report')
+              ? 'Report follows:\n```json\n' +
+                JSON.stringify({
+                  summary: 'Fixture report',
+                  findings: [],
+                  contradictions: [],
+                  gaps: [],
+                  discardedSources: [],
+                  bibliography: [],
+                }) +
+                '\n```'
+              : 'Fake result',
             ...(args.includes('--typed-valid') ? { structured_output: { ok: true } } : {}),
             session_id: 'fake-claude-session',
             usage: { input_tokens: 10, output_tokens: 5 },

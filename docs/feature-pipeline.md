@@ -1494,7 +1494,24 @@ hash del extracto y día UTC de recuperación. Se vuelve a consultar el origen p
 detectar cambios; no es una caché HTTP ni evita consumo de red. Nada de esto integra
 ramas ni concede aprobación de producto.
 
-TODO fase B: YouTube, libros, papers y podcasts con APIs/licencias y fixtures propios.
+Fase B parcial (sin credenciales): arXiv (Atom), Semantic Scholar (Graph API) y Open
+Library (search + works) permiten buscar papers y libros. Ejemplo:
+`pixel-agents research run --question "evidence synthesis" --kinds paper,book,web --json`.
+Sin `--kinds` se consideran todos los adapters registrados, dentro del presupuesto.
+Los servicios de papers se espacian al menos 3,1 s por servicio en este proceso;
+un error suspende nuevas peticiones a ese servicio durante una hora, sin reintentos.
+Semantic Scholar usa un User-Agent identificable y no necesita clave; su cupo público
+es compartido y puede responder 429 (se registra como laguna).
+Todos usan researchHttp y sus límites y protección SSRF. Solo se leen metadatos,
+abstracts y descripciones/primeras frases públicas, nunca PDFs ni obras completas.
+Venue/editorial se guardan en `channel`, DOI/ISBN en `citation`; años sin fecha
+precisa se representan como 1 de enero. Extractos limitados a 4000 caracteres y
+citas acumuladas a 300 por fuente. Tests con fixtures, sin red real.
+Referencias: [Semantic Scholar API](https://www.semanticscholar.org/product/api),
+[Open Library search](https://openlibrary.org/dev/docs/api/search).
+
+TODO fase B: Google Books opcional; YouTube y podcasts requieren claves y revisar
+los términos de acceso/transcripción antes de implementar sus adapters.
 TODO fase C: integraciones de investigación con Features, otros roles y UI.
 
 ## Próximos pasos

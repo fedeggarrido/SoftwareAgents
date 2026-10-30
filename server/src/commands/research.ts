@@ -9,6 +9,7 @@ import {
   RESEARCH_DEFAULTS,
   type ResearchReport,
   type SourceItem,
+  type SourceKind,
 } from '../../../core/src/research.js';
 import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
@@ -25,6 +26,8 @@ import {
   validateResearchReport,
   validateSourceItem,
 } from '../research.js';
+import { booksAdapter } from '../researchAdapters/books.js';
+import { paperAdapter } from '../researchAdapters/papers.js';
 import { redditAdapter } from '../researchAdapters/reddit.js';
 import { webAdapter } from '../researchAdapters/web.js';
 import { researchFailureReason } from '../researchHttp.js';
@@ -43,7 +46,7 @@ export async function runResearchCommand(
   options: ResearchCommandOptions = {},
 ): Promise<void> {
   const usage =
-    'Usage: pixel-agents research run --question <text> [--depth quick|standard] [--since YYYY-MM-DD] [--source <url>...] [--json]';
+    'Usage: pixel-agents research run --question <text> [--kinds paper,book,web] [--depth quick|standard] [--since YYYY-MM-DD] [--source <url>...] [--json]';
   if (argv[0] !== 'run') throw new CliUsageError(usage);
   let question = '',
     depth = 'standard',
@@ -51,6 +54,7 @@ export async function runResearchCommand(
     json = false;
   const seeds: string[] = [],
     seen = new Set<string>();
+  let kinds: SourceKind[] | undefined;
   for (let i = 1; i < argv.length; i++) {
     const flag = argv[i];
     if (flag !== '--source' && seen.has(flag)) throw new CliUsageError(usage);
@@ -60,6 +64,15 @@ export async function runResearchCommand(
       const value = argv[++i];
       if (!value || value.startsWith('--')) throw new CliUsageError(usage);
       if (flag === '--question') question = value;
+      else if (
+        flag === '--kinds' &&
+        value
+          .split(',')
+          .every((kind) =>
+            ['paper', 'book', 'web', 'article', 'thread', 'video', 'podcast'].includes(kind),
+          )
+      )
+        kinds = value.split(',') as SourceKind[];
       else if (flag === '--depth' && ['quick', 'standard'].includes(value)) depth = value;
       else if (
         flag === '--since' &&
@@ -127,6 +140,9 @@ export async function runResearchCommand(
   if (!options.adapters) {
     registry.register(webAdapter(policy.search));
     registry.register(redditAdapter(policy.reddit));
+    registry.register(paperAdapter('arxiv'));
+    registry.register(paperAdapter('semantic-scholar'));
+    registry.register(booksAdapter());
   }
   const add = (items: SourceItem[]) => {
     for (const candidate of items) {
@@ -157,6 +173,7 @@ export async function runResearchCommand(
   record('started');
   try {
     for (const adapter of registry.all()) {
+      if (kinds && !adapter.kinds.some((kind) => kinds.includes(kind))) continue;
       if (adapter.unavailable) gaps.push(adapter.unavailable);
       const refs = seeds.filter((ref) =>
         adapter.id === 'reddit'

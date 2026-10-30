@@ -19,6 +19,12 @@ import {
   validateResearchReport,
   validateSourceItem,
 } from '../src/research.js';
+import { booksAdapter, normalizeOpenLibrary } from '../src/researchAdapters/books.js';
+import {
+  normalizeArxiv,
+  normalizeSemanticScholar,
+  paperAdapter,
+} from '../src/researchAdapters/papers.js';
 import { normalizeReddit, redditAdapter } from '../src/researchAdapters/reddit.js';
 import { relevantExcerpts, webAdapter } from '../src/researchAdapters/web.js';
 import { publicAddress, type ResearchHttp, researchHttp } from '../src/researchHttp.js';
@@ -168,6 +174,111 @@ describe('research contracts and trust boundaries', () => {
   });
 });
 describe('fixture adapters and guarded native fetch', () => {
+  const atom = `<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+    <id>http://arxiv.org/abs/2601.12345v1</id><title>Research &amp; evidence</title>
+    <author><name>Alice</name></author><author><name>Bob</name></author>
+    <published>2026-01-02T00:00:00Z</published><arxiv:doi>10.1234/test</arxiv:doi>
+    <arxiv:journal_ref>Fixture journal</arxiv:journal_ref><summary>Abstract evidence.</summary>
+    </entry></feed>`;
+  const scholar = {
+    data: [
+      {
+        paperId: 'fixture',
+        title: 'Scholar paper',
+        authors: [{ name: 'Carol' }],
+        year: 2025,
+        venue: 'Conference',
+        externalIds: { DOI: '10.1234/scholar' },
+        citationCount: 42,
+        abstract: 'Scholar evidence.',
+      },
+    ],
+  };
+  const book = {
+    key: '/works/OL123W',
+    title: 'Fixture book',
+    author_name: ['Dana'],
+    first_publish_year: 2001,
+    publisher: ['Fixture Press'],
+    isbn: ['9781234567890'],
+    first_sentence: ['Public first sentence.'],
+  };
+  it('parses bounded arXiv Atom and Scholar metadata into valid paper sources', () => {
+    const [a] = normalizeArxiv(atom, 1);
+    expect(validateSourceItem(a)).toMatchObject({
+      kind: 'paper',
+      author: 'Alice, Bob',
+      title: 'Research & evidence',
+      channel: 'Fixture journal',
+      citation: 'DOI: 10.1234/test',
+    });
+    const [s] = normalizeSemanticScholar(scholar, 1);
+    expect(validateSourceItem(s)).toMatchObject({
+      kind: 'paper',
+      signals: { citations: 42 },
+      publishedAt: '2025-01-01T00:00:00.000Z',
+    });
+    expect(
+      normalizeArxiv(atom.replace('Abstract evidence.', 'x'.repeat(9000)), 1)[0].excerpt,
+    ).toHaveLength(RESEARCH_EXCERPT_CHARS);
+    expect(
+      normalizeSemanticScholar({ data: [{ ...scholar.data[0], abstract: 'x'.repeat(9000) }] }, 1)[0]
+        .excerpt,
+    ).toHaveLength(RESEARCH_EXCERPT_CHARS);
+    expect(normalizeArxiv(atom, 0)).toEqual([]);
+  });
+  it('collects each public service through injected HTTP, never PDFs or book contents', async () => {
+    const http = vi.fn<ResearchHttp>(async (url) => ({
+      text: url.includes('arxiv') ? atom : JSON.stringify(scholar),
+      headers: new Headers(),
+    }));
+    const options = { limit: 1, signal: new AbortController().signal };
+    expect(await paperAdapter('arxiv', http).search!('evidence', options)).toHaveLength(1);
+    expect(await paperAdapter('semantic-scholar', http).search!('evidence', options)).toHaveLength(
+      1,
+    );
+    expect(http.mock.calls[1][1]?.headers).toHaveProperty(
+      'User-Agent',
+      expect.stringContaining('SoftwareAgents'),
+    );
+    const booksHttp = vi.fn<ResearchHttp>(async (url) => ({
+      text: JSON.stringify(
+        url.includes('search.json')
+          ? { docs: [book] }
+          : { description: { value: 'Public description.' } },
+      ),
+      headers: new Headers(),
+    }));
+    const [b] = await booksAdapter(booksHttp).search!('fixture', options);
+    expect(validateSourceItem(b)).toMatchObject({
+      kind: 'book',
+      author: 'Dana',
+      channel: 'Fixture Press',
+      citation: 'ISBN: 9781234567890',
+      excerpt: 'Public description.',
+    });
+    expect(booksHttp.mock.calls.map(([url]) => url)).toContain(
+      'https://openlibrary.org/works/OL123W.json',
+    );
+    expect(normalizeOpenLibrary(book, { description: 'x'.repeat(9000) })[0].excerpt).toHaveLength(
+      RESEARCH_EXCERPT_CHARS,
+    );
+    expect(normalizeOpenLibrary(book)[0].excerpt).toBe('Public first sentence.');
+    expect(normalizeOpenLibrary({ ...book, key: '//private.invalid' })).toEqual([]);
+  });
+  it('retains high confidence for independent paper and web evidence', () => {
+    const paper = normalizeArxiv(atom, 1)[0];
+    const web = makeSource({
+      ...source(),
+      author: undefined,
+      excerpt: 'Independent web evidence.',
+    });
+    const r = report(paper.id);
+    r.findings[0].sources.push(web.id);
+    expect(validateResearchReport(JSON.stringify(r), [paper, web]).findings[0].confidence).toBe(
+      'high',
+    );
+  });
   it('selects relevant sections after a long document preamble', () => {
     const html = `<h1>Introduction</h1><p>${'Unrelated introduction. '.repeat(500)}</p>
       <h2 id="contrast-minimum">Contrast minimum</h2><p>Text contrast requires 4.5:1.</p>
@@ -353,6 +464,8 @@ it('human command uses a fake executor, persists report/cache and audits without
       },
     };
     const adapters = new ResearchAdapters();
+    const excluded = vi.fn();
+    adapters.register({ id: 'excluded', kinds: ['book'], search: excluded });
     adapters.register({ id: 'web', kinds: ['article'], search: async () => [source()] });
     const start = vi.fn<Executor['start']>((request) => {
       expect(request.role).toBe('researcher');
@@ -370,12 +483,19 @@ it('human command uses a fake executor, persists report/cache and audits without
     });
     const append = vi.fn(),
       log = vi.fn();
-    await runResearchCommand(['run', '--question', 'Question', '--json'], home, log, {
-      config,
-      adapters,
-      executor: { id: 'claude', start },
-      audit: { append },
-    });
+    await runResearchCommand(
+      ['run', '--question', 'Question', '--kinds', 'article', '--json'],
+      home,
+      log,
+      {
+        config,
+        adapters,
+        executor: { id: 'claude', start },
+        audit: { append },
+      },
+    );
+    expect(excluded).not.toHaveBeenCalled();
+    excluded.mockResolvedValue([]);
     const result = JSON.parse(log.mock.calls[0][0]);
     expect(result.report.findings[0].confidence).toBe('low');
     expect(fs.existsSync(path.join(home, 'research', `${result.id}.md`))).toBe(true);

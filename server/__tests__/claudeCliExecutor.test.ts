@@ -9,6 +9,7 @@ import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
 import { getHookScriptPath } from '../src/providers/hook/claude/claudeHookInstaller.js';
+import { RESEARCH_MODEL_SCHEMA } from '../src/research.js';
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
@@ -302,6 +303,32 @@ it('can cancel before launch without creating runtime files', async () => {
   expect(events).toEqual([{ type: 'finished', exitCode: 130, resultSummary: 'Cancelled' }]);
   expect(fs.existsSync(path.join(root, 'runtime'))).toBe(false);
 });
+it.each(['--typed-fenced-report', undefined])(
+  'validates a fenced report without structured_output (%s)',
+  async (mode) => {
+    req.taskData = { task: 'research report', outputSchema: RESEARCH_MODEL_SCHEMA };
+    const events: ExecutionEvent[] = [];
+    for await (const event of executor(mode).start(req).events) events.push(event);
+    const finished = events.at(-1);
+    if (mode) {
+      expect(finished).toMatchObject({ type: 'finished', exitCode: 0 });
+      if (finished?.type === 'finished')
+        expect(JSON.parse(finished.resultSummary!)).toEqual({
+          summary: 'Fixture report',
+          findings: [],
+          contradictions: [],
+          gaps: [],
+          discardedSources: [],
+          bibliography: [],
+        });
+    } else
+      expect(finished).toMatchObject({
+        type: 'finished',
+        exitCode: 1,
+        resultSummary: expect.stringContaining('schema validation'),
+      });
+  },
+);
 it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
   'cancels the process tree including the fake child',
   async () => {

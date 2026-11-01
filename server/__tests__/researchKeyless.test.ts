@@ -14,6 +14,7 @@ import { webAdapter } from '../src/researchAdapters/web.js';
 import { timedText, youtubeAdapter } from '../src/researchAdapters/youtube.js';
 import type { ResearchHttp } from '../src/researchHttp.js';
 import { discoverUrls, scoutSchema, scoutUrls } from '../src/webScout.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -219,6 +220,8 @@ it('refetches scout URLs and never forwards scout text to Researcher', async () 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'keyless-'));
   vi.stubEnv('HOME', home);
   vi.stubEnv('USERPROFILE', home);
+  // research run is a human decision (SA-107): confirm with an isolated test token.
+  operatorToken(home);
   try {
     const config: ProjectConfig = {
       repoRoot: home,

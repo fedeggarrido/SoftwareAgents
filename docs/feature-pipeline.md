@@ -1449,8 +1449,8 @@ En `~/.pixel-agents/config.json`, bajo `projects.<project-id>`, configurar:
 }
 ```
 
-`search` y `reddit` son opcionales. Sin proveedor contratado, búsqueda web no disponible:
-solo URLs explícitas. El proveedor configurable recibe GET con `q` y Bearer opcional;
+`search` y `reddit` son opcionales. Sin proveedor contratado, la búsqueda web requiere
+`--discover`; también se admiten URLs explícitas. El proveedor configurable recibe GET con `q` y Bearer opcional;
 debe devolver `{ "urls": ["https://..."] }`. No se scrapean buscadores. La lectura web
 acepta HTTP(S) sin credenciales, texto/HTML; usa fetch nativo con transporte fijado a
 DNS público validado y TLS normal. Rechaza redirecciones, localhost, IP privada/reservada
@@ -1458,8 +1458,11 @@ y resoluciones mixtas; máximo 1 MiB de respuesta y 10 s por petición, dentro d
 global. Extracción conservadora de texto, título, autor y lenguaje; no ejecuta JavaScript.
 Algunas páginas legítimas que redirigen o requieren JavaScript no estarán disponibles.
 
-Reddit usa API oficial, OAuth app-only y credenciales solo del Operator config; sin ellas
-informa no disponible. Normaliza hilos y comentarios con autor, canal, fecha y puntuación.
+Reddit conserva OAuth app-only cuando hay credenciales del Operator config. Sin ellas
+usa JSON público: `/search.json`, `/r/<sub>/search.json` y comentarios `.json`, con
+User-Agent identificable, intervalo de 6 s compartido por proceso y suspensión de una
+hora tras cualquier fallo (incluido 429), sin reintentos ni solicitud de OAuth.
+Normaliza hilos y comentarios con autor, canal, fecha y puntuación.
 Pausa con cabeceras `x-ratelimit-*`, espacia peticiones y suspende el adapter tras errores
 (incluido 429); nunca reintenta en bucle. No expone token ni secretos en contexto,
 informes o auditoría. El operador debe tener acceso autorizado a la API/proveedor.
@@ -1510,8 +1513,38 @@ citas acumuladas a 300 por fuente. Tests con fixtures, sin red real.
 Referencias: [Semantic Scholar API](https://www.semanticscholar.org/product/api),
 [Open Library search](https://openlibrary.org/dev/docs/api/search).
 
-TODO fase B: Google Books opcional; YouTube y podcasts requieren claves y revisar
-los términos de acceso/transcripción antes de implementar sus adapters.
+SA-108: descubrimiento sin clave con `pixel-agents research run --question "Pregunta"
+  --discover --kinds web,thread,video --depth quick`. El scout `web-scout` es Claude
+exclusivamente (Codex no ofrece búsqueda controlable sin shell), `read_only`, solo
+WebSearch, sin WebFetch, archivos, shell, MCP ni delegación. Se lanza con sistema
+propio, cwd privado, `claudeMdExcludes: ["**"]`, `autoMemoryEnabled: false` y
+`--disable-slash-commands` para excluir instrucciones, memoria y skills. No usa
+`--bare`: ese modo no admite el login de suscripción. Conserva OAuth y los hooks
+del runtime, con settings sources vacíos y MCP estricto. Rechaza un CLAUDE.md
+gestionado local porque no se puede excluir. Requiere un CLI compatible; fallo del scout falla
+cerrado. El único contexto de tarea es la pregunta pública del operador: no incluir
+secretos ni datos privados en ella. El scout devuelve JSON estricto con hasta
+min(12, maxSources) candidatos (4 en quick), URL HTTP(S) sin credenciales, título
+y motivo cortos. Se rechaza texto adicional. El runtime descarta títulos y motivos,
+descarga las URLs con researchHttp y etiqueta todos los SourceItems como
+untrusted-external. El texto del scout no llega al Researcher ni al Brain. Fuentes,
+tiempo global y tokens observados se comparten con síntesis, también al reintentar.
+El proveedor WebSearch sigue siendo una frontera externa; una URL puede transportar
+datos de la pregunta. WebFetch está deshabilitado: si se habilita en el futuro,
+puede exfiltrar datos por URLs y debe conservar la regla de contexto sin secretos.
+
+YouTube sin clave: `pixel-agents research run --question "Pregunta" --kinds video
+  --source https://www.youtube.com/watch?v=abcdefghijk`. También acepta candidatos del
+scout. Consulta el player IOS (fallback ANDROID) y subtítulos públicos JSON3 mediante
+researchHttp, nunca vídeo ni página watch; sin subtítulos se descarta con motivo.
+Es una API no oficial, como la utilizada por yt-dlp, y puede romperse. Prefiere
+pistas manuales en el idioma solicitado o inglés antes de recurrir a ASR.
+SourceItem video incluye título, canal, fecha disponible y transcripción acotada
+a los mismos 4000 caracteres; citas siguen limitadas a 300 por fuente. Cambios en
+HTML, restricciones regionales, consentimiento o bloqueos públicos pueden impedir
+recuperar evidencia. No hay evasión de acceso ni garantía de disponibilidad.
+
+TODO fase B: Google Books opcional y podcasts.
 TODO fase C: integraciones de investigación con Features, otros roles y UI.
 
 ## Próximos pasos

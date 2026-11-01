@@ -102,6 +102,7 @@ export function makeSource(
   });
 }
 export interface ResearchSearchOptions {
+  language?: string;
   question?: string;
   limit: number;
   since?: string;

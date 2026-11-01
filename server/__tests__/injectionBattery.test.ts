@@ -112,11 +112,25 @@ for (const attack of cases) {
             compileAgent(template(role), role, { task, outputSchema: EXTERNAL_HANDOFF_SCHEMA })
               .claude.allowedTools,
           ).toEqual([]);
+        } else if (role === 'web-scout') {
+          // The scout takes only a bounded question string; tainted objects never reach it.
+          expect(() => compileAgent(template(role), role, { task })).toThrow(/Web scout requires/);
         } else expect(() => compileAgent(template(role), role, { task })).toThrow(/quarantine/);
       }
     });
   }
-  it.each(Object.keys(ROLE_PROFILES))(
+  it(`${attack.id}: web-scout keeps the payload as data and gets WebSearch only`, () => {
+    const compiled = compileAgent(template('web-scout'), 'web-scout', {
+      task: { question: attack.payload.slice(0, 4000) },
+      outputSchema: { type: 'object' },
+    });
+    expect(compiled.systemPrompt).not.toContain(attack.payload.slice(0, 4000));
+    expect(compiled.claude.allowedTools).toEqual(['WebSearch']);
+    expect(compiled.claude.disallowedTools).toEqual(
+      expect.arrayContaining(['Bash', 'WebFetch', 'Read', 'Agent', 'Task', 'Edit', 'Write']),
+    );
+  });
+  it.each(Object.keys(ROLE_PROFILES).filter((role) => role !== 'web-scout'))(
     `${attack.id}: keeps the payload as data and grants %s no web tool or connector`,
     (role) => {
       const spec = template(role);

@@ -12,6 +12,43 @@ Fundtrinsic queda fuera del alcance: no se inspeccionan ni modifican sus archivo
 datos o procesos. Las fronteras de confianza son contenido → runtime, runtime →
 Executor/herramientas, rama → CI y propuesta → Human Decision.
 
+## SA-108: descubrimiento y fuentes sin claves
+
+Inventario añadido: `server/src/webScout.ts`, `agents/templates/web-scout.yaml` y
+`server/src/researchAdapters/youtube.ts`; Reddit público amplía `reddit.ts`.
+Web-scout usa exclusivamente WebSearch de Claude, read_only, sin WebFetch, lectura
+de archivos, shell, MCP ni delegación; Codex no admite este rol. El compilador exige
+solo una pregunta acotada y un esquema de salida, sin Brain ni repository. Claude se
+lanza en cwd privado, sistema propio y sin persistencia de sesión, con
+`claudeMdExcludes: ["**"]`, `autoMemoryEnabled: false`, skills deshabilitadas,
+settings sources vacíos y MCP estricto. No usa `--bare` porque impide OAuth de
+suscripción; conserva los hooks de contención. Rechaza CLAUDE.md gestionado local,
+que no admite exclusión. Esta excepción no abre la web al
+Researcher ni a los demás roles. El tripwire rechaza cualquier otra herramienta.
+La frontera del scout depende de la lista explícita de tools y del CLI, no de un
+sandbox de SO. Validar compatibilidad de las exclusiones en QA real; políticas
+gestionadas remotas del Operator siguen siendo una frontera de confianza y no
+deben añadir contexto privado. Referencia:
+[memoria de Claude Code](https://code.claude.com/docs/en/memory) y
+[modo programático y limitación OAuth de bare](https://code.claude.com/docs/en/headless).
+
+La salida completa debe ser JSON estricto con lista acotada (hasta 12), sin campos
+extra; se validan URLs HTTP(S) sin credenciales. Solo se conservan URLs: título y
+motivo nunca se pasan al Researcher. El runtime vuelve a descargar por researchHttp
+con DNS pinning, límites y validación SSRF. Reddit público y YouTube usan la misma
+frontera HTTP y makeSource: cada SourceItem entero sigue siendo untrusted-external.
+YouTube lee página y subtítulos públicos únicamente; no vídeo. Reddit comparte
+pacing por proceso y suspende una hora tras errores, incluido 429.
+
+Riesgo residual: WebSearch recibe la pregunta y puede emitir URLs controladas por
+contenido hostil; consultas y URLs pueden transportar su texto a terceros. No dar
+secretos ni datos privados al scout: solo la pregunta pública. WebFetch está denegado;
+habilitarlo permitiría exfiltración directa por URL y exigiría mantener esta restricción.
+La descarga posterior evita confiar en texto del scout, pero no hace fiables las
+fuentes ni elimina inyecciones de sus extractos. La barrera del Researcher sin
+herramientas y el handoff limitado de SA-102 permanecen necesarios. Tests de fixtures:
+`server/__tests__/researchKeyless.test.ts`; no prueban resistencia del modelo real.
+
 ## Riesgos principales
 
 Inventario SA-102 y [mapa OWASP Agentic ASI01–ASI10](owasp-agentic.md).

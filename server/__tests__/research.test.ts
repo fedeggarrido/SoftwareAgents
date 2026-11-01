@@ -28,7 +28,12 @@ import {
 } from '../src/researchAdapters/papers.js';
 import { normalizeReddit, redditAdapter } from '../src/researchAdapters/reddit.js';
 import { relevantExcerpts, webAdapter } from '../src/researchAdapters/web.js';
-import { publicAddress, type ResearchHttp, researchHttp } from '../src/researchHttp.js';
+import {
+  publicAddress,
+  RESEARCH_HTTP_MAX_BYTES,
+  type ResearchHttp,
+  researchHttp,
+} from '../src/researchHttp.js';
 import { exampleAdapter } from './fixtures/research/exampleAdapter.js';
 import * as redditFixture from './fixtures/research/reddit.json';
 
@@ -373,9 +378,9 @@ describe('fixture adapters and guarded native fetch', () => {
     }) as unknown as typeof https.request);
     expect((await researchHttp('https://example.com')).text).toBe('Fixture native fetch');
   });
-  it('normalizes official Reddit threads and comments and requires Operator credentials', async () => {
-    expect(redditAdapter().search).toBeUndefined();
-    expect(redditAdapter().unavailable).toContain('credentials');
+  it('normalizes OAuth Reddit threads and comments with Operator credentials', async () => {
+    expect(redditAdapter().search).toBeTypeOf('function');
+    expect(redditAdapter().unavailable).toBeUndefined();
     const http = vi
       .fn<ResearchHttp>()
       .mockResolvedValueOnce({
@@ -451,6 +456,57 @@ describe('fixture adapters and guarded native fetch', () => {
     expect(fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     await expect(researchHttp('https://example.com')).rejects.toThrow('size limit');
   });
+});
+it('bounds JSON POST and preserves destination, redirect, response and timeout protections', async () => {
+  const init = { json: { videoId: 'abcdefghijk' }, allowedPostHosts: ['www.youtube.com'] };
+  const fetch = vi.fn().mockResolvedValue(new Response('ok'));
+  vi.stubGlobal('fetch', fetch);
+  vi.mocked(lookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }] as never);
+  await expect(researchHttp('https://www.youtube.com/player', init)).rejects.toThrow('destination');
+  await expect(researchHttp('https://other.example/player', init)).rejects.toThrow('destination');
+  await expect(
+    researchHttp('https://www.youtube.com/player', { ...init, json: { text: 'x'.repeat(20000) } }),
+  ).rejects.toThrow('size limit');
+  expect(fetch).not.toHaveBeenCalled();
+  vi.mocked(lookup).mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
+  await researchHttp('https://www.youtube.com/player', init);
+  expect(fetch.mock.calls[0][1]).toMatchObject({
+    method: 'POST',
+    body: JSON.stringify(init.json),
+    redirect: 'manual',
+    signal: expect.any(AbortSignal),
+  });
+  expect(fetch.mock.calls[0][1].dispatcher.dispatch).toBeTypeOf('function');
+  fetch.mockResolvedValueOnce(
+    new Response(null, { status: 307, headers: { location: 'https://other.example/player' } }),
+  );
+  await expect(researchHttp('https://www.youtube.com/player', init)).rejects.toThrow('redirect');
+  fetch.mockResolvedValueOnce(new Response('x'.repeat(RESEARCH_HTTP_BYTES + 1)));
+  await expect(researchHttp('https://www.youtube.com/player', init)).rejects.toThrow('size limit');
+  const controller = new AbortController();
+  controller.abort();
+  await expect(
+    researchHttp('https://www.youtube.com/player', { ...init, signal: controller.signal }),
+  ).rejects.toThrow();
+});
+it('enforces per-call HTTP byte limits and the fixed ceiling for headers and streams', async () => {
+  vi.mocked(lookup).mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  fetch.mockResolvedValueOnce(new Response('x'.repeat(RESEARCH_HTTP_BYTES + 1)));
+  await expect(
+    researchHttp('https://example.com', { maxBytes: RESEARCH_HTTP_BYTES + 1 }),
+  ).rejects.toThrow('size limit');
+  fetch.mockResolvedValueOnce(new Response('12345'));
+  await expect(researchHttp('https://example.com', { maxBytes: 4 })).rejects.toThrow('size limit');
+  for (const headers of [{}, { 'content-length': String(RESEARCH_HTTP_MAX_BYTES + 1) }]) {
+    fetch.mockResolvedValueOnce(new Response('x'.repeat(RESEARCH_HTTP_MAX_BYTES + 1), { headers }));
+    await expect(
+      researchHttp('https://example.com', { maxBytes: Number.MAX_SAFE_INTEGER }),
+    ).rejects.toThrow('size limit');
+  }
+  for (const maxBytes of [0, -1, NaN, Infinity, 1.5])
+    await expect(researchHttp('https://example.com', { maxBytes })).rejects.toThrow('size limit');
 });
 it('human command uses a fake executor, persists report/cache and audits without credentials', async () => {
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])

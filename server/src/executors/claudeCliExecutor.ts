@@ -53,6 +53,23 @@ export function containmentHookScriptPath(): string {
     : path.resolve(__dirname, '../../../dist/hooks/containment-hook.js');
 }
 
+/** Managed memory cannot be excluded by claudeMdExcludes. Never inspect its contents. */
+export function assertScoutHasNoManagedMemory(): void {
+  const managed =
+    process.platform === 'win32'
+      ? path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'ClaudeCode', 'CLAUDE.md')
+      : process.platform === 'darwin'
+        ? '/Library/Application Support/ClaudeCode/CLAUDE.md'
+        : '/etc/claude-code/CLAUDE.md';
+  try {
+    fs.statSync(managed);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw new Error('Cannot establish absence of managed scout memory');
+  }
+  throw new Error('Web scout cannot load managed CLAUDE.md');
+}
+
 /** Claude runs hook commands through a shell. Paths are quoted, so characters a shell still
  * expands inside double quotes are refused instead of escaped. Under Electron, execPath is the
  * editor, not Node. */
@@ -158,6 +175,7 @@ export class ClaudeCliExecutor implements Executor {
             throw new Error('Runtime settings must be outside the worktree');
           }
           directory = fs.mkdtempSync(path.join(options.runtimeDirectory, 'claude-'));
+          if (req.role === 'web-scout') assertScoutHasNoManagedMemory();
           const settings = path.join(directory, compiled.claude.settingsFile);
           const mcp = path.join(directory, 'mcp.json');
           const hooksAvailable = fs.existsSync(getHookScriptPath());
@@ -175,6 +193,12 @@ export class ClaudeCliExecutor implements Executor {
           fs.writeFileSync(
             settings,
             JSON.stringify({
+              ...(req.role === 'web-scout'
+                ? {
+                    claudeMdExcludes: ['**'],
+                    autoMemoryEnabled: false,
+                  }
+                : {}),
               hooks: {
                 ...office,
                 PreToolUse: [
@@ -199,6 +223,8 @@ export class ClaudeCliExecutor implements Executor {
           const tools = compiled.claude.allowedTools.join(',');
           const args = [
             ...(options.binaryArgs ?? []),
+            // Keep subscription OAuth: --bare would require an API key.
+            ...(req.role === 'web-scout' ? ['--no-session-persistence'] : []),
             '-p',
             '--output-format',
             'stream-json',
@@ -218,7 +244,7 @@ export class ClaudeCliExecutor implements Executor {
             tools,
             '--disallowedTools',
             compiled.claude.disallowedTools.join(','),
-            '--append-system-prompt',
+            req.role === 'web-scout' ? '--system-prompt' : '--append-system-prompt',
             compiled.claude.appendSystemPrompt,
             '--permission-mode',
             compiled.claude.permissionMode,
@@ -230,7 +256,7 @@ export class ClaudeCliExecutor implements Executor {
           child = spawnRegisteredProcess(
             options.binary,
             args,
-            req.worktreePath,
+            req.role === 'web-scout' ? directory : req.worktreePath,
             req.registerProcess,
             req.persistProcessClose,
             claudeConfigEnvironment(options.configDir),
@@ -267,7 +293,7 @@ export class ClaudeCliExecutor implements Executor {
             queue.push(event);
             wake?.();
           };
-          // Flags already withhold web tools; seeing one means they did not apply (SA-074).
+          // Tripwire for tools outside the compiled policy, including the scout exception.
           const violate = (detail: string) => {
             if (violation) return;
             violation = `Policy violation: ${detail}`;
@@ -332,7 +358,9 @@ export class ClaudeCliExecutor implements Executor {
                   const servers: unknown[] = Array.isArray(record.mcp_servers)
                     ? record.mcp_servers
                     : [];
-                  if (web.length)
+                  if (req.role === 'web-scout' && tools.some((tool) => tool !== 'WebSearch'))
+                    violate('Web scout exposed tools outside WebSearch');
+                  else if (web.some((tool) => !compiled.claude.allowedTools.includes(String(tool))))
                     violate(`Claude exposed ${web.join(', ')}; slice profiles have no web access`);
                   else if (mcp.length || servers.length)
                     violate(
@@ -357,7 +385,12 @@ export class ClaudeCliExecutor implements Executor {
                 if (record.type === 'assistant') {
                   for (const content of record.message?.content ?? []) {
                     if (content.type === 'tool_use') {
-                      if (CLAUDE_WEB_TOOLS.includes(content.name))
+                      if (req.role === 'web-scout' && content.name !== 'WebSearch')
+                        violate('Web scout used tools outside WebSearch');
+                      else if (
+                        CLAUDE_WEB_TOOLS.includes(content.name) &&
+                        !compiled.claude.allowedTools.includes(content.name)
+                      )
                         violate(`Claude used ${content.name}; slice profiles have no web access`);
                       else if (
                         typeof content.name === 'string' &&
@@ -441,7 +474,8 @@ export class ClaudeCliExecutor implements Executor {
                       // Models sometimes return the JSON as a ```json text block instead of
                       // structured output (the researcher did, every run); extract it.
                       const output =
-                        record.structured_output ?? JSON.parse(extractJsonObject(summary));
+                        record.structured_output ??
+                        JSON.parse(req.role === 'web-scout' ? summary : extractJsonObject(summary));
                       if (!validateAgentOutput(compiled.outputSchema, output))
                         throw new Error('Schema mismatch');
                       summary = JSON.stringify(output);

@@ -15,7 +15,7 @@ import { type Learning, type LearningScope, selectLearnings } from './learnings.
 export const TOOL_POLICY_VERSION = 'sa-062/v5';
 export const PROMPT_RULES_VERSION = 'sa-099/v1';
 const CONTEXT_PREAMBLE = '\nUNTRUSTED_CONTEXT_JSON\n';
-/** No slice profile reaches the web; executors treat any sign of these as a policy violation. */
+/** Web is denied except WebSearch in the isolated question-only web-scout role. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
 export const CLAUDE_DELEGATION_TOOLS: readonly string[] = ['Agent', 'Task'];
 /** Claude names every MCP tool `mcp__<server>__<tool>`; slice profiles get no MCP at all. */
@@ -46,13 +46,15 @@ export const ROLE_PROFILES = {
   qa: 'read_only',
   'product-designer': 'read_only',
   researcher: 'read_only',
+  'web-scout': 'read_only',
 } as const;
 export type CompilerRole = keyof typeof ROLE_PROFILES;
 /** Codex read-only still exposes arbitrary shell; these roles require read tools only.
  * Post-execution stream detection cannot mediate code before it runs. */
 export function executorSupportsRole(executor: string, role: string): boolean {
   return (
-    !['qa', 'reviewer', 'product-designer', 'researcher'].includes(role) || executor === 'claude'
+    !['qa', 'reviewer', 'product-designer', 'researcher', 'web-scout'].includes(role) ||
+    executor === 'claude'
   );
 }
 const PROFILE_FLAGS = {
@@ -108,6 +110,22 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
   )
     throw new Error('Permission profile exceeds role ceiling');
   const profile = PROFILE_FLAGS[spec.permissions.profile];
+  if (
+    role === 'web-scout' &&
+    (data.approvedLearnings !== undefined ||
+      data.learningScope !== undefined ||
+      data.repository !== undefined ||
+      Object.keys(data.brainContents ?? {}).length ||
+      !data.task ||
+      typeof data.task !== 'object' ||
+      Array.isArray(data.task) ||
+      Object.keys(data.task).some((key) => key !== 'question') ||
+      typeof (data.task as { question?: unknown }).question !== 'string' ||
+      !(data.task as { question: string }).question.trim() ||
+      (data.task as { question: string }).question.length > 4000 ||
+      data.outputSchema?.type !== 'object')
+  )
+    throw new Error('Web scout requires only a bounded question and output schema');
   const external = containsExternalContent({
     task: data.task,
     repository: data.repository ?? null,
@@ -132,6 +150,11 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       `AgentSpec fingerprint: ${specHash}`,
       `Prompt rules version: ${PROMPT_RULES_VERSION}. Tool policy: ${TOOL_POLICY_VERSION}.`,
       rules,
+      ...(role === 'web-scout'
+        ? [
+            'Discover public URLs using WebSearch only. Return only the candidate JSON requested by the schema, without prose. Titles and reasons are discarded by runtime. Never access private data, files, shell, MCP or delegate.',
+          ]
+        : []),
       ...(role === 'product-designer' ? [DESIGNER_SYSTEM_PROMPT] : []),
       ...(role === 'researcher'
         ? [
@@ -224,13 +247,14 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
     outputSchema,
     claude: {
       appendSystemPrompt: systemPrompt,
-      allowedTools: role === 'researcher' ? [] : [...profile.tools],
+      allowedTools:
+        role === 'web-scout' ? ['WebSearch'] : role === 'researcher' ? [] : [...profile.tools],
       disallowedTools: [
         'Bash',
         ...CLAUDE_DELEGATION_TOOLS,
-        ...CLAUDE_WEB_TOOLS,
+        ...CLAUDE_WEB_TOOLS.filter((tool) => role !== 'web-scout' || tool !== 'WebSearch'),
         'NotebookEdit',
-        ...(role === 'researcher' ? ['Read', 'Glob', 'Grep'] : []),
+        ...(['researcher', 'web-scout'].includes(role) ? ['Read', 'Glob', 'Grep'] : []),
         ...(profile.sandbox === 'read-only' ? ['Edit', 'Write'] : []),
       ],
       permissionMode: 'dontAsk' as const,

@@ -27,8 +27,10 @@ export function publicAddress(address: string): boolean {
 }
 export type ResearchHttp = (
   url: string,
-  init?: RequestInit,
+  init?: RequestInit & { maxBytes?: number; json?: unknown; allowedPostHosts?: readonly string[] },
 ) => Promise<{ text: string; headers: Headers }>;
+export const RESEARCH_HTTP_MAX_BYTES = RESEARCH_HTTP_BYTES;
+export const RESEARCH_HTTP_JSON_BYTES = 16 * 1024;
 
 /** Native fetch, pinned to a vetted DNS result via its dispatcher interface.
  * The minimal dispatcher uses Node's TLS/HTTP transport with an immutable lookup;
@@ -37,16 +39,39 @@ export type ResearchHttp = (
  * each hop resolves and pins public addresses again, under one shared deadline.
  */
 export const researchHttp: ResearchHttp = async (ref, init = {}) => {
+  const {
+    maxBytes: requestedBytes = RESEARCH_HTTP_BYTES,
+    json,
+    allowedPostHosts,
+    ...requestInit
+  } = init;
+  if (json !== undefined) {
+    const url = new URL(ref);
+    if (url.protocol !== 'https:' || !allowedPostHosts?.includes(url.hostname))
+      throw new Error('Research POST destination rejected');
+    const body = JSON.stringify(json);
+    if (!body || Buffer.byteLength(body) > RESEARCH_HTTP_JSON_BYTES)
+      throw new Error('Research request size limit');
+    requestInit.method = 'POST';
+    requestInit.body = body;
+    const headers = new Headers(requestInit.headers);
+    headers.set('content-type', 'application/json');
+    requestInit.headers = headers;
+  }
+  if (!Number.isSafeInteger(requestedBytes) || requestedBytes <= 0)
+    throw new Error('Invalid research HTTP size limit');
+  const maxBytes = Math.min(requestedBytes, RESEARCH_HTTP_MAX_BYTES);
   const signal = AbortSignal.any([
     AbortSignal.timeout(RESEARCH_HTTP_MS),
     ...(init.signal ? [init.signal] : []),
   ]);
-  return requestHop(ref, { ...init, signal }, 0);
+  return requestHop(ref, { ...requestInit, signal }, 0, maxBytes);
 };
 async function requestHop(
   ref: string,
   init: RequestInit,
   redirects: number,
+  maxBytes: number,
 ): ReturnType<ResearchHttp> {
   const url = new URL(ref);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
@@ -132,13 +157,13 @@ async function requestHop(
       next.port !== url.port
     )
       throw new Error('Research redirect destination rejected');
-    return requestHop(next.href, init, redirects + 1);
+    return requestHop(next.href, init, redirects + 1, maxBytes);
   }
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(`Research HTTP status ${response.status}`);
   }
-  if (Number(response.headers.get('content-length')) > RESEARCH_HTTP_BYTES) {
+  if (Number(response.headers.get('content-length')) > maxBytes) {
     await response.body?.cancel();
     throw new Error('Research HTTP size limit');
   }
@@ -151,7 +176,7 @@ async function requestHop(
         const { done, value } = await reader.read();
         if (done) break;
         bytes += value.length;
-        if (bytes > RESEARCH_HTTP_BYTES) throw new Error('Research HTTP size limit');
+        if (bytes > maxBytes) throw new Error('Research HTTP size limit');
         chunks.push(value);
       }
   } finally {
@@ -170,6 +195,8 @@ export function researchFailureReason(error: unknown): string {
     return 'Unsafe destination rejected';
   if (/size limit/i.test(message)) return 'Response size limit exceeded';
   if (/content type/i.test(message)) return 'Unsupported content type';
+  if (/No public YouTube subtitles|No public YouTube transcript text/.test(message))
+    return 'No public YouTube subtitles available';
   if (/timeout|abort/i.test(message)) return 'Request timed out or cancelled';
   if (error instanceof SyntaxError) return 'Response parse failed';
   return 'Source collection or parsing failed';

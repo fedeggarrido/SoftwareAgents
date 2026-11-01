@@ -24,6 +24,18 @@ export const RESEARCHER_SPEC: AgentSpec = {
   escalation: { humanRequired: ['permission_expansion'] },
 };
 
+export const WEB_SCOUT_SPEC: AgentSpec = {
+  ...RESEARCHER_SPEC,
+  metadata: { ...RESEARCHER_SPEC.metadata, id: 'web-scout', displayName: 'Web scout' },
+  identity: {
+    role: 'web-scout',
+    mission: 'Discover candidate public URLs from the question only.',
+    principles: ['Return only candidate JSON', 'No private context'],
+    antiPatterns: ['Synthesize evidence'],
+  },
+  outputs: ['WebScoutCandidates'],
+};
+
 /** Phase 1 visual review has the same read-only ceiling as code review. */
 export const PRODUCT_DESIGNER_SPEC: AgentSpec = {
   apiVersion: 'softwareagents.io/v1alpha1',

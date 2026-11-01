@@ -36,7 +36,9 @@ it.each(['FEAT-001', 'FEAT-002', 'FEAT-003'])(
     ).not.toThrow();
   },
 );
-for (const role of Object.keys(ROLE_PROFILES)) {
+// Scout has a separate question-only contract tested in researchKeyless.
+const toolRoles = Object.keys(ROLE_PROFILES).filter((role) => role !== 'web-scout');
+for (const role of toolRoles) {
   it(`snapshots ${role} for both CLIs`, () => {
     const compiled = compileAgent(template(role), role, { task: { key: 'SA-020' } });
     const snapshot = {
@@ -70,7 +72,7 @@ for (const role of Object.keys(ROLE_PROFILES)) {
     }
   });
 }
-it.each(Object.keys(ROLE_PROFILES))('closes web access for %s in both CLIs', (role) => {
+it.each(toolRoles)('closes web access for %s in both CLIs', (role) => {
   const compiled = compileAgent(template(role), role, { task: { key: 'SA-074' } });
   expect(compiled.claude.disallowedTools).toEqual(
     expect.arrayContaining([...CLAUDE_WEB_TOOLS, ...CLAUDE_DELEGATION_TOOLS]),
@@ -82,7 +84,7 @@ it.each(Object.keys(ROLE_PROFILES))('closes web access for %s in both CLIs', (ro
   expect(flags).not.toContain('--search');
   expect(flags.filter((flag) => flag.startsWith('web_search='))).toEqual(['web_search="disabled"']);
 });
-it.each(Object.keys(ROLE_PROFILES))(
+it.each(toolRoles)(
   'turns off the account connectors, plugins and browser for %s in Codex',
   (role) => {
     const flags = codexCompilerFlags(compileAgent(template(role), role, { task: 'SA-QA-4' }));
@@ -147,7 +149,7 @@ it('hashes a stable system prompt and canonicalizes schemas regardless of key or
     }),
   );
 });
-it.each(Object.keys(ROLE_PROFILES))('keeps the %s prefix independent of all task data', (role) => {
+it.each(toolRoles)('keeps the %s prefix independent of all task data', (role) => {
   const spec = template(role);
   // The output schema is per role (part of the prefix), so both tasks share it.
   const outputSchema = { type: 'object' };

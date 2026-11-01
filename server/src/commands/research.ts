@@ -31,7 +31,9 @@ import { booksAdapter } from '../researchAdapters/books.js';
 import { paperAdapter } from '../researchAdapters/papers.js';
 import { redditAdapter } from '../researchAdapters/reddit.js';
 import { webAdapter } from '../researchAdapters/web.js';
+import { isYoutube, youtubeAdapter } from '../researchAdapters/youtube.js';
 import { researchFailureReason } from '../researchHttp.js';
+import { discoverUrls } from '../webScout.js';
 
 interface ResearchCommandOptions {
   config?: ProjectConfig;
@@ -47,12 +49,13 @@ export async function runResearchCommand(
   options: ResearchCommandOptions = {},
 ): Promise<void> {
   const usage =
-    'Usage: pixel-agents research run --question <text> [--kinds paper,book,web] [--depth quick|standard] [--since YYYY-MM-DD] [--source <url>...] [--json]';
+    'Usage: pixel-agents research run --question <text> [--discover] [--kinds paper,book,web,thread,video] [--depth quick|standard] [--since YYYY-MM-DD] [--source <url>...] [--json]';
   if (argv[0] !== 'run') throw new CliUsageError(usage);
   let question = '',
     depth = 'standard',
     since: string | undefined,
-    json = false;
+    json = false,
+    discover = false;
   const seeds: string[] = [],
     seen = new Set<string>();
   let kinds: SourceKind[] | undefined;
@@ -61,6 +64,7 @@ export async function runResearchCommand(
     if (flag !== '--source' && seen.has(flag)) throw new CliUsageError(usage);
     seen.add(flag);
     if (flag === '--json') json = true;
+    else if (flag === '--discover') discover = true;
     else {
       const value = argv[++i];
       if (!value || value.startsWith('--')) throw new CliUsageError(usage);
@@ -144,6 +148,7 @@ export async function runResearchCommand(
     registry.register(paperAdapter('arxiv'));
     registry.register(paperAdapter('semantic-scholar'));
     registry.register(booksAdapter());
+    registry.register(youtubeAdapter());
   }
   const add = (items: SourceItem[]) => {
     for (const candidate of items) {
@@ -172,7 +177,37 @@ export async function runResearchCommand(
     }
   };
   record('started');
+  let usedTokens = 0;
   try {
+    const executor =
+      options.executor ??
+      new ClaudeCliExecutor({
+        binary: resolveClaudeBinary(config.operator.binaryPaths?.claude),
+        configDir: config.operator.executors?.claude?.configDir,
+        runtimeDirectory:
+          options.runtimeDirectory ??
+          path.join(os.homedir(), '.pixel-agents', 'research-runtime', id),
+      });
+    if (discover) {
+      const result = await discoverUrls(
+        executor,
+        {
+          executionId: `${id}-scout`,
+          projectId: config.project.id,
+          taskKey: `scout-${id}`,
+          flags: [],
+          prompt: '',
+          worktreePath: config.repoRoot,
+          timeoutMin: policy.maxSeconds / 60,
+        },
+        question,
+        maxSources,
+        policy.maxTokens,
+        abort.signal,
+      );
+      usedTokens = result.tokens;
+      seeds.push(...result.urls.filter((url) => !seeds.includes(url)));
+    }
     const selected = registry
       .all()
       .filter((adapter) => !kinds || adapter.kinds.some((kind) => kinds.includes(kind)));
@@ -181,11 +216,13 @@ export async function runResearchCommand(
     for (const adapter of selected) {
       if (adapter.unavailable) gaps.push(adapter.unavailable);
       const refs = seeds.filter((ref) =>
-        adapter.id === 'reddit'
-          ? /^(www\.)?reddit\.com$/.test(new URL(ref).hostname)
-          : adapter.id === 'web'
-            ? !/^(www\.)?reddit\.com$/.test(new URL(ref).hostname)
-            : true,
+        adapter.id === 'youtube'
+          ? isYoutube(ref)
+          : adapter.id === 'reddit'
+            ? /^(www\.)?reddit\.com$/.test(new URL(ref).hostname)
+            : adapter.id === 'web'
+              ? !isYoutube(ref) && !/^(www\.)?reddit\.com$/.test(new URL(ref).hostname)
+              : true,
       );
       const operations = [
         ...(adapter.fetch
@@ -240,15 +277,6 @@ export async function runResearchCommand(
       bibliography: sources,
     };
     if (sources.length && !abort.signal.aborted) {
-      const executor =
-        options.executor ??
-        new ClaudeCliExecutor({
-          binary: resolveClaudeBinary(config.operator.binaryPaths?.claude),
-          configDir: config.operator.executors?.claude?.configDir,
-          runtimeDirectory:
-            options.runtimeDirectory ??
-            path.join(os.homedir(), '.pixel-agents', 'research-runtime', id),
-        });
       if (executor.id !== 'claude')
         throw new Error('Researcher requires a read-tools-only Claude executor');
       // The CLI's own structured-output check is not deterministic for the model: one retry
@@ -280,7 +308,7 @@ export async function runResearchCommand(
           });
           const cancel = () => handle.cancel();
           abort.signal.addEventListener('abort', cancel, { once: true });
-          let tokens = 0,
+          let tokens = usedTokens,
             output: string | undefined,
             exhausted = false,
             usageObserved = false;
@@ -296,6 +324,7 @@ export async function runResearchCommand(
                 )
                   throw new Error('Invalid research usage');
                 tokens += event.inputTokens + event.outputTokens;
+                usedTokens = tokens;
                 if (tokens >= policy.maxTokens) {
                   exhausted = true;
                   handle.cancel();

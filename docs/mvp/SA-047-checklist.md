@@ -1,4 +1,7 @@
-# SA-047 · Cierre del MVP — checklist con evidencia (borrador)
+# SA-047 · Cierre del MVP — checklist con evidencia
+
+> **CERRADO por Fede el 2026-11-01.** Decisiones y retro en
+> `.softwareagents/brain/learnings/MVP-retro.md`.
 
 > Preparado por Claude en el turno de noche del 2026-10-29 para que Fede decida el
 > cierre. **La decisión, la retro (`.softwareagents/brain/learnings/MVP-retro.md`) y

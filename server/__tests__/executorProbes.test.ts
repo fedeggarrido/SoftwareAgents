@@ -292,6 +292,21 @@ describe('runProbe (real processes)', () => {
     );
     expect(run).toEqual({ code: 0, output: 'isolated-test-profile' });
   });
+  it('strips operator credentials from inherited and overridden probe environments', async () => {
+    vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'operator-secret');
+    try {
+      const args = [
+        '-e',
+        "process.stdout.write(String(Object.keys(process.env).some(k => k.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN')))",
+      ];
+      expect(await runProbe(process.execPath, args)).toEqual({ code: 0, output: 'false' });
+      expect(
+        await runProbe(process.execPath, args, { pixel_agents_operator_token: 'override' }),
+      ).toEqual({ code: 0, output: 'false' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it('reports an executable that does not exist as missing', async () => {
     expect(await runProbe('/nonexistent/pixel-agents-probe', ['--version'])).toEqual({
       code: 'missing',

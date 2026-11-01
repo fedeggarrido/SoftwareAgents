@@ -19,6 +19,7 @@ import {
 import { WorkerLifecycle } from '../src/workerLifecycle.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -135,6 +136,7 @@ describe('SA-037 usage ledger and budgets', () => {
     telemetry.observe({ kind: 'model', model: 'observed' });
     telemetry.observe({ kind: 'usage', input: 100, output: 20, cacheRead: 60, cacheCreate: 10 });
     await telemetry.finish('ok');
+    operatorToken(path.join(root, 'home'));
     await runUsageCommand(['backfill', '--json'], root, output);
     const rows = store.listUsage();
     expect(rows).toHaveLength(2);

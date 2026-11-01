@@ -14,7 +14,7 @@ import {
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
 import { lastDeveloperFailure } from '../developer.js';
-import { featureIngressActor } from '../featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
@@ -276,6 +276,7 @@ export async function runTaskCommand(
   cwd = process.cwd(),
   log = console.log,
 ): Promise<void> {
+  if (argv[0] === 'retry') argv = await confirmHumanIngress(argv);
   const args = parseArgs(argv);
   if (args.command === 'retry' && featureIngressActor() !== 'human')
     throw new CliUsageError('task retry requires human ingress (SA-003)');

@@ -21,6 +21,7 @@ import { deferredAcceptanceCoverage } from '../src/taskDag.js';
 import { VerifierInfrastructureError } from '../src/verifierInfrastructure.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // Each case runs real Git plus a nested Vitest; under full-suite load on Windows this exceeds 30 s.
@@ -110,6 +111,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(repo, '.softwareagents/brain'), { recursive: true });
   fs.mkdirSync(path.join(root, '.pixel-agents'));
   for (const key of ['HOME', 'USERPROFILE']) vi.stubEnv(key, root);
+  operatorToken(root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex'));
   vi.stubEnv('SA_TEST_NO_RATE_LIMIT', '1');
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])

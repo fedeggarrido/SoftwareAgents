@@ -22,6 +22,7 @@ import {
 } from './evalReport.js';
 import { loadEvalTasks } from './evalTasks.js';
 import { createEvalWorktree } from './evalWorktree.js';
+import { confirmHumanIngress } from './featureIngress.js';
 import { MODEL_TIERS } from './modelTiers.js';
 import { resolveInside } from './pathGuard.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -119,6 +120,10 @@ export async function runEvalCommand(
   argv: string[],
   options: EvalCommandOptions = {},
 ): Promise<void> {
+  if (argv[0] === 'run') {
+    assertEvalRunAllowed();
+    argv = await confirmHumanIngress(argv);
+  }
   const args = parseEvalArgs(argv);
   // Before reading the bank, probing binaries, prompting or creating any files.
   if (args.command === 'run') assertEvalRunAllowed();

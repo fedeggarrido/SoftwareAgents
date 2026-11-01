@@ -49,6 +49,7 @@ import { runEvalCommand } from './evalCommand.js';
 import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
+import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
@@ -185,7 +186,10 @@ export async function dispatchCli(
   } else if (argv[0] === 'executors') {
     runExecutorsCommand(argv.slice(1));
   } else if (argv[0] === 'worker') {
-    await handlers.worker(parseWorkerArgs(argv.slice(1)));
+    const args = argv.slice(1);
+    await handlers.worker(
+      parseWorkerArgs(args[0] === 'run' ? await confirmHumanIngress(args) : args),
+    );
   } else if (argv[0] === 'telemetry') {
     await runTelemetryCommand(argv.slice(1));
   } else if (argv[0] === 'usage') {

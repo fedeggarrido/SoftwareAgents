@@ -5,7 +5,7 @@ import { gitCommonDir } from './boardWatcher.js';
 import { CliUsageError } from './cliErrors.js';
 import { backup } from './commands/task.js';
 import { TASK_CLI_DEFAULT_KEEP } from './constants.js';
-import { featureIngressActor } from './featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from './featureIngress.js';
 import { resolveInside } from './pathGuard.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { telemetryDirectory, type TelemetrySpan } from './telemetry.js';
@@ -34,6 +34,7 @@ function lines(file: string): unknown[] {
 }
 
 export async function runUsageBackfill(argv: string[], cwd: string, log: (s: string) => void) {
+  if (!argv.includes('--dry-run')) argv = await confirmHumanIngress(argv);
   if (new Set(argv).size !== argv.length || argv.some((a) => !['--dry-run', '--json'].includes(a)))
     throw new CliUsageError('Usage: pixel-agents usage backfill [--dry-run] [--json]');
   if (featureIngressActor() !== 'human')

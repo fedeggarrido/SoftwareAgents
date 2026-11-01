@@ -1,10 +1,11 @@
 import { CliUsageError } from '../cliErrors.js';
-import { featureIngressActor } from '../featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { decideLearning, learningDecisionKey, learningHash, listLearnings } from '../learnings.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 
 export async function runLearningCommand(argv: string[], cwd = process.cwd(), log = console.log) {
+  if (['approve', 'reject'].includes(argv[0])) argv = await confirmHumanIngress(argv);
   const [command, id, flag, reason] = argv;
   // Reading proposals is harmless; only approving or rejecting is a human decision.
   if (command !== 'list' && featureIngressActor() !== 'human')

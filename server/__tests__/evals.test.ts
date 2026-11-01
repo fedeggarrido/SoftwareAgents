@@ -22,6 +22,7 @@ import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { readExecutorSlots } from '../src/executorSlots.js';
 import { checkCascadeCriteria } from '../src/modelCascade.js';
 import { loadWorkerAgentSpec } from '../src/worker.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 vi.setConfig({ testTimeout: 90_000 });
@@ -111,6 +112,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(repo, '.softwareagents/evals/answer.json'), JSON.stringify(task));
   configFile = path.join(root, '.pixel-agents/config.json');
   fs.mkdirSync(path.dirname(configFile));
+  operatorToken(root);
   const rule = parse(
     fs.readFileSync(path.join(sourceRoot, '.softwareagents/agents/model-policy.yaml'), 'utf8'),
   ).tierRule;

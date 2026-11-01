@@ -373,20 +373,38 @@ ni seguridad semántica de sus resúmenes.
 - **Revisit when:** cambien permisos Git/CI, reglas de integración o se proponga
   automatizar el merge; requerir una Human Decision antes de cambiar este Gate.
 
-### 9. Ingreso humano inferido por ausencia de marcadores (SA-003)
+### 9. Ingreso humano con token privilegiado (SA-107)
 
-- **Descripción:** los comandos de decisión humana (`feature run`, `review finding`,
-  `learning approve|reject`, respuestas a Human Decisions) consideran humano a quien
-  los lanza si no existe ninguno de `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`,
-  `SA_WORKER` o `CLAUDECODE` (`server/src/featureIngress.ts`). Un agente con shell
-  podría borrar esas variables y presentarse como humano; no hay autenticación del
-  operador. Detectado por la QA de Codex de SA-098 (2026-10-30).
-- **Mitigación actual:** los Executors de la Platform se lanzan con su entorno
-  marcado y la contención (SA-062) restringe comandos y rutas; las decisiones quedan
-  auditadas con actor y momento; las lecciones aprobadas se anclan en el WorkStore
-  con hash de contenido (SA-098), de modo que un fichero falsificado no basta.
-- **Aceptación temporal:** riesgo residual conocido mientras el operador y los
-  Agents compartan identidad de host.
-- **Revisit when:** se automatice cualquier aprobación, se ejecuten Agents con shell
-  sin contención, o antes de SA-058 (sandbox). Opción: confirmar decisiones con el
-  token privilegiado del servidor o una confirmación interactiva fuera del proceso.
+- **Descripción:** borrar `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` y
+  `CLAUDECODE` ya no basta para presentar una decisión humana por CLI.
+- **Mitigación:** `featureIngress.ts` exige el token vigente de discovery
+  (`server.json`, instancia con PID vivo), proporcionado por el operador mediante
+  `PIXEL_AGENTS_OPERATOR_TOKEN` o `--confirm` al final del comando (stdin TTY en
+  modo raw, sin eco; sin TTY falla cerrado). Compara digests SHA-256 de tamaño fijo
+  con `timingSafeEqual`, antes de escribir artefactos, abrir WorkStore o auditar.
+  Los errores nunca incluyen el valor recibido. Los marcadores siguen denegando
+  decisiones incluso con token. Executors, supervisor, autopilot, sondas y
+  bootstrap eliminan explícitamente la variable después de fusionar overrides,
+  también con otras mayúsculas en Windows.
+- **Inventario CLI:** `feature run|approve|rebase`, `feature spec|design --answers`,
+  `review finding --accept|--reject`, `learning approve|reject`, `task retry`,
+  `design review|direction|apply-direction`, `research run` y `usage backfill`
+  (salvo `--dry-run`), además de `worker run` directo y `eval run` (también con
+  `--yes`). `feature spec --request`, `feature design` sin respuestas,
+  `feature develop|review|qa` son etapas del runtime: no registran una aprobación
+  humana. Se conservan la admisión de `feature run` por argv exacto de
+  `companyAutopilot` en Operator config y la revisión acotada del pipeline de
+  diseño. No admiten decisiones ni respuestas humanas implícitas.
+- **Oficina y lecturas:** DecisionsPanel conserva la autorización WS privilegiada
+  de §5; no usa esta confirmación CLI. `list`, `show`, `precision`, `flow`, `usage`
+  y el preview de backfill no requieren token. Véase
+  [confirmación del operador](../reference/discovery.md#confirmación-humana-en-cli-sa-107).
+- **Límite residual:** es una capacidad bearer, no una prueba de presencia física.
+  El servidor compartido del host no publica una vinculación criptográfica por
+  Project; se usa el puntero predeterminado de discovery. Un agente con los mismos
+  permisos del operador todavía puede leer el token en su perfil, historial o
+  memoria, o modificar el código que verifica. Filtrar el entorno no protege esos
+  canales ni las ACL de discovery. SA-058 (aislamiento de SO y secretos fuera del
+  alcance del agente) sigue pendiente; no presentar SA-107 como confinamiento.
+- **Revisit when:** se ejecute contenido adversarial, se comparta discovery entre
+  identidades/Projects, cambien los ingresos o se implemente SA-058.

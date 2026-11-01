@@ -12,6 +12,7 @@ import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { readRequirements, requirementsDocPath } from '../src/requirements.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
@@ -89,6 +90,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(root, '.pixel-agents'));
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
+  operatorToken(root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex'));
   vi.stubEnv('SA_TEST_NO_RATE_LIMIT', '1');
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
@@ -451,7 +453,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
     }
   });
 
-  it('rejects managed CLI approval and audits the refusal', async () => {
+  it('rejects managed CLI approval before recording anything', async () => {
     await run();
     vi.stubEnv('SA_MANAGED_EXECUTION', 'worker');
     await expect(runFeatureCommand(['approve', 'FEAT-001'], repo, () => {})).rejects.toThrow(
@@ -467,7 +469,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
             r.entry.actorType === 'agent' &&
             r.entry.outcome.status === 'rejected',
         ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('requires durable approval intent and reports a committed approval if confirmation fails', async () => {

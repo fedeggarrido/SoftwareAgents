@@ -12,6 +12,7 @@ import { runTaskCommand } from '../src/commands/task.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
 import { readRequirements } from '../src/requirements.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
@@ -89,6 +90,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(root, '.pixel-agents'));
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
+  operatorToken(root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex'));
   vi.stubEnv('SA_TEST_NO_RATE_LIMIT', '1');
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])

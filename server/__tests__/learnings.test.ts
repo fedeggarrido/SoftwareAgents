@@ -21,6 +21,7 @@ import {
   verifiedLearnings,
 } from '../src/learnings.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 let root: string;
 vi.mock('../src/projectConfig.js', () => ({
@@ -44,6 +45,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'learnings-'));
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
+  operatorToken(root);
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
     vi.stubEnv(key, undefined);
 });

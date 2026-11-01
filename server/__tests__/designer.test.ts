@@ -16,6 +16,7 @@ import { roleFromBrief } from '../src/agentRoles.js';
 import { runDesignCommand } from '../src/commands/design.js';
 import { contrastRatio, validateDesignReport } from '../src/designer.js';
 import type { Executor } from '../src/executors/executor.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 const validations: DesignValidation[] = [
   { kind: 'capture', tool: 'playwright/v1', result: 'pass', evidence: 'office.png' },
@@ -102,6 +103,9 @@ describe('Designer phase 1', () => {
         vi.stubEnv(key, undefined);
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'designer-command-'));
       dirs.push(root);
+      vi.stubEnv('HOME', root);
+      vi.stubEnv('USERPROFILE', root);
+      operatorToken(root);
       const brain = path.join(root, 'brain');
       fs.mkdirSync(brain);
       const config = {
@@ -148,3 +152,7 @@ describe('Designer phase 1', () => {
     },
   );
 });
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));

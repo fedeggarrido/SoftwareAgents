@@ -15,7 +15,7 @@ import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import { ClaudeCliExecutor } from '../executors/claudeCliExecutor.js';
 import type { Executor } from '../executors/executor.js';
-import { featureIngressActor } from '../featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { resolveClaudeBinary } from '../modelTiers.js';
 import { resolveInside } from '../pathGuard.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -48,6 +48,7 @@ export async function runResearchCommand(
   log = console.log,
   options: ResearchCommandOptions = {},
 ): Promise<void> {
+  if (argv[0] === 'run') argv = await confirmHumanIngress(argv);
   const usage =
     'Usage: pixel-agents research run --question <text> [--discover] [--kinds paper,book,web,thread,video] [--depth quick|standard] [--since YYYY-MM-DD] [--source <url>...] [--json]';
   if (argv[0] !== 'run') throw new CliUsageError(usage);

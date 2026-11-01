@@ -86,3 +86,34 @@ sections; recovery tombstones remain on disk. Concurrent starts may create separ
 servers, each publishing after listen with its own PID/port entry. Permanent
 filesystem/ACL failures still prevent publication despite retries. The legacy
 single pointer reaches at most one server during mixed-version operation.
+
+### Confirmación humana en CLI (SA-107)
+
+Abra primero la oficina del Project. Los comandos que registran decisiones humanas
+exigen el token de la instancia seleccionada por `~/.pixel-agents/server.json`
+(el mismo puntero predeterminado de `pixel-agents token rotate`). La instancia
+debe seguir viva. El servidor es compartido entre Projects: discovery no publica
+un token distinto por Project. Si hay varias oficinas, compruebe cuál señala ese
+puntero; el token de otra instancia no confirma el comando.
+
+Ejemplo: `pixel-agents feature approve FEAT-001 --confirm`. Pegue solo el token
+de la URL privilegiada de esa oficina cuando aparezca el prompt oculto. `--confirm`
+va al final, no recibe un valor y requiere stdin y stderr TTY. Ctrl+C, Ctrl+D o
+fin de entrada cancelan; no se admite un pipe. No pegue el token en argv ni en
+archivos del Project. También puede proporcionar `PIXEL_AGENTS_OPERATOR_TOKEN`
+en el entorno privado del operador; si existe, se usa incluso con `--confirm`.
+No la configure en scripts del repo, perfiles de Agents ni logs. Los hijos de
+Executors, autopilot, sondas y bootstrap la eliminan explícitamente.
+
+Se aplica a `feature run|approve|rebase`, `feature spec|design --answers`,
+`review finding --accept|--reject`, `learning approve|reject`, `task retry`,
+`design review|direction|apply-direction`, `research run`, `worker run` directo,
+`eval run` (también con `--yes`) y `usage backfill` sin `--dry-run`.
+Las etapas internas sin decisión humana, la admisión explícita de
+companyAutopilot y las lecturas conservan sus reglas. DecisionsPanel sigue usando
+el WS privilegiado. Tras rotar el token, vuelva a abrir discovery y actualice
+la variable si la usa. Los fallos de confirmación no registran decisiones.
+
+Esta medida evita la suplantación basada solo en borrar marcadores. No evita que
+otro proceso con los permisos del operador lea discovery: véase
+[threat-model §9](../security/threat-model.md#9-ingreso-humano-con-token-privilegiado-sa-107).

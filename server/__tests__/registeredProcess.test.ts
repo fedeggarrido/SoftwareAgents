@@ -18,6 +18,7 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'registered-process-'));
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
   await removeTempDir(dir);
 }, 30_000);
@@ -43,6 +44,27 @@ function settle(child: ChildProcess, timeoutMs = 8000) {
 
 const marker = () => path.join(dir, 'launched');
 const command = () => ['-e', `require('fs').writeFileSync(${JSON.stringify(marker())}, 'x')`];
+
+it('never passes operator credentials to the supervisor or CLI, even through overrides', async () => {
+  vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'operator-secret');
+  const child = spawnRegisteredProcess(
+    process.execPath,
+    [
+      '-e',
+      "process.exit(Object.keys(process.env).some(k => k.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN') ? 42 : 0)",
+    ],
+    dir,
+    () => {},
+    undefined,
+    { pixel_agents_operator_token: 'override-secret' },
+  );
+  expect((await settle(child)).code).toBe(0);
+  const options = vi.mocked(childProcess.spawn).mock.calls.at(-1)![2]!;
+  expect(Object.keys(options.env!).map((key) => key.toUpperCase())).not.toContain(
+    'PIXEL_AGENTS_OPERATOR_TOKEN',
+  );
+  expect(process.env.PIXEL_AGENTS_OPERATOR_TOKEN).toBe('operator-secret');
+});
 
 it('a failed registration still closes, so executors release their slot and lock', async () => {
   const child = spawnRegisteredProcess(process.execPath, command(), dir, () => {

@@ -14,6 +14,7 @@ import { runTaskCommand } from '../src/commands/task.js';
 import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 vi.setConfig({ testTimeout: 300_000 });
 
@@ -65,6 +66,7 @@ beforeEach(() => {
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
+  operatorToken(root);
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
     vi.stubEnv(key, undefined);
   vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');

@@ -11,6 +11,7 @@ import { DIRECTION_WEIGHTS } from '../src/artDirection.js';
 import { runDesignCommand } from '../src/commands/design.js';
 import type { Executor } from '../src/executors/executor.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 const git = vi.hoisted(() => vi.fn(() => 'sa/design-test'));
 vi.mock('child_process', async (importOriginal) => ({
@@ -21,6 +22,7 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   git.mockReset().mockReturnValue('sa/design-test');
 });
 
@@ -29,6 +31,9 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
     vi.stubEnv(key, undefined);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'direction-command-'));
   roots.push(root);
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('USERPROFILE', root);
+  operatorToken(root);
   const brain = path.join(root, 'brain'),
     tree = path.join(root, 'proposal');
   fs.mkdirSync(brain);
@@ -208,3 +213,7 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
     ),
   ).toBe(false);
 });
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));

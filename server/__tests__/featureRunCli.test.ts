@@ -26,6 +26,7 @@ import * as processRecovery from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 vi.setConfig({ testTimeout: 300_000 });
@@ -130,6 +131,7 @@ beforeEach(async (context) => {
   fs.mkdirSync(path.join(repo, '.softwareagents/brain'), { recursive: true });
   fs.mkdirSync(path.join(root, '.pixel-agents'));
   for (const key of ['HOME', 'USERPROFILE']) vi.stubEnv(key, root);
+  operatorToken(root);
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex'));
   vi.stubEnv('SA_TEST_NO_RATE_LIMIT', '1');
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])

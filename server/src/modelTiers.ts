@@ -24,6 +24,7 @@ import {
   type SelectionSnapshot,
   unprovenWait,
 } from './executorSelection.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { type QuotaDecision, quotaGate } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
@@ -240,7 +241,7 @@ export function claudeEffortSupported(binary = 'claude', configDir?: string): re
   try {
     const help = execFileSync(binary, ['--help'], {
       cwd: os.tmpdir(),
-      ...(environment ? { env: { ...process.env, ...environment } } : {}),
+      env: withoutOperatorToken({ ...process.env, ...environment }),
       encoding: 'utf8',
       timeout: 3000,
       maxBuffer: 128 * 1024,

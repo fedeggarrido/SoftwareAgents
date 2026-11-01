@@ -6,6 +6,7 @@ import { recordAudit } from './auditLog.js';
 import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { companyAutopilotKey, readConfig } from './configPersistence.js';
 import { MANAGED_EXECUTION_ENV } from './evalGuard.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { resolveInside } from './pathGuard.js';
 import type { PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -148,7 +149,7 @@ function performAutopilot(enabled: boolean, result: { status: string }): string 
   if (enabled && !alive(state.pid) && Array.isArray(command) && command.length > 0) {
     const child = spawn(command[0], command.slice(1), {
       cwd: workspace,
-      env: { ...process.env, [MANAGED_EXECUTION_ENV]: 'autopilot' },
+      env: withoutOperatorToken({ ...process.env, [MANAGED_EXECUTION_ENV]: 'autopilot' }),
       detached: true,
       stdio: 'ignore',
       windowsHide: true,

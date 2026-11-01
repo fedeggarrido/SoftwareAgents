@@ -36,6 +36,7 @@ import {
 } from '../src/researchHttp.js';
 import { exampleAdapter } from './fixtures/research/exampleAdapter.js';
 import * as redditFixture from './fixtures/research/reddit.json';
+import { operatorToken } from './helpers/operatorToken.js';
 
 vi.mock('dns/promises', () => ({ lookup: vi.fn() }));
 vi.mock('https', async (original) => ({
@@ -513,6 +514,8 @@ it('human command uses a fake executor, persists report/cache and audits without
     vi.stubEnv(key, undefined);
   const home = fs.mkdtempSync(path.join(process.env.HOME ?? os.tmpdir(), 'research-test-'));
   vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+  operatorToken(home);
   try {
     const config: ProjectConfig = {
       repoRoot: home,

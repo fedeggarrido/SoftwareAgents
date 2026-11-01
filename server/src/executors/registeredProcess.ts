@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'child_process';
 
 import { MANAGED_EXECUTION_ENV } from '../evalGuard.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { WINDOWS_JOB_LAUNCH } from './windowsJob.js';
 
 // A worker may die immediately after spawn. This supervisor cannot launch the CLI
@@ -84,14 +85,22 @@ export function spawnRegisteredProcess(
   if (!register && process.platform !== 'win32')
     return spawn(binary, args, {
       cwd,
-      env: { ...process.env, ...environment, [MANAGED_EXECUTION_ENV]: 'worker' },
+      env: withoutOperatorToken({
+        ...process.env,
+        ...environment,
+        [MANAGED_EXECUTION_ENV]: 'worker',
+      }),
       windowsHide: true,
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   const child = spawn(process.execPath, ['-e', supervisor, binary, ...args], {
     cwd,
-    env: { ...process.env, ...environment, [MANAGED_EXECUTION_ENV]: 'worker' },
+    env: withoutOperatorToken({
+      ...process.env,
+      ...environment,
+      [MANAGED_EXECUTION_ENV]: 'worker',
+    }),
     windowsHide: true,
     // UV_PROCESS_DETACHED keeps Windows out of libuv's worker-owned
     // KILL_ON_JOB_CLOSE job. Keep windowsHide as well: no console window.

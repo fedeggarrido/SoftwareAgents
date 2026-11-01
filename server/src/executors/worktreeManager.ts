@@ -5,6 +5,7 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { promisify } from 'util';
 
+import { withoutOperatorToken } from '../featureIngress.js';
 import { assertDirectRef } from '../gitPublication.js';
 import { resolveInside } from '../pathGuard.js';
 import { taskBranchBase } from '../taskBranchBase.js';
@@ -209,9 +210,12 @@ export class WorktreeManager {
   }
 
   private git(cwd: string, args: string[]): Promise<string> {
-    return execute('git', args, { cwd, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }).then(
-      ({ stdout }) => stdout.trim(),
-    );
+    return execute('git', args, {
+      cwd,
+      env: withoutOperatorToken(process.env),
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    }).then(({ stdout }) => stdout.trim());
   }
 
   private visitLinks(directory: string, visit: (link: string) => void): void {
@@ -293,7 +297,7 @@ export class WorktreeManager {
         cwd: directory,
         windowsHide: true,
         maxBuffer: 8 * 1024 * 1024,
-        env: { ...process.env, HUSKY: '0' },
+        env: withoutOperatorToken({ ...process.env, HUSKY: '0' }),
       },
     );
     // Empty dependency sets may not create node_modules; keep retries deterministic.

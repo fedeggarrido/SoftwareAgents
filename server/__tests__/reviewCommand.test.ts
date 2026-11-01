@@ -1,6 +1,10 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { runReviewCommand } from '../src/commands/review.js';
+import { operatorToken } from './helpers/operatorToken.js';
 
 const mocks = vi.hoisted(() => ({
   record: vi.fn(async () => {}),
@@ -33,6 +37,10 @@ it('records a human decision on the persisted verifier execution', async () => {
     recordFindingDecision: mocks.record,
     close: mocks.close,
   });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'review-operator-'));
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+  operatorToken(home);
   await runReviewCommand(
     ['finding', 'T', '0', '--reject', '--reason', 'Expected behavior'],
     '.',
@@ -49,6 +57,8 @@ it('records a human decision on the persisted verifier execution', async () => {
     }),
   );
   expect(mocks.close).toHaveBeenCalledOnce();
+  fs.rmSync(home, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 it('rejects conflicting decisions and negative indexes before store access', async () => {
@@ -59,3 +69,7 @@ it('rejects conflicting decisions and negative indexes before store access', asy
     await expect(runReviewCommand(args)).rejects.toThrow();
   expect(mocks.open).not.toHaveBeenCalled();
 });
+vi.mock('os', async (original) => ({
+  ...(await original<typeof import('os')>()),
+  homedir: () => process.env.HOME!,
+}));

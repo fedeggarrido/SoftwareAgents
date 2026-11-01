@@ -1,5 +1,5 @@
 import { CliUsageError } from '../cliErrors.js';
-import { featureIngressActor } from '../featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { findingPrecision } from '../findingPrecision.js';
 import { proposeLearnings } from '../learnings.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -9,6 +9,7 @@ const USAGE =
   'Usage: pixel-agents review finding <TASK> <index> --accept|--reject [--reason <text>] | precision [--feature <KEY>] [--json]';
 
 export async function runReviewCommand(argv: string[], cwd = process.cwd(), log = console.log) {
+  if (argv[0] === 'finding') argv = await confirmHumanIngress(argv);
   const [command, ...args] = argv;
   let feature: string | undefined;
   let json = false;

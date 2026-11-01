@@ -28,7 +28,11 @@ import {
 import { validateDesignReport } from '../designer.js';
 import { ClaudeCliExecutor } from '../executors/claudeCliExecutor.js';
 import type { Executor } from '../executors/executor.js';
-import { featureIngressActor } from '../featureIngress.js';
+import {
+  confirmHumanIngress,
+  featureIngressActor,
+  withoutOperatorToken,
+} from '../featureIngress.js';
 import { resolveClaudeBinary } from '../modelTiers.js';
 import { resolveInside } from '../pathGuard.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -60,6 +64,7 @@ export async function runDesignCommand(
   log = console.log,
   options: DesignCommandOptions = {},
 ): Promise<void> {
+  if (!(argv[0] === 'review' && options.pipeline)) argv = await confirmHumanIngress(argv);
   const usage =
     'Usage: pixel-agents design review|direction [--views office,features,audit,backlog,hud] [--json] | apply-direction --decision <id> [--json]';
   const mode = argv[0];
@@ -224,19 +229,20 @@ export async function runDesignCommand(
           if (fs.existsSync(prettier))
             execFileSync(process.execPath, [prettier, '--write', ...files], {
               cwd: tree,
+              env: withoutOperatorToken(process.env),
               windowsHide: true,
             });
           const run = (args: string[]) =>
             execFileSync('git', args, {
               cwd: tree,
               windowsHide: true,
-              env: {
+              env: withoutOperatorToken({
                 ...process.env,
                 GIT_AUTHOR_NAME: 'SoftwareAgents Runtime',
                 GIT_AUTHOR_EMAIL: 'runtime@softwareagents.local',
                 GIT_COMMITTER_NAME: 'SoftwareAgents Runtime',
                 GIT_COMMITTER_EMAIL: 'runtime@softwareagents.local',
-              },
+              }),
             });
           run(['add', '--', ...files]);
           // --only keeps unrelated staged changes out of the runtime's proposal commit.

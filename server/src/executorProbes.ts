@@ -15,6 +15,7 @@ import {
 } from './constants.js';
 import { resolveCodexBinary } from './executors/codexCliExecutor.js';
 import { processCancellation } from './executors/processCancellation.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { resolveClaudeBinary } from './modelTiers.js';
 
 /**
@@ -107,7 +108,7 @@ export const runProbe: ProbeRunner = (file, args, environment) =>
     try {
       child = spawn(file, [...args], {
         cwd: os.tmpdir(),
-        env: environment ? { ...process.env, ...environment } : undefined,
+        env: withoutOperatorToken({ ...process.env, ...environment }),
         shell: false,
         windowsHide: true,
         detached: process.platform !== 'win32',

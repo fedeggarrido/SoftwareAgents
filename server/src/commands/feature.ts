@@ -7,7 +7,7 @@ import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import { developerRequest, lastDeveloperFailure, pushDeveloperBranch } from '../developer.js';
 import { featureDocument } from '../featureArtifacts.js';
-import { featureIngressActor } from '../featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { assertFeatureRunIngress, runFeature } from '../featureRun.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -87,6 +87,12 @@ export async function runFeatureCommand(
   log = console.log,
   workerOptions: Pick<WorkerOptions, 'binaryArgs' | 'probe'> = {},
 ): Promise<void> {
+  if (
+    ['approve', 'rebase'].includes(argv[0]) ||
+    (['spec', 'design'].includes(argv[0]) && argv.includes('--answers')) ||
+    (argv[0] === 'run' && featureIngressActor() === 'human')
+  )
+    argv = await confirmHumanIngress(argv);
   const [command, key, ...rest] = argv;
   if (
     !/^FEAT-\d{3}$/.test(key ?? '') ||

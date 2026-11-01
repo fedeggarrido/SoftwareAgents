@@ -240,13 +240,27 @@ describe('dist/cli.js entry-point guard', () => {
             ['worker', 'run'],
           ]) {
             const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+              // worker run is a human decision (SA-107): confirm with the live test server's
+              // token, as the operator would, and without managed-execution markers.
+              const operatorEnv = Object.fromEntries(
+                Object.entries(process.env).filter(
+                  ([key]) =>
+                    !['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'].includes(
+                      key,
+                    ),
+                ),
+              );
+              const token = JSON.parse(
+                fs.readFileSync(path.join(tmpHome, '.pixel-agents', 'server.json'), 'utf8'),
+              ).token as string;
               const child = spawn(process.execPath, [CLI_BUNDLE, ...args], {
                 cwd: workspace,
                 env: {
-                  ...process.env,
+                  ...operatorEnv,
                   HOME: tmpHome,
                   USERPROFILE: tmpHome,
                   CODEX_HOME: path.join(tmpHome, 'codex'),
+                  PIXEL_AGENTS_OPERATOR_TOKEN: token,
                 },
                 stdio: ['ignore', 'pipe', 'pipe'],
               });

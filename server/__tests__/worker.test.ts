@@ -28,6 +28,7 @@ import { telemetryAttributes } from '../src/telemetryCommand.js';
 import { acquireTaskLock, parseWorkerArgs, runWorker, workerCommitSubject } from '../src/worker.js';
 import { processStartIdentity } from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
+import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
@@ -2087,6 +2088,13 @@ describe('supervised worker', () => {
     const worker = vi.fn(async () => ({ branch: '', commit: null, stat: '' }));
     await dispatchCli([], { server, worker });
     await dispatchCli(['--port', '8123'], { server, worker });
+    // worker run is a human decision (SA-107): isolated operator token, no agent markers.
+    for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+      vi.stubEnv(key, undefined);
+    const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-operator-'));
+    vi.stubEnv('HOME', operatorHome);
+    vi.stubEnv('USERPROFILE', operatorHome);
+    operatorToken(operatorHome);
     await dispatchCli(['worker', 'run', '--task', 'SA-999', '--brief', 'brief.md'], {
       server,
       worker,

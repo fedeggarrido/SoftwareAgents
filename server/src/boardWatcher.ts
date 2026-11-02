@@ -14,6 +14,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import { type BoardSelection, BoardSources, loadBoardSelection } from './boardSources.js';
 import { readAutopilot } from './companyControl.js';
 import { BOARD_RECENT_EVENTS } from './constants.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { claudeQuota, codexQuota } from './quotaReader.js';
 import { readRows } from './sqliteReadOnly.js';
 import { type WorkStoreBoard, WorkStoreBoardSource } from './workStoreBoardSource.js';
@@ -156,7 +157,11 @@ export function gitCommonDir(workspace: string): string | undefined {
     const out = execFileSync(
       'git',
       ['-C', workspace, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+      {
+        env: withoutOperatorToken(process.env),
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
     );
     return out.trim() || undefined;
   } catch {

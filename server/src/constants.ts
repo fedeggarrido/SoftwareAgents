@@ -293,3 +293,9 @@ export const LEARNING_CONTEXT_CHARS = 2400;
 export const CHARACTER_DETAIL_UNKNOWN = 'desconocido';
 export const CHARACTER_DETAIL_TASK_PREFIX = 'tarea ';
 export const CHARACTER_DETAIL_SECOND_MS = 1000;
+// Human ingress: bounded, domain-separated proof of the live server's token.
+export const OPERATOR_PROOF_PATH = '/api/operator/proof';
+export const OPERATOR_PROOF_CONTEXT = 'pixel-agents:operator-proof:v1:';
+export const OPERATOR_PROOF_NONCE_BYTES = 32;
+export const OPERATOR_PROOF_TIMEOUT_MS = 2000;
+export const OPERATOR_PROOF_MAX_BODY_CHARS = 1024;

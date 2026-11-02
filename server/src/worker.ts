@@ -99,6 +99,7 @@ import {
   executorSlotsDirectory,
   withMachineAdmission,
 } from './executorSlots.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { assertTaskDependencies, featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
 import { HumanDecisions } from './humanDecisions.js';
@@ -243,13 +244,19 @@ export function parseWorkerArgs(argv: string[]): WorkerArgs {
 }
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
+  return execFileSync('git', args, {
+    env: withoutOperatorToken(process.env),
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+  }).trim();
 }
 
 function requireGitIdentity(cwd: string): void {
   try {
     for (const identity of ['GIT_AUTHOR_IDENT', 'GIT_COMMITTER_IDENT'])
       execFileSync('git', ['var', identity], {
+        env: withoutOperatorToken(process.env),
         cwd,
         encoding: 'utf8',
         windowsHide: true,
@@ -835,6 +842,7 @@ async function runWorkerExecution(
     for (const identity of ['GIT_AUTHOR_IDENT', 'GIT_COMMITTER_IDENT'])
       if (!options.evaluation)
         execFileSync('git', ['var', identity], {
+          env: withoutOperatorToken(process.env),
           cwd,
           encoding: 'utf8',
           windowsHide: true,
@@ -2528,6 +2536,7 @@ async function runWorkerExecution(
         'git',
         ['-c', 'commit.gpgSign=false', 'commit-tree', treeHash, '-p', startingHead!],
         {
+          env: withoutOperatorToken(process.env),
           cwd: tree.path,
           input: `${subject}\n\nSoftwareAgents-Execution: ${executionId}\n`,
           encoding: 'utf8',

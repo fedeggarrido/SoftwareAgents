@@ -7,6 +7,7 @@ import type { CharacterDetail } from '../../../core/src/messages.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import { projectCharacterDetail, readCharacterDetail } from '../characterDetail.js';
 import { EXECUTION_REGISTRY_LOCK_TIMEOUT_MS } from '../constants.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { contentionNow, contentionPause, isFileContention } from '../fileContention.js';
 import type { CascadeAttempt } from '../modelCascade.js';
 import { resolveInside } from '../pathGuard.js';
@@ -38,7 +39,12 @@ export interface ExecutionRecord extends SessionExecution {
 }
 
 function git(worktree: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: worktree, encoding: 'utf8', windowsHide: true }).trim();
+  return execFileSync('git', args, {
+    env: withoutOperatorToken(process.env),
+    cwd: worktree,
+    encoding: 'utf8',
+    windowsHide: true,
+  }).trim();
 }
 
 /** Local transitional ledger. A held/crashed lock fails closed; never steal it. */

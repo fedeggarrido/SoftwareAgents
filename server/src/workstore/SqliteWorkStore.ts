@@ -16,6 +16,7 @@ import {
 import { needsDesignReview } from '../designReviewLoop.js';
 import { developerGuardFailure } from '../developerFailure.js';
 import { evalGit } from '../evalTasks.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { resolveInside } from '../pathGuard.js';
 import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
@@ -120,7 +121,7 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
   const { stdout } = await execute(
     'git',
     ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-    { cwd: options.repositoryPath, windowsHide: true },
+    { env: withoutOperatorToken(process.env), cwd: options.repositoryPath, windowsHide: true },
   );
   const commonDir = fs.realpathSync.native(stdout.trim());
   fs.mkdirSync(resolveInside(commonDir, 'softwareagents'), { recursive: true });

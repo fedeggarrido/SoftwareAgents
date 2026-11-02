@@ -382,10 +382,17 @@ ni seguridad semántica de sus resúmenes.
   `PIXEL_AGENTS_OPERATOR_TOKEN` o `--confirm` al final del comando (stdin TTY en
   modo raw, sin eco; sin TTY falla cerrado). Compara digests SHA-256 de tamaño fijo
   con `timingSafeEqual`, antes de escribir artefactos, abrir WorkStore o auditar.
+  SA-QA-107 resuelve el perfil de esta comprobación con `os.userInfo().homedir`,
+  sin aceptar `HOME` ni `USERPROFILE` del llamador. Después exige una prueba del
+  servidor activo en `127.0.0.1`: HMAC-SHA-256 de un nonce aleatorio nuevo y su
+  PID, con contexto de protocolo y el token como clave. El cliente nunca envía
+  el token y falla cerrado ante errores, respuesta inválida o timeout absoluto.
   Los errores nunca incluyen el valor recibido. Los marcadores siguen denegando
   decisiones incluso con token. Executors, supervisor, autopilot, sondas y
   bootstrap eliminan explícitamente la variable después de fusionar overrides,
-  también con otras mayúsculas en Windows.
+  también con otras mayúsculas en Windows. El filtrado cubre además git,
+  verificadores, capturas, limpieza y recuperación de procesos. Los terminales
+  de VS Code anulan la variable y sus variantes presentes con valores `null` en `env`.
 - **Inventario CLI:** `feature run|approve|rebase`, `feature spec|design --answers`,
   `review finding --accept|--reject`, `learning approve|reject`, `task retry`,
   `design review|direction|apply-direction`, `research run` y `usage backfill`

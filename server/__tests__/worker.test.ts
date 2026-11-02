@@ -165,7 +165,19 @@ describe('worker lifecycle SA-039', () => {
         yield { type: 'finished', exitCode: 0, resultSummary: 'done' };
       })(),
     });
+    vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'operator-secret');
+    vi.stubEnv('pixel_agents_operator_token', 'case-override');
+    const beforeWorker = vi.mocked(execFileSync).mock.calls.length;
     await runWorker({ task: 'SA-999' }, { cwd: repo, log: () => {} });
+    const workerChildren = vi.mocked(execFileSync).mock.calls.slice(beforeWorker);
+    expect(workerChildren.length).toBeGreaterThan(0);
+    for (const call of workerChildren) {
+      const env = (call[2] as { env: NodeJS.ProcessEnv }).env;
+      expect(env).toBeDefined();
+      expect(
+        Object.keys(env).some((key) => key.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN'),
+      ).toBe(false);
+    }
     expect(limited).toHaveBeenCalledTimes(1);
     expect(fallback).toHaveBeenCalledTimes(1);
     const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });

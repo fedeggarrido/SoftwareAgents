@@ -58,7 +58,11 @@ function commonDir(): string | undefined {
     return execFileSync(
       'git',
       ['-C', workspace, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+      {
+        env: withoutOperatorToken(process.env),
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
     ).trim();
   } catch {
     return undefined;

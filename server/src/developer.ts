@@ -17,6 +17,7 @@ import {
   developerGuardFailure,
   MissingTestError,
 } from './developerFailure.js';
+import { withoutOperatorToken } from './featureIngress.js';
 export { ChangeZonesExceededError, MissingTestError } from './developerFailure.js';
 import { validateDeveloperTests } from './developerTests.js';
 import { assertEvalIntegrity, evalChangedFiles } from './evalIntegrity.js';
@@ -749,7 +750,12 @@ export async function pushDeveloperBranch(
       execFileSync(
         'git',
         ['-c', 'core.hooksPath=', 'push', '--', url, `${review.sha}:refs/heads/${review.branch}`],
-        { cwd: config.repoRoot, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+        {
+          env: withoutOperatorToken(process.env),
+          cwd: config.repoRoot,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
       );
     } catch {
       audit('failed');

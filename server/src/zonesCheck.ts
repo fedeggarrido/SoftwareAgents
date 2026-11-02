@@ -10,6 +10,7 @@ import {
   ZONES_GIT_BUFFER_BYTES,
   ZONES_GIT_TIMEOUT_MS,
 } from './constants.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
 import { taskZones } from './zoneAdmission.js';
@@ -40,6 +41,7 @@ export async function checkZones(root: string, tasks: ZoneTask[] = []): Promise<
         'git',
         ['-c', 'core.hooksPath=', '-c', 'core.fsmonitor=false', ...args],
         {
+          env: withoutOperatorToken(process.env),
           cwd: root,
           windowsHide: true,
           timeout: ZONES_GIT_TIMEOUT_MS,

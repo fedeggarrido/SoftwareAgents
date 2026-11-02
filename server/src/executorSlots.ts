@@ -6,6 +6,7 @@ import * as path from 'path';
 
 import { LAYOUT_FILE_DIR } from './constants.js';
 import type { ExecutorId } from './executors/executor.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import {
   contentionNow,
   contentionPause,
@@ -57,7 +58,13 @@ export function slotProcessIdentity(pid: number): string | null | undefined {
           '-Command',
           `$ErrorActionPreference='Stop'; try { (Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString() } catch { $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().Ticks.ToString() } }`,
         ],
-        { encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+        {
+          env: withoutOperatorToken(process.env),
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 5000,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
       ).trim();
       if (!/^\d+$/.test(identity)) return dead() ? null : undefined;
     } else if (process.platform === 'linux') {
@@ -70,7 +77,7 @@ export function slotProcessIdentity(pid: number): string | null | undefined {
       identity = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
         encoding: 'utf8',
         timeout: 5000,
-        env: { ...process.env, LC_ALL: 'C' },
+        env: withoutOperatorToken({ ...process.env, LC_ALL: 'C' }),
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();
       if (!identity) return dead() ? null : undefined;

@@ -5,6 +5,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 
 import { evalGit } from './evalTasks.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { resolveInside } from './pathGuard.js';
 
 const execute = promisify(execFile);
@@ -39,21 +40,26 @@ export async function createEvalWorktree(cwd: string, common: string, base: stri
       await execute(
         'powershell',
         ['-NoProfile', '-File', script, '-Path', tree, '-DiscardChanges'],
-        {
-          cwd,
-          windowsHide: true,
-        },
+        { env: withoutOperatorToken(process.env), cwd, windowsHide: true },
       );
     } else {
       unlinkTreeLinks(tree);
-      await execute('git', ['worktree', 'remove', '--force', tree], { cwd, windowsHide: true });
+      await execute('git', ['worktree', 'remove', '--force', tree], {
+        env: withoutOperatorToken(process.env),
+        cwd,
+        windowsHide: true,
+      });
     }
     // No branch, dependency installation or Git configuration was created.
     if (evalGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']) !== common)
       throw new Error('Git common directory changed');
   };
   try {
-    await execute('git', ['worktree', 'add', '--detach', tree, base], { cwd, windowsHide: true });
+    await execute('git', ['worktree', 'add', '--detach', tree, base], {
+      env: withoutOperatorToken(process.env),
+      cwd,
+      windowsHide: true,
+    });
   } catch (error) {
     // Git may register a tree and then fail its checkout (disk/checkout filter error).
     if (

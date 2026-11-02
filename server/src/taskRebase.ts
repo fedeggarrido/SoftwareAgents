@@ -10,6 +10,7 @@ import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { developerRequest } from './developer.js';
 import { evalChangedFiles } from './evalIntegrity.js';
 import { evalGit } from './evalTasks.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { featureIngressActor } from './featureIngress.js';
 import { featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef, publishDirectRef } from './gitPublication.js';
@@ -285,9 +286,15 @@ export async function rebaseFeatureTask(
         `${base}..${sha}`,
         '--',
       ],
-      { cwd: root, windowsHide: true, maxBuffer: TASK_CLI_INPUT_BYTES },
+      {
+        env: withoutOperatorToken(process.env),
+        cwd: root,
+        windowsHide: true,
+        maxBuffer: TASK_CLI_INPUT_BYTES,
+      },
     );
     return execFileSync('git', ['patch-id', '--stable'], {
+      env: withoutOperatorToken(process.env),
       cwd: root,
       input: diff,
       encoding: 'utf8',

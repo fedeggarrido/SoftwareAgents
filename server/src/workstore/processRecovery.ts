@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { WORKSTORE_PROCESS_TIMEOUT_MS } from '../constants.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { windowsTerminationScript } from './windowsProcessRecovery.js';
 
 const execute = promisify(execFile);
@@ -11,7 +12,12 @@ async function powershell(script: string): Promise<string> {
     const { stdout } = await execute(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', script],
-      { encoding: 'utf8', windowsHide: true, timeout: WORKSTORE_PROCESS_TIMEOUT_MS },
+      {
+        env: withoutOperatorToken(process.env),
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: WORKSTORE_PROCESS_TIMEOUT_MS,
+      },
     );
     return stdout.trim();
   } catch (error) {

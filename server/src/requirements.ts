@@ -8,6 +8,7 @@ import * as featureSchema from '../../core/schemas/feature-spec.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import { readTaskInput, taskDirectory, taskPath } from './commands/taskFiles.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { parseFeatureSpec } from './featureSpec.js';
 import { SchemaValidationError } from './schemaValidation.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -43,6 +44,7 @@ export function requirementsBrief(input: RequirementsRequest, errors: string[] =
  * This is a final guard, not an OS sandbox; native tools remain read-only (SA-062). */
 export function requirementsSnapshot(cwd: string): Map<string, string> {
   const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others'], {
+    env: withoutOperatorToken(process.env),
     cwd,
     encoding: 'utf8',
     windowsHide: true,

@@ -196,6 +196,7 @@ export async function runDesignCommand(
       try {
         const git = (args: string[]) =>
           execFileSync('git', args, {
+            env: withoutOperatorToken(process.env),
             cwd: config.repoRoot,
             encoding: 'utf8',
             windowsHide: true,
@@ -207,6 +208,7 @@ export async function runDesignCommand(
           if (!options.proposalTree)
             git(['worktree', 'add', '-b', `sa/design-${key}`, tree, 'HEAD']);
           const branch = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], {
+            env: withoutOperatorToken(process.env),
             cwd: tree,
             encoding: 'utf8',
             windowsHide: true,

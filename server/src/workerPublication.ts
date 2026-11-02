@@ -7,6 +7,7 @@ import { AuditLog } from './auditLog.js';
 import { taskDirectory, taskPath } from './commands/taskFiles.js';
 import { evalGit } from './evalTasks.js';
 import { guardProtectedPaths } from './executors/protectedPaths.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { assertDirectRef, publishDirectRef } from './gitPublication.js';
 import { guardRequirementsWrites, openRequirementsQuestions } from './requirements.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
@@ -54,6 +55,7 @@ export async function publishWorkerResult(
       'git',
       ['-c', 'commit.gpgSign=false', 'commit-tree', pending.tree, '-p', pending.before],
       {
+        env: withoutOperatorToken(process.env),
         cwd: tree,
         input: `${draft.subject}\n\nSoftwareAgents-Execution: ${pending.execution}\n`,
         encoding: 'utf8',

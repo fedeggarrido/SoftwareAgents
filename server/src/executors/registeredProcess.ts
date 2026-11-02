@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'child_process';
 
 import { MANAGED_EXECUTION_ENV } from '../evalGuard.js';
-import { withoutOperatorToken } from '../featureIngress.js';
+import { OPERATOR_TOKEN_ENV, withoutOperatorToken } from '../featureIngress.js';
 import { WINDOWS_JOB_LAUNCH } from './windowsJob.js';
 
 // A worker may die immediately after spawn. This supervisor cannot launch the CLI
@@ -10,6 +10,8 @@ import { WINDOWS_JOB_LAUNCH } from './windowsJob.js';
 // this verifiable root alive for SA-026, even if the CLI has already exited.
 const supervisor = `
 const { spawn } = require('child_process');
+const OPERATOR_TOKEN_ENV = ${JSON.stringify(OPERATOR_TOKEN_ENV)};
+const withoutOperatorToken = env => Object.fromEntries(Object.entries(env).filter(([key]) => key.toUpperCase() !== OPERATOR_TOKEN_ENV));
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});
 let launched = false;
@@ -34,7 +36,7 @@ process.on('message', message => {
   if (message !== 'launch') return process.exit(1);
   launched = true;
   const launch = () => {
-  const child = spawn(process.argv[1], process.argv.slice(2), { stdio: 'inherit', windowsHide: true });
+  const child = spawn(process.argv[1], process.argv.slice(2), { env: withoutOperatorToken(process.env), stdio: 'inherit', windowsHide: true });
   child.once('error', () => {
     if (process.connected) process.send({ type: 'spawn_error' }, () => {});
   });
@@ -47,7 +49,7 @@ process.on('message', message => {
   if (process.platform !== 'win32') return launch();
   job = spawn(process.env.SystemRoot + '\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe',
     ['-NoProfile','-NonInteractive','-EncodedCommand', ${JSON.stringify(Buffer.from(WINDOWS_JOB_LAUNCH, 'utf16le').toString('base64'))}],
-    { windowsHide: true, env: {...process.env, SA_JOB_ROOT: String(process.pid)}, stdio: ['pipe','pipe','ignore'] });
+    { windowsHide: true, env: withoutOperatorToken({...process.env, SA_JOB_ROOT: String(process.pid)}), stdio: ['pipe','pipe','ignore'] });
   let ready = false;
   job.stdin.on('error', () => process.exit(1));
   require('readline').createInterface({input:job.stdout}).on('line', line => {

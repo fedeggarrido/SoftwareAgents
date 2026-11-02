@@ -4,6 +4,8 @@ import * as path from 'path';
 import { PassThrough } from 'stream';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { AgentStateStore } from '../src/agentStateStore.js';
+import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
 import { runDesignCommand } from '../src/commands/design.js';
 import { runFeatureCommand } from '../src/commands/feature.js';
@@ -17,25 +19,52 @@ import {
   readOperatorToken,
   withoutOperatorToken,
 } from '../src/featureIngress.js';
+import {
+  createHttpServer,
+  type HttpServerHandle,
+  type HttpServerOptions,
+} from '../src/httpServer.js';
+import { loadProjectConfig } from '../src/projectConfig.js';
 import { runUsageCommand } from '../src/usageCommand.js';
-import { operatorToken } from './helpers/operatorToken.js';
+import * as workstore from '../src/workstore/SqliteWorkStore.js';
 
 vi.mock('../src/projectConfig.js', () => ({ loadProjectConfig: vi.fn(() => undefined) }));
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
+  userInfo: vi.fn(),
 }));
 let home: string;
-beforeEach(() => {
+let server: HttpServerHandle;
+let serverOptions: HttpServerOptions;
+const token = 'test-operator-capability';
+beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'human-ingress-'));
   vi.stubEnv('HOME', home);
   vi.stubEnv('USERPROFILE', home);
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
     vi.stubEnv(key, undefined);
   vi.stubEnv('CI', undefined);
-  operatorToken(home);
+  vi.mocked(os.userInfo).mockReturnValue({
+    homedir: home,
+    uid: 1,
+    gid: 1,
+    username: 'test',
+    shell: null,
+  });
+  serverOptions = { embedded: true, token, store: new AgentStateStore() };
+  server = await createHttpServer(serverOptions);
+  fs.mkdirSync(path.join(home, '.pixel-agents'));
+  writeDiscovery();
+  vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', token);
+  vi.spyOn(workstore, 'openWorkStore');
+  vi.spyOn(AuditLog.prototype, 'append');
 });
-afterEach(() => {
+function writeDiscovery(value: unknown = { pid: process.pid, port: server.port, token }) {
+  fs.writeFileSync(path.join(home, '.pixel-agents/server.json'), JSON.stringify(value));
+}
+afterEach(async () => {
+  await server?.app.close();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   fs.rmSync(home, { recursive: true, force: true });
@@ -77,11 +106,15 @@ it.each(decisions.map((run, index) => ({ run, index })))(
   'rejects decision $index without markers or a valid token, before any writes',
   async ({ run }) => {
     const before = fs.readdirSync(path.join(home, '.pixel-agents'));
+    vi.mocked(loadProjectConfig).mockClear();
     vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', undefined);
     await expect(run()).rejects.toThrow('PIXEL_AGENTS_OPERATOR_TOKEN');
     vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'incorrect-secret');
     await expect(run()).rejects.toThrow('Invalid operator token');
     expect(fs.readdirSync(path.join(home, '.pixel-agents'))).toEqual(before);
+    expect(loadProjectConfig).not.toHaveBeenCalled();
+    expect(workstore.openWorkStore).not.toHaveBeenCalled();
+    expect(AuditLog.prototype.append).not.toHaveBeenCalled();
   },
 );
 
@@ -92,7 +125,7 @@ it('accepts the current capability, strips only trailing --confirm, and rejects 
   ]);
   fs.writeFileSync(
     path.join(home, '.pixel-agents/server.json'),
-    JSON.stringify({ pid: process.pid, port: 43210, token: 'rotated' }),
+    JSON.stringify({ pid: process.pid, port: server.port, token: 'rotated' }),
   );
   await expect(confirmHumanIngress([])).rejects.toThrow('Invalid operator token');
 });
@@ -104,6 +137,65 @@ it('admits a confirmed direct worker launch without invoking a real executor', a
     server: vi.fn(async () => {}),
   });
   expect(worker).toHaveBeenCalledWith(expect.objectContaining({ task: 'SA-107' }));
+});
+
+it.each([
+  'missing',
+  'unreadable',
+  'malformed',
+  'invalid shape',
+  'dead PID',
+  'unrelated live PID',
+  'proof mismatch',
+])('rejects %s discovery before every mutation sink', async (scenario) => {
+  const record = path.join(home, '.pixel-agents/server.json');
+  if (scenario === 'missing') fs.unlinkSync(record);
+  if (scenario === 'unreadable') {
+    const read = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((
+      file: fs.PathOrFileDescriptor,
+      ...args: unknown[]
+    ) => {
+      if (file === record) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return Reflect.apply(read, fs, [file, ...args]);
+    }) as typeof fs.readFileSync);
+  }
+  if (scenario === 'malformed') fs.writeFileSync(record, '{');
+  if (scenario === 'invalid shape') writeDiscovery({ pid: process.pid, port: 0, token });
+  if (scenario === 'dead PID')
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error(), { code: 'ESRCH' });
+    });
+  if (scenario === 'unrelated live PID') await server.app.close();
+  if (scenario === 'proof mismatch') serverOptions.token = 'unrelated-secret';
+  vi.mocked(loadProjectConfig).mockClear();
+  for (const run of decisions) await expect(run()).rejects.toThrow('PIXEL_AGENTS_OPERATOR_TOKEN');
+  expect(loadProjectConfig).not.toHaveBeenCalled();
+  expect(workstore.openWorkStore).not.toHaveBeenCalled();
+  expect(AuditLog.prototype.append).not.toHaveBeenCalled();
+  expect(fs.readdirSync(home)).toEqual(['.pixel-agents']);
+});
+
+it('ignores forged HOME and USERPROFILE even with a live PID and matching invented token', async () => {
+  const forged = path.join(home, 'forged');
+  fs.mkdirSync(path.join(forged, '.pixel-agents'), { recursive: true });
+  fs.writeFileSync(
+    path.join(forged, '.pixel-agents/server.json'),
+    JSON.stringify({ pid: process.pid, port: server.port, token: 'invented' }),
+  );
+  vi.stubEnv('HOME', forged);
+  vi.stubEnv('USERPROFILE', forged);
+  vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'invented');
+  await expect(confirmHumanIngress([])).rejects.toThrow('Invalid operator token');
+  vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', token);
+  await expect(confirmHumanIngress([])).resolves.toEqual([]);
+});
+
+it('fails closed if the OS account cannot be resolved', async () => {
+  vi.mocked(os.userInfo).mockImplementation(() => {
+    throw new Error('account unavailable');
+  });
+  await expect(confirmHumanIngress([])).rejects.toThrow('PIXEL_AGENTS_OPERATOR_TOKEN');
 });
 
 it.each(['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])(

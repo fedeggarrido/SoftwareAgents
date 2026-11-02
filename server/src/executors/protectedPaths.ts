@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 
 import type { ProjectOperatorConfig } from '../../../core/src/project.js';
 import { AuditLog } from '../auditLog.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { evaluatePolicy, type PolicyActor, type PolicyDecision } from '../policy.js';
 
 export const DEFAULT_PROTECTED_PATHS = Object.freeze([
@@ -64,6 +65,7 @@ export function guardProtectedPaths(options: ProtectedPathsOptions): {
 } {
   const git = (args: string[]) =>
     execFileSync('git', args, {
+      env: withoutOperatorToken(process.env),
       cwd: options.cwd,
       encoding: 'utf8',
       windowsHide: true,

@@ -92,7 +92,12 @@ single pointer reaches at most one server during mixed-version operation.
 Abra primero la oficina del Project. Los comandos que registran decisiones humanas
 exigen el token de la instancia seleccionada por `~/.pixel-agents/server.json`
 (el mismo puntero predeterminado de `pixel-agents token rotate`). La instancia
-debe seguir viva. El servidor es compartido entre Projects: discovery no publica
+debe seguir viva y demostrar que conoce el token mediante un HMAC de un nonce
+nuevo y su PID, sin recibir el token del cliente. Esta comprobación lee el perfil
+del usuario del SO (`os.userInfo().homedir`), sin confiar en `HOME` o `USERPROFILE`.
+Solo contacta con `127.0.0.1`; una instancia sin ese listener, una versión sin
+la ruta de prueba o cualquier error/timeout deniega la confirmación.
+El servidor es compartido entre Projects: discovery no publica
 un token distinto por Project. Si hay varias oficinas, compruebe cuál señala ese
 puntero; el token de otra instancia no confirma el comando.
 
@@ -103,7 +108,8 @@ fin de entrada cancelan; no se admite un pipe. No pegue el token en argv ni en
 archivos del Project. También puede proporcionar `PIXEL_AGENTS_OPERATOR_TOKEN`
 en el entorno privado del operador; si existe, se usa incluso con `--confirm`.
 No la configure en scripts del repo, perfiles de Agents ni logs. Los hijos de
-Executors, autopilot, sondas y bootstrap la eliminan explícitamente.
+Executors, autopilot, sondas, bootstrap, git, verificadores y limpieza la eliminan
+explícitamente después de fusionar overrides; VS Code la anula en los terminales.
 
 Se aplica a `feature run|approve|rebase`, `feature spec|design --answers`,
 `review finding --accept|--reject`, `learning approve|reject`, `task retry`,

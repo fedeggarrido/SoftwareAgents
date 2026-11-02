@@ -5,6 +5,7 @@ import {
   EXECUTOR_TERMINATION_RETRY_MS,
   EXECUTOR_TERMINATION_TIMEOUT_MS,
 } from '../constants.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { cancelRegisteredProcess } from './registeredProcess.js';
 
 /** Request cancellation independently of process-close confirmation. Failed kills retry within
@@ -30,6 +31,7 @@ export function processCancellation(child: () => ChildProcess | undefined) {
       if (cancelRegisteredProcess(proc)) return;
       if (process.platform === 'win32')
         execFileSync('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
+          env: withoutOperatorToken(process.env),
           windowsHide: true,
           timeout: EXECUTOR_TASKKILL_TIMEOUT_MS,
         });

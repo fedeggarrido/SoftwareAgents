@@ -22,9 +22,12 @@ import {
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
+  OPERATOR_PROOF_NONCE_BYTES,
+  OPERATOR_PROOF_PATH,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
+import { serverProof } from './serverProof.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -125,6 +128,18 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // ── Routes ──────────────────────────────────────────────────
 
   registerHealthRoute(app);
+  app.get<{ Querystring: { nonce?: string } }>(OPERATOR_PROOF_PATH, (request, reply) => {
+    if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
+    const nonce = request.query.nonce;
+    if (
+      typeof nonce !== 'string' ||
+      !new RegExp(`^[a-f0-9]{${OPERATOR_PROOF_NONCE_BYTES * 2}}$`).test(nonce)
+    )
+      return reply.code(400).send('invalid nonce');
+    return reply
+      .header('Cache-Control', 'no-store')
+      .send({ proof: serverProof(options.token, nonce, process.pid) });
+  });
   registerHookRoute(app, options);
   registerWebSocketRoute(app, options);
   if (options.onRotateToken) {

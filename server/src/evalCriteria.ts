@@ -11,6 +11,7 @@ import { MANAGED_EXECUTION_ENV } from './evalGuard.js';
 import { EvalIntegrityError } from './evalIntegrity.js';
 import { evalGit, type EvalTask } from './evalTasks.js';
 import { processCancellation } from './executors/processCancellation.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { resolveInside } from './pathGuard.js';
 import { testDiscovery } from './testRoots.js';
 import { VerifierInfrastructureError } from './verifierInfrastructure.js';
@@ -62,10 +63,10 @@ export async function runVerifierCommand(
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
+      env: withoutOperatorToken({
         ...criterionEnvironment(home),
         ...(gitIndexFile ? { GIT_INDEX_FILE: gitIndexFile } : {}),
-      },
+      }),
     });
     const cancellation = processCancellation(() => child);
     let stopped = false;

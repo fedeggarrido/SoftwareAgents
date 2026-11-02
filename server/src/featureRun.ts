@@ -8,6 +8,7 @@ import { FEATURE_RUN_POLL_MS } from './constants.js';
 import { runDesignGate } from './designPipeline.js';
 import { pushDeveloperBranch } from './developer.js';
 import { evalGit } from './evalTasks.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { featureIngressActor } from './featureIngress.js';
 import { assertTaskDependencies } from './featureRunBase.js';
 import { wipConflict } from './flow.js';
@@ -222,6 +223,7 @@ export async function runFeature(
       'git',
       ['-c', 'commit.gpgSign=false', 'commit-tree', tree, '-p', left, '-p', right],
       {
+        env: withoutOperatorToken(process.env),
         cwd: config.repoRoot,
         input: subject + '\n',
         encoding: 'utf8',
@@ -614,6 +616,7 @@ export async function runFeature(
                 review.sha,
               ],
               {
+                env: withoutOperatorToken(process.env),
                 cwd: config.repoRoot,
                 input: `feat(${key}): integrar ${done.key.toLowerCase()}\n`,
                 encoding: 'utf8',

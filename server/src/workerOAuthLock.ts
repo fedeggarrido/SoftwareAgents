@@ -8,6 +8,7 @@ import {
   EXECUTOR_PROBE_TIMEOUT_MS,
 } from './constants.js';
 import { slotProcessIdentity } from './executorSlots.js';
+import { withoutOperatorToken } from './featureIngress.js';
 
 /** Conservative absence check. Unknown process visibility never proves absence. */
 export function noClaudeProcess(): boolean {
@@ -22,6 +23,7 @@ export function noClaudeProcess(): boolean {
           `$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -Filter "(Name = 'claude.exe' OR Name = 'node.exe') AND ProcessId <> ${process.pid}").Count`,
         ],
         {
+          env: withoutOperatorToken(process.env),
           encoding: 'utf8',
           windowsHide: true,
           timeout: EXECUTOR_PROBE_TIMEOUT_MS,

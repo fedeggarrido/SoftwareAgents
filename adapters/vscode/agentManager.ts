@@ -8,6 +8,7 @@ import { resendAgentActivity } from '../../server/src/agentActivityResend.js';
 import { AgentStateStore } from '../../server/src/agentStateStore.js';
 import { recordAudit } from '../../server/src/auditLog.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS, JSONL_POLL_INTERVAL_MS } from '../../server/src/constants.js';
+import { OPERATOR_TOKEN_ENV } from '../../server/src/featureIngress.js';
 import {
   ensureProjectScan,
   readNewLines,
@@ -68,6 +69,13 @@ export async function launchNewTerminal(
     const terminal = vscode.window.createTerminal({
       name: `${CLAUDE_TERMINAL_NAME_PREFIX} #${idx}`,
       cwd,
+      env: Object.fromEntries(
+        [
+          OPERATOR_TOKEN_ENV,
+          OPERATOR_TOKEN_ENV.toLowerCase(),
+          ...Object.keys(process.env).filter((key) => key.toUpperCase() === OPERATOR_TOKEN_ENV),
+        ].map((key) => [key, null]),
+      ),
     });
     // When suppressShow is set (auto-spawn + autoShowPanel), keep the panel view
     // on Pixel Agents instead of switching to Terminal. Claude Code still runs

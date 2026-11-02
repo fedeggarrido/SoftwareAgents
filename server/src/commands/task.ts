@@ -14,6 +14,7 @@ import {
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
 import { lastDeveloperFailure } from '../developer.js';
+import { withoutOperatorToken } from '../featureIngress.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -323,6 +324,7 @@ export async function runTaskCommand(
       const analysis = analyzeTaskDag(dag, spec);
       if (!analysis.valid) throw new Error(`Invalid TaskDAG: ${JSON.stringify(analysis.issues)}`);
       const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        env: withoutOperatorToken(process.env),
         cwd,
         encoding: 'utf8',
         windowsHide: true,
@@ -332,6 +334,7 @@ export async function runTaskCommand(
       if (design) {
         const registered = parseDocument(
           execFileSync('git', ['show', `${design.git_sha}:${design.dag_path}`], {
+            env: withoutOperatorToken(process.env),
             cwd,
             encoding: 'utf8',
             windowsHide: true,

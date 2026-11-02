@@ -3,11 +3,17 @@ import { execFileSync } from 'child_process';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { architectPaths } from './architect.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { readRequirements, requirementsDocPath } from './requirements.js';
 import type { FeatureRecord, WorkStore } from './workstore/WorkStore.js';
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  return execFileSync('git', args, {
+    env: withoutOperatorToken(process.env),
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
 }
 
 /** The feature document lives in its worker branch, even before integration. */

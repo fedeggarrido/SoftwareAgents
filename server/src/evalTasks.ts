@@ -3,6 +3,7 @@ import * as fs from 'fs';
 
 import * as schema from '../../core/schemas/eval-task.schema.json';
 import { CliUsageError } from './cliErrors.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { resolveInside } from './pathGuard.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 
@@ -45,6 +46,7 @@ export function isProtectedEvalPath(file: string, allowTestChanges = false): boo
 
 export function evalGit(cwd: string, args: string[]): string {
   const output = execFileSync('git', args, {
+    env: withoutOperatorToken(process.env),
     cwd,
     encoding: 'utf8',
     windowsHide: true,

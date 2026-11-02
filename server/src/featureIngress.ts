@@ -1,11 +1,13 @@
 import { createHash, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 
 import { CliUsageError } from './cliErrors.js';
 import { SERVER_JSON_NAME } from './constants.js';
 import { discoveryEntryPath, isProcessRunning } from './discoveryRecords.js';
 import type { PolicyActor } from './policy.js';
 import { isServerTarget } from './serverConfig.js';
+import { verifyServerProof } from './serverProof.js';
 
 export const OPERATOR_TOKEN_ENV = 'PIXEL_AGENTS_OPERATOR_TOKEN';
 
@@ -19,7 +21,7 @@ export function withoutOperatorToken(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
 const confirmationError =
   'Human confirmation requires the current server token: set PIXEL_AGENTS_OPERATOR_TOKEN in the operator environment or append --confirm for a hidden TTY prompt. Open the project office first.';
 
-/** No network, logging, argv credentials or fallback to an inferred human identity. */
+/** Authenticate discovery from the OS account, then prove the live server's secret. */
 export async function confirmHumanIngress(argv: string[]): Promise<string[]> {
   if (featureIngressActor() !== 'human')
     throw new CliUsageError(
@@ -30,20 +32,21 @@ export async function confirmHumanIngress(argv: string[]): Promise<string[]> {
   const supplied =
     process.env[OPERATOR_TOKEN_ENV] || (interactive ? await readOperatorToken() : '');
   if (!supplied) throw new CliUsageError(confirmationError);
-  let expected: string;
   try {
     const target: unknown = JSON.parse(
-      fs.readFileSync(discoveryEntryPath(SERVER_JSON_NAME), 'utf8'),
+      fs.readFileSync(discoveryEntryPath(SERVER_JSON_NAME, os.userInfo().homedir), 'utf8'),
     );
     if (!isServerTarget(target) || !isProcessRunning(target.pid)) throw new Error();
-    expected = target.token;
-  } catch {
+    // Check the supplied capability before contacting any discovery destination.
+    // Fixed-size digests also compare different input lengths in constant time.
+    const digest = (value: string) => createHash('sha256').update(value).digest();
+    if (!timingSafeEqual(digest(supplied), digest(target.token)))
+      throw new CliUsageError('Invalid operator token; reopen discovery after token rotation.');
+    if (!(await verifyServerProof(target))) throw new Error();
+  } catch (error) {
+    if (error instanceof CliUsageError) throw error;
     throw new CliUsageError(confirmationError);
   }
-  // Fixed-size digests keep comparison constant-time even for different input lengths.
-  const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(supplied), digest(expected)))
-    throw new CliUsageError('Invalid operator token; reopen discovery after token rotation.');
   return args;
 }
 

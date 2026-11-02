@@ -1,12 +1,14 @@
 import { execFileSync } from 'child_process';
 
 import { evalGit } from './evalTasks.js';
+import { withoutOperatorToken } from './featureIngress.js';
 
 /** Check the ref itself, including dangling symbolic refs omitted by for-each-ref. */
 export function assertDirectRef(repository: string, ref: string): void {
   let target: string;
   try {
     target = execFileSync('git', ['symbolic-ref', '--quiet', '--no-recurse', ref], {
+      env: withoutOperatorToken(process.env),
       cwd: repository,
       encoding: 'utf8',
       windowsHide: true,

@@ -9,6 +9,7 @@ import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { type DeveloperRequest, developerRequest, isDeveloperTest } from './developer.js';
 import { evalGit } from './evalTasks.js';
 import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executorSelection.js';
+import { withoutOperatorToken } from './featureIngress.js';
 import { featureBaseBranch } from './featureRunBase.js';
 import { isFailedReview } from './reviewAttempts.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
@@ -114,6 +115,7 @@ export function reviewerRequest(
         '--',
       ],
       {
+        env: withoutOperatorToken(process.env),
         cwd: tree,
         encoding: 'utf8',
         windowsHide: true,
@@ -179,6 +181,7 @@ export function validateReview(source: string, input: ReviewerRequest): ReviewRe
   const lineCount = (rev: string, file: string) => {
     try {
       const content = execFileSync('git', ['show', `${rev}:${file}`], {
+        env: withoutOperatorToken(process.env),
         cwd: input.worktree,
         encoding: 'utf8',
         windowsHide: true,

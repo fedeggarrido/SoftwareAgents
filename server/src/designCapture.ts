@@ -4,6 +4,7 @@ import * as path from 'path';
 
 import type { DesignValidation } from '../../core/src/designReport.js';
 import { DESIGN_CANVAS_READY_TIMEOUT_MS } from './constants.js';
+import { withoutOperatorToken } from './featureIngress.js';
 
 /** A mounted canvas alone may still be blank before its first animation frame. */
 export async function waitForDesignCanvas(page: {
@@ -44,7 +45,7 @@ export async function captureDesign(input: CaptureInput): Promise<DesignEvidence
   const child = fork(bundled, ['--design-capture-host'], {
     cwd: input.tree,
     execArgv: [],
-    env: {
+    env: withoutOperatorToken({
       PATH: process.env.PATH,
       SystemRoot: process.env.SystemRoot,
       HOME: home,
@@ -54,7 +55,7 @@ export async function captureDesign(input: CaptureInput): Promise<DesignEvidence
       TEMP: home,
       TMP: home,
       PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
-    },
+    }),
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
   return new Promise((resolve, reject) => {

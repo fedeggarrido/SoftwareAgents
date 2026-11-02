@@ -26,16 +26,20 @@ export function sameServerGeneration(a: ServerTarget, b: ServerTarget): boolean 
     a.host === b.host
   );
 }
-export function discoveryRoot(): string {
-  return path.join(os.homedir(), SERVER_JSON_DIR);
+export function discoveryRoot(home = os.homedir()): string {
+  return path.join(home, SERVER_JSON_DIR);
 }
 export function discoveryPath(relative: string): string {
   return resolveInside(discoveryRoot(), relative);
 }
-/** Contain the parent, then operate on the lexical entry, never a link target. */
-export function discoveryEntryPath(relative: string): string {
+/** Contain the parent, then operate on the lexical entry, never a link target.
+ * Human ingress supplies the OS account home explicitly, independent of caller env. */
+export function discoveryEntryPath(relative: string, home?: string): string {
   const parent = path.dirname(relative);
-  const dir = parent === '.' ? fs.realpathSync.native(discoveryRoot()) : discoveryPath(parent);
+  const dir =
+    parent === '.'
+      ? fs.realpathSync.native(discoveryRoot(home))
+      : resolveInside(discoveryRoot(home), parent);
   const entry = path.join(dir, path.basename(relative));
   assertRegularEntry(entry);
   return entry;

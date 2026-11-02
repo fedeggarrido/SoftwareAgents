@@ -240,6 +240,8 @@ describe('AuditLog', () => {
     const store = new AgentStateStore();
     const scan = { current: null as ReturnType<typeof setInterval> | null };
     const polls = new Map<number, ReturnType<typeof setInterval>>();
+    vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'operator-secret');
+    vi.stubEnv('Pixel_Agents_Operator_Token', 'case-variant');
     vi.useFakeTimers();
     try {
       await module.exports.launchNewTerminal(
@@ -290,7 +292,18 @@ describe('AuditLog', () => {
         ['launchAgent', 'failure', null],
       ]);
       expect(terminal.sendText).toHaveBeenCalledTimes(2);
+      for (const call of vscode.window.createTerminal.mock.calls as unknown as [
+        { env: Record<string, string | null> },
+      ][]) {
+        expect(call[0].env.PIXEL_AGENTS_OPERATOR_TOKEN).toBeNull();
+        expect(call[0].env.pixel_agents_operator_token).toBeNull();
+        for (const key of Object.keys(process.env).filter(
+          (key) => key.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN',
+        ))
+          expect(call[0].env[key]).toBeNull();
+      }
     } finally {
+      vi.unstubAllEnvs();
       vi.clearAllTimers();
       vi.useRealTimers();
       store.dispose();

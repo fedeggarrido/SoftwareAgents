@@ -34,6 +34,7 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
   operatorToken(root);
+  vi.stubEnv('pixel_agents_operator_token', 'case-override');
   const brain = path.join(root, 'brain'),
     tree = path.join(root, 'proposal');
   fs.mkdirSync(brain);
@@ -200,6 +201,17 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   expect(fs.readFileSync(path.join(tree, 'webview-ui/src/index.css'), 'utf8')).toContain(
     'button { display: flex; }',
   );
+  // Includes checkout, branch lookup, formatting and proposal publication.
+  for (const call of git.mock.calls as unknown as [
+    string,
+    string[],
+    { env: NodeJS.ProcessEnv },
+  ][]) {
+    expect(call[2].env).toBeDefined();
+    expect(
+      Object.keys(call[2].env).some((key) => key.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN'),
+    ).toBe(false);
+  }
   git.mockReturnValue('main');
   git.mockClear();
   await expect(runDesignCommand(['direction'], root, vi.fn(), options)).rejects.toThrow(

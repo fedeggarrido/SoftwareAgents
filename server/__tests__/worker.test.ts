@@ -87,7 +87,8 @@ function legacyAuditEntries() {
     .filter((r) => r.corrupt || !steps.includes(r.entry.outcome.status));
 }
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'worker-'));
+  // Canonical: Windows TEMP may be in 8.3 short form (RUNNER~1) on CI.
+  root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'worker-')));
   repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);

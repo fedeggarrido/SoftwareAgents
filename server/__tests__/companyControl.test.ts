@@ -71,7 +71,8 @@ describe('companyControl authorization and containment', () => {
   }
 
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'company-control-'));
+    // Canonical: Windows TEMP may be in 8.3 short form (RUNNER~1) on CI.
+    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'company-control-')));
     workspace = path.join(root, 'workspace');
     gitDir = path.join(root, 'git-common');
     fs.mkdirSync(path.join(workspace, 'docs', 'backlog'), { recursive: true });

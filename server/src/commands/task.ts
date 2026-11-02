@@ -199,7 +199,9 @@ export async function backup(store: WorkStore, keep: number): Promise<string> {
     await store.backup(database);
     fs.chmodSync(database, 0o600);
     // Stop cooperating JSONL writers while copying; a stale/busy lock fails closed.
-    const relativeAudit = path.relative(home, auditFile);
+    // AuditLog builds its path from os.homedir(), which Windows may report in 8.3 short
+    // form (C:\Users\RUNNER~1) while `home` is canonical; relate it to its own base.
+    const relativeAudit = path.relative(os.homedir(), auditFile);
     taskDirectory(home, path.dirname(relativeAudit));
     taskPath(home, relativeAudit);
     const lock = taskPath(home, `${relativeAudit}.lock`);

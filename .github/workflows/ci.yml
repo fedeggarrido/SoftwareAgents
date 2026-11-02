@@ -240,13 +240,13 @@ jobs:
     # The full server suite exceeds 30 min on the hosted Windows runner (featureRunCli
     # alone ~18 min), so the job was cancelled before Vitest printed its failures.
     # Shards by file keep each run short and always end with a summary.
-    name: Unit Tests (Windows ${{ matrix.shard }}/3)
+    name: Unit Tests (Windows ${{ matrix.shard }}/6)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -268,7 +268,7 @@ jobs:
 
       - name: Server Tests
         working-directory: server
-        run: npx vitest run --shard=${{ matrix.shard }}/3
+        run: npx vitest run --shard=${{ matrix.shard }}/6
 
       - name: Webview Tests
         if: ${{ !cancelled() && matrix.shard == 1 }}

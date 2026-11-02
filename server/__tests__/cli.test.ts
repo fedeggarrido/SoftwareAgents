@@ -270,7 +270,12 @@ describe('dist/cli.js entry-point guard', () => {
             });
             expect(result.code).toBe(1);
             expect(result.stderr).not.toMatch(/\n\s+at /);
-            if (args.length > 2) expect(result.stderr).toContain('Invalid Operator modelTiers');
+            if (args.length > 2)
+              expect(result.stderr).toContain(
+                args[0] === 'worker' && process.platform !== 'win32'
+                  ? 'worker run requires Windows'
+                  : 'Invalid Operator modelTiers',
+              );
           }
         },
         '127.0.0.1',

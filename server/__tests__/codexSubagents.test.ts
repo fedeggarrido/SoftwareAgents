@@ -69,9 +69,7 @@ it('resolves the sessions root from CODEX_HOME, falling back to ~/.codex', () =>
   expect(codexSessionsDirectory({ CODEX_HOME: 'relative' }, root)).toBe(
     path.join(root, 'relative', 'sessions'),
   );
-  expect(codexSessionsDirectory({ CODEX_HOME: 'D:/codex-home' })).toBe(
-    path.join('D:/codex-home', 'sessions'),
-  );
+  expect(codexSessionsDirectory({ CODEX_HOME: root })).toBe(path.join(root, 'sessions'));
   expect(codexSessionsDirectory({})).toBe(path.join(os.homedir(), '.codex', 'sessions'));
 });
 

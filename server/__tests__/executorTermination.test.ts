@@ -48,6 +48,9 @@ let proc: EventEmitter & {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'executor-termination-'));
   fs.mkdirSync(path.join(root, 'worktree'));
+  // These tests emulate Windows even on POSIX. Resolution requires an .exe;
+  // spawn is mocked, so this fixture is never executed.
+  fs.writeFileSync(path.join(root, 'codex.exe'), 'mock executable');
   vi.stubEnv('HOME', root);
   vi.useFakeTimers();
   proc = Object.assign(new EventEmitter(), {
@@ -68,7 +71,7 @@ function start(id: string, timeoutMin = 1) {
       ? new ClaudeCliExecutor({ ...options, binary: process.execPath })
       : new CodexCliExecutor({
           ...options,
-          operator: { binaryPaths: { codex: process.execPath } },
+          operator: { binaryPaths: { codex: path.join(root, 'codex.exe') } },
           sessionsDirectory: path.join(root, 'sessions'),
         });
   return executor.start({

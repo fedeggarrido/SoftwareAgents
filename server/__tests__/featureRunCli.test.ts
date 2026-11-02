@@ -379,7 +379,8 @@ describe('feature run interruption authority', () => {
       }
     },
   );
-  it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'WAITING_QUOTA'])(
+  // Launches the real worker path: POSIX process-tree recovery is unsupported.
+  it.skipIf(process.platform !== 'win32').each(['WAITING_HUMAN', 'FAILED_FINAL', 'WAITING_QUOTA'])(
     'advances independent tasks while respecting %s',
     async (status) => {
       await spec();

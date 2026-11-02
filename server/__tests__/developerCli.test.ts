@@ -120,49 +120,56 @@ function configure(
   );
 }
 
-it('corrects a misplaced test for free on the same tree before verification', async () => {
-  await prepare();
-  enableGuardCascade();
-  await develop('misplaced');
-  const calls = fs
-    .readFileSync(launches, 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  expect(calls).toHaveLength(2);
-  expect(calls[1].cwd).toBe(calls[0].cwd);
-  expect(JSON.parse(calls[1].context.task.brief).guardCorrection).toMatchObject({
-    category: 'change_zones_exceeded',
-    paths: ['server/src/audit.test.ts'],
-  });
-  const store = await storeFor();
-  try {
-    expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
-  } finally {
-    store.close();
-  }
-  const corrections = new AuditLog()
-    .read('test')
-    .filter((row) => !row.corrupt && row.entry.outcome.status === 'guard_correction');
-  expect(corrections).toHaveLength(2);
-  expect(cascadeAttempts()).toEqual([expect.objectContaining({ attempt: 1, result: 'pass' })]);
-});
+// These scenarios launch worker run, whose process-tree recovery requires Windows.
+it.skipIf(process.platform !== 'win32')(
+  'corrects a misplaced test for free on the same tree before verification',
+  async () => {
+    await prepare();
+    enableGuardCascade();
+    await develop('misplaced');
+    const calls = fs
+      .readFileSync(launches, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(calls).toHaveLength(2);
+    expect(calls[1].cwd).toBe(calls[0].cwd);
+    expect(JSON.parse(calls[1].context.task.brief).guardCorrection).toMatchObject({
+      category: 'change_zones_exceeded',
+      paths: ['server/src/audit.test.ts'],
+    });
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
+    } finally {
+      store.close();
+    }
+    const corrections = new AuditLog()
+      .read('test')
+      .filter((row) => !row.corrupt && row.entry.outcome.status === 'guard_correction');
+    expect(corrections).toHaveLength(2);
+    expect(cascadeAttempts()).toEqual([expect.objectContaining({ attempt: 1, result: 'pass' })]);
+  },
+);
 
-it('bounds a failed free correction and retains normal retry accounting', async () => {
-  await prepare();
-  enableGuardCascade();
-  await expect(develop('misplaced-always')).rejects.toThrow('changeZones exceeded');
-  expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
-  const store = await storeFor();
-  try {
-    expect(store.getTask(task)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
-  } finally {
-    store.close();
-  }
-  expect(cascadeAttempts()).toEqual([
-    expect.objectContaining({ attempt: 1, result: 'guard_rejected' }),
-  ]);
-});
+it.skipIf(process.platform !== 'win32')(
+  'bounds a failed free correction and retains normal retry accounting',
+  async () => {
+    await prepare();
+    enableGuardCascade();
+    await expect(develop('misplaced-always')).rejects.toThrow('changeZones exceeded');
+    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)).toMatchObject({ status: 'FAILED_RETRYABLE', attempt: 0 });
+    } finally {
+      store.close();
+    }
+    expect(cascadeAttempts()).toEqual([
+      expect.objectContaining({ attempt: 1, result: 'guard_rejected' }),
+    ]);
+  },
+);
 
 function enableGuardCascade() {
   const file = path.join(root, '.pixel-agents/config.json');
@@ -198,34 +205,40 @@ function cascadeAttempts() {
     .map((line) => JSON.parse(line));
 }
 
-it('relaunches Codex after a contained shell write without relaxing containment', async () => {
-  configure(undefined, 'codex');
-  await prepare();
-  await develop('shell-denied');
-  const calls = fs
-    .readFileSync(launches, 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  expect(calls).toHaveLength(2);
-  expect(JSON.parse(calls[1].context.task.brief).guardCorrection.detail).toContain(
-    'usa apply_patch/Edit',
-  );
-  const store = await storeFor();
-  try {
-    expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
-  } finally {
-    store.close();
-  }
-});
+it.skipIf(process.platform !== 'win32')(
+  'relaunches Codex after a contained shell write without relaxing containment',
+  async () => {
+    configure(undefined, 'codex');
+    await prepare();
+    await develop('shell-denied');
+    const calls = fs
+      .readFileSync(launches, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[1].context.task.brief).guardCorrection.detail).toContain(
+      'usa apply_patch/Edit',
+    );
+    const store = await storeFor();
+    try {
+      expect(store.getTask(task)).toMatchObject({ status: 'REVIEW', attempt: 0 });
+    } finally {
+      store.close();
+    }
+  },
+);
 
-it('rejects nested Git before starting any verifier', async () => {
-  await prepare();
-  const verifier = vi.spyOn(modelCascade, 'checkCascadeCriteria');
-  await expect(develop('nested-git')).rejects.toThrow(/nested .git/);
-  expect(verifier).not.toHaveBeenCalled();
-  expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
-});
+it.skipIf(process.platform !== 'win32')(
+  'rejects nested Git before starting any verifier',
+  async () => {
+    await prepare();
+    const verifier = vi.spyOn(modelCascade, 'checkCascadeCriteria');
+    await expect(develop('nested-git')).rejects.toThrow(/nested .git/);
+    expect(verifier).not.toHaveBeenCalled();
+    expect(fs.readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
+  },
+);
 const run = (command: string[], fixture = 'developer', mode = 'valid') =>
   runFeatureCommand(command, repo, () => {}, {
     binaryArgs: [

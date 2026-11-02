@@ -8,11 +8,11 @@ import { readMainAncestors } from '../src/workstore/readOnlyWorkStore.js';
 
 let root: string;
 const git = (...args: string[]) =>
-  execFileSync(
-    'git',
-    ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args],
-    { cwd: root, encoding: 'utf8', windowsHide: true },
-  ).trim();
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+  }).trim();
 
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 

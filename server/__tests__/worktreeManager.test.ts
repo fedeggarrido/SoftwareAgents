@@ -168,19 +168,23 @@ describe('Task worktree manager (real Git)', () => {
     expect(fs.existsSync(path.join(root, '.worktrees', 'SA-032'))).toBe(false);
   });
 
-  it('unlinks dependency junctions before removal without touching their target', async () => {
-    const worktree = await manager.create('SA-032', 'worktrees');
-    const dependencies = path.join(temp, 'shared dependencies');
-    fs.mkdirSync(dependencies);
-    fs.writeFileSync(path.join(dependencies, 'keep.txt'), 'keep');
-    fs.symlinkSync(
-      dependencies,
-      path.join(worktree.path, 'node_modules'),
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
-    await manager.cleanup('SA-032', 'worktrees');
-    expect(fs.readFileSync(path.join(dependencies, 'keep.txt'), 'utf8')).toBe('keep');
-  });
+  // Directory junctions are a Windows feature; POSIX symlinks show up as untracked files.
+  it.skipIf(process.platform !== 'win32')(
+    'unlinks dependency junctions before removal without touching their target',
+    async () => {
+      const worktree = await manager.create('SA-032', 'worktrees');
+      const dependencies = path.join(temp, 'shared dependencies');
+      fs.mkdirSync(dependencies);
+      fs.writeFileSync(path.join(dependencies, 'keep.txt'), 'keep');
+      fs.symlinkSync(
+        dependencies,
+        path.join(worktree.path, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      await manager.cleanup('SA-032', 'worktrees');
+      expect(fs.readFileSync(path.join(dependencies, 'keep.txt'), 'utf8')).toBe('keep');
+    },
+  );
 
   it('runs npm ci with measured bootstrap, caches retries and invalidates package changes', async () => {
     fs.writeFileSync(

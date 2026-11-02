@@ -452,10 +452,13 @@ it('utility is not an assertion', () => { new assert.AssertionError({ message: '
     expect(commands.map((row) => row.command)).toEqual(tests.map((file) => 'vitest:' + file));
     // Browser-backed specs skip themselves without Playwright Chromium; the verifier must
     // then fail closed (not_tested), never report them as passed.
+    // Specs that need a browser or a local dev server (vite createServer) cannot run in
+    // every isolated runner (Linux CI); the verifier must then report not_tested, never pass.
     const browserBacked = new Set(
-      tests.filter((file) =>
-        fs.readFileSync(path.join(repository, file), 'utf8').includes('context.skip('),
-      ),
+      tests.filter((file) => {
+        const source = fs.readFileSync(path.join(repository, file), 'utf8');
+        return source.includes('context.skip(') || /createServer/.test(source);
+      }),
     );
     const ran = commands.filter(
       (row) => !(browserBacked.has(row.command.slice(7)) && row.result === 'not_tested'),

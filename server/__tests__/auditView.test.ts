@@ -99,23 +99,26 @@ describe('readAuditView acceptance', () => {
     });
   });
 
-  it.each([500, 501, 520])('AC-017/018/022: bounds %i entries with whole-file counts', async (count) => {
-    write([
-      'bad',
-      entry({ projectId: 'other' }),
-      ...Array.from({ length: count }, () => entry()),
-    ]);
-    const result = await readAuditView('sample');
-    expect(result.entries).toHaveLength(500);
-    expect(result.entries[0].line).toBe(count + 2);
-    expect(result.entries.at(-1)!.line).toBe(count - 497);
-    expect(result).toMatchObject({
-      totalValid: count,
-      truncated: count > 500,
-      corruptLines: [1],
-      excludedCount: 1,
-    });
-  });
+  it.each([500, 501, 520])(
+    'AC-017/018/022: bounds %i entries with whole-file counts',
+    async (count) => {
+      write([
+        'bad',
+        entry({ projectId: 'other' }),
+        ...Array.from({ length: count }, () => entry()),
+      ]);
+      const result = await readAuditView('sample');
+      expect(result.entries).toHaveLength(500);
+      expect(result.entries[0].line).toBe(count + 2);
+      expect(result.entries.at(-1)!.line).toBe(count - 497);
+      expect(result).toMatchObject({
+        totalValid: count,
+        truncated: count > 500,
+        corruptLines: [1],
+        excludedCount: 1,
+      });
+    },
+  );
 
   it('AC-002/014/015: projects, redacts all strings and leaves logs byte-identical', async () => {
     const discovery = path.join(home, '.pixel-agents', 'server.json');

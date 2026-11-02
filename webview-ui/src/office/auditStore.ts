@@ -95,10 +95,9 @@ export function viewState(store: AuditStore): AuditViewState {
 }
 
 /** Whole-file metadata is never recomputed from the filtered window. */
-export function auditNotices(store: AuditStore): Pick<
-  AuditLogSnapshot,
-  'totalValid' | 'truncated' | 'corruptLines' | 'excludedCount'
-> {
+export function auditNotices(
+  store: AuditStore,
+): Pick<AuditLogSnapshot, 'totalValid' | 'truncated' | 'corruptLines' | 'excludedCount'> {
   const snapshot = store.loading ? null : store.snapshot;
   return {
     totalValid: snapshot?.totalValid ?? 0,

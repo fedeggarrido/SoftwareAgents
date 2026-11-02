@@ -50,7 +50,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(root, 'worktree'));
   // These tests emulate Windows even on POSIX. Resolution requires an .exe;
   // spawn is mocked, so this fixture is never executed.
-  fs.writeFileSync(path.join(root, 'codex.exe'), 'mock executable');
+  fs.writeFileSync(path.join(root, 'codex.exe'), 'mock executable', { mode: 0o755 });
   vi.stubEnv('HOME', root);
   vi.useFakeTimers();
   proc = Object.assign(new EventEmitter(), {

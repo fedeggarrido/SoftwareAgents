@@ -263,7 +263,9 @@ jobs:
         run: npm run test:webview
 
   npm-package-node20:
-    name: npm Package Smoke (Node 20)
+    # The fork uses node:sqlite (Node >= 22.5): the published package targets that floor.
+    # The job id stays npm-package-node20 so Required Checks keeps working.
+    name: npm Package Smoke (Node 22)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -272,10 +274,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v7
         with:
-          node-version: '20.x'
+          node-version: '22.x'
           cache: npm
           cache-dependency-path: package-lock.json
 

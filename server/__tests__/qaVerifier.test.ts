@@ -457,7 +457,7 @@ it('utility is not an assertion', () => { new assert.AssertionError({ message: '
     const browserBacked = new Set(
       tests.filter((file) => {
         const source = fs.readFileSync(path.join(repository, file), 'utf8');
-        return source.includes('context.skip(') || /createServer/.test(source);
+        return source.includes('context.skip(') || /\bcreateServer\b/.test(source);
       }),
     );
     const ran = commands.filter(

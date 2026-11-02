@@ -307,14 +307,16 @@ export async function runTaskCommand(
             text: task.description,
           });
       // Resolve canonical pipeline artifacts without opening/activating SQLite for invalid DAGs.
+      // Relate Brain paths to the canonical repo root they are built from: `cwd` may be
+      // the same directory in Windows 8.3 short form, which would yield a '..' escape.
       const pipelineSpec = path.relative(
-        cwd,
+        config.repoRoot,
         path.join(config.paths.brain, 'features', `${dag.feature}.yaml`),
       );
       const specRelative = fs.existsSync(taskPath(cwd, pipelineSpec))
         ? pipelineSpec
         : path.relative(
-            cwd,
+            config.repoRoot,
             path.join(config.paths.brain, 'features/requests', `${dag.feature}.yaml`),
           );
       const spec = parseFeatureSpec(readTaskInput(cwd, specRelative), specRelative);

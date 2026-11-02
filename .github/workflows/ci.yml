@@ -103,10 +103,12 @@ jobs:
 
       - name: Upload Linux Webview Allure Results
         if: always() && steps.install_dependencies.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: allure-results-webview-linux
           if-no-files-found: warn
+          retention-days: 3
           path: allure-results/webview
 
       - name: Format Check
@@ -147,10 +149,12 @@ jobs:
 
       - name: Upload Linux Server Allure Results
         if: always() && steps.build.outcome == 'success' && steps.install_dependencies.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: allure-results-server-linux
           if-no-files-found: warn
+          retention-days: 3
           path: allure-results/server
 
       # --- Audit Checks (blocking) ---
@@ -235,7 +239,7 @@ jobs:
   unit-tests-windows:
     name: Unit Tests (Windows)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30 # full server suite on Windows exceeds 15 min
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -372,20 +376,24 @@ jobs:
 
       - name: Upload E2E Artifacts
         if: always() && steps.install_playwright_deps.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: e2e-artifacts-${{ matrix.target.label }}-shard-${{ matrix.shard }}
           if-no-files-found: ignore
+          retention-days: 3
           path: |
             playwright-report/e2e
             test-results/e2e
 
       - name: Upload Allure Results
         if: always() && steps.install_playwright_deps.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: allure-results-e2e-${{ matrix.target.label }}-shard-${{ matrix.shard }}
           if-no-files-found: warn
+          retention-days: 3
           path: allure-results/e2e
 
       # Cache save gated on cache MISS + path existence only (NOT test outcome):
@@ -518,10 +526,12 @@ jobs:
 
       - name: Upload Merged Cross-Platform E2E Allure Results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: allure-results-e2e
           if-no-files-found: warn
+          retention-days: 3
           path: allure-results/e2e
 
       - name: Check Deploy Preconditions

@@ -237,9 +237,16 @@ jobs:
           exit "$failed"
 
   unit-tests-windows:
-    name: Unit Tests (Windows)
+    # The full server suite exceeds 30 min on the hosted Windows runner (featureRunCli
+    # alone ~18 min), so the job was cancelled before Vitest printed its failures.
+    # Shards by file keep each run short and always end with a summary.
+    name: Unit Tests (Windows ${{ matrix.shard }}/3)
     runs-on: windows-latest
-    timeout-minutes: 30 # full server suite on Windows exceeds 15 min
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -260,10 +267,11 @@ jobs:
         run: npm run build:extension && npm run build:webview
 
       - name: Server Tests
-        run: npm run test:server
+        working-directory: server
+        run: npx vitest run --shard=${{ matrix.shard }}/3
 
       - name: Webview Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.shard == 1 }}
         run: npm run test:webview
 
   npm-package-node20:

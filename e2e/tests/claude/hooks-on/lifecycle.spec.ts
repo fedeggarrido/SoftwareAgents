@@ -38,6 +38,7 @@ import {
 import {
   closeAgentFromOverlay,
   expectAgentOverlayGone,
+  expectCharacterCount,
   expectNoOverlay,
   expectNoOverlayWithTexts,
   expectOverlayCount,
@@ -45,6 +46,7 @@ import {
   expectOverlayVisibleForAgent,
   expectOverlayVisibleWithTexts,
   expectSingleAgentOverlay,
+  expectSubagentOverlay,
   getOverlayByAgentId,
   readAgentOverlayIds,
 } from '../../../helpers/office';
@@ -442,15 +444,14 @@ test.describe('Hooks ON / lifecycle', () => {
 
     narrator.step('waiting for all three parallel Subtask sub-characters to appear');
     await expectOverlayVisible(panelFrame, 'Subtask: Parallel task 3');
-    await expectOverlayVisible(panelFrame, 'Parallel task 1');
-    await expectOverlayVisible(panelFrame, 'Parallel task 2');
-    await expectOverlayVisible(panelFrame, 'Parallel task 3');
-    await expectOverlayCount(panelFrame, 4, 10_000);
-    expect(await readAgentOverlayIds(panelFrame)).toHaveLength(4);
+    await expectCharacterCount(panelFrame, 4, 10_000);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 1', -1);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 2', -2);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 3', -3);
     narrator.check('parent + 3 subtasks on screen (count → 4)');
 
     narrator.step('after the batched tool_results + turn_duration, the subtasks should collapse');
-    await expectOverlayCount(panelFrame, 1, 16_000);
+    await expectCharacterCount(panelFrame, 1, 16_000);
     narrator.check('everything collapses back to just the parent (count → 1)');
   });
 

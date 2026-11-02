@@ -17,6 +17,7 @@ import {
 } from '../../../helpers/mock-claude';
 import {
   closeAgentFromOverlay,
+  expectCharacterCount,
   expectNoOverlay,
   expectNoOverlayWithTexts,
   expectOverlayCount,
@@ -24,6 +25,7 @@ import {
   expectOverlayVisibleForAgent,
   expectOverlayVisibleWithTexts,
   expectSingleAgentOverlay,
+  expectSubagentOverlay,
   readAgentOverlayIds,
   readAgentOverlayTexts,
 } from '../../../helpers/office';
@@ -463,15 +465,14 @@ test.describe('Hooks OFF / lifecycle', () => {
 
     narrator.step('waiting for all three Subtask sub-characters to appear');
     await expectOverlayVisible(panelFrame, 'Subtask: Parallel task 3');
-    await expectOverlayVisible(panelFrame, 'Parallel task 1');
-    await expectOverlayVisible(panelFrame, 'Parallel task 2');
-    await expectOverlayVisible(panelFrame, 'Parallel task 3');
-    await expectOverlayCount(panelFrame, 4, 10_000);
-    expect(await readAgentOverlayIds(panelFrame)).toHaveLength(4);
+    await expectCharacterCount(panelFrame, 4, 10_000);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 1', -1);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 2', -2);
+    await expectSubagentOverlay(panelFrame, 'Parallel task 3', -3);
     narrator.check('all three parallel tasks render — count 4 (lead + 3 subtasks)');
 
     narrator.step('after the tool_results + turn_duration, the subtasks should collapse');
-    await expectOverlayCount(panelFrame, 1, 16_000);
+    await expectCharacterCount(panelFrame, 1, 16_000);
     narrator.check('back to a single character — count 1');
   });
 
@@ -933,13 +934,11 @@ test.describe('Hooks OFF / lifecycle', () => {
 
     // Sub-character appears once the Task tool_use is parsed.
     narrator.step('waiting for the Subtask sub-character to appear');
-    await expectOverlayCount(panelFrame, 2, 12_000);
-    await expectOverlayVisible(panelFrame, 'Subtask: permission subtask');
-    narrator.check('"Subtask: permission subtask" on screen — count 2');
+    await expectCharacterCount(panelFrame, 2, 12_000);
+    await expectSubagentOverlay(panelFrame, 'Running: npm test');
+    narrator.check('the selected sub-agent shows its stalled Bash — count 2');
 
-    // The "Subtask: permission subtask" overlay above already resolves the
-    // moment the Task tool_use is parsed (scenario t=2s), but the heuristic
-    // permission timer only starts when the sub-tool tool_use lands in the
+    // The permission timer starts when the sub-tool tool_use lands in the
     // progress record (scenario t=3s). The timer is PERMISSION_TIMER_DELAY_MS
     // (7s), and broadcast-to-DOM takes another ~300ms (transport + React
     // render). So this wait must cover: 1s scenario gap + 7s timer + slop.

@@ -26,6 +26,11 @@ Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-
 
 ## Domain work states (SA-048)
 
+With always-show labels enabled, idle/unselected sessions use a compact pill
+that retains their company role and team identity (LEAD or teammate name).
+Sub-agents still render on the canvas but show their label only on hover or
+selection; selecting a sub-agent reveals its own current tool activity.
+
 `office/workState.ts` projects the latest successful `workSnapshot` plus subsequent
 same-Project events (a `missing` snapshot is an empty store, so its events apply),
 ignoring `eventId <= lastEventId` and older task versions. Association requires the

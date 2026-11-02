@@ -146,7 +146,11 @@ test.describe('Areas (multi-root)', () => {
     async function paintAndSaveEngineering(frame: Frame): Promise<void> {
       await startArea(frame, 'Engineering');
       const seats = await readSeats(frame);
-      const targetSeats = seats.filter((s) => !s.assigned).slice(0, 3);
+      // The fork seats work sessions at PCs before considering plain chairs.
+      // Paint actual workstations and leave at least one unzoned for beta.
+      const workstations = seats.filter((s) => !s.assigned && s.isWorkstation && !s.isReserved);
+      expect(workstations.length).toBeGreaterThan(1);
+      const targetSeats = workstations.slice(0, Math.min(3, workstations.length - 1));
       expect(targetSeats.length).toBeGreaterThan(0);
       for (const seat of targetSeats) {
         await paintTile(frame, seat.col, seat.row);

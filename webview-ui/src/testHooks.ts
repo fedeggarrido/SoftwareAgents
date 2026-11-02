@@ -57,6 +57,8 @@ declare global {
         row: number;
         areaLabel: string | null;
         assigned: boolean;
+        isWorkstation: boolean;
+        isReserved: boolean;
       }>;
       /** Drive the real edit-mode tile paint/erase handlers by (col,row),
        *  bypassing only canvas pixel→tile geometry (mirrors petClick). */
@@ -266,6 +268,8 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
       row: seat.seatRow,
       areaLabel: os.seatZone(uid),
       assigned: seat.assigned,
+      isWorkstation: os.isWorkstationSeat(uid),
+      isReserved: os.isReservedSeat(uid),
     }));
   };
 

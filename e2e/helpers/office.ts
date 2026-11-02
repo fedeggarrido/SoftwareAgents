@@ -12,6 +12,49 @@ type OverlaySurface = Frame | Page;
 
 const OVERLAY_TIMEOUT_MS = 15_000;
 
+/** Canvas characters and DOM labels differ: compact labels hide unselected
+ * sub-agents. Count the same live characters the canvas draws, like the pet
+ * helpers, and assert sub-agent activity separately on its selected overlay. */
+export async function expectCharacterCount(
+  frame: OverlaySurface,
+  count: number,
+  timeout = OVERLAY_TIMEOUT_MS,
+): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        frame.evaluate(() => {
+          const hooks = (
+            window as Window & {
+              __pixelAgentsTestHooks?: {
+                getCharacters?: () => Array<{ isGreeter?: boolean }>;
+              };
+            }
+          ).__pixelAgentsTestHooks;
+          return (hooks?.getCharacters?.() ?? []).filter((ch) => !ch.isGreeter).length;
+        }),
+      { timeout },
+    )
+    .toBe(count);
+}
+
+/** Selection reveals the sub-agent's actual DOM label; the parent can carry
+ * the same Subtask text, so constrain the assertion to the negative child id. */
+export async function expectSubagentOverlay(
+  frame: OverlaySurface,
+  text: string,
+  id = -1,
+): Promise<void> {
+  // The sub-agent spawns seconds after the parent's tool starts; selecting a character
+  // that does not exist yet is a no-op, so re-select until its overlay shows. The parent
+  // shows "Subtask: <description>" while the child's own label is the description.
+  const childLabel = text.replace(/^Subtask:\s*/, '');
+  await expect(async () => {
+    await selectCharacter(frame, id);
+    await expectOverlayVisibleForAgent(frame, id, childLabel, 1_000);
+  }).toPass({ timeout: OVERLAY_TIMEOUT_MS });
+}
+
 /**
  * Wait-strategy conventions for tests using this helper module:
  *
@@ -73,7 +116,14 @@ export async function expectOverlayVisibleWithTexts(
   texts: string[],
   timeout = OVERLAY_TIMEOUT_MS,
 ): Promise<void> {
-  await expect(getOverlayByTexts(frame, texts).first()).toBeVisible({ timeout });
+  const overlay = getOverlayByTexts(frame, texts).first();
+  await expect(overlay).toBeVisible({ timeout });
+  // Compact pills expose activity to accessibility APIs but don't draw it.
+  // Select the matching character and verify the text a user can actually see.
+  await selectCharacter(frame, Number(await overlay.getAttribute('data-agent-id')));
+  for (const text of texts) {
+    await expect(overlay.getByText(text).last()).toBeVisible({ timeout });
+  }
 }
 
 export async function expectOverlayVisibleForAgent(
@@ -226,7 +276,14 @@ export async function expectTeammateSeatedNextToLead(
     interface SeatHooks {
       getCharacters?: () => Array<{ id: number; agentName?: string }>;
       getAgentSeats?: () => Array<{ id: number; seatId: string | null }>;
-      getSeats?: () => Array<{ uid: string; col: number; row: number; assigned: boolean }>;
+      getSeats?: () => Array<{
+        uid: string;
+        col: number;
+        row: number;
+        assigned: boolean;
+        isWorkstation: boolean;
+        isReserved: boolean;
+      }>;
     }
     const hooks = (window as { __pixelAgentsTestHooks?: SeatHooks }).__pixelAgentsTestHooks;
     const characters = hooks?.getCharacters?.() ?? [];
@@ -243,7 +300,13 @@ export async function expectTeammateSeatedNextToLead(
     const dist = (s: { col: number; row: number }): number =>
       Math.abs(s.col - leadSeat.col) + Math.abs(s.row - leadSeat.row);
     const teammateDist = dist(teammateSeat);
-    const closerFreeSeat = seats.find((s) => !s.assigned && dist(s) < teammateDist) ?? null;
+    // Social chairs are reserved, and a plain chair cannot displace a PC seat.
+    const eligible = seats.filter((s) => !s.assigned && !s.isReserved);
+    const workstationAvailable =
+      teammateSeat.isWorkstation || eligible.some((s) => s.isWorkstation);
+    const closerFreeSeat =
+      eligible.find((s) => (!workstationAvailable || s.isWorkstation) && dist(s) < teammateDist) ??
+      null;
     return { error: null, teammateDist, closerFreeSeat };
   }, teammateName);
 

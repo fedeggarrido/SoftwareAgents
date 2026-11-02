@@ -26,9 +26,11 @@ import {
   waitForClaudeHookSetup,
 } from '../../../helpers/mock-claude';
 import {
+  expectCharacterCount,
   expectNoOverlayWithTexts,
   expectOverlayCount,
   expectOverlayVisibleWithTexts,
+  expectSubagentOverlay,
   expectTeammateSeatedNextToLead,
   selectCharacter,
 } from '../../../helpers/office';
@@ -37,8 +39,8 @@ import {
   buildAssistantToolUseRecord,
   buildAsyncAgentLaunchResultRecord,
   buildBackgroundAgentDoneRecord,
-  buildTeamMetadataRecord,
   buildTeammateSpawnResultRecord,
+  buildTeamMetadataRecord,
   seedTeamConfig,
 } from '../../../helpers/team';
 import { getPixelAgentsFrame, openPixelAgentsPanel, setSettings } from '../../../helpers/webview';
@@ -338,8 +340,8 @@ test.describe('Hooks ON / teams', () => {
     const panelFrame = await getPixelAgentsFrame(window);
 
     narrator.step('waiting for the Subtask sub-character to spawn');
-    await expectOverlayVisibleWithTexts(panelFrame, ['Say hello']);
-    await expectOverlayCount(panelFrame, 2);
+    await expectCharacterCount(panelFrame, 2);
+    await expectSubagentOverlay(panelFrame, 'Say hello');
     narrator.check('the Subtask sub-character joined — unnamed spawns stay sub-agents');
     narrator.step('selecting the sub-agent to reveal its live activity');
     await selectCharacter(panelFrame, -1);
@@ -347,11 +349,11 @@ test.describe('Hooks ON / teams', () => {
     narrator.check('"Searching the web" on the selected sub-agent — its own transcript drives it');
     narrator.step('Stop fires on the lead mid-run — the sub-character must survive');
     await panelFrame.waitForTimeout(2_000);
-    await expectOverlayCount(panelFrame, 2);
-    await expectOverlayVisibleWithTexts(panelFrame, ['Say hello']);
+    await expectCharacterCount(panelFrame, 2);
+    await expectSubagentOverlay(panelFrame, 'Searching the web');
     narrator.check('still two characters after Stop — the sub survives in place');
     narrator.step('waiting for the completion queue-operation to despawn it');
-    await expectOverlayCount(panelFrame, 1);
+    await expectCharacterCount(panelFrame, 1);
     narrator.check('the sub-agent despawned on completion — the lead remains');
   });
 

@@ -3,15 +3,25 @@ import type { Frame } from '@playwright/test';
 import { expect, test } from '../../../fixtures/pixel-agents';
 import { spawnInternalAgentAndWait } from '../../../helpers/internal-agent';
 import {
+  INLINE_TEAMMATE_ALIAS,
+  INLINE_TEAMMATE_ROLE,
+  TMUX_TEAMMATE_ALIAS,
+  uniqueTeamName,
+  withInlineTeammateSession,
+  withTmuxTeammateSession,
+} from '../../../helpers/lifecycle';
+import {
   arrangeNextClaudeInvocation,
   claudeScenario,
   spawnExternalClaudeScenario,
 } from '../../../helpers/mock-claude';
 import {
+  expectCharacterCount,
   expectNoOverlayWithTexts,
   expectOverlayCount,
   expectOverlayVisible,
   expectOverlayVisibleWithTexts,
+  expectSubagentOverlay,
 } from '../../../helpers/office';
 import {
   buildAssistantToolUseRecord,
@@ -21,14 +31,6 @@ import {
   buildUserToolResultRecord,
   seedTeamConfig,
 } from '../../../helpers/team';
-import {
-  INLINE_TEAMMATE_ALIAS,
-  INLINE_TEAMMATE_ROLE,
-  TMUX_TEAMMATE_ALIAS,
-  uniqueTeamName,
-  withInlineTeammateSession,
-  withTmuxTeammateSession,
-} from '../../../helpers/lifecycle';
 import { getPixelAgentsFrame, openPixelAgentsPanel, setSettings } from '../../../helpers/webview';
 
 async function expectLeadActivity(frame: Frame, text: string): Promise<void> {
@@ -241,12 +243,12 @@ test.describe('Hooks OFF / matrix', () => {
     await expectExternalAgentAdoption(frame);
     narrator.check('external session adopted (count → 1)');
     narrator.step('expecting the scripted Task to surface a Subtask');
-    await expectOverlayVisible(frame, 'Subtask: External research', 10_000);
+    await expectSubagentOverlay(frame, 'Subtask: External research');
     narrator.check('"Subtask: External research" appears');
-    await expectOverlayCount(frame, 2, 10_000);
+    await expectCharacterCount(frame, 2, 10_000);
     narrator.check('subtask on screen alongside the lead (count → 2)');
     narrator.step('waiting for the tool_result + turn_duration to retire the subtask');
-    await expectOverlayCount(frame, 1, 12_000);
+    await expectCharacterCount(frame, 1, 12_000);
     narrator.check('subtask despawned — count back to 1');
   });
 

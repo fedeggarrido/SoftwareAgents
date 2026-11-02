@@ -17,11 +17,14 @@ import {
   waitForClaudeHookSetup,
 } from '../../../helpers/mock-claude';
 import {
+  expectCharacterCount,
   expectCharacterGhosted,
   expectContextGauge,
   expectOverlayCount,
   expectOverlayVisible,
+  expectSubagentOverlay,
   getContextGauges,
+  selectCharacter,
 } from '../../../helpers/office';
 import {
   buildAssistantToolUseRecord,
@@ -88,20 +91,21 @@ test.describe('Hooks ON / spawn paths', () => {
     await expectCharacterGhosted(panelFrame, false);
 
     narrator.step('waiting for the t+5s Task tool_use to spawn a "Subtask" character');
-    await expectOverlayCount(panelFrame, 2);
-    await expectOverlayVisible(panelFrame, 'Subtask: spawned subtask');
+    await expectCharacterCount(panelFrame, 2);
+    await expectSubagentOverlay(panelFrame, 'Subtask: spawned subtask');
     narrator.check('"Subtask: spawned subtask" overlay up — count 1 → 2');
 
     // The agent is on no team, so this also pins that the context gauge is not
     // a teams feature. 90k of an Opus 5 window is 9%; reading 45% would mean
     // the runtime fell back to assuming a 200k window.
     narrator.step("waiting for the t+7s usage record to fill the agent's context gauge");
+    await selectCharacter(panelFrame, 1);
     await expectContextGauge(panelFrame, 9);
     await expect(getContextGauges(panelFrame)).toHaveCount(1);
     narrator.check('the agent shows a 9% context gauge; the subtask has none');
 
     narrator.step('waiting for the t+13s tool_result — the subtask should despawn');
-    await expectOverlayCount(panelFrame, 1);
+    await expectCharacterCount(panelFrame, 1);
     narrator.check('count back to 1 after the tool_result');
   });
 

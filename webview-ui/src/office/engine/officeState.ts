@@ -333,13 +333,13 @@ export class OfficeState {
   }
 
   /** Meeting chairs and sofas are social seating, not permanent desks. */
-  private isReservedSeat(uid: string): boolean {
+  isReservedSeat(uid: string): boolean {
     if (isMeetingArea(this.seatZone(uid))) return true;
     const furnitureUid = uid.replace(/:\d+$/, '');
     return this.layout.furniture.some((f) => f.uid === furnitureUid && f.type.startsWith('SOFA_'));
   }
 
-  private isWorkstationSeat(uid: string): boolean {
+  isWorkstationSeat(uid: string): boolean {
     const seat = this.seats.get(uid);
     return !!seat && this.isSeatFacingElectronics(seat, this.buildElectronicsTileSet());
   }

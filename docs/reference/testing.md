@@ -49,7 +49,7 @@ Run: `npm run test:webview`.
 
 ### End-to-end (Playwright)
 
-`e2e/` contains Playwright tests against a real VS Code Electron instance and a standalone Fastify server. CI runs the suite on Linux, macOS, and Windows in three shards at `--workers=1`. The generated [e2e inventory](../../e2e/README.md) is the source of truth for current specs, scenarios, and `@area:` coverage.
+`e2e/` contains Playwright tests against a real VS Code Electron instance and a standalone Fastify server. CI runs the suite on Linux and Windows in three shards at `--workers=1`. macOS is outside the fork's supported targets (the worker requires Windows). The generated [e2e inventory](../../e2e/README.md) is the source of truth for current specs, scenarios, and `@area:` coverage.
 
 **Mock claude**: Tests never invoke real `claude`. A bash script (`e2e/fixtures/mock-claude`) is copied into an isolated `bin/` and prepended to `PATH`. The scenario runner (`mock-claude-runner.cjs`) honors `claudeScenario(...).at(ms).appendJsonl(record).emitHook(event).holdOpenFor(ms).build()` to drive timed JSONL writes and hook events.
 

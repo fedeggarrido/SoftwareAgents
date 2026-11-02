@@ -293,12 +293,14 @@ jobs:
 
   e2e:
     name: ${{ matrix.target.label }} E2E (shard ${{ matrix.shard }}/3)
-    # Normal PRs run Linux + Windows (6 shards). Pushes to main and PRs with
-    # the `e2e-macos` label also run macOS (9 shards). Artifact names stay stable.
+    # The fork targets Windows (required by the worker); Linux also checks portability.
+    # macOS is outside the fork's supported targets, so it has no E2E shards.
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON((github.event_name == 'push' && github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'e2e-macos')) && '[{"os":"ubuntu-latest","label":"linux"},{"os":"macos-latest","label":"macos"},{"os":"windows-latest","label":"windows"}]' || '[{"os":"ubuntu-latest","label":"linux"},{"os":"windows-latest","label":"windows"}]') }}
+        target:
+          - { os: ubuntu-latest, label: linux }
+          - { os: windows-latest, label: windows }
         shard: [1, 2, 3]
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 60
@@ -346,7 +348,7 @@ jobs:
         run: npm run build:webview
 
       # Skip the ~250 MB chromium download when the browser cache hit; only run
-      # `install-deps` on Linux (macOS/Windows ship the required system libs, so
+      # `install-deps` on Linux (Windows ships the required system libs, so
       # the old unconditional `--with-deps` just burned ~30 s for a no-op).
       - name: Install Playwright Dependencies
         id: install_playwright_deps
@@ -516,14 +518,6 @@ jobs:
           path: allure-results/e2e
           merge-multiple: true
 
-      - name: Download macOS E2E Allure Shards
-        uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          pattern: allure-results-e2e-macos-shard-*
-          path: allure-results/e2e
-          merge-multiple: true
-
       - name: Upload Merged Cross-Platform E2E Allure Results
         if: always()
         continue-on-error: true
@@ -674,7 +668,7 @@ jobs:
             echo
             echo "- Deployment type: Preview"
             echo "- Deployment URL: $base_url"
-            echo "- Allure report (Linux + macOS + Windows): $base_url/reports/allure/"
+            echo "- Allure report (Linux + Windows): $base_url/reports/allure/"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create or update preview comment on PR
@@ -691,7 +685,7 @@ jobs:
           <!-- pixel-agents-vercel-preview -->
           🔍 Vercel Preview: $base_url
 
-          Allure report (Linux + macOS + Windows): $base_url/reports/allure/
+          Allure report (Linux + Windows): $base_url/reports/allure/
           EOF
           )"
 

@@ -17,6 +17,7 @@ import {
   CONTEXT_GAUGE_WIDTH_PX,
   CONTEXT_WARN_THRESHOLD,
   DEPARTMENT_COLORS,
+  SELECTED_AGENT_OVERLAY_Z_INDEX,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOOL_OVERLAY_VERTICAL_OFFSET,
@@ -308,6 +309,7 @@ export function ToolOverlay({
                   title={taskDetail}
                 >
                   {companyRole?.label ?? providerName ?? 'Agente'}
+                  {teamRoleLabel ? ` · ${teamRoleLabel}` : ''}
                   {task ? ` · ${task}` : ''}
                 </span>
                 {/* The pill stays visually compact; the current activity remains in the
@@ -328,7 +330,8 @@ export function ToolOverlay({
               top: screenY - (hasExtraLines ? 34 : 28),
               pointerEvents: isSelected ? 'auto' : 'none',
               opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
-              zIndex: isSelected ? 21 : 20,
+              // Keep the selected character's actions above its detail card.
+              zIndex: isSelected ? SELECTED_AGENT_OVERLAY_Z_INDEX : 20,
             }}
             data-testid="agent-overlay"
             data-agent-id={id}

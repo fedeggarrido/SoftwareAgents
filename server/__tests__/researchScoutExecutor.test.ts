@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'child_process';
+import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -7,13 +7,14 @@ import { PassThrough } from 'stream';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { WEB_SCOUT_SPEC } from '../../core/src/agentSpec.js';
+import { WEB_SCOUT_MAX_TURNS } from '../src/constants.js';
 import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
-import { spawnRegisteredProcess } from '../src/executors/registeredProcess.js';
-import { scoutSchema } from '../src/webScout.js';
+import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
+import { discoverUrls, scoutSchema } from '../src/webScout.js';
 
-vi.mock('../src/executors/registeredProcess.js', () => ({
-  spawnRegisteredProcess: vi.fn(),
-  cancelRegisteredProcess: () => false,
+vi.mock('child_process', async (original) => ({
+  ...(await original<typeof import('child_process')>()),
+  spawn: vi.fn(),
 }));
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -31,6 +32,26 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
     vi.stubEnv('HOME', root);
     vi.stubEnv('USERPROFILE', root);
     vi.stubEnv('ProgramFiles', path.join(root, 'program-files'));
+    for (const key of [
+      'CLICKUP_TOKEN',
+      'GH_TOKEN',
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_SESSION_TOKEN',
+      'AWS_PROFILE',
+      'PIXEL_AGENTS_OPERATOR_TOKEN',
+      'NODE_OPTIONS',
+      'UNRELATED_SECRET',
+    ])
+      vi.stubEnv(key, 'fixture-secret');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'fixture-auth');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'fixture-auth-token');
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', 'fixture-oauth');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'unused-config'));
+    vi.stubEnv('LANG', 'en_US.UTF-8');
+    vi.stubEnv('LC_CTYPE', 'en_US.UTF-8');
+    const configDir = path.join(root, 'claude-config');
+    fs.mkdirSync(configDir);
     const worktree = path.join(root, 'worktree');
     fs.mkdirSync(worktree);
     const child = Object.assign(new EventEmitter(), {
@@ -40,11 +61,14 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
     });
     let settings: Record<string, unknown> = {},
       cwd = '',
-      args: string[] = [];
-    vi.mocked(spawnRegisteredProcess).mockImplementation((_binary, argv, directory) => {
-      args = argv;
-      cwd = directory;
-      settings = JSON.parse(fs.readFileSync(argv[argv.indexOf('--settings') + 1], 'utf8'));
+      args: string[] = [],
+      environment: NodeJS.ProcessEnv = {};
+    vi.mocked(spawn).mockImplementation((_binary, argv, options) => {
+      args = argv as string[];
+      const spawnOptions = options as SpawnOptions;
+      cwd = spawnOptions.cwd as string;
+      environment = spawnOptions.env!;
+      settings = JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
       child.stdin.on('finish', () =>
         setImmediate(() => {
           const tools = mode === 'valid' || mode === 'prose' ? ['WebSearch'] : ['WebSearch', mode];
@@ -73,6 +97,7 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
     try {
       const executor = new ClaudeCliExecutor({
         binary: 'fixture-only',
+        configDir,
         runtimeDirectory: path.join(root, 'runtime'),
         containmentHookScript: __filename,
       });
@@ -94,10 +119,185 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
       expect(args).not.toContain('--bare');
       expect(args).toContain('--system-prompt');
       expect(args).toContain('--disable-slash-commands');
+      expect(args[args.indexOf('--max-turns') + 1]).toBe(String(WEB_SCOUT_MAX_TURNS));
       expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch');
+      expect(environment).toMatchObject({
+        HOME: root,
+        USERPROFILE: root,
+        CLAUDE_CONFIG_DIR: configDir,
+        ANTHROPIC_API_KEY: 'fixture-auth',
+        ANTHROPIC_AUTH_TOKEN: 'fixture-auth-token',
+        CLAUDE_CODE_OAUTH_TOKEN: 'fixture-oauth',
+        LANG: 'en_US.UTF-8',
+        LC_CTYPE: 'en_US.UTF-8',
+        SA_MANAGED_EXECUTION: 'worker',
+      });
+      for (const key of ['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TEMP', 'TMP']) {
+        const parentKey = Object.keys(process.env).find((name) => name.toUpperCase() === key);
+        if (parentKey) expect(environment[parentKey]).toBe(process.env[parentKey]);
+      }
+      expect(
+        Object.keys(environment).filter((key) =>
+          /^(CLICKUP_TOKEN|GH_TOKEN|AWS_.*|PIXEL_AGENTS_OPERATOR_TOKEN|NODE_OPTIONS|UNRELATED_SECRET)$/i.test(
+            key,
+          ),
+        ),
+      ).toEqual([]);
+      expect(process.env.CLICKUP_TOKEN).toBe('fixture-secret');
       expect(settings).toMatchObject({ claudeMdExcludes: ['**'], autoMemoryEnabled: false });
       expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: mode === 'valid' ? 0 : 1 });
     } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each(['complete', 'cancel'])(
+  'tracks multiple assistant turns with cache tokens before the final result: %s',
+  async (mode) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-usage-'));
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('USERPROFILE', root);
+    vi.stubEnv('ProgramFiles', path.join(root, 'program-files'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    const first = {
+      type: 'assistant',
+      message: {
+        id: 'turn-1',
+        content: [],
+        usage: {
+          input_tokens: 2,
+          output_tokens: 3,
+          cache_read_input_tokens: 10,
+          cache_creation_input_tokens: 5,
+        },
+      },
+    };
+    const second = {
+      type: 'assistant',
+      message: {
+        id: 'turn-2',
+        content: [],
+        usage: {
+          input_tokens: 4,
+          output_tokens: 5,
+          cache_read_input_tokens: 20,
+          cache_creation_input_tokens: 6,
+        },
+      },
+    };
+    const records = [
+      first,
+      first, // Multiple content blocks can repeat the same message's usage.
+      {
+        ...first,
+        message: { ...first.message, usage: { ...first.message.usage, output_tokens: 4 } },
+      },
+      second,
+      {
+        type: 'result',
+        result: '{"candidates":[]}',
+        // Cumulative totals also reconcile usage absent from assistant messages.
+        usage: {
+          input_tokens: 8,
+          output_tokens: 10,
+          cache_read_input_tokens: 30,
+          cache_creation_input_tokens: 11,
+        },
+      },
+    ];
+    let closed = false;
+    let finalWritten = false;
+    const close = (code: number) => {
+      if (closed) return;
+      closed = true;
+      child.stdout.end();
+      child.stderr.end();
+      child.emit('close', code);
+    };
+    vi.mocked(spawn).mockImplementation(() => {
+      child.stdin.on('finish', () => {
+        let index = 0;
+        const next = () => {
+          if (closed) return;
+          const record = records[index++];
+          if (!record) return close(0);
+          finalWritten ||= record.type === 'result';
+          child.stdout.write(JSON.stringify(record) + '\n');
+          setImmediate(next);
+        };
+        setImmediate(next);
+      });
+      return child as unknown as ChildProcess;
+    });
+    try {
+      const executor = new ClaudeCliExecutor({
+        binary: 'fixture-only',
+        runtimeDirectory: path.join(root, 'runtime'),
+        containmentHookScript: __filename,
+      });
+      const request: ExecutionRequest = {
+        executionId: 'usage',
+        projectId: 'fixture',
+        taskKey: 'scout',
+        role: 'web-scout',
+        agentSpec: WEB_SCOUT_SPEC,
+        flags: [],
+        prompt: '',
+        worktreePath: worktree,
+        timeoutMin: 1,
+        taskData: { task: { question: 'public' }, outputSchema: scoutSchema(2) },
+      };
+      if (mode === 'complete') {
+        const events: ExecutionEvent[] = [];
+        for await (const event of executor.start(request).events) {
+          if (event.type === 'usage' && !events.some((prior) => prior.type === 'usage'))
+            expect(finalWritten).toBe(false);
+          events.push(event);
+        }
+        expect(events.filter((event) => event.type === 'usage')).toEqual([
+          { type: 'usage', inputTokens: 17, outputTokens: 3 },
+          { type: 'usage', inputTokens: 0, outputTokens: 1 },
+          { type: 'usage', inputTokens: 30, outputTokens: 5 },
+          { type: 'usage', inputTokens: 2, outputTokens: 1 },
+        ]);
+        expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
+      } else {
+        const cancel = vi.fn();
+        await expect(
+          discoverUrls(
+            {
+              id: 'claude',
+              start: (req) => {
+                const handle = executor.start(req);
+                return {
+                  ...handle,
+                  cancel: () => {
+                    cancel(finalWritten);
+                    handle.cancel();
+                    close(130);
+                  },
+                };
+              },
+            },
+            request,
+            'public',
+            2,
+            50, // Uncached tokens total only 15; cache pushes turn 2 over budget.
+            new AbortController().signal,
+          ),
+        ).rejects.toThrow('Scout token budget exhausted');
+        expect(cancel).toHaveBeenCalledWith(false);
+        expect(finalWritten).toBe(false);
+      }
+    } finally {
+      close(0);
       fs.rmSync(root, { recursive: true, force: true });
     }
   },

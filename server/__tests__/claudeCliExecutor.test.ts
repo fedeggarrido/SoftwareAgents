@@ -208,6 +208,7 @@ it('uses fixed isolation flags, hooks and an empty MCP config without bypassPerm
   );
   expect(report.args).not.toContain('bypassPermissions');
   expect(report.args).toContain('--strict-mcp-config');
+  expect(report.args).not.toContain('--max-turns');
   expect(report.args[report.args.indexOf('--setting-sources') + 1]).toBe('');
   expect(report.args[report.args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
   expect(report.args[report.args.indexOf('--model') + 1]).toBe('requested-model');

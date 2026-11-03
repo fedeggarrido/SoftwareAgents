@@ -47,6 +47,7 @@ const command = () => ['-e', `require('fs').writeFileSync(${JSON.stringify(marke
 
 it('never passes operator credentials to the supervisor or CLI, even through overrides', async () => {
   vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'operator-secret');
+  vi.stubEnv('UNRELATED_EXECUTOR_ENV', 'inherited');
   const child = spawnRegisteredProcess(
     process.execPath,
     [
@@ -63,8 +64,45 @@ it('never passes operator credentials to the supervisor or CLI, even through ove
   expect(Object.keys(options.env!).map((key) => key.toUpperCase())).not.toContain(
     'PIXEL_AGENTS_OPERATOR_TOKEN',
   );
+  expect(options.env!.UNRELATED_EXECUTOR_ENV).toBe('inherited');
   expect(process.env.PIXEL_AGENTS_OPERATOR_TOKEN).toBe('operator-secret');
 });
+
+it.each([false, true])(
+  'keeps a replacement environment through CLI launch (registered: %s)',
+  async (registered) => {
+    vi.stubEnv('UNRELATED_EXECUTOR_ENV', 'parent-secret');
+    const child = spawnRegisteredProcess(
+      process.execPath,
+      [
+        '-e',
+        `const env = process.env;
+        process.exit(env.UNRELATED_EXECUTOR_ENV === undefined &&
+          env.SCOUT_FIXTURE === 'allowed' &&
+          !Object.keys(env).some(k => k.toUpperCase() === 'PIXEL_AGENTS_OPERATOR_TOKEN') ? 0 : 42)`,
+      ],
+      dir,
+      registered ? () => {} : undefined,
+      undefined,
+      {
+        SystemRoot: process.env.SystemRoot,
+        PATH: process.env.PATH,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        SCOUT_FIXTURE: 'allowed',
+        pixel_agents_operator_token: 'override-secret',
+      },
+      'replace',
+    );
+    expect((await settle(child)).code).toBe(0);
+    const options = vi.mocked(childProcess.spawn).mock.calls.at(-1)![2]!;
+    expect(options.env!.UNRELATED_EXECUTOR_ENV).toBeUndefined();
+    expect(Object.keys(options.env!).map((key) => key.toUpperCase())).not.toContain(
+      'PIXEL_AGENTS_OPERATOR_TOKEN',
+    );
+    expect(process.env.UNRELATED_EXECUTOR_ENV).toBe('parent-secret');
+  },
+);
 
 it('a failed registration still closes, so executors release their slot and lock', async () => {
   const child = spawnRegisteredProcess(process.execPath, command(), dir, () => {

@@ -83,26 +83,25 @@ export function spawnRegisteredProcess(
   register?: (pid: number) => void | Promise<void>,
   persistClose?: () => void | Promise<void>,
   environment?: NodeJS.ProcessEnv,
+  environmentMode: 'inherit' | 'replace' = 'inherit',
 ): ChildProcess {
+  // A replacement must reach both direct launches and the retained supervisor.
+  const env = withoutOperatorToken({
+    ...(environmentMode === 'inherit' ? process.env : {}),
+    ...environment,
+    [MANAGED_EXECUTION_ENV]: 'worker',
+  });
   if (!register && process.platform !== 'win32')
     return spawn(binary, args, {
       cwd,
-      env: withoutOperatorToken({
-        ...process.env,
-        ...environment,
-        [MANAGED_EXECUTION_ENV]: 'worker',
-      }),
+      env,
       windowsHide: true,
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   const child = spawn(process.execPath, ['-e', supervisor, binary, ...args], {
     cwd,
-    env: withoutOperatorToken({
-      ...process.env,
-      ...environment,
-      [MANAGED_EXECUTION_ENV]: 'worker',
-    }),
+    env,
     windowsHide: true,
     // UV_PROCESS_DETACHED keeps Windows out of libuv's worker-owned
     // KILL_ON_JOB_CLOSE job. Keep windowsHide as well: no console window.

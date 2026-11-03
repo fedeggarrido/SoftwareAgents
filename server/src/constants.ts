@@ -299,3 +299,31 @@ export const OPERATOR_PROOF_CONTEXT = 'pixel-agents:operator-proof:v1:';
 export const OPERATOR_PROOF_NONCE_BYTES = 32;
 export const OPERATOR_PROOF_TIMEOUT_MS = 2000;
 export const OPERATOR_PROOF_MAX_BODY_CHARS = 1024;
+
+/** Web scout inherits only OS essentials and Claude authentication/configuration. */
+export const WEB_SCOUT_ENV_ALLOWLIST = [
+  'PATH',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'USER',
+  'LOGNAME',
+  'LANG',
+  'LANGUAGE',
+  'TZ',
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+] as const;
+export const WEB_SCOUT_ENV_PREFIX_ALLOWLIST = ['ANTHROPIC_', 'LC_'] as const;
+/** Independent CLI ceiling, including runs that stop reporting token usage. */
+export const WEB_SCOUT_MAX_TURNS = 6;

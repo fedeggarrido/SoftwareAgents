@@ -13,6 +13,11 @@ import {
 } from '../agentCompiler.js';
 import { extractJsonObject } from '../agentOutput.js';
 import { claudeConfigEnvironment } from '../claudeConfig.js';
+import {
+  WEB_SCOUT_ENV_ALLOWLIST,
+  WEB_SCOUT_ENV_PREFIX_ALLOWLIST,
+  WEB_SCOUT_MAX_TURNS,
+} from '../constants.js';
 import { isQuotaDiagnostic } from '../executorQuotaState.js';
 import { claudeEffortSupported, resolveClaudeBinary, validateModelChoice } from '../modelTiers.js';
 import { getHookScriptPath, makeHookEntry } from '../providers/hook/claude/claudeHookInstaller.js';
@@ -224,7 +229,9 @@ export class ClaudeCliExecutor implements Executor {
           const args = [
             ...(options.binaryArgs ?? []),
             // Keep subscription OAuth: --bare would require an API key.
-            ...(req.role === 'web-scout' ? ['--no-session-persistence'] : []),
+            ...(req.role === 'web-scout'
+              ? ['--no-session-persistence', '--max-turns', String(WEB_SCOUT_MAX_TURNS)]
+              : []),
             '-p',
             '--output-format',
             'stream-json',
@@ -253,13 +260,27 @@ export class ClaudeCliExecutor implements Executor {
             ...(req.model ? ['--model', req.model] : []),
             ...(req.effort ? ['--effort', req.effort] : []),
           ];
+          const configEnvironment = claudeConfigEnvironment(options.configDir);
+          const environment =
+            req.role === 'web-scout'
+              ? Object.fromEntries(
+                  Object.entries({ ...process.env, ...configEnvironment }).filter(([key]) => {
+                    const name = key.toUpperCase();
+                    return (
+                      WEB_SCOUT_ENV_ALLOWLIST.some((allowed) => name === allowed) ||
+                      WEB_SCOUT_ENV_PREFIX_ALLOWLIST.some((prefix) => name.startsWith(prefix))
+                    );
+                  }),
+                )
+              : configEnvironment;
           child = spawnRegisteredProcess(
             options.binary,
             args,
             req.role === 'web-scout' ? directory : req.worktreePath,
             req.registerProcess,
             req.persistProcessClose,
-            claudeConfigEnvironment(options.configDir),
+            environment,
+            req.role === 'web-scout' ? 'replace' : 'inherit',
           );
           const processChild = child;
           let failure: Error | undefined;
@@ -288,6 +309,9 @@ export class ClaudeCliExecutor implements Executor {
             { type: 'telemetry', observation: { kind: 'prefix', hash: compiled.prefixHash } },
           ];
           const telemetry = new CliTelemetryProjection();
+          let usageInput = 0;
+          let usageOutput = 0;
+          let usageObserved = false;
           let wake: (() => void) | undefined;
           const push = (event: ExecutionEvent) => {
             queue.push(event);
@@ -338,8 +362,20 @@ export class ClaudeCliExecutor implements Executor {
                 const record = JSON.parse(line);
                 if (record.type === 'assistant' && record.error === 'rate_limit')
                   push({ type: 'rateLimit', message: 'rejected', retryAfterSec: 0 });
-                for (const observation of telemetry.claude(record))
+                for (const observation of telemetry.claude(record)) {
                   push({ type: 'telemetry', observation });
+                  if (observation.kind === 'usage') {
+                    // The projection deduplicates assistant message IDs and includes cache
+                    // tokens. Emit only deltas; final result totals reconcile missing usage.
+                    const inputTokens = Math.max(0, observation.input - usageInput);
+                    const outputTokens = Math.max(0, observation.output - usageOutput);
+                    if (!usageObserved || inputTokens || outputTokens)
+                      push({ type: 'usage', inputTokens, outputTokens });
+                    usageInput += inputTokens;
+                    usageOutput += outputTokens;
+                    usageObserved = true;
+                  }
+                }
                 if (!record?.type) {
                   push({ type: 'output', text: line, stream });
                   continue;
@@ -457,14 +493,7 @@ export class ClaudeCliExecutor implements Executor {
                     );
                   }
                 }
-                // Result usage is cumulative; assistant usage must not be counted twice.
                 if (record.type === 'result') {
-                  if (record.usage)
-                    push({
-                      type: 'usage',
-                      inputTokens: record.usage.input_tokens ?? 0,
-                      outputTokens: record.usage.output_tokens ?? 0,
-                    });
                   summary = record.result || record.errors?.join('\n') || '';
                   resultError = record.is_error === true;
                   if (resultError && isQuotaDiagnostic(summary))

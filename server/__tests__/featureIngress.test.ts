@@ -151,14 +151,8 @@ it.each([
   const record = path.join(home, '.pixel-agents/server.json');
   if (scenario === 'missing') fs.unlinkSync(record);
   if (scenario === 'unreadable') {
-    const read = fs.readFileSync;
-    vi.spyOn(fs, 'readFileSync').mockImplementation(((
-      file: fs.PathOrFileDescriptor,
-      ...args: unknown[]
-    ) => {
-      if (file === record) throw Object.assign(new Error('denied'), { code: 'EACCES' });
-      return Reflect.apply(read, fs, [file, ...args]);
-    }) as typeof fs.readFileSync);
+    fs.unlinkSync(record);
+    fs.mkdirSync(record);
   }
   if (scenario === 'malformed') fs.writeFileSync(record, '{');
   if (scenario === 'invalid shape') writeDiscovery({ pid: process.pid, port: 0, token });

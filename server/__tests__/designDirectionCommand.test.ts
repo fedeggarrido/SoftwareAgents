@@ -34,7 +34,8 @@ it('re-explores once, drafts off main, opens HumanDecision, and applies only hum
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
   operatorToken(root);
-  vi.stubEnv('pixel_agents_operator_token', 'case-override');
+  // Windows aliases this name to the capability set by the helper.
+  vi.stubEnv('pixel_agents_operator_token', process.env.PIXEL_AGENTS_OPERATOR_TOKEN!);
   const brain = path.join(root, 'brain'),
     tree = path.join(root, 'proposal');
   fs.mkdirSync(brain);

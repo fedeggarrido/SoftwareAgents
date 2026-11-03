@@ -327,3 +327,6 @@ export const WEB_SCOUT_ENV_ALLOWLIST = [
 export const WEB_SCOUT_ENV_PREFIX_ALLOWLIST = ['ANTHROPIC_', 'LC_'] as const;
 /** Independent CLI ceiling, including runs that stop reporting token usage. */
 export const WEB_SCOUT_MAX_TURNS = 6;
+
+/** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
+export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;

@@ -24,7 +24,7 @@ afterEach(async () => {
 }, 30_000);
 
 /** Resolves with the events seen once 'close' arrives; rejects if it never does. */
-function settle(child: ChildProcess, timeoutMs = 8000) {
+function settle(child: ChildProcess, timeoutMs = 20_000) {
   const seen: string[] = [];
   child.stdout!.resume();
   child.stderr!.resume();
@@ -102,6 +102,7 @@ it.each([false, true])(
     );
     expect(process.env.UNRELATED_EXECUTOR_ENV).toBe('parent-secret');
   },
+  30_000,
 );
 
 it('a failed registration still closes, so executors release their slot and lock', async () => {

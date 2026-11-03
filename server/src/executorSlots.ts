@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { LAYOUT_FILE_DIR } from './constants.js';
+import { LAYOUT_FILE_DIR, PROCESS_IDENTITY_TIMEOUT_MS } from './constants.js';
 import type { ExecutorId } from './executors/executor.js';
 import { withoutOperatorToken } from './featureIngress.js';
 import {
@@ -62,7 +62,7 @@ export function slotProcessIdentity(pid: number): string | null | undefined {
           env: withoutOperatorToken(process.env),
           encoding: 'utf8',
           windowsHide: true,
-          timeout: 5000,
+          timeout: PROCESS_IDENTITY_TIMEOUT_MS,
           stdio: ['ignore', 'pipe', 'ignore'],
         },
       ).trim();
@@ -76,7 +76,7 @@ export function slotProcessIdentity(pid: number): string | null | undefined {
       // Darwin/BSD: ps is locale-stable, second precision. Never enumerate processes.
       identity = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
         encoding: 'utf8',
-        timeout: 5000,
+        timeout: PROCESS_IDENTITY_TIMEOUT_MS,
         env: withoutOperatorToken({ ...process.env, LC_ALL: 'C' }),
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();

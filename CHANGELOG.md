@@ -1,5 +1,9 @@
 # Changelog
 
+SoftwareAgents is developed on `main` without versioned releases yet; see the Git history for its changes.
+The entries below (v1.4.1 and earlier) are inherited from the upstream
+[Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents) project this repository was forked from.
+
 ## v1.4.1
 
 ### Features

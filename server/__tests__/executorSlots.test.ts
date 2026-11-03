@@ -42,7 +42,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   // Windows can briefly retain directory handles after the verified child exit.
-  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  // A handle that outlives the retries is a runner artifact, not a test failure.
+  try {
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+  }
 });
 it('serializes admission, holds slots until release, and rejects probes while another slot is held', () => {
   const slot = withExecutorAdmission('codex', 'execution-a', (owner) => {

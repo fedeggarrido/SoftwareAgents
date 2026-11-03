@@ -5,6 +5,7 @@ import { backlogView } from '../office/backlogView.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import { taskPullRequestLabel } from '../office/prStatusView.js';
 import { Button } from './ui/Button.js';
 import { PanelHeading } from './ui/PanelHeading.js';
 
@@ -114,9 +115,18 @@ function Card({
         </div>
       )}
       {item.lastEvent && <EventLine e={item.lastEvent} now={now} />}
+      {item.prRef && (
+        <div className="text-2xs text-text-muted" data-testid="task-pr-status">
+          {taskPullRequestLabel(item)}
+        </div>
+      )}
       {open && (
         <div className="text-2xs text-text-muted leading-tight flex flex-col gap-1">
           {item.epic && <div>{item.epic}</div>}
+          {item.prRef && <div>PR {item.prStatus?.url ?? item.prRef}</div>}
+          {item.prStatus?.failedChecks.length ? (
+            <div>{item.prStatus.failedChecks.join(', ')}</div>
+          ) : null}
           <div>
             Prioridad {item.priority ?? '—'} · tamaño {item.size ?? '—'}
             {item.clickupId ? ` · ClickUp ${item.clickupId}` : ''}

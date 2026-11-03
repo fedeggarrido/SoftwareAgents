@@ -1,7 +1,12 @@
 import { Worker } from 'node:worker_threads';
 
 import type { HumanDecision } from '../../core/src/humanDecision.js';
-import type { BoardDecision, BoardEvent, BoardItem } from '../../core/src/messages.js';
+import type {
+  BoardDecision,
+  BoardEvent,
+  BoardItem,
+  PullRequestStatus,
+} from '../../core/src/messages.js';
 import { BOARD_RECENT_EVENTS } from './constants.js';
 
 interface TaskRow {
@@ -17,9 +22,12 @@ interface TaskRow {
   execution_role: string | null;
   execution_key: string | null;
   session_id: string | null;
+  pr_ref: string | null;
+  pr_status: string | null;
 }
 interface EventRow {
   id: number;
+  type: string;
   task_key: string;
   from_status: string;
   to_status: string;
@@ -54,11 +62,16 @@ function readInWorker(): void {
       parentPort.postMessage(null);
       return;
     }
+    const hasPrStatus = db
+      .prepare('PRAGMA table_info(tasks)')
+      .all()
+      .some((column: { name: string }) => column.name === 'pr_status');
     const tasks = db
       .prepare(
         `
       SELECT t.key, t.type, t.status, t.priority, t.feature_key, t.agent_role,
-             t.lease_owner, t.lease_expires_at, t.updated_at,
+             t.lease_owner, t.lease_expires_at, t.updated_at, t.pr_ref,
+             ${hasPrStatus ? 't.pr_status' : 'NULL AS pr_status'},
              e.agent_role AS execution_role, e.key AS execution_key, e.session_id
       FROM tasks t LEFT JOIN executions e ON e.project_id = t.project_id AND e.key = (
         SELECT key FROM executions WHERE project_id = t.project_id AND task_key = t.key
@@ -74,7 +87,7 @@ function readInWorker(): void {
     const events = db
       .prepare(
         `
-      SELECT id, task_key, from_status, to_status, created_at FROM domain_events
+      SELECT id, type, task_key, from_status, to_status, created_at FROM domain_events
       WHERE project_id = ? AND (id IN (
         SELECT MAX(id) FROM domain_events WHERE project_id = ? GROUP BY task_key
       ) OR id IN (
@@ -164,7 +177,12 @@ function projectBoard(snapshot: Snapshot, now: number): WorkStoreBoard {
       phase: e.to_status,
       state: '',
       // Reasons/actors may contain prompts, paths or secrets: never transmit them.
-      detail: `${e.from_status} → ${e.to_status}`,
+      detail:
+        e.type === 'PR_MERGED'
+          ? 'PR merged'
+          : e.type === 'PR_UPDATED'
+            ? 'PR updated'
+            : `${e.from_status} → ${e.to_status}`,
     }));
   const lastByTask = new Map<string, BoardEvent>();
   for (const event of events) if (!lastByTask.has(event.task)) lastByTask.set(event.task, event);
@@ -211,6 +229,8 @@ function projectBoard(snapshot: Snapshot, now: number): WorkStoreBoard {
         title: t.key,
         epic: t.feature_key ?? undefined,
         phase: t.status,
+        prRef: t.pr_ref ?? undefined,
+        prStatus: t.pr_status ? (JSON.parse(t.pr_status) as PullRequestStatus) : undefined,
         priority: String(t.priority),
         dependsOn: dependencies.get(t.key) ?? [],
         owner: holder

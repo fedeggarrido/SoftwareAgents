@@ -24,6 +24,8 @@ export const DOMAIN_EVENT_KINDS = [
   'quota.exhausted',
   'human.decision.required',
   'human.decision.answered',
+  'pr.updated',
+  'pr.merged',
 ] as const satisfies readonly DomainEventKind[];
 
 interface DomainEventBase {
@@ -71,7 +73,14 @@ export interface PendingDomainEvent extends DomainEventBase {
   kind: 'task.created';
 }
 
-export type DomainEvent = TransitionDomainEvent | HumanDecisionDomainEvent | PendingDomainEvent;
+export interface PullRequestDomainEvent extends DomainEventBase {
+  kind: 'pr.updated' | 'pr.merged';
+  /** Manual cleanup gate for a newly observed merge. */
+  decisionId?: string | null;
+}
+
+export type DomainEvent =
+  TransitionDomainEvent | HumanDecisionDomainEvent | PendingDomainEvent | PullRequestDomainEvent;
 
 export function isDomainEventKind(value: unknown): value is DomainEventKind {
   return (DOMAIN_EVENT_KINDS as readonly unknown[]).includes(value);

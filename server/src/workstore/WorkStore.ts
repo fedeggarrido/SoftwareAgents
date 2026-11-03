@@ -1,4 +1,5 @@
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
+import type { PullRequestStatus } from '../../../core/src/messages.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { ReviewReport } from '../../../core/src/reviewReport.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
@@ -118,6 +119,7 @@ export interface TaskRecord {
   branch: string | null;
   worktree_ref: string | null;
   pr_ref: string | null;
+  pr_status?: PullRequestStatus | null;
   review_ref?: ReviewRef | null;
   review_reports?: ReviewRecord[];
   test_reports?: TestRecord[];
@@ -217,7 +219,7 @@ export interface DomainEventRecord {
   id: number;
   project_id: string;
   task_key: string;
-  type: 'TASK_TRANSITIONED';
+  type: 'TASK_TRANSITIONED' | 'PR_UPDATED' | 'PR_MERGED';
   from_status: TaskStatus;
   to_status: TaskStatus;
   task_version: number;
@@ -283,6 +285,14 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
+  /** Compare-and-set observations. CI blocking, merge notice and human cleanup gate are durable. */
+  observePullRequest(
+    taskId: string,
+    expectedVersion: number,
+    ref: string,
+    status: PullRequestStatus,
+    cleanup: NewHumanDecision | undefined,
+  ): Promise<void>;
   requestDesignRework(task: string, version: number): Promise<void>;
   /** Validated DAG ingress. Existing keys are immutable; the entire batch is atomic. */
   importTaskDag(

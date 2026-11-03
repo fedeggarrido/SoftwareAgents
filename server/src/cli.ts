@@ -53,6 +53,7 @@ import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
+import { createPullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
@@ -444,6 +445,8 @@ async function startServer(argv: string[]): Promise<void> {
     // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).
     const domainEventRelay = createDomainEventRelay(store, cwd, boardSelection);
     domainEventRelay?.start();
+    const pullRequestMonitor = createPullRequestMonitor(boardSelection);
+    pullRequestMonitor?.start();
     // Technical availability of the bound Project's enabled Executors (SA-089).
     startExecutorMonitoring(store, executorProject);
 
@@ -481,6 +484,7 @@ async function startServer(argv: string[]): Promise<void> {
       roleResolver.dispose();
       boardWatcher.dispose();
       domainEventRelay?.dispose();
+      pullRequestMonitor?.dispose();
       machineCapacity.dispose();
       runtime.dispose();
       server.stop();

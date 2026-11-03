@@ -1,0 +1,11 @@
+{
+  "state": "MERGED",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    { "__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS" }
+  ],
+  "mergedAt": "2026-11-03T10:00:00Z",
+  "url": "https://github.com/example/project/pull/42",
+  "headRefName": "sa/SA-055"
+}

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
+import { useBoard } from '../office/boardStore.js';
+import { pullRequestDockSummary } from '../office/prStatusView.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
@@ -35,6 +37,8 @@ export function BottomToolbar({
   onToggleFeatures,
   workspaceFolders,
 }: BottomToolbarProps) {
+  const board = useBoard();
+  const prs = pullRequestDockSummary(board?.items ?? []);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
   const folderPickerRef = useRef<HTMLDivElement>(null);
@@ -146,6 +150,11 @@ export function BottomToolbar({
       >
         Backlog
       </Button>
+      {prs && (
+        <Button onClick={onToggleBacklog} title={prs.title} data-testid="dock-pr-status">
+          {prs.label}
+        </Button>
+      )}
       <Button
         variant={isAuditOpen ? 'active' : 'default'}
         onClick={onToggleAudit}

@@ -1,0 +1,14 @@
+{
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    { "__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS" },
+    { "__typename": "CheckRun", "name": "optional", "status": "COMPLETED", "conclusion": "SKIPPED" },
+    { "__typename": "CheckRun", "name": "annotations", "status": "COMPLETED", "conclusion": "NEUTRAL" },
+    { "__typename": "StatusContext", "context": "legacy-ci", "state": "SUCCESS" }
+  ],
+  "mergedAt": null,
+  "url": "https://github.com/example/project/pull/42",
+  "headRefName": "sa/SA-055"
+}

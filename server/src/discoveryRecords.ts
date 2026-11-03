@@ -32,8 +32,7 @@ export function discoveryRoot(home = os.homedir()): string {
 export function discoveryPath(relative: string): string {
   return resolveInside(discoveryRoot(), relative);
 }
-/** Contain the parent, then operate on the lexical entry, never a link target.
- * Human ingress supplies the OS account home explicitly, independent of caller env. */
+/** Contain the parent, then operate on the lexical entry, never a link target. */
 export function discoveryEntryPath(relative: string, home?: string): string {
   const parent = path.dirname(relative);
   const dir =

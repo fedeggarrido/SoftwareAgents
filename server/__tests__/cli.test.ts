@@ -3,13 +3,21 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CliArgsError, parseArgs } from '../src/cli.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
+import { operatorTokenServer } from './helpers/operatorToken.js';
 
 const CLI_BUNDLE = path.join(__dirname, '../../dist/cli.js');
 const CLI_START_TIMEOUT_MS = 10_000;
+let proofServer: Awaited<ReturnType<typeof operatorTokenServer>> | undefined;
+
+afterEach(async () => {
+  await proofServer?.close();
+  proofServer = undefined;
+  vi.unstubAllEnvs();
+});
 
 async function getFreePort(): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -220,6 +228,7 @@ describe('dist/cli.js entry-point guard', () => {
         async ({ output, port }) => {
           expect((await fetch(`http://127.0.0.1:${port}/api/health`)).ok).toBe(true);
           expect(output()).toContain('Rejected Operator project sample');
+          proofServer = await operatorTokenServer(tmpHome);
           const workspace = path.join(tmpHome, 'commands');
           fs.mkdirSync(path.join(workspace, '.softwareagents'), { recursive: true });
           fs.writeFileSync(
@@ -240,7 +249,7 @@ describe('dist/cli.js entry-point guard', () => {
             ['worker', 'run'],
           ]) {
             const result = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-              // worker run is a human decision (SA-107): confirm with the live test server's
+              // worker run is a human decision (SA-107): confirm with the live proof server's
               // token, as the operator would, and without managed-execution markers.
               const operatorEnv = Object.fromEntries(
                 Object.entries(process.env).filter(

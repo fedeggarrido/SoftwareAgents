@@ -32,7 +32,6 @@ vi.mock('../src/projectConfig.js', () => ({ loadProjectConfig: vi.fn(() => undef
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
-  userInfo: vi.fn(),
 }));
 let home: string;
 let server: HttpServerHandle;
@@ -45,13 +44,6 @@ beforeEach(async () => {
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
     vi.stubEnv(key, undefined);
   vi.stubEnv('CI', undefined);
-  vi.mocked(os.userInfo).mockReturnValue({
-    homedir: home,
-    uid: 1,
-    gid: 1,
-    username: 'test',
-    shell: null,
-  });
   serverOptions = { embedded: true, token, store: new AgentStateStore() };
   server = await createHttpServer(serverOptions);
   fs.mkdirSync(path.join(home, '.pixel-agents'));
@@ -170,7 +162,8 @@ it.each([
   expect(fs.readdirSync(home)).toEqual(['.pixel-agents']);
 });
 
-it('ignores forged HOME and USERPROFILE even with a live PID and matching invented token', async () => {
+it('rejects forged HOME and USERPROFILE without a live proof server', async () => {
+  await server.app.close();
   const forged = path.join(home, 'forged');
   fs.mkdirSync(path.join(forged, '.pixel-agents'), { recursive: true });
   fs.writeFileSync(
@@ -180,15 +173,6 @@ it('ignores forged HOME and USERPROFILE even with a live PID and matching invent
   vi.stubEnv('HOME', forged);
   vi.stubEnv('USERPROFILE', forged);
   vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', 'invented');
-  await expect(confirmHumanIngress([])).rejects.toThrow('Invalid operator token');
-  vi.stubEnv('PIXEL_AGENTS_OPERATOR_TOKEN', token);
-  await expect(confirmHumanIngress([])).resolves.toEqual([]);
-});
-
-it('fails closed if the OS account cannot be resolved', async () => {
-  vi.mocked(os.userInfo).mockImplementation(() => {
-    throw new Error('account unavailable');
-  });
   await expect(confirmHumanIngress([])).rejects.toThrow('PIXEL_AGENTS_OPERATOR_TOKEN');
 });
 

@@ -93,8 +93,9 @@ Abra primero la oficina del Project. Los comandos que registran decisiones human
 exigen el token de la instancia seleccionada por `~/.pixel-agents/server.json`
 (el mismo puntero predeterminado de `pixel-agents token rotate`). La instancia
 debe seguir viva y demostrar que conoce el token mediante un HMAC de un nonce
-nuevo y su PID, sin recibir el token del cliente. Esta comprobación lee el perfil
-del usuario del SO (`os.userInfo().homedir`), sin confiar en `HOME` o `USERPROFILE`.
+nuevo y su PID, sin recibir el token del cliente. Esta comprobación usa
+`discoveryRoot()` y `os.homedir()`, igual que el resto de discovery, respetando
+`HOME` o `USERPROFILE` según el SO.
 Solo contacta con `127.0.0.1`; una instancia sin ese listener, una versión sin
 la ruta de prueba o cualquier error/timeout deniega la confirmación.
 El servidor es compartido entre Projects: discovery no publica
@@ -120,6 +121,10 @@ companyAutopilot y las lecturas conservan sus reglas. DecisionsPanel sigue usand
 el WS privilegiado. Tras rotar el token, vuelva a abrir discovery y actualice
 la variable si la usa. Los fallos de confirmación no registran decisiones.
 
-Esta medida evita la suplantación basada solo en borrar marcadores. No evita que
-otro proceso con los permisos del operador lea discovery: véase
+Un agente que se ejecute con el mismo usuario del SO puede borrar los marcadores
+gestionados, falsificar discovery y levantar su propio servidor de prueba para
+superar la confirmación. Los marcadores, la contención del Executor,
+`protectedPaths` y el filtrado del entorno mitigan este riesgo residual. La
+separación efectiva requiere una identidad de SO distinta, pendiente en SA-058.
+Véase
 [threat-model §9](../security/threat-model.md#9-ingreso-humano-con-token-privilegiado-sa-107).

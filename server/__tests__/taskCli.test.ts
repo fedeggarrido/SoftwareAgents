@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { createHash } from 'crypto';
 import { buildSync } from 'esbuild';
 import * as fs from 'fs';
@@ -14,7 +14,7 @@ import { runTaskCommand } from '../src/commands/task.js';
 import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
-import { operatorToken } from './helpers/operatorToken.js';
+import { operatorTokenServer } from './helpers/operatorToken.js';
 
 vi.setConfig({ testTimeout: 300_000 });
 
@@ -27,6 +27,7 @@ let bundleRoot: string;
 let bundle: string;
 let root: string;
 let repo: string;
+let proofServer: Awaited<ReturnType<typeof operatorTokenServer>> | undefined;
 const stores: WorkStore[] = [];
 const first = 'FEAT-001-T01';
 const second = 'FEAT-001-T02';
@@ -60,13 +61,13 @@ beforeAll(() => {
   });
 });
 afterAll(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
-beforeEach(() => {
+beforeEach(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-cli-'));
   repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
-  operatorToken(root);
+  proofServer = await operatorTokenServer(root);
   for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
     vi.stubEnv(key, undefined);
   vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
@@ -105,7 +106,9 @@ beforeEach(() => {
   git('add', '.');
   git('commit', '-m', 'fixture');
 });
-afterEach(() => {
+afterEach(async () => {
+  await proofServer?.close();
+  proofServer = undefined;
   for (const store of stores.splice(0)) store.close();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -118,15 +121,22 @@ function writeDag(value: unknown) {
   fs.writeFileSync(path.join(repo, 'dag.yaml'), JSON.stringify(value));
 }
 function cli(...args: string[]) {
-  const result = spawnSync(process.execPath, [bundle, 'task', ...args], {
-    cwd: repo,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 15_000,
-    env: { ...process.env, HOME: root, USERPROFILE: root, NODE_NO_WARNINGS: '1' },
+  // Yield the test process so its loopback server can answer the CLI's proof request.
+  return new Promise<{ code: number | null; out: string; err: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, [bundle, 'task', ...args], {
+      cwd: repo,
+      windowsHide: true,
+      timeout: 15_000,
+      env: { ...process.env, HOME: root, USERPROFILE: root, NODE_NO_WARNINGS: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, out, err }));
   });
-  if (result.error) throw result.error;
-  return { code: result.status, out: result.stdout, err: result.stderr };
 }
 async function open() {
   const store = await openWorkStore({ repositoryPath: repo, projectId: 'test' });
@@ -144,7 +154,7 @@ function developerSpec(): AgentSpec {
 }
 
 it('persists external import provenance and rejects the task before tool execution', async () => {
-  expect(cli('import', 'dag.yaml', '--origin', 'external').code).toBe(0);
+  expect((await cli('import', 'dag.yaml', '--origin', 'external')).code).toBe(0);
   const store = await open();
   for (const key of [first, second]) {
     const task = store.getTask(key)!;
@@ -159,8 +169,8 @@ it('persists external import provenance and rejects the task before tool executi
     );
   }
   // Repeating the same import is idempotent; omitting the source cannot untaint it.
-  expect(cli('import', 'dag.yaml', '--origin', 'external').code).toBe(0);
-  expect(cli('import', 'dag.yaml').code).not.toBe(0);
+  expect((await cli('import', 'dag.yaml', '--origin', 'external')).code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).not.toBe(0);
   expect(() => compileAgent(developerSpec(), 'developer', { task: store.getTask(first) })).toThrow(
     'tool-free quarantine reader',
   );
@@ -169,7 +179,7 @@ it('persists external import provenance and rejects the task before tool executi
 it.each([{ options: [] }, { options: ['--origin', 'local'] }])(
   'keeps local Architect DAGs usable: $options',
   async ({ options }) => {
-    expect(cli('import', 'dag.yaml', ...options).code).toBe(0);
+    expect((await cli('import', 'dag.yaml', ...options)).code).toBe(0);
     const task = (await open()).getTask(first)!;
     expect(JSON.parse(task.declaration!).description).toBe('Implement');
     expect(() => compileAgent(developerSpec(), 'developer', { task })).not.toThrow();
@@ -178,14 +188,14 @@ it.each([{ options: [] }, { options: ['--origin', 'local'] }])(
 
 it.each([['--origin'], ['--origin', 'unknown'], ['--origin', 'external', '--origin', 'local']])(
   'rejects invalid import provenance options: %j',
-  (...options) => {
-    expect(cli('import', 'dag.yaml', ...options).code).not.toBe(0);
+  async (...options) => {
+    expect((await cli('import', 'dag.yaml', ...options)).code).not.toBe(0);
     expect(fs.existsSync(dbFile())).toBe(false);
   },
 );
 
 it('imports the spec title and backfills legacy NULL titles at open from the registered revision', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const first = await open();
   expect(first.getFeature('FEAT-001')?.title).toBe('CLI');
   const docPath = first.getFeature('FEAT-001')!.doc_path;
@@ -210,7 +220,7 @@ it('imports the spec title and backfills legacy NULL titles at open from the reg
 });
 
 it('retries QA with a backup, human audit and preserved reports', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const store = await open();
   const ref = { branch: 'sa/test', sha: 'a'.repeat(40), base: 'b'.repeat(40) };
   store.createTask({
@@ -244,7 +254,7 @@ it('retries QA with a backup, human audit and preserved reports', async () => {
     'fixture approval',
     'fixture',
   );
-  const result = cli('retry', 'retry-me', '--reason', 'Move the test to webview-ui/test');
+  const result = await cli('retry', 'retry-me', '--reason', 'Move the test to webview-ui/test');
   expect(result).toMatchObject({ code: 0, err: '' });
   expect(store.getTask('retry-me')).toMatchObject({
     status: 'READY',
@@ -280,7 +290,7 @@ it('requires human ingress before creating any retry backup', async () => {
 it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'FAILED_RETRYABLE', 'QA'] as const)(
   'retries %s without an approval as FAILED_RETRYABLE',
   async (status) => {
-    expect(cli('import', 'dag.yaml').code).toBe(0);
+    expect((await cli('import', 'dag.yaml')).code).toBe(0);
     const store = await open();
     store.createTask({
       key: 'retry-unapproved',
@@ -306,7 +316,7 @@ it.each(['WAITING_HUMAN', 'FAILED_FINAL', 'FAILED_RETRYABLE', 'QA'] as const)(
 it.each(['DONE', 'QA'] as const)(
   'refuses manual retry for DONE or a leased QA task (%s)',
   async (status) => {
-    expect(cli('import', 'dag.yaml').code).toBe(0);
+    expect((await cli('import', 'dag.yaml')).code).toBe(0);
     const store = await open();
     store.createTask({
       key: 'no-retry',
@@ -316,29 +326,29 @@ it.each(['DONE', 'QA'] as const)(
     });
     if (status === 'QA') await store.claim('no-retry', 'worker');
     const before = store.getTask('no-retry');
-    expect(cli('retry', 'no-retry', '--reason', 'try again').code).not.toBe(0);
+    expect((await cli('retry', 'no-retry', '--reason', 'try again')).code).not.toBe(0);
     expect(store.getTask('no-retry')).toEqual(before);
   },
 );
 
 it('dispatches import/list, reimports without duplication and preserves a live lease', async () => {
-  expect(cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });
+  expect(await cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });
   const store = await open();
   await store.transition(first, 1, 'READY', 'ready', 'operator');
   await store.claim(first, 'test-worker');
   const before = store.getTask(first);
-  expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
+  expect((await cli('import', 'dag.yaml')).out).toContain('0 created, 2 unchanged');
   expect(store.getTask(first)).toEqual(before);
   expect(store.listTasks()).toHaveLength(2);
   expect(store.listTaskDependencies(second)).toHaveLength(1);
-  const rows = JSON.parse(cli('list', '--json').out);
+  const rows = JSON.parse((await cli('list', '--json')).out);
   expect(rows[0]).toMatchObject({
     lease_owner: 'test-worker',
     lease_expires_at: expect.any(String),
   });
   expect(rows[1].blockingReasons).toEqual([`Dependencies pending: ${first}`]);
-  expect(cli('list', '--status', 'LEASED').out).toContain('owner=test-worker');
-  expect(JSON.parse(cli('list', '--status', 'DONE', '--json').out)).toEqual([]);
+  expect((await cli('list', '--status', 'LEASED')).out).toContain('owner=test-worker');
+  expect(JSON.parse((await cli('list', '--status', 'DONE', '--json')).out)).toEqual([]);
   expect(
     new AuditLog()
       .read('test')
@@ -347,12 +357,12 @@ it('dispatches import/list, reimports without duplication and preserves a live l
 });
 
 it('rejects changed declarations atomically, including changes to declarative-only fields', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const changed = dag();
   changed.tasks.unshift({ ...changed.tasks[0], key: 'FEAT-001-T03' });
   changed.tasks[1].title = 'Changed';
   writeDag(changed);
-  expect(cli('import', 'dag.yaml')).toMatchObject({
+  expect(await cli('import', 'dag.yaml')).toMatchObject({
     code: 1,
     err: expect.stringContaining('immutable declaration'),
   });
@@ -362,13 +372,13 @@ it('rejects changed declarations atomically, including changes to declarative-on
 });
 
 it('keeps additive imports and partial reimports for historical DAGs without a registered design', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const extended = dag();
   extended.tasks.push({ ...extended.tasks[0], key: 'FEAT-001-T03' });
   writeDag(extended);
-  expect(cli('import', 'dag.yaml').out).toContain('1 created, 2 unchanged');
+  expect((await cli('import', 'dag.yaml')).out).toContain('1 created, 2 unchanged');
   writeDag(dag());
-  expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
+  expect((await cli('import', 'dag.yaml')).out).toContain('0 created, 2 unchanged');
   expect((await open()).listTasks()).toHaveLength(3);
 });
 
@@ -380,8 +390,8 @@ it('imports and reimports with an additive tasks/dependencies column', async () 
     db.exec(
       'ALTER TABLE tasks ADD COLUMN future TEXT; ALTER TABLE task_dependencies ADD COLUMN future TEXT;',
     );
-    expect(cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });
-    expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
+    expect(await cli('import', 'dag.yaml')).toMatchObject({ code: 0, err: '' });
+    expect((await cli('import', 'dag.yaml')).out).toContain('0 created, 2 unchanged');
     expect(db.prepare('SELECT declaration, future FROM tasks WHERE key = ?').get(first)).toEqual({
       declaration: expect.any(String),
       future: null,
@@ -393,7 +403,7 @@ it('imports and reimports with an additive tasks/dependencies column', async () 
 });
 
 it('escapes terminal controls in text fields while preserving original JSON values', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const store = await open();
   const controls = '\n\r\t\x1b[2J\x01\x1f\x7f\x85\x9f';
   const escaped = '\\n\\r\\t\\u001b[2J\\u0001\\u001f\\u007f\\u0085\\u009f';
@@ -403,7 +413,7 @@ it('escapes terminal controls in text fields while preserving original JSON valu
   store.createTask({ key, type: 'doc', blocked_reason: reason });
   await store.transition(first, 1, 'READY', 'ready', 'operator');
   await store.claim(first, owner);
-  const text = cli('list');
+  const text = await cli('list');
   expect(text).toMatchObject({ code: 0, err: '' });
   const lines = text.out.trimEnd().split(/\r?\n/);
   expect(lines).toHaveLength(3);
@@ -411,7 +421,7 @@ it('escapes terminal controls in text fields while preserving original JSON valu
   expect(text.out).toContain(`extra${escaped}`);
   expect(text.out).toContain(`blocked${escaped}`);
   expect(text.out).toContain(`owner=worker${escaped}`);
-  expect(JSON.parse(cli('list', '--json').out)).toEqual(
+  expect(JSON.parse((await cli('list', '--json')).out)).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ key, blocked_reason: reason, blockingReasons: [reason] }),
       expect.objectContaining({ key: first, lease_owner: owner }),
@@ -419,14 +429,14 @@ it('escapes terminal controls in text fields while preserving original JSON valu
   );
 });
 
-it('escapes controls in import error diagnostics', () => {
-  const result = cli('import', 'missing\n\r\x1b.yaml');
+it('escapes controls in import error diagnostics', async () => {
+  const result = await cli('import', 'missing\n\r\x1b.yaml');
   expect(result.code).toBe(1);
   expect(result.err.trimEnd().split(/\r?\n/)).toHaveLength(1);
   expect(result.err).not.toContain('\x1b');
 });
 
-it('rejects a declared Brain junction targeting another directory inside the checkout', () => {
+it('rejects a declared Brain junction targeting another directory inside the checkout', async () => {
   const link = path.join(repo, '.softwareagents/linked-brain');
   const target = path.join(repo, '.softwareagents/brain');
   const spec = path.join(target, 'features/requests/FEAT-001.yaml');
@@ -440,7 +450,7 @@ it('rejects a declared Brain junction targeting another directory inside the che
         .readFileSync(config, 'utf8')
         .replace('path: .softwareagents/brain', 'path: .softwareagents/linked-brain'),
     );
-    expect(cli('import', 'dag.yaml')).toMatchObject({
+    expect(await cli('import', 'dag.yaml')).toMatchObject({
       code: 1,
       err: expect.stringContaining('Links are forbidden'),
     });
@@ -453,7 +463,7 @@ it('rejects a declared Brain junction targeting another directory inside the che
 
 it.each(['schema', 'cycle', 'dangling', 'duplicate', 'coverage', 'yaml', 'large'])(
   'invalid %s input exits nonzero, without stack or partial DB activation',
-  (kind) => {
+  async (kind) => {
     const value = dag();
     if (kind === 'schema') value.tasks[0].type = 'bad';
     if (kind === 'cycle') value.tasks[0].dependsOn = [second];
@@ -467,7 +477,7 @@ it.each(['schema', 'cycle', 'dangling', 'duplicate', 'coverage', 'yaml', 'large'
     if (kind === 'yaml') fs.writeFileSync(path.join(repo, 'dag.yaml'), 'kind: [');
     if (kind === 'large')
       fs.writeFileSync(path.join(repo, 'dag.yaml'), 'x'.repeat(TASK_CLI_INPUT_BYTES + 1));
-    const result = cli('import', 'dag.yaml');
+    const result = await cli('import', 'dag.yaml');
     expect(result.code).toBe(1);
     expect(result.err).toContain('task import:');
     expect(result.err).not.toMatch(/\n\s+at /);
@@ -484,15 +494,15 @@ it.each([
   ['backup', '--keep', '1.5'],
   ['backup', '--keep', '1001'],
   ['restore', 'x'],
-])('rejects usage %j before opening WorkStore', (...args) => {
-  const result = cli(...args);
+])('rejects usage %j before opening WorkStore', async (...args) => {
+  const result = await cli(...args);
   expect(result.code).toBe(1);
   expect(result.err).not.toMatch(/\n\s+at /);
   expect(fs.existsSync(dbFile())).toBe(false);
 });
 
 it('explains quota reset and open human decisions', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const store = await open();
   await store.transition(first, 1, 'READY', 'ready', 'operator');
   const reset = '2099-01-01T00:00:00.000Z';
@@ -514,7 +524,7 @@ it('explains quota reset and open human decisions', async () => {
     requestedBy: 'operator',
     blocks: [second],
   });
-  const rows = JSON.parse(cli('list', '--json').out);
+  const rows = JSON.parse((await cli('list', '--json')).out);
   expect(rows[0]).toMatchObject({
     resetsAt: reset,
     blockingReasons: expect.arrayContaining(['quota exhausted']),
@@ -523,7 +533,7 @@ it('explains quota reset and open human decisions', async () => {
 });
 
 it('VACUUM backup includes committed WAL and offline restore recovers tasks, edges and audit', async () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const store = await open();
   const { DatabaseSync } = await import('node:sqlite');
   const connection = new DatabaseSync(dbFile());
@@ -532,7 +542,7 @@ it('VACUUM backup includes committed WAL and offline restore recovers tasks, edg
     store.createTask({ key: 'wal-only', type: 'doc' });
     expect(fs.statSync(`${dbFile()}-wal`).size).toBeGreaterThan(0);
     const originalAudit = fs.readFileSync(new AuditLog().file('test'), 'utf8');
-    const result = cli('backup');
+    const result = await cli('backup');
     expect(result).toMatchObject({ code: 0, err: '' });
     const backup = result.out.trim();
     const manifest = JSON.parse(fs.readFileSync(path.join(backup, 'manifest.json'), 'utf8'));
@@ -565,8 +575,8 @@ it('VACUUM backup includes committed WAL and offline restore recovers tasks, edg
     expect(restored.listTasks()).toHaveLength(3);
     expect(restored.listTaskDependencies(second)).toHaveLength(1);
     expect(fs.readFileSync(auditFile, 'utf8')).toBe(originalAudit);
-    expect(cli('import', 'dag.yaml').out).toContain('0 created, 2 unchanged');
-    expect(cli('list', '--json').code).toBe(0);
+    expect((await cli('import', 'dag.yaml')).out).toContain('0 created, 2 unchanged');
+    expect((await cli('list', '--json')).code).toBe(0);
   } finally {
     try {
       connection.close();
@@ -576,16 +586,16 @@ it('VACUUM backup includes committed WAL and offline restore recovers tasks, edg
   }
 });
 
-it('rotates to N complete copies and fails safely on an audit lock', () => {
-  expect(cli('import', 'dag.yaml').code).toBe(0);
-  const firstBackup = cli('backup', '--keep', '2').out.trim();
-  expect(cli('backup', '--keep', '2').code).toBe(0);
-  expect(cli('backup', '--keep', '2').code).toBe(0);
+it('rotates to N complete copies and fails safely on an audit lock', async () => {
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
+  const firstBackup = (await cli('backup', '--keep', '2')).out.trim();
+  expect((await cli('backup', '--keep', '2')).code).toBe(0);
+  expect((await cli('backup', '--keep', '2')).code).toBe(0);
   const directory = path.dirname(firstBackup);
   expect(fs.readdirSync(directory)).toHaveLength(2);
   expect(fs.existsSync(firstBackup)).toBe(false);
   fs.writeFileSync(`${new AuditLog().file('test')}.lock`, '');
-  expect(cli('backup', '--keep', '2').code).toBe(1);
+  expect((await cli('backup', '--keep', '2')).code).toBe(1);
   expect(fs.readdirSync(directory)).toHaveLength(2);
 });
 
@@ -598,9 +608,9 @@ it('rejects traversal and junctions on import/backup/rotation without touching t
     path.join(repo, 'linked'),
     process.platform === 'win32' ? 'junction' : 'dir',
   );
-  expect(cli('import', '../outside/dag.yaml').code).toBe(1);
-  expect(cli('import', 'linked/dag.yaml').code).toBe(1);
-  expect(cli('import', 'dag.yaml').code).toBe(0);
+  expect((await cli('import', '../outside/dag.yaml')).code).toBe(1);
+  expect((await cli('import', 'linked/dag.yaml')).code).toBe(1);
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
   const backups = path.join(root, '.pixel-agents/backups');
   fs.mkdirSync(backups);
   fs.symlinkSync(
@@ -608,10 +618,10 @@ it('rejects traversal and junctions on import/backup/rotation without touching t
     path.join(backups, 'test'),
     process.platform === 'win32' ? 'junction' : 'dir',
   );
-  expect(cli('backup').code).toBe(1);
+  expect((await cli('backup')).code).toBe(1);
   expect(fs.readdirSync(outside)).toEqual(['dag.yaml']);
   fs.unlinkSync(path.join(backups, 'test'));
-  const result = cli('backup');
+  const result = await cli('backup');
   expect(result.code).toBe(0);
   const dir = path.dirname(result.out.trim());
   const old = '2000-01-01T00-00-00-000Z-00000000-0000-0000-0000-000000000000';
@@ -630,13 +640,13 @@ it('audit failure before import prevents mutation', async () => {
   expect((await open()).listTasks()).toEqual([]);
 });
 
-it('backs up an empty Project with an empty audit and honors the backup lock', () => {
-  const result = cli('backup');
+it('backs up an empty Project with an empty audit and honors the backup lock', async () => {
+  const result = await cli('backup');
   expect(result).toMatchObject({ code: 0, err: '' });
   const directory = result.out.trim();
   expect(fs.readFileSync(path.join(directory, 'audit.jsonl'), 'utf8')).toBe('');
   const lock = path.join(path.dirname(directory), '.backup.lock');
   fs.writeFileSync(lock, '');
-  expect(cli('backup').code).toBe(1);
+  expect((await cli('backup')).code).toBe(1);
   expect(fs.readdirSync(path.dirname(directory))).toHaveLength(2);
 });

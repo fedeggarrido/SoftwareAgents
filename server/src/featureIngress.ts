@@ -1,6 +1,5 @@
 import { createHash, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
-import * as os from 'os';
 
 import { CliUsageError } from './cliErrors.js';
 import { SERVER_JSON_NAME } from './constants.js';
@@ -21,7 +20,7 @@ export function withoutOperatorToken(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
 const confirmationError =
   'Human confirmation requires the current server token: set PIXEL_AGENTS_OPERATOR_TOKEN in the operator environment or append --confirm for a hidden TTY prompt. Open the project office first.';
 
-/** Authenticate discovery from the OS account, then prove the live server's secret. */
+/** Authenticate normal discovery, then prove the live server's secret. */
 export async function confirmHumanIngress(argv: string[]): Promise<string[]> {
   if (featureIngressActor() !== 'human')
     throw new CliUsageError(
@@ -34,7 +33,7 @@ export async function confirmHumanIngress(argv: string[]): Promise<string[]> {
   if (!supplied) throw new CliUsageError(confirmationError);
   try {
     const target: unknown = JSON.parse(
-      fs.readFileSync(discoveryEntryPath(SERVER_JSON_NAME, os.userInfo().homedir), 'utf8'),
+      fs.readFileSync(discoveryEntryPath(SERVER_JSON_NAME), 'utf8'),
     );
     if (!isServerTarget(target) || !isProcessRunning(target.pid)) throw new Error();
     // Check the supplied capability before contacting any discovery destination.

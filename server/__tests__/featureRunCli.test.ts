@@ -26,7 +26,7 @@ import * as processRecovery from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { developerVerifierConfig } from './helpers/developerVerifierConfig.js';
-import { operatorToken } from './helpers/operatorToken.js';
+import { operatorToken, operatorTokenServer } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
 
 vi.setConfig({ testTimeout: 300_000 });
@@ -75,6 +75,7 @@ vi.mock('os', async (original) => ({
 let root: string;
 let repo: string;
 let launches: string;
+let proofServer: Awaited<ReturnType<typeof operatorTokenServer>> | undefined;
 const feature = 'FEAT-001';
 const git = (...args: string[]) =>
   execFileSync('git', args, { cwd: repo, encoding: 'utf8', windowsHide: true }).trim();
@@ -177,7 +178,9 @@ beforeEach(async (context) => {
     await runFeatureCommand(['design', feature], repo, () => {}, options());
   }
 }, 90_000);
-afterEach(() => {
+afterEach(async () => {
+  await proofServer?.close();
+  proofServer = undefined;
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   process.exitCode = 0;
@@ -1525,6 +1528,7 @@ describe.skipIf(process.platform !== 'win32')(
     it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
       'kills a runner in RUNNING, refuses a simultaneous runner, and resumes via SA-026 without duplicate commits/reports',
       async () => {
+        proofServer = await operatorTokenServer(root);
         await spec();
         await runFeatureCommand(['design', feature], repo, () => {}, options('single'));
         // The subprocess records real SA-026 identities. Comparing those with

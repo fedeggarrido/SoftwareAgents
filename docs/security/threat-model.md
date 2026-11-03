@@ -382,8 +382,8 @@ ni seguridad semántica de sus resúmenes.
   `PIXEL_AGENTS_OPERATOR_TOKEN` o `--confirm` al final del comando (stdin TTY en
   modo raw, sin eco; sin TTY falla cerrado). Compara digests SHA-256 de tamaño fijo
   con `timingSafeEqual`, antes de escribir artefactos, abrir WorkStore o auditar.
-  SA-QA-107 resuelve el perfil de esta comprobación con `os.userInfo().homedir`,
-  sin aceptar `HOME` ni `USERPROFILE` del llamador. Después exige una prueba del
+  SA-QA-107 usa `discoveryRoot()` con `os.homedir()`, igual que el resto de
+  discovery, respetando `HOME` o `USERPROFILE` según el SO. Después exige una prueba del
   servidor activo en `127.0.0.1`: HMAC-SHA-256 de un nonce aleatorio nuevo y su
   PID, con contexto de protocolo y el token como clave. El cliente nunca envía
   el token y falla cerrado ante errores, respuesta inválida o timeout absoluto.
@@ -408,10 +408,13 @@ ni seguridad semántica de sus resúmenes.
   [confirmación del operador](../reference/discovery.md#confirmación-humana-en-cli-sa-107).
 - **Límite residual:** es una capacidad bearer, no una prueba de presencia física.
   El servidor compartido del host no publica una vinculación criptográfica por
-  Project; se usa el puntero predeterminado de discovery. Un agente con los mismos
-  permisos del operador todavía puede leer el token en su perfil, historial o
-  memoria, o modificar el código que verifica. Filtrar el entorno no protege esos
-  canales ni las ACL de discovery. SA-058 (aislamiento de SO y secretos fuera del
-  alcance del agente) sigue pendiente; no presentar SA-107 como confinamiento.
+  Project. Se usa el puntero predeterminado de discovery. Un agente que se ejecute
+  con el mismo usuario del SO puede borrar los marcadores gestionados, falsificar
+  discovery y levantar su propio servidor de prueba para superar la confirmación.
+  También puede leer el token en el perfil, historial o memoria del operador, o
+  modificar el código que verifica. Los marcadores, la contención del Executor,
+  `protectedPaths` y el filtrado del entorno mitigan este riesgo residual. La
+  separación efectiva requiere una identidad de SO distinta y secretos fuera del
+  alcance del agente, pendiente en SA-058.
 - **Revisit when:** se ejecute contenido adversarial, se comparta discovery entre
   identidades/Projects, cambien los ingresos o se implemente SA-058.

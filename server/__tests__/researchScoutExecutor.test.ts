@@ -67,7 +67,10 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
       args = argv as string[];
       const spawnOptions = options as SpawnOptions;
       cwd = spawnOptions.cwd as string;
-      environment = spawnOptions.env!;
+      // A supervised launch carries the CLI environment separately from its own.
+      environment = spawnOptions.env!.PIXEL_AGENTS_CLI_ENV
+        ? JSON.parse(spawnOptions.env!.PIXEL_AGENTS_CLI_ENV)
+        : spawnOptions.env!;
       settings = JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1], 'utf8'));
       child.stdin.on('finish', () =>
         setImmediate(() => {

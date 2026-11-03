@@ -96,10 +96,16 @@ it.each([false, true])(
     );
     expect((await settle(child)).code).toBe(0);
     const options = vi.mocked(childProcess.spawn).mock.calls.at(-1)![2]!;
-    expect(options.env!.UNRELATED_EXECUTOR_ENV).toBeUndefined();
-    expect(Object.keys(options.env!).map((key) => key.toUpperCase())).not.toContain(
-      'PIXEL_AGENTS_OPERATOR_TOKEN',
-    );
+    // A registered launch keeps the host environment for its supervisor and
+    // hands the replacement to the CLI only.
+    const cliEnv: NodeJS.ProcessEnv = options.env!.PIXEL_AGENTS_CLI_ENV
+      ? JSON.parse(options.env!.PIXEL_AGENTS_CLI_ENV)
+      : options.env!;
+    expect(cliEnv.UNRELATED_EXECUTOR_ENV).toBeUndefined();
+    for (const env of [options.env!, cliEnv])
+      expect(Object.keys(env).map((key) => key.toUpperCase())).not.toContain(
+        'PIXEL_AGENTS_OPERATOR_TOKEN',
+      );
     expect(process.env.UNRELATED_EXECUTOR_ENV).toBe('parent-secret');
   },
   30_000,

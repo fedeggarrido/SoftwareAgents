@@ -4,6 +4,9 @@ import { MANAGED_EXECUTION_ENV } from '../evalGuard.js';
 import { OPERATOR_TOKEN_ENV, withoutOperatorToken } from '../featureIngress.js';
 import { WINDOWS_JOB_LAUNCH } from './windowsJob.js';
 
+/** Carries a replacement CLI environment through the supervisor, which keeps the host's own. */
+const CLI_ENV_TRANSPORT = 'PIXEL_AGENTS_CLI_ENV';
+
 // A worker may die immediately after spawn. This supervisor cannot launch the CLI
 // until the worker has durably registered its PID/creation identity and sent ACK.
 // After CLI close it waits for a durable-close ACK. A disconnected worker leaves
@@ -12,6 +15,10 @@ const supervisor = `
 const { spawn } = require('child_process');
 const OPERATOR_TOKEN_ENV = ${JSON.stringify(OPERATOR_TOKEN_ENV)};
 const withoutOperatorToken = env => Object.fromEntries(Object.entries(env).filter(([key]) => key.toUpperCase() !== OPERATOR_TOKEN_ENV));
+const CLI_ENV_TRANSPORT = ${JSON.stringify(CLI_ENV_TRANSPORT)};
+// PowerShell's job launcher needs the host environment; only the CLI gets a replacement.
+const cliEnv = process.env[CLI_ENV_TRANSPORT] ? JSON.parse(process.env[CLI_ENV_TRANSPORT]) : undefined;
+delete process.env[CLI_ENV_TRANSPORT];
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});
 let launched = false;
@@ -36,7 +43,7 @@ process.on('message', message => {
   if (message !== 'launch') return process.exit(1);
   launched = true;
   const launch = () => {
-  const child = spawn(process.argv[1], process.argv.slice(2), { env: withoutOperatorToken(process.env), stdio: 'inherit', windowsHide: true });
+  const child = spawn(process.argv[1], process.argv.slice(2), { env: withoutOperatorToken(cliEnv ?? process.env), stdio: 'inherit', windowsHide: true });
   child.once('error', () => {
     if (process.connected) process.send({ type: 'spawn_error' }, () => {});
   });
@@ -85,7 +92,7 @@ export function spawnRegisteredProcess(
   environment?: NodeJS.ProcessEnv,
   environmentMode: 'inherit' | 'replace' = 'inherit',
 ): ChildProcess {
-  // A replacement must reach both direct launches and the retained supervisor.
+  // A replacement reaches the CLI itself; the retained supervisor keeps the host environment.
   const env = withoutOperatorToken({
     ...(environmentMode === 'inherit' ? process.env : {}),
     ...environment,
@@ -99,9 +106,17 @@ export function spawnRegisteredProcess(
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+  const supervisorEnv =
+    environmentMode === 'replace'
+      ? withoutOperatorToken({
+          ...process.env,
+          [MANAGED_EXECUTION_ENV]: 'worker',
+          [CLI_ENV_TRANSPORT]: JSON.stringify(env),
+        })
+      : env;
   const child = spawn(process.execPath, ['-e', supervisor, binary, ...args], {
     cwd,
-    env,
+    env: supervisorEnv,
     windowsHide: true,
     // UV_PROCESS_DETACHED keeps Windows out of libuv's worker-owned
     // KILL_ON_JOB_CLOSE job. Keep windowsHide as well: no console window.

@@ -416,7 +416,7 @@ export class RoleResolver {
         if (projected && role.characterDetail) {
           for (const field of Object.keys(projected) as (keyof typeof projected)[]) {
             if (projected[field] === CHARACTER_DETAIL_UNKNOWN) {
-              projected[field] = role.characterDetail[field];
+              projected[field] = role.characterDetail[field] ?? CHARACTER_DETAIL_UNKNOWN;
             }
           }
         }

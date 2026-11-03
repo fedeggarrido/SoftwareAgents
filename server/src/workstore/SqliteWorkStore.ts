@@ -6,8 +6,11 @@ import { promisify } from 'node:util';
 
 import * as decisionSchema from '../../../core/schemas/human-decision.schema.json';
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
+import type { PullRequestStatus } from '../../../core/src/messages.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
 import {
+  PR_CI_FAILURE_PREFIX,
+  PR_MONITOR_ACTOR,
   WORKSTORE_BUSY_TIMEOUT_MS,
   WORKSTORE_DEFAULT_MAX_ATTEMPTS,
   WORKSTORE_INITIAL_TASK_STATUS,
@@ -72,12 +75,13 @@ const execute = promisify(execFile);
 function taskRecord(row: unknown): TaskRecord {
   const record = row as Omit<
     TaskRecord,
-    'review_ref' | 'review_reports' | 'test_reports' | 'defect_context'
+    'review_ref' | 'review_reports' | 'test_reports' | 'defect_context' | 'pr_status'
   > & {
     review_ref: string | null;
     review_reports: string;
     test_reports: string;
     defect_context: string | null;
+    pr_status: string | null;
   };
   return {
     ...record,
@@ -85,6 +89,7 @@ function taskRecord(row: unknown): TaskRecord {
     review_reports: JSON.parse(record.review_reports),
     test_reports: JSON.parse(record.test_reports),
     defect_context: record.defect_context ? JSON.parse(record.defect_context) : null,
+    pr_status: record.pr_status ? JSON.parse(record.pr_status) : null,
   };
 }
 
@@ -1364,8 +1369,8 @@ class SqliteWorkStore implements WorkStore {
         `INSERT INTO tasks (
         project_id, feature_key, key, type, status, priority, agent_role,
         version, lease_owner, lease_expires_at, attempt, max_attempts,
-        branch, worktree_ref, pr_ref, blocked_reason, created_at, updated_at
-      ) VALUES (${Array(18).fill('?').join(',')})`,
+        branch, worktree_ref, pr_ref, blocked_reason, created_at, updated_at, pr_status
+      ) VALUES (${Array(19).fill('?').join(',')})`,
       )
       .run(
         this.projectId,
@@ -1386,6 +1391,7 @@ class SqliteWorkStore implements WorkStore {
         task.blocked_reason ?? null,
         now,
         now,
+        task.pr_status ? JSON.stringify(task.pr_status) : null,
       );
   }
   getTask(key: string): TaskRecord | undefined {
@@ -1565,6 +1571,131 @@ class SqliteWorkStore implements WorkStore {
         .run(this.projectId, taskId, task.status, to, version + 1, 'manual_retry: ' + reason, now);
       return this.getTask(taskId)!;
     });
+  }
+
+  async observePullRequest(
+    taskId: string,
+    expectedVersion: number,
+    ref: string,
+    observation: PullRequestStatus,
+    cleanup: NewHumanDecision | undefined,
+  ): Promise<void> {
+    const status = structuredClone(observation);
+    const decision = cleanup ? this.validateDecision(cleanup) : undefined;
+    const assertCurrent = () => {
+      const task = this.getTask(taskId);
+      if (!task || task.pr_ref !== ref || status.ref !== ref)
+        throw new Error('PR reference changed');
+      if (task.version !== expectedVersion)
+        throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
+      return task;
+    };
+    // A CI failure may interrupt a worker. Use the same durable process fence as
+    // cancellation/decisions before clearing its lease or exposing BLOCKED.
+    const reservation = await this.write(() => {
+      this.assertNotRecovering(taskId);
+      const task = assertCurrent();
+      const block = status.ci === 'failure' && task.status !== 'BLOCKED';
+      return {
+        task,
+        token:
+          block && task.lease_owner
+            ? this.reserve(task, PR_CI_FAILURE_PREFIX, PR_MONITOR_ACTOR)
+            : undefined,
+      };
+    });
+    try {
+      if (reservation.token) await this.terminate(reservation.task, reservation.token);
+      await this.write(() => {
+        this.assertNotRecovering(taskId, reservation.token);
+        let task = assertCurrent();
+        const previous = task.pr_status;
+        const merged =
+          status.state === 'MERGED' &&
+          !(previous?.ref === ref && previous.state === 'MERGED' && previous.url === status.url);
+        if (merged && (!decision || decision.blocks.length))
+          throw new Error('Merged PR requires a manual cleanup decision');
+        const unchanged =
+          previous &&
+          JSON.stringify({ ...previous, observedAt: 0 }) ===
+            JSON.stringify({ ...status, observedAt: 0 });
+        const reason = PR_CI_FAILURE_PREFIX + status.failedChecks.join(', ');
+        if (
+          status.ci === 'failure' &&
+          (task.status !== 'BLOCKED' || task.blocked_reason !== reason)
+        ) {
+          // External CI evidence can block any lifecycle state, including DONE.
+          // A later green check never resumes execution or restores DONE implicitly.
+          this.decisionTask(task, 'BLOCKED', PR_MONITOR_ACTOR, reason, reservation.token);
+          this.db
+            .prepare('UPDATE tasks SET blocked_reason = ? WHERE project_id = ? AND key = ?')
+            .run(reason, this.projectId, taskId);
+          // An outstanding human decision must not resurrect the pre-failure state.
+          for (const gate of this.listDecisions().filter(
+            (d) => d.status !== 'answered' && d.blocks.includes(taskId),
+          )) {
+            const row = this.db
+              .prepare(
+                'SELECT previous_states FROM human_decisions WHERE project_id = ? AND key = ?',
+              )
+              .get(this.projectId, gate.id)!;
+            const states = JSON.parse(row.previous_states as string);
+            states[taskId] = 'BLOCKED';
+            this.db
+              .prepare(
+                'UPDATE human_decisions SET previous_states = ? WHERE project_id = ? AND key = ?',
+              )
+              .run(JSON.stringify(states), this.projectId, gate.id);
+          }
+          task = this.getTask(taskId)!;
+        }
+        if (!unchanged) {
+          const now = new Date().toISOString();
+          this.db
+            .prepare(
+              'UPDATE tasks SET pr_status = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+            )
+            .run(JSON.stringify(status), now, this.projectId, taskId);
+          this.db
+            .prepare(
+              'INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            )
+            .run(
+              this.projectId,
+              taskId,
+              merged ? 'PR_MERGED' : 'PR_UPDATED',
+              task.status,
+              task.status,
+              task.version + 1,
+              task.attempt,
+              merged ? decision!.id : '',
+              PR_MONITOR_ACTOR,
+              now,
+            );
+        }
+        if (merged) {
+          this.db
+            .prepare(
+              'INSERT INTO human_decisions (project_id,key,task_key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?,?)',
+            )
+            .run(
+              this.projectId,
+              decision!.id,
+              taskId,
+              decision!.context,
+              '',
+              PR_MONITOR_ACTOR,
+              '',
+              JSON.stringify(decision),
+              '{}',
+            );
+        }
+        if (reservation.token) this.clearReservation(taskId, reservation.token);
+      });
+    } catch (error) {
+      if (reservation.token) await this.recoveryFailure(taskId, reservation.token, error);
+      throw error;
+    }
   }
 
   async transition(
@@ -2130,7 +2261,11 @@ class SqliteWorkStore implements WorkStore {
       for (const [key, status] of Object.entries(states)) {
         this.assertNotRecovering(key);
         const task = this.getTask(key);
-        if (!task || task.status !== 'WAITING_HUMAN') throw new Error('Blocked task state changed');
+        if (
+          !task ||
+          (task.status !== 'WAITING_HUMAN' && !(task.status === 'BLOCKED' && status === 'BLOCKED'))
+        )
+          throw new Error('Blocked task state changed');
         if (
           answer !== null &&
           this.db
@@ -2142,7 +2277,7 @@ class SqliteWorkStore implements WorkStore {
           throw new Error('Blocked task has Executions pending closure');
         // Expiry is not a human answer: retain the gate until explicit recovery.
         // A human answer is no lease owner and starts no Execution. Active work must re-claim.
-        if (answer !== null)
+        if (answer !== null && task.status !== 'BLOCKED')
           this.decisionTask(
             task,
             ['LEASED', 'RUNNING'].includes(status) ? 'READY' : status,

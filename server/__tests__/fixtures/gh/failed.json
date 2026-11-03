@@ -1,0 +1,16 @@
+{
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "statusCheckRollup": [
+    { "__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "FAILURE" },
+    { "__typename": "CheckRun", "name": "tests", "status": "COMPLETED", "conclusion": "TIMED_OUT" },
+    { "__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "CANCELLED" },
+    { "__typename": "CheckRun", "name": "security", "status": "COMPLETED", "conclusion": "ACTION_REQUIRED" },
+    { "__typename": "CheckRun", "name": "optional", "status": "COMPLETED", "conclusion": "SKIPPED" },
+    { "__typename": "CheckRun", "name": "annotations", "status": "COMPLETED", "conclusion": "NEUTRAL" }
+  ],
+  "mergedAt": null,
+  "url": "https://github.com/example/project/pull/42",
+  "headRefName": "sa/SA-055"
+}

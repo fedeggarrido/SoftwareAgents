@@ -1720,6 +1720,54 @@ components:
           type: number
         worktree:
           type: string
+    PullRequestState:
+      type: string
+      enum: [OPEN, CLOSED, MERGED]
+    PullRequestReviewDecision:
+      type: string
+      enum: ['', APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED]
+    PullRequestCiState:
+      type: string
+      enum: [unknown, pending, success, failure]
+    PullRequestStatus:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          ref,
+          state,
+          isDraft,
+          reviewDecision,
+          ci,
+          failedChecks,
+          mergedAt,
+          url,
+          headRefName,
+          observedAt,
+        ]
+      properties:
+        ref:
+          type: string
+        state:
+          $ref: '#/components/schemas/PullRequestState'
+        isDraft:
+          type: boolean
+        reviewDecision:
+          $ref: '#/components/schemas/PullRequestReviewDecision'
+        ci:
+          $ref: '#/components/schemas/PullRequestCiState'
+        failedChecks:
+          type: array
+          items:
+            type: string
+        mergedAt:
+          type: [string, 'null']
+        url:
+          type: string
+        headRefName:
+          type: string
+        observedAt:
+          type: number
     BoardItem:
       type: object
       additionalProperties: false
@@ -1729,6 +1777,10 @@ components:
         - phase
         - agentIds
       properties:
+        prRef:
+          type: string
+        prStatus:
+          $ref: '#/components/schemas/PullRequestStatus'
         id:
           type: string
         clickupId:
@@ -2105,6 +2157,10 @@ components:
           log,
         ]
       properties:
+        prState:
+          type: string
+        ciState:
+          type: string
         projectId:
           type: string
         spec:
@@ -2472,6 +2528,8 @@ components:
         - quota.exhausted
         - human.decision.required
         - human.decision.answered
+        - pr.updated
+        - pr.merged
     DomainEventPayload:
       description: |
         One notice derived from an append-only domain_events row. Several kinds may
@@ -2533,6 +2591,10 @@ components:
       required:
         [key, type, status, priority, agentRole, featureKey, version, attempt, dependsOn, updatedAt]
       properties:
+        prRef:
+          type: string
+        prStatus:
+          $ref: '#/components/schemas/PullRequestStatus'
         key:
           type: string
         type:

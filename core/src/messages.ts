@@ -471,6 +471,8 @@ export interface BoardState {
 export type BoardMode = 'legacy' | 'project' | 'invalid';
 
 export interface BoardItem {
+  prRef?: string;
+  prStatus?: PullRequestStatus;
   id: string;
   clickupId?: string;
   title: string;
@@ -485,6 +487,25 @@ export interface BoardItem {
   lastEvent?: BoardEvent;
   agentIds: number[];
 }
+
+export interface PullRequestStatus {
+  ref: string;
+  state: PullRequestState;
+  isDraft: boolean;
+  reviewDecision: PullRequestReviewDecision;
+  ci: PullRequestCiState;
+  failedChecks: string[];
+  mergedAt: string | null;
+  url: string;
+  headRefName: string;
+  observedAt: number;
+}
+
+export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
+
+export type PullRequestReviewDecision = '' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
+
+export type PullRequestCiState = 'unknown' | 'pending' | 'success' | 'failure';
 
 export interface BoardOwner {
   worker: string;
@@ -654,6 +675,8 @@ export interface AgentRole {
 export type ModelTier = 'economy' | 'standard' | 'deep';
 
 export interface CharacterDetail {
+  prState?: string;
+  ciState?: string;
   projectId: string;
   spec: string;
   role: string;
@@ -773,6 +796,8 @@ export interface WorkSnapshot {
 export type WorkSnapshotSource = 'ok' | 'missing' | 'unreadable';
 
 export interface WorkTask {
+  prRef?: string;
+  prStatus?: PullRequestStatus;
   key: string;
   type: string;
   status: WorkTaskStatus;
@@ -846,7 +871,9 @@ export type DomainEventKind =
   | 'quota.waiting'
   | 'quota.exhausted'
   | 'human.decision.required'
-  | 'human.decision.answered';
+  | 'human.decision.answered'
+  | 'pr.updated'
+  | 'pr.merged';
 
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';

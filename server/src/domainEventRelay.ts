@@ -34,6 +34,7 @@ import { openReadOnly, type ReadOnlyDb } from './sqliteReadOnly.js';
 const WORKSTORE_FILE = 'softwareagents/work.sqlite3';
 
 export interface DomainEventRow {
+  type?: 'TASK_TRANSITIONED' | 'PR_UPDATED' | 'PR_MERGED';
   id: number;
   task_key: string;
   from_status: WorkTaskStatus;
@@ -76,6 +77,15 @@ export function eventsFromTransition(
     taskVersion: row.task_version,
     attempt: row.attempt,
   };
+  if (row.type === 'PR_UPDATED' || row.type === 'PR_MERGED') {
+    return [
+      {
+        ...base,
+        kind: row.type === 'PR_MERGED' ? 'pr.merged' : 'pr.updated',
+        decisionId: context.decisionId,
+      },
+    ];
+  }
   const events: DomainEvent[] = [{ ...base, kind: 'task.state_changed' }];
   const { from_status: from, to_status: to } = row;
   if (from === 'RUNNING') events.push({ ...base, kind: 'execution.finished' });
@@ -102,6 +112,13 @@ export function eventsFromTransition(
 
 /** Decision a WAITING_HUMAN transition names: its reason is the decision id (or the reconcile form). */
 function decisionIdFor(db: ReadOnlyDb, projectId: string, row: DomainEventRow): string | null {
+  if (row.type === 'PR_MERGED') {
+    return db
+      .prepare('SELECT key FROM human_decisions WHERE project_id = ? AND key = ? AND task_key = ?')
+      .get(projectId, row.reason, row.task_key)
+      ? row.reason
+      : null;
+  }
   if (row.from_status !== 'WAITING_HUMAN' && row.to_status !== 'WAITING_HUMAN') return null;
   const query = db.prepare('SELECT * FROM human_decisions WHERE project_id = ? AND key = ?');
   type DecisionRow = {
@@ -192,10 +209,14 @@ function readSnapshot(
       list.push(dep.depends_on_key);
       dependsOn.set(dep.task_key, list);
     }
+    const hasPrStatus = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).some(
+      (column) => column.name === 'pr_status',
+    );
     const tasks = (
       db
         .prepare(
-          `SELECT key, type, status, priority, agent_role, feature_key, version, attempt, updated_at
+          `SELECT key, type, status, priority, agent_role, feature_key, version, attempt, updated_at,
+                  pr_ref, ${hasPrStatus ? 'pr_status' : 'NULL AS pr_status'}
            FROM tasks WHERE project_id = ? ORDER BY key`,
         )
         .all(projectId) as {
@@ -208,6 +229,8 @@ function readSnapshot(
         version: number;
         attempt: number;
         updated_at: string;
+        pr_ref: string | null;
+        pr_status: string | null;
       }[]
     ).map((t): WorkTask => ({
       key: t.key,
@@ -220,6 +243,8 @@ function readSnapshot(
       attempt: t.attempt,
       dependsOn: dependsOn.get(t.key) ?? [],
       updatedAt: Date.parse(t.updated_at),
+      prRef: t.pr_ref ?? undefined,
+      prStatus: t.pr_status ? JSON.parse(t.pr_status) : undefined,
     }));
     // Older schemas have no escalation column: no structured decisions yet.
     const hasEscalation = (
@@ -376,7 +401,7 @@ export class DomainEventRelay {
       for (let batch = 0; batch < DOMAIN_EVENT_MAX_BATCHES_PER_POLL; batch++) {
         const rows = db
           .prepare(
-            `SELECT de.id, de.task_key, de.from_status, de.to_status, de.task_version, de.attempt,
+            `SELECT de.id, de.type, de.task_key, de.from_status, de.to_status, de.task_version, de.attempt,
                     de.reason, de.created_at, t.agent_role
              FROM domain_events de
              LEFT JOIN tasks t ON t.project_id = de.project_id AND t.key = de.task_key
@@ -385,7 +410,8 @@ export class DomainEventRelay {
           .all(projectId, this.cursor, DOMAIN_EVENT_BATCH_LIMIT) as unknown as DomainEventRow[];
         for (const row of rows) {
           const events = eventsFromTransition(projectId, row, {
-            executionId: executionIdFor(db, projectId, row),
+            executionId:
+              row.type === 'TASK_TRANSITIONED' ? executionIdFor(db, projectId, row) : null,
             decisionId: decisionIdFor(db, projectId, row),
           });
           for (const event of events)

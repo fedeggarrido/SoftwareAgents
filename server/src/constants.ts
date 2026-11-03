@@ -330,3 +330,14 @@ export const WEB_SCOUT_MAX_TURNS = 6;
 
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
 export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;
+
+/** SA-055: bounded, observational GitHub CLI polling. */
+export const PR_POLL_INTERVAL_MS = 60_000;
+export const GH_PR_TIMEOUT_MS = 15_000;
+export const GH_PR_MAX_BUFFER_BYTES = 1024 * 1024;
+export const GH_PR_FIELDS =
+  'state,isDraft,reviewDecision,statusCheckRollup,mergedAt,url,headRefName';
+export const GH_FAILED_CONCLUSIONS = ['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED'];
+export const GH_IGNORED_CONCLUSIONS = ['SKIPPED', 'NEUTRAL'];
+export const PR_MONITOR_ACTOR = 'pr-monitor';
+export const PR_CI_FAILURE_PREFIX = 'CI failed: ';

@@ -465,6 +465,8 @@ export const CHARACTER_DETAIL_FIELDS = [
   ['worktree', 'Worktree'],
   ['branch', 'Rama'],
   ['pr', 'PR'],
+  ['prState', 'Estado PR'],
+  ['ciState', 'CI'],
   ['selectionReason', 'Razón de selección'],
   ['permissions', 'Perfil de permisos'],
   ['log', 'Log de ejecución'],

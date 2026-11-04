@@ -559,7 +559,9 @@ it('webview runtime', () => {
           created_at: 'second',
         },
       ] as DomainEventRecord[];
-      const store = { listDomainEvents: () => events } as unknown as WorkStore;
+      const store = {
+        listDomainEvents: () => events.map((event) => ({ ...event, type: 'TASK_TRANSITIONED' })),
+      } as unknown as WorkStore;
       expect(lastDeveloperFailure(store, task)?.reason).toBe(events[0].reason);
       expect(lastReviewFailure(store, task)?.reason).toBe(events[1].reason);
       events.push({ to_status: 'RUNNING', reason: 'Claim QA lease' } as DomainEventRecord);

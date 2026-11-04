@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { PR_DISPLAY_REFRESH_MS } from '../constants.js';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
 import { useBoard } from '../office/boardStore.js';
 import { pullRequestDockSummary } from '../office/prStatusView.js';
@@ -38,7 +39,12 @@ export function BottomToolbar({
   workspaceFolders,
 }: BottomToolbarProps) {
   const board = useBoard();
-  const prs = pullRequestDockSummary(board?.items ?? []);
+  const [prNow, setPrNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setPrNow(Date.now()), PR_DISPLAY_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const prs = pullRequestDockSummary(board?.items ?? [], prNow);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
   const folderPickerRef = useRef<HTMLDivElement>(null);

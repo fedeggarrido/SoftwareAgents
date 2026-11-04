@@ -10,10 +10,11 @@ export function isReviewFailure(reason: string): boolean {
 /** Success supersedes visible diagnostics; the original events remain in the audit history. */
 export function isSuccessfulTaskStep(event: DomainEventRecord): boolean {
   return (
-    ['Reviewer report persisted', 'QA report persisted'].includes(event.reason) ||
-    (event.to_status === 'REVIEW' &&
-      (event.reason.startsWith('Runtime commit ') ||
-        event.reason === 'Execution finished without changes'))
+    event.type === 'TASK_TRANSITIONED' &&
+    (['Reviewer report persisted', 'QA report persisted'].includes(event.reason) ||
+      (event.to_status === 'REVIEW' &&
+        (event.reason.startsWith('Runtime commit ') ||
+          event.reason === 'Execution finished without changes')))
   );
 }
 
@@ -34,6 +35,7 @@ export function isFailedReview(store: WorkStore, task: TaskRecord): boolean {
 export function lastReviewFailure(store: WorkStore, task: TaskRecord) {
   const event = store
     .listDomainEvents(task.key)
+    .filter((event) => event.type === 'TASK_TRANSITIONED')
     .filter(
       (e) =>
         isReviewFailure(e.reason) ||

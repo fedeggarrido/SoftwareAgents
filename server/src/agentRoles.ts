@@ -415,6 +415,7 @@ export class RoleResolver {
         // A legacy registry may know execution facts absent from the WorkStore.
         if (projected && role.characterDetail) {
           for (const field of Object.keys(projected) as (keyof typeof projected)[]) {
+            if (field === 'prStatus' || field === 'prObservation') continue;
             if (projected[field] === CHARACTER_DETAIL_UNKNOWN) {
               projected[field] = role.characterDetail[field] ?? CHARACTER_DETAIL_UNKNOWN;
             }

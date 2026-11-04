@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 
+import { PR_DISPLAY_REF_CHARS } from '../../core/src/constants.js';
 import type { DomainEvent } from '../../core/src/domainEvents.js';
 import type { HumanDecision } from '../../core/src/humanDecision.js';
 import type {
@@ -9,6 +10,7 @@ import type {
   WorkTask,
   WorkTaskStatus,
 } from '../../core/src/messages.js';
+import { projectPullRequest, projectPullRequestObservation } from '../../core/src/pullRequest.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { type BoardSelection, BoardSources } from './boardSources.js';
 import { gitCommonDir } from './boardWatcher.js';
@@ -160,12 +162,13 @@ function decisionIdFor(db: ReadOnlyDb, projectId: string, row: DomainEventRow): 
  * worker records it, the answer is null rather than an older attempt's.
  */
 function executionIdFor(db: ReadOnlyDb, projectId: string, row: DomainEventRow): string | null {
+  if (row.type !== 'TASK_TRANSITIONED') return null;
   if (!ACTIVE.includes(row.from_status) && !ACTIVE.includes(row.to_status)) return null;
   const start = db
     .prepare(
       `SELECT MAX(task_version) AS version FROM domain_events
        WHERE project_id = ? AND task_key = ? AND task_version <= ?
-         AND (to_status = 'LEASED' OR (to_status = 'RUNNING' AND from_status IN ('REVIEW', 'QA')))`,
+         AND type = 'TASK_TRANSITIONED' AND (to_status = 'LEASED' OR (to_status = 'RUNNING' AND from_status IN ('REVIEW', 'QA')))`,
     )
     .get(projectId, row.task_key, row.task_version) as { version: number | null } | undefined;
   if (typeof start?.version !== 'number') return null;
@@ -212,11 +215,14 @@ function readSnapshot(
     const hasPrStatus = (db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]).some(
       (column) => column.name === 'pr_status',
     );
+    const hasPrObservation = (
+      db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]
+    ).some((column) => column.name === 'pr_observation');
     const tasks = (
       db
         .prepare(
           `SELECT key, type, status, priority, agent_role, feature_key, version, attempt, updated_at,
-                  pr_ref, ${hasPrStatus ? 'pr_status' : 'NULL AS pr_status'}
+                  pr_ref, ${hasPrStatus ? 'pr_status' : 'NULL AS pr_status'}, ${hasPrObservation ? 'pr_observation' : 'NULL AS pr_observation'}
            FROM tasks WHERE project_id = ? ORDER BY key`,
         )
         .all(projectId) as {
@@ -231,6 +237,7 @@ function readSnapshot(
         updated_at: string;
         pr_ref: string | null;
         pr_status: string | null;
+        pr_observation: string | null;
       }[]
     ).map((t): WorkTask => ({
       key: t.key,
@@ -243,8 +250,9 @@ function readSnapshot(
       attempt: t.attempt,
       dependsOn: dependsOn.get(t.key) ?? [],
       updatedAt: Date.parse(t.updated_at),
-      prRef: t.pr_ref ?? undefined,
-      prStatus: t.pr_status ? JSON.parse(t.pr_status) : undefined,
+      prRef: t.pr_ref?.slice(0, PR_DISPLAY_REF_CHARS),
+      prStatus: projectPullRequest(t.pr_status),
+      prObservation: projectPullRequestObservation(t.pr_observation),
     }));
     // Older schemas have no escalation column: no structured decisions yet.
     const hasEscalation = (

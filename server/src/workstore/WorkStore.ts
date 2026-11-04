@@ -1,5 +1,5 @@
 import type { HumanDecision, NewHumanDecision } from '../../../core/src/humanDecision.js';
-import type { PullRequestStatus } from '../../../core/src/messages.js';
+import type { PullRequestObservation, PullRequestStatus } from '../../../core/src/messages.js';
 import type { ModelTier } from '../../../core/src/modelTier.js';
 import type { ReviewReport } from '../../../core/src/reviewReport.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
@@ -120,6 +120,7 @@ export interface TaskRecord {
   worktree_ref: string | null;
   pr_ref: string | null;
   pr_status?: PullRequestStatus | null;
+  pr_observation?: PullRequestObservation | null;
   review_ref?: ReviewRef | null;
   review_reports?: ReviewRecord[];
   test_reports?: TestRecord[];
@@ -285,7 +286,14 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
-  /** Compare-and-set observations. CI blocking, merge notice and human cleanup gate are durable. */
+  /** Explicit operator binding. Canonical PR identity only, no execution authority. */
+  bindPullRequest(taskId: string, expectedVersion: number, ref: string): Promise<void>;
+  recordPullRequestError(
+    taskId: string,
+    ref: string,
+    error: 'unavailable' | 'binding_required',
+  ): Promise<void>;
+  /** Compare-and-set observations. Freshness does not create versions or events. */
   observePullRequest(
     taskId: string,
     expectedVersion: number,

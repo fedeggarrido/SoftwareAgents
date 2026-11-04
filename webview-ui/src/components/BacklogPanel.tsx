@@ -117,7 +117,7 @@ function Card({
       {item.lastEvent && <EventLine e={item.lastEvent} now={now} />}
       {item.prRef && (
         <div className="text-2xs text-text-muted" data-testid="task-pr-status">
-          {taskPullRequestLabel(item)}
+          {taskPullRequestLabel(item, now)}
         </div>
       )}
       {open && (

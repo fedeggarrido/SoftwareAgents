@@ -10,6 +10,7 @@ import type { PullRequestStatus } from '../../../core/src/messages.js';
 import type { TaskDag } from '../../../core/src/taskDag.js';
 import {
   PR_CI_FAILURE_PREFIX,
+  PR_CI_REASON_CHARS,
   PR_MONITOR_ACTOR,
   WORKSTORE_BUSY_TIMEOUT_MS,
   WORKSTORE_DEFAULT_MAX_ATTEMPTS,
@@ -22,6 +23,7 @@ import { evalGit } from '../evalTasks.js';
 import { withoutOperatorToken } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
 import { resolveInside } from '../pathGuard.js';
+import { canonicalPullRequest } from '../pullRequestBinding.js';
 import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
 import { compileSchema, validateSchema } from '../schemaValidation.js';
 import { taskDagDeclaration, taskDeclaration } from '../taskDag.js';
@@ -75,13 +77,19 @@ const execute = promisify(execFile);
 function taskRecord(row: unknown): TaskRecord {
   const record = row as Omit<
     TaskRecord,
-    'review_ref' | 'review_reports' | 'test_reports' | 'defect_context' | 'pr_status'
+    | 'review_ref'
+    | 'review_reports'
+    | 'test_reports'
+    | 'defect_context'
+    | 'pr_status'
+    | 'pr_observation'
   > & {
     review_ref: string | null;
     review_reports: string;
     test_reports: string;
     defect_context: string | null;
     pr_status: string | null;
+    pr_observation: string | null;
   };
   return {
     ...record,
@@ -90,6 +98,7 @@ function taskRecord(row: unknown): TaskRecord {
     test_reports: JSON.parse(record.test_reports),
     defect_context: record.defect_context ? JSON.parse(record.defect_context) : null,
     pr_status: record.pr_status ? JSON.parse(record.pr_status) : null,
+    pr_observation: record.pr_observation ? JSON.parse(record.pr_observation) : null,
   };
 }
 
@@ -97,6 +106,8 @@ export interface OpenWorkStoreOptions {
   /** Trusted operator-selected repository. Never a DB path supplied by Project Brain. */
   repositoryPath: string;
   projectId: string;
+  /** Observational handles must never run lease recovery. */
+  recoverLeases?: boolean;
 }
 
 /** Explicit standalone activation boundary. Importing this module requires no SQLite support. */
@@ -162,7 +173,12 @@ export async function openWorkStore(options: OpenWorkStoreOptions): Promise<Work
         .run(options.projectId, new Date().toISOString()),
     );
     db.exec(`PRAGMA busy_timeout = ${WORKSTORE_BUSY_TIMEOUT_MS}`);
-    const store = new SqliteWorkStore(db, options.projectId, options.repositoryPath);
+    const store = new SqliteWorkStore(
+      db,
+      options.projectId,
+      options.repositoryPath,
+      options.recoverLeases,
+    );
     store.backfillFeatureTitles();
     return store;
   } catch (error) {
@@ -177,7 +193,9 @@ class SqliteWorkStore implements WorkStore {
     private readonly db: DatabaseSync,
     readonly projectId: string,
     private readonly repositoryPath: string,
+    recoverLeases = true,
   ) {
+    if (!recoverLeases) return;
     this.sweeper = setInterval(() => {
       void this.recoverExpiredLeases().catch((error: unknown) => {
         console.error('[WorkStore] Lease recovery failed; work remains reserved', error);
@@ -185,7 +203,7 @@ class SqliteWorkStore implements WorkStore {
     }, LEASE_SWEEP_INTERVAL_MS);
     this.sweeper.unref();
   }
-  private readonly sweeper: ReturnType<typeof setInterval>;
+  private readonly sweeper?: ReturnType<typeof setInterval>;
   private closed = false;
 
   private write<T>(operation: () => T, rollback?: () => void): Promise<T> {
@@ -344,6 +362,7 @@ class SqliteWorkStore implements WorkStore {
     if (task.review_ref) {
       const qa =
         this.listDomainEvents(task.key)
+          .filter((event) => event.type === 'TASK_TRANSITIONED')
           .filter((e) => e.to_status === 'RUNNING')
           .at(-1)?.reason === 'Claim QA lease';
       let recovered = this.change(
@@ -1573,6 +1592,47 @@ class SqliteWorkStore implements WorkStore {
     });
   }
 
+  bindPullRequest(taskId: string, expectedVersion: number, ref: string): Promise<void> {
+    const canonical = canonicalPullRequest(ref);
+    return this.write(() => {
+      const task = this.getTask(taskId);
+      if (!task || task.version !== expectedVersion)
+        throw new Error('Task changed before PR binding');
+      if (task.pr_ref === canonical) return;
+      // The existing binding's repository is immutable, including explicit rebindings.
+      if (task.pr_ref?.startsWith('https://'))
+        canonicalPullRequest(
+          canonical,
+          canonicalPullRequest(task.pr_ref).replace(/\/pull\/\d+$/, ''),
+        );
+      this.db
+        .prepare(
+          'UPDATE tasks SET pr_ref = ?, pr_status = NULL, pr_observation = NULL, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+        )
+        .run(canonical, new Date().toISOString(), this.projectId, taskId);
+    });
+  }
+
+  recordPullRequestError(
+    taskId: string,
+    ref: string,
+    error: 'unavailable' | 'binding_required',
+  ): Promise<void> {
+    return this.write(() => {
+      const task = this.getTask(taskId);
+      if (!task || task.pr_ref !== ref) return;
+      this.db.prepare('UPDATE tasks SET pr_observation = ? WHERE project_id = ? AND key = ?').run(
+        JSON.stringify({
+          lastSuccessAt: task.pr_observation?.lastSuccessAt ?? task.pr_status?.observedAt ?? null,
+          attemptedAt: Date.now(),
+          error,
+        }),
+        this.projectId,
+        taskId,
+      );
+    });
+  }
+
   async observePullRequest(
     taskId: string,
     expectedVersion: number,
@@ -1581,6 +1641,8 @@ class SqliteWorkStore implements WorkStore {
     cleanup: NewHumanDecision | undefined,
   ): Promise<void> {
     const status = structuredClone(observation);
+    if (canonicalPullRequest(status.url) !== canonicalPullRequest(ref))
+      throw new Error('PR identity changed');
     const decision = cleanup ? this.validateDecision(cleanup) : undefined;
     const assertCurrent = () => {
       const task = this.getTask(taskId);
@@ -1590,112 +1652,124 @@ class SqliteWorkStore implements WorkStore {
         throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
       return task;
     };
-    // A CI failure may interrupt a worker. Use the same durable process fence as
-    // cancellation/decisions before clearing its lease or exposing BLOCKED.
-    const reservation = await this.write(() => {
-      this.assertNotRecovering(taskId);
-      const task = assertCurrent();
-      const block = status.ci === 'failure' && task.status !== 'BLOCKED';
-      return {
-        task,
-        token:
-          block && task.lease_owner
-            ? this.reserve(task, PR_CI_FAILURE_PREFIX, PR_MONITOR_ACTOR)
-            : undefined,
-      };
+    await this.write(() => {
+      let task = assertCurrent();
+      const previous = task.pr_status;
+      const merged =
+        status.state === 'MERGED' &&
+        !(previous?.ref === ref && previous.state === 'MERGED' && previous.url === status.url);
+      const unchanged =
+        previous &&
+        JSON.stringify({ ...previous, observedAt: 0 }) ===
+          JSON.stringify({ ...status, observedAt: 0 });
+      const reason = (PR_CI_FAILURE_PREFIX + status.failedChecks.join(', ')).slice(
+        0,
+        PR_CI_REASON_CHARS,
+      );
+      const active =
+        task.lease_owner ||
+        task.lease_expires_at ||
+        ['LEASED', 'RUNNING'].includes(task.status) ||
+        this.db
+          .prepare(
+            'SELECT 1 FROM executions WHERE project_id = ? AND task_key = ? AND pid IS NOT NULL AND tree_closed_at IS NULL LIMIT 1',
+          )
+          .get(this.projectId, taskId) ||
+        this.db
+          .prepare('SELECT 1 FROM lease_recoveries WHERE project_id = ? AND task_key = ?')
+          .get(this.projectId, taskId);
+      const closed = ['DONE', 'CANCELLED', 'FAILED_FINAL'].includes(task.status);
+      // The gate blocks nothing, so closed Tasks ask too. Active work defers to a later poll.
+      const requestCleanup =
+        status.state === 'MERGED' &&
+        !active &&
+        !this.db
+          .prepare(
+            "SELECT 1 FROM human_decisions WHERE project_id = ? AND task_key = ? AND instr(question, 'pr-cleanup/') = 1 AND instr(question, ?) > 0 LIMIT 1",
+          )
+          .get(this.projectId, taskId, `PR ${status.url} merged`);
+      if (requestCleanup && (!decision || decision.blocks.length))
+        throw new Error('Merged PR requires a manual cleanup decision');
+      if (status.ci === 'failure' && !active && !closed && task.status !== 'BLOCKED') {
+        // CI has no worker authority. Even expired leases remain owned until recovery releases them.
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            'UPDATE tasks SET status = ?, blocked_reason = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+          )
+          .run('BLOCKED', reason, now, this.projectId, taskId);
+        this.db
+          .prepare(
+            "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, 'BLOCKED', ?, ?, ?, ?, ?)",
+          )
+          .run(
+            this.projectId,
+            taskId,
+            task.status,
+            task.version + 1,
+            task.attempt,
+            reason,
+            PR_MONITOR_ACTOR,
+            now,
+          );
+        task = this.getTask(taskId)!;
+      }
+      this.db
+        .prepare(
+          'UPDATE tasks SET pr_status = ?, pr_observation = ? WHERE project_id = ? AND key = ?',
+        )
+        .run(
+          JSON.stringify(status),
+          JSON.stringify({
+            lastSuccessAt: status.observedAt,
+            attemptedAt: status.observedAt,
+            error: null,
+          }),
+          this.projectId,
+          taskId,
+        );
+      if (!unchanged || requestCleanup) {
+        const now = new Date().toISOString();
+        this.db
+          .prepare(
+            'UPDATE tasks SET version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+          )
+          .run(now, this.projectId, taskId);
+        this.db
+          .prepare(
+            'INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            this.projectId,
+            taskId,
+            merged || requestCleanup ? 'PR_MERGED' : 'PR_UPDATED',
+            task.status,
+            task.status,
+            task.version + 1,
+            task.attempt,
+            requestCleanup ? decision!.id : '',
+            PR_MONITOR_ACTOR,
+            now,
+          );
+      }
+      if (requestCleanup) {
+        this.db
+          .prepare(
+            'INSERT INTO human_decisions (project_id,key,task_key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?,?)',
+          )
+          .run(
+            this.projectId,
+            decision!.id,
+            taskId,
+            decision!.context,
+            '',
+            PR_MONITOR_ACTOR,
+            '',
+            JSON.stringify(decision),
+            '{}',
+          );
+      }
     });
-    try {
-      if (reservation.token) await this.terminate(reservation.task, reservation.token);
-      await this.write(() => {
-        this.assertNotRecovering(taskId, reservation.token);
-        let task = assertCurrent();
-        const previous = task.pr_status;
-        const merged =
-          status.state === 'MERGED' &&
-          !(previous?.ref === ref && previous.state === 'MERGED' && previous.url === status.url);
-        if (merged && (!decision || decision.blocks.length))
-          throw new Error('Merged PR requires a manual cleanup decision');
-        const unchanged =
-          previous &&
-          JSON.stringify({ ...previous, observedAt: 0 }) ===
-            JSON.stringify({ ...status, observedAt: 0 });
-        const reason = PR_CI_FAILURE_PREFIX + status.failedChecks.join(', ');
-        if (
-          status.ci === 'failure' &&
-          (task.status !== 'BLOCKED' || task.blocked_reason !== reason)
-        ) {
-          // External CI evidence can block any lifecycle state, including DONE.
-          // A later green check never resumes execution or restores DONE implicitly.
-          this.decisionTask(task, 'BLOCKED', PR_MONITOR_ACTOR, reason, reservation.token);
-          this.db
-            .prepare('UPDATE tasks SET blocked_reason = ? WHERE project_id = ? AND key = ?')
-            .run(reason, this.projectId, taskId);
-          // An outstanding human decision must not resurrect the pre-failure state.
-          for (const gate of this.listDecisions().filter(
-            (d) => d.status !== 'answered' && d.blocks.includes(taskId),
-          )) {
-            const row = this.db
-              .prepare(
-                'SELECT previous_states FROM human_decisions WHERE project_id = ? AND key = ?',
-              )
-              .get(this.projectId, gate.id)!;
-            const states = JSON.parse(row.previous_states as string);
-            states[taskId] = 'BLOCKED';
-            this.db
-              .prepare(
-                'UPDATE human_decisions SET previous_states = ? WHERE project_id = ? AND key = ?',
-              )
-              .run(JSON.stringify(states), this.projectId, gate.id);
-          }
-          task = this.getTask(taskId)!;
-        }
-        if (!unchanged) {
-          const now = new Date().toISOString();
-          this.db
-            .prepare(
-              'UPDATE tasks SET pr_status = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
-            )
-            .run(JSON.stringify(status), now, this.projectId, taskId);
-          this.db
-            .prepare(
-              'INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            )
-            .run(
-              this.projectId,
-              taskId,
-              merged ? 'PR_MERGED' : 'PR_UPDATED',
-              task.status,
-              task.status,
-              task.version + 1,
-              task.attempt,
-              merged ? decision!.id : '',
-              PR_MONITOR_ACTOR,
-              now,
-            );
-        }
-        if (merged) {
-          this.db
-            .prepare(
-              'INSERT INTO human_decisions (project_id,key,task_key,question,answer,actor,decided_at,escalation,previous_states) VALUES (?,?,?,?,?,?,?,?,?)',
-            )
-            .run(
-              this.projectId,
-              decision!.id,
-              taskId,
-              decision!.context,
-              '',
-              PR_MONITOR_ACTOR,
-              '',
-              JSON.stringify(decision),
-              '{}',
-            );
-        }
-        if (reservation.token) this.clearReservation(taskId, reservation.token);
-      });
-    } catch (error) {
-      if (reservation.token) await this.recoveryFailure(taskId, reservation.token, error);
-      throw error;
-    }
   }
 
   async transition(
@@ -2263,7 +2337,11 @@ class SqliteWorkStore implements WorkStore {
         const task = this.getTask(key);
         if (
           !task ||
-          (task.status !== 'WAITING_HUMAN' && !(task.status === 'BLOCKED' && status === 'BLOCKED'))
+          (task.status !== 'WAITING_HUMAN' &&
+            !(
+              task.status === 'BLOCKED' &&
+              (status === 'BLOCKED' || task.blocked_reason?.startsWith(PR_CI_FAILURE_PREFIX))
+            ))
         )
           throw new Error('Blocked task state changed');
         if (

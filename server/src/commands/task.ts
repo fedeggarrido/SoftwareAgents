@@ -17,7 +17,9 @@ import { lastDeveloperFailure } from '../developer.js';
 import { withoutOperatorToken } from '../featureIngress.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
+import { resolvePullRequestBinding } from '../prMonitor.js';
 import { loadProjectConfig } from '../projectConfig.js';
+import { pullRequestRepository } from '../pullRequestBinding.js';
 import { lastReviewFailure } from '../reviewAttempts.js';
 import { analyzeTaskDag, parseTaskDag, taskDagDeclaration } from '../taskDag.js';
 import { aggregateUsage } from '../usageLedger.js';
@@ -30,7 +32,7 @@ import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFile
 const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
 const USAGE =
-  'Usage: pixel-agents task import <dag.yaml> [--origin local|external] | list [--status S] [--json] | show <KEY> | backup [--keep N] | retry <KEY> --reason <text>';
+  'Usage: pixel-agents task import <dag.yaml> [--origin local|external] | list [--status S] [--json] | show <KEY> | backup [--keep N] | bind-pr <KEY> <number|URL|branch> | retry <KEY> --reason <text>';
 
 /** Keep untrusted fields on one terminal line without executing control sequences. */
 function textField(value: string): string {
@@ -47,6 +49,8 @@ function parseArgs(argv: string[]) {
   let status: TaskStatus | undefined;
   let json = false;
   let keep = TASK_CLI_DEFAULT_KEEP;
+  if (command === 'bind-pr' && args.length === 2 && !args.some((arg) => arg.startsWith('-')))
+    return { command, file: args[0], selector: args[1], status, json, keep };
   if (command === 'show' && args.length === 1 && !args[0].startsWith('-'))
     return { command, file: args[0], status, json: true, keep };
   if (
@@ -139,7 +143,12 @@ function list(store: WorkStore, status?: TaskStatus) {
       }
       const humanDecisions = decisions.filter((decision) => decision.blocks.includes(task.key));
       const event =
-        task.status === 'WAITING_HUMAN' ? store.listDomainEvents(task.key).at(-1) : undefined;
+        task.status === 'WAITING_HUMAN'
+          ? store
+              .listDomainEvents(task.key)
+              .filter((event) => event.type === 'TASK_TRANSITIONED')
+              .at(-1)
+          : undefined;
       return {
         ...task,
         usage: aggregateUsage(
@@ -279,10 +288,10 @@ export async function runTaskCommand(
   cwd = process.cwd(),
   log = console.log,
 ): Promise<void> {
-  if (argv[0] === 'retry') argv = await confirmHumanIngress(argv);
+  if (['retry', 'bind-pr'].includes(argv[0])) argv = await confirmHumanIngress(argv);
   const args = parseArgs(argv);
-  if (args.command === 'retry' && featureIngressActor() !== 'human')
-    throw new CliUsageError('task retry requires human ingress (SA-003)');
+  if (['retry', 'bind-pr'].includes(args.command) && featureIngressActor() !== 'human')
+    throw new CliUsageError(`task ${args.command} requires human ingress (SA-003)`);
   let store: WorkStore | undefined;
   try {
     const config = loadProjectConfig(cwd, true);
@@ -366,7 +375,17 @@ export async function runTaskCommand(
       );
     } else {
       store = await openWorkStore({ repositoryPath: cwd, projectId: config.project.id });
-      if (args.command === 'show') {
+      if (args.command === 'bind-pr') {
+        const task = store.getTask(args.file!);
+        if (!task) throw new Error('Unknown task');
+        const repository = pullRequestRepository(config.project.repo.remote);
+        const ref = await resolvePullRequestBinding(config.repoRoot, repository, args.selector!);
+        const input = { task: task.key, ref };
+        audit(config.project.id, 'task_bind_pr', 'intent', input, task.key);
+        await store.bindPullRequest(task.key, task.version, ref);
+        audit(config.project.id, 'task_bind_pr', 'committed', input, task.key);
+        log(textField(`${task.key}: ${ref}`));
+      } else if (args.command === 'show') {
         const task = store.getTask(args.file!);
         if (!task) throw new CliUsageError('Unknown task');
         const report = await checkZones(config.repoRoot, store.listTasks());

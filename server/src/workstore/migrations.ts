@@ -163,6 +163,7 @@ const migrations = [
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;
   CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;`,
+  `ALTER TABLE tasks ADD COLUMN pr_observation TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

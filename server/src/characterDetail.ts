@@ -1,4 +1,10 @@
-import type { CharacterDetail, PullRequestStatus } from '../../core/src/messages.js';
+import { PR_DISPLAY_REF_CHARS } from '../../core/src/constants.js';
+import type { CharacterDetail } from '../../core/src/messages.js';
+import {
+  projectPullRequest,
+  projectPullRequestObservation,
+  pullRequestCi,
+} from '../../core/src/pullRequest.js';
 import { ROLE_PROFILES } from './agentCompiler.js';
 import { CHARACTER_DETAIL_SECOND_MS, CHARACTER_DETAIL_UNKNOWN } from './constants.js';
 import { readRows } from './sqliteReadOnly.js';
@@ -14,10 +20,13 @@ export function readCharacterDetail(
   const hasPrStatus = readRows<{ name: string }>(file, 'PRAGMA table_info(tasks)')?.some(
     (column) => column.name === 'pr_status',
   );
+  const hasPrObservation = readRows<{ name: string }>(file, 'PRAGMA table_info(tasks)')?.some(
+    (column) => column.name === 'pr_observation',
+  );
   const row = readRows<Row>(
     file,
     `SELECT t.project_id, t.key AS task_key, t.status,
-    t.branch, t.worktree_ref, t.pr_ref, ${hasPrStatus ? 't.pr_status' : 'NULL AS pr_status'},
+    t.branch, t.worktree_ref, t.pr_ref, ${hasPrStatus ? 't.pr_status' : 'NULL AS pr_status'}, ${hasPrObservation ? 't.pr_observation' : 'NULL AS pr_observation'},
     CASE WHEN json_valid(t.declaration) THEN json_extract(t.declaration, '$.title') END AS task_title,
     e.agent_role AS execution_role, e.agent_template_version, e.executor, e.model_id,
     e.model_tier, e.model_effort, e.selection_reason, e.started_at
@@ -49,13 +58,12 @@ function text(value: unknown): string {
 /** Explicit display projection; never serialize a row, declaration, reason or actor. */
 export function projectCharacterDetail(row: Row, now = Date.now()): CharacterDetail {
   const start = typeof row.started_at === 'string' ? Date.parse(row.started_at) : NaN;
-  let pr: PullRequestStatus | undefined;
-  try {
-    pr = typeof row.pr_status === 'string' ? JSON.parse(row.pr_status) : undefined;
-    if (pr?.ref !== row.pr_ref) pr = undefined;
-  } catch {
-    // Corrupt optional metadata cannot hide the other recorded facts.
-  }
+  const projected = projectPullRequest(typeof row.pr_status === 'string' ? row.pr_status : null);
+  const pr = projected?.ref === row.pr_ref ? projected : undefined;
+  const observation = projectPullRequestObservation(
+    typeof row.pr_observation === 'string' ? row.pr_observation : null,
+  );
+  const ci = pullRequestCi(pr, observation, now);
   return {
     projectId: text(row.project_id),
     // Platform templates are named after their role (agents/templates/<role>.yaml).
@@ -92,13 +100,17 @@ export function projectCharacterDetail(row: Row, now = Date.now()): CharacterDet
         ? CHARACTER_DETAIL_UNKNOWN
         : fileName(String(row.worktree_ref)),
     branch: text(row.branch),
-    pr: text(row.pr_ref),
+    pr: text(row.pr_ref).slice(0, PR_DISPLAY_REF_CHARS),
+    ...(pr ? { prStatus: pr } : {}),
+    ...(observation ? { prObservation: observation } : {}),
     prState: pr
       ? `${pr.state}${pr.isDraft ? ' (draft)' : ''}${pr.reviewDecision ? ` · ${pr.reviewDecision}` : ''}`
       : CHARACTER_DETAIL_UNKNOWN,
     ciState: pr
-      ? `${pr.ci}${pr.failedChecks.length ? ` · ${pr.failedChecks.join(', ')}` : ''}`
-      : CHARACTER_DETAIL_UNKNOWN,
+      ? `${ci}${ci === pr?.ci && pr.failedChecks.length ? ` · ${pr.failedChecks.join(', ')}` : ''}`
+      : row.pr_ref
+        ? 'unavailable'
+        : CHARACTER_DETAIL_UNKNOWN,
     selectionReason: text(row.selection_reason),
     // The role's permission ceiling (ROLE_PROFILES); a template can only narrow it.
     permissions: Object.hasOwn(ROLE_PROFILES, String(row.execution_role))

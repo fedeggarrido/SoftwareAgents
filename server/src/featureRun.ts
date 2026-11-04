@@ -322,7 +322,9 @@ export async function runFeature(
     // Developer's WorkStore claim enforces tasks.attempt/max_attempts. Review and QA
     // already share validated rework rounds. Non-code proposals use task history,
     // since their explicit retry transitions do not increment tasks.attempt.
-    const events = store.listDomainEvents(taskKey);
+    const events = store
+      .listDomainEvents(taskKey)
+      .filter((event) => event.type === 'TASK_TRANSITIONED');
     const reset = events
       .map(
         (event) =>

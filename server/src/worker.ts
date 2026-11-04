@@ -549,7 +549,9 @@ export async function runWorker(
       error instanceof MissingTestError ||
       error instanceof DeveloperGuardError;
     const diagnostic = guard ? error.diagnostic() : undefined;
-    const history = store.listDomainEvents(args.task);
+    const history = store
+      .listDomainEvents(args.task)
+      .filter((event) => event.type === 'TASK_TRANSITIONED');
     // A successful step or an explicit operator reset starts a fresh correction cycle.
     // Looking beyond the last failure also bounds alternating guard violations.
     const reset = history

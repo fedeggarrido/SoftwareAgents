@@ -42,7 +42,7 @@ import {
   grantHooksConsent,
   readConfig,
 } from './configPersistence.js';
-import { MAX_PORT, MIN_PORT } from './constants.js';
+import { MAX_PORT, MIN_PORT, PR_SHUTDOWN_TIMEOUT_MS } from './constants.js';
 import { designCaptureHost } from './designCaptureHost.js';
 import { createDomainEventRelay } from './domainEventRelay.js';
 import { runEvalCommand } from './evalCommand.js';
@@ -53,7 +53,7 @@ import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
-import { createPullRequestMonitor } from './prMonitor.js';
+import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { parseQuotaArgs, runQuotaCheck } from './quotaCommand.js';
@@ -108,6 +108,7 @@ Options:
   --help                Show this help message
 
 Commands:
+  task bind-pr <KEY> <number|URL|branch>  Bind a task to a pinned PR
   token rotate [--port PORT]  Revoke the running server token and disconnect clients`);
       process.exit(0);
     }
@@ -212,6 +213,23 @@ export async function dispatchCli(
   }
 }
 
+export async function shutdownPullRequestMonitor(
+  monitor: Pick<PullRequestMonitor, 'dispose'> | undefined,
+): Promise<void> {
+  if (!monitor) return;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      monitor.dispose(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, PR_SHUTDOWN_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function startServer(argv: string[]): Promise<void> {
   let args: CliArgs;
   try {
@@ -254,6 +272,7 @@ async function startServer(argv: string[]): Promise<void> {
 
   // ── Create server ──
   const server = new PixelAgentsServer();
+  let pullRequestMonitor: PullRequestMonitor | undefined;
 
   try {
     // Create runtime first (before server.start, so we can pass it in)
@@ -445,7 +464,7 @@ async function startServer(argv: string[]): Promise<void> {
     // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).
     const domainEventRelay = createDomainEventRelay(store, cwd, boardSelection);
     domainEventRelay?.start();
-    const pullRequestMonitor = createPullRequestMonitor(boardSelection);
+    pullRequestMonitor = createPullRequestMonitor(boardSelection);
     pullRequestMonitor?.start();
     // Technical availability of the bound Project's enabled Executors (SA-089).
     startExecutorMonitoring(store, executorProject);
@@ -478,22 +497,29 @@ async function startServer(argv: string[]): Promise<void> {
     );
 
     // ── Graceful shutdown ──
-    function shutdown(): void {
+    let shuttingDown = false;
+    async function shutdown(): Promise<void> {
+      if (shuttingDown) return;
+      shuttingDown = true;
       console.log('\nShutting down...');
       codexWatcher.dispose();
       roleResolver.dispose();
       boardWatcher.dispose();
       domainEventRelay?.dispose();
-      pullRequestMonitor?.dispose();
-      machineCapacity.dispose();
-      runtime.dispose();
-      server.stop();
+      try {
+        await shutdownPullRequestMonitor(pullRequestMonitor);
+      } finally {
+        machineCapacity.dispose();
+        runtime.dispose();
+        server.stop();
+      }
       process.exit(0);
     }
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', () => void shutdown());
+    process.on('SIGTERM', () => void shutdown());
   } catch (err) {
+    await shutdownPullRequestMonitor(pullRequestMonitor);
     console.error('Failed to start server:', err);
     process.exit(1);
   }

@@ -1,12 +1,9 @@
 import { Worker } from 'node:worker_threads';
 
+import { PR_DISPLAY_REF_CHARS } from '../../core/src/constants.js';
 import type { HumanDecision } from '../../core/src/humanDecision.js';
-import type {
-  BoardDecision,
-  BoardEvent,
-  BoardItem,
-  PullRequestStatus,
-} from '../../core/src/messages.js';
+import type { BoardDecision, BoardEvent, BoardItem } from '../../core/src/messages.js';
+import { projectPullRequest, projectPullRequestObservation } from '../../core/src/pullRequest.js';
 import { BOARD_RECENT_EVENTS } from './constants.js';
 
 interface TaskRow {
@@ -24,6 +21,7 @@ interface TaskRow {
   session_id: string | null;
   pr_ref: string | null;
   pr_status: string | null;
+  pr_observation: string | null;
 }
 interface EventRow {
   id: number;
@@ -66,18 +64,21 @@ function readInWorker(): void {
       .prepare('PRAGMA table_info(tasks)')
       .all()
       .some((column: { name: string }) => column.name === 'pr_status');
+    const hasPrObservation = (
+      db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]
+    ).some((column) => column.name === 'pr_observation');
     const tasks = db
       .prepare(
         `
       SELECT t.key, t.type, t.status, t.priority, t.feature_key, t.agent_role,
              t.lease_owner, t.lease_expires_at, t.updated_at, t.pr_ref,
-             ${hasPrStatus ? 't.pr_status' : 'NULL AS pr_status'},
+             ${hasPrStatus ? 't.pr_status' : 'NULL AS pr_status'}, ${hasPrObservation ? 't.pr_observation' : 'NULL AS pr_observation'},
              e.agent_role AS execution_role, e.key AS execution_key, e.session_id
       FROM tasks t LEFT JOIN executions e ON e.project_id = t.project_id AND e.key = (
         SELECT key FROM executions WHERE project_id = t.project_id AND task_key = t.key
         AND (t.lease_owner IS NULL OR task_version >= COALESCE((
           SELECT task_version FROM domain_events WHERE project_id = t.project_id AND task_key = t.key
-          AND (to_status = 'LEASED' OR (to_status = 'RUNNING' AND from_status IN ('REVIEW', 'QA')))
+          AND type = 'TASK_TRANSITIONED' AND (to_status = 'LEASED' OR (to_status = 'RUNNING' AND from_status IN ('REVIEW', 'QA')))
           ORDER BY id DESC LIMIT 1
         ), t.version))
         ORDER BY started_at DESC, key DESC LIMIT 1
@@ -229,8 +230,9 @@ function projectBoard(snapshot: Snapshot, now: number): WorkStoreBoard {
         title: t.key,
         epic: t.feature_key ?? undefined,
         phase: t.status,
-        prRef: t.pr_ref ?? undefined,
-        prStatus: t.pr_status ? (JSON.parse(t.pr_status) as PullRequestStatus) : undefined,
+        prRef: t.pr_ref?.slice(0, PR_DISPLAY_REF_CHARS),
+        prStatus: projectPullRequest(t.pr_status),
+        prObservation: projectPullRequestObservation(t.pr_observation),
         priority: String(t.priority),
         dependsOn: dependencies.get(t.key) ?? [],
         owner: holder

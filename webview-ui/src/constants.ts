@@ -471,3 +471,5 @@ export const CHARACTER_DETAIL_FIELDS = [
   ['permissions', 'Perfil de permisos'],
   ['log', 'Log de ejecución'],
 ] as const;
+
+export const PR_DISPLAY_REFRESH_MS = 5000;

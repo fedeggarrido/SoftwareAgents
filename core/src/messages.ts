@@ -473,6 +473,7 @@ export type BoardMode = 'legacy' | 'project' | 'invalid';
 export interface BoardItem {
   prRef?: string;
   prStatus?: PullRequestStatus;
+  prObservation?: PullRequestObservation;
   id: string;
   clickupId?: string;
   title: string;
@@ -506,6 +507,14 @@ export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
 export type PullRequestReviewDecision = '' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
 
 export type PullRequestCiState = 'unknown' | 'pending' | 'success' | 'failure';
+
+export interface PullRequestObservation {
+  lastSuccessAt: number | null;
+  attemptedAt: number;
+  error: PullRequestObservationError | null;
+}
+
+export type PullRequestObservationError = 'unavailable' | 'binding_required';
 
 export interface BoardOwner {
   worker: string;
@@ -675,6 +684,8 @@ export interface AgentRole {
 export type ModelTier = 'economy' | 'standard' | 'deep';
 
 export interface CharacterDetail {
+  prStatus?: PullRequestStatus;
+  prObservation?: PullRequestObservation;
   prState?: string;
   ciState?: string;
   projectId: string;
@@ -798,6 +809,7 @@ export type WorkSnapshotSource = 'ok' | 'missing' | 'unreadable';
 export interface WorkTask {
   prRef?: string;
   prStatus?: PullRequestStatus;
+  prObservation?: PullRequestObservation;
   key: string;
   type: string;
   status: WorkTaskStatus;

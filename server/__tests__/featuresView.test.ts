@@ -444,6 +444,40 @@ describe('features view acceptance', () => {
     });
   });
 
+  it.each(['reviewer', 'qa'])(
+    'keeps the active %s step when PR events share its lifecycle version',
+    (role) => {
+      const data = fixture();
+      data.tasks = [
+        {
+          key: 'FEAT-001-T01',
+          feature_key: 'FEAT-001',
+          status: 'RUNNING',
+          version: 3,
+        },
+      ];
+      data.executions = [
+        {
+          task_key: 'FEAT-001-T01',
+          task_version: 3,
+          agent_role: role,
+          started_at: '2026-01-01T00:00:00Z',
+        },
+      ];
+      const current = projectFeatures(data)[0].currentTask;
+      expect(current).toMatchObject({ step: role === 'reviewer' ? 'review' : 'qa' });
+      data.events = ['PR_UPDATED', 'PR_MERGED'].map((type) => ({
+        type,
+        task_key: 'FEAT-001-T01',
+        task_version: 3,
+        from_status: 'RUNNING',
+        to_status: 'RUNNING',
+        created_at: '2026-01-02T00:00:00Z',
+      }));
+      expect(projectFeatures(data)[0].currentTask).toEqual(current);
+    },
+  );
+
   it('AC-005 lists all decisions, quota and QA gates without leaking messages', () => {
     const data = fixture();
     data.features[0].status = 'in_review';

@@ -166,6 +166,7 @@ export async function recoverWorkerResults(
         : store.getFeature(feature)?.git_sha === pending.sha;
     const recordedCommit = store
       .listDomainEvents(task.key)
+      .filter((event) => event.type === 'TASK_TRANSITIONED')
       .some((event) => event.reason === `Runtime commit ${pending.sha}`);
     if (
       completed &&

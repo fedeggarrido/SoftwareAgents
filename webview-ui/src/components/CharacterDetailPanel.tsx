@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react';
+
 import type { BoardState, CharacterDetail, ExecutorState } from '../../../core/src/messages.js';
+import { pullRequestCi } from '../../../core/src/pullRequest.js';
 import {
   CHARACTER_DETAIL_FIELDS,
   CHARACTER_DETAIL_SECOND_MS,
   CHARACTER_DETAIL_UNKNOWN,
+  PR_DISPLAY_REFRESH_MS,
 } from '../constants.js';
 
 export interface CharacterDetailPanelProps {
@@ -13,6 +17,12 @@ export interface CharacterDetailPanelProps {
 
 /** Read-only: every fact is projected by the server, never parsed from labels. */
 export function CharacterDetailPanel({ detail, executorState, board }: CharacterDetailPanelProps) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), PR_DISPLAY_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const ci = pullRequestCi(detail?.prStatus, detail?.prObservation, now);
   const provider =
     detail && executorState && executorState.projectId === detail.projectId
       ? executorState.executors.find((row) => row.executorId === detail.executor)
@@ -36,7 +46,11 @@ export function CharacterDetailPanel({ detail, executorState, board }: Character
         {CHARACTER_DETAIL_FIELDS.map(([key, label]) => (
           <div key={key}>
             <dt className="text-text-muted">{label}</dt>
-            <dd>{detail?.[key] || CHARACTER_DETAIL_UNKNOWN}</dd>
+            <dd>
+              {key === 'ciState' && detail?.prStatus && ci !== detail.prStatus.ci
+                ? ci
+                : detail?.[key] || CHARACTER_DETAIL_UNKNOWN}
+            </dd>
           </div>
         ))}
         <div>

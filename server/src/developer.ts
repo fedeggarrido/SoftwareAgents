@@ -74,6 +74,7 @@ export function lastDeveloperFailure(store: WorkStore, task: TaskRecord) {
   if (!isDevelopableTask({ type: task.type, agentRole: task.agent_role } as DagTask)) return null;
   const event = store
     .listDomainEvents(task.key)
+    .filter((event) => event.type === 'TASK_TRANSITIONED')
     .filter(
       (e) =>
         isSuccessfulTaskStep(e) ||
@@ -161,6 +162,7 @@ export function resetDeveloperWorktree(
   // A prior reviewed/QA commit is valid rework input; otherwise only the pinned base is trusted.
   const lastCommit = store
     .listDomainEvents(record.key)
+    .filter((event) => event.type === 'TASK_TRANSITIONED')
     .map((event) =>
       event.actor === 'operator' && event.reason.startsWith(TASK_REBASE_REASON)
         ? (JSON.parse(event.reason.slice(TASK_REBASE_REASON.length)) as { after: ReviewRef }).after
@@ -336,6 +338,7 @@ export function developerRequest(
     retryReason:
       store
         .listDomainEvents(record.key)
+        .filter((event) => event.type === 'TASK_TRANSITIONED')
         .filter((event) => event.reason.startsWith('manual_retry: '))
         .at(-1)?.reason ?? null,
     allowedScope: developerScope(task, config.repoRoot),

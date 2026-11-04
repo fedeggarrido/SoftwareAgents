@@ -1729,6 +1729,22 @@ components:
     PullRequestCiState:
       type: string
       enum: [unknown, pending, success, failure]
+    PullRequestObservationError:
+      type: string
+      enum: [unavailable, binding_required]
+    PullRequestObservation:
+      type: object
+      additionalProperties: false
+      required: [lastSuccessAt, attemptedAt, error]
+      properties:
+        lastSuccessAt:
+          type: [number, 'null']
+        attemptedAt:
+          type: number
+        error:
+          oneOf:
+            - $ref: '#/components/schemas/PullRequestObservationError'
+            - type: 'null'
     PullRequestStatus:
       type: object
       additionalProperties: false
@@ -1781,6 +1797,8 @@ components:
           type: string
         prStatus:
           $ref: '#/components/schemas/PullRequestStatus'
+        prObservation:
+          $ref: '#/components/schemas/PullRequestObservation'
         id:
           type: string
         clickupId:
@@ -2157,6 +2175,10 @@ components:
           log,
         ]
       properties:
+        prStatus:
+          $ref: '#/components/schemas/PullRequestStatus'
+        prObservation:
+          $ref: '#/components/schemas/PullRequestObservation'
         prState:
           type: string
         ciState:
@@ -2595,6 +2617,8 @@ components:
           type: string
         prStatus:
           $ref: '#/components/schemas/PullRequestStatus'
+        prObservation:
+          $ref: '#/components/schemas/PullRequestObservation'
         key:
           type: string
         type:

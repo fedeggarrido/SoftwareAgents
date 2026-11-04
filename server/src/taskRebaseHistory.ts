@@ -15,6 +15,7 @@ export const sameReviewRef = (a: ReviewRef | null | undefined, b: ReviewRef) =>
 export function taskRebaseHistory(store: WorkStore, key: string): TaskRebase[] {
   return store
     .listDomainEvents(key)
+    .filter((event) => event.type === 'TASK_TRANSITIONED')
     .flatMap((event) =>
       event.actor === 'operator' && event.reason.startsWith(TASK_REBASE_REASON)
         ? [JSON.parse(event.reason.slice(TASK_REBASE_REASON.length)) as TaskRebase]

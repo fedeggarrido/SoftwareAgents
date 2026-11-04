@@ -1,0 +1,26 @@
+{
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "statusCheckRollup": [
+    {
+      "__typename": "StatusContext",
+      "context": "commit-status-error",
+      "state": "ERROR"
+    },
+    {
+      "__typename": "StatusContext",
+      "context": "commit-status-failure",
+      "state": "FAILURE"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "build",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS"
+    }
+  ],
+  "mergedAt": null,
+  "url": "https://github.com/example/project/pull/42",
+  "headRefName": "sa/SA-055"
+}

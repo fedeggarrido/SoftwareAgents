@@ -1599,15 +1599,18 @@ class SqliteWorkStore implements WorkStore {
       if (!task || task.version !== expectedVersion)
         throw new Error('Task changed before PR binding');
       if (task.pr_ref === canonical) return;
-      // The existing binding's repository is immutable, including explicit rebindings.
-      if (task.pr_ref?.startsWith('https://'))
-        canonicalPullRequest(
-          canonical,
-          canonicalPullRequest(task.pr_ref).replace(/\/pull\/\d+$/, ''),
-        );
+      let repository: string | undefined;
+      if (task.pr_ref) {
+        try {
+          repository = canonicalPullRequest(task.pr_ref).replace(/\/pull\/\d+$/, '');
+        } catch {
+          // Legacy selectors require explicit binding through authenticated human ingress.
+        }
+      }
+      if (repository) canonicalPullRequest(canonical, repository);
       this.db
         .prepare(
-          'UPDATE tasks SET pr_ref = ?, pr_status = NULL, pr_observation = NULL, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+          'UPDATE tasks SET pr_ref = ?, pr_status = NULL, pr_observation = NULL, updated_at = ? WHERE project_id = ? AND key = ?',
         )
         .run(canonical, new Date().toISOString(), this.projectId, taskId);
     });
@@ -1648,6 +1651,7 @@ class SqliteWorkStore implements WorkStore {
       const task = this.getTask(taskId);
       if (!task || task.pr_ref !== ref || status.ref !== ref)
         throw new Error('PR reference changed');
+      // Checked under the writer lock. A lifecycle change defers this poll only.
       if (task.version !== expectedVersion)
         throw new TaskVersionConflictError(taskId, expectedVersion, task.version);
       return task;
@@ -1731,9 +1735,7 @@ class SqliteWorkStore implements WorkStore {
       if (!unchanged || requestCleanup) {
         const now = new Date().toISOString();
         this.db
-          .prepare(
-            'UPDATE tasks SET version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
-          )
+          .prepare('UPDATE tasks SET updated_at = ? WHERE project_id = ? AND key = ?')
           .run(now, this.projectId, taskId);
         this.db
           .prepare(
@@ -1745,7 +1747,7 @@ class SqliteWorkStore implements WorkStore {
             merged || requestCleanup ? 'PR_MERGED' : 'PR_UPDATED',
             task.status,
             task.status,
-            task.version + 1,
+            task.version,
             task.attempt,
             requestCleanup ? decision!.id : '',
             PR_MONITOR_ACTOR,

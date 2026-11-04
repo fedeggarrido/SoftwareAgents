@@ -1,4 +1,5 @@
 -- Frozen v18 upgrade for testing reopening a genuinely populated v18 database.
+-- Keep its original all-event version uniqueness. Migration v19 must replace it.
 ALTER TABLE tasks ADD COLUMN pr_status TEXT;
 DROP TRIGGER domain_events_no_update;
 DROP TRIGGER domain_events_no_delete;

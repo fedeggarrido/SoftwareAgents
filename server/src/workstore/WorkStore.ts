@@ -286,14 +286,14 @@ export interface WorkStore {
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];
-  /** Explicit operator binding. Canonical PR identity only, no execution authority. */
+  /** Explicit operator binding. Canonical PR identity, preserving the lifecycle version. */
   bindPullRequest(taskId: string, expectedVersion: number, ref: string): Promise<void>;
   recordPullRequestError(
     taskId: string,
     ref: string,
     error: 'unavailable' | 'binding_required',
   ): Promise<void>;
-  /** Compare-and-set observations. Freshness does not create versions or events. */
+  /** Compare-and-set observations. Only a lifecycle transition advances the version. */
   observePullRequest(
     taskId: string,
     expectedVersion: number,

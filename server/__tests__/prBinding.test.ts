@@ -6,7 +6,11 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { dispatchCli } from '../src/cli.js';
-import { PullRequestMonitor, resolvePullRequestBinding } from '../src/prMonitor.js';
+import {
+  parsePullRequest,
+  PullRequestMonitor,
+  resolvePullRequestBinding,
+} from '../src/prMonitor.js';
 import { canonicalPullRequest, pullRequestRepository } from '../src/pullRequestBinding.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
@@ -106,6 +110,9 @@ it('requires operator ingress for binding and leaves the task untouched', async 
 it('fences stale bindings and refuses another repository at the store entry point', async () => {
   const before = work.getTask('task')!;
   await work.bindPullRequest('task', before.version, ref);
+  await work.bindPullRequest('task', before.version, ref);
+  expect(work.getTask('task')!.version).toBe(before.version);
+  await work.transition('task', before.version, 'BLOCKED', 'human hold', 'operator');
   await expect(work.bindPullRequest('task', before.version, ref)).rejects.toThrow('changed');
   await expect(
     work.bindPullRequest(
@@ -116,6 +123,39 @@ it('fences stale bindings and refuses another repository at the store entry poin
   ).rejects.toThrow('repository');
   expect(canonicalPullRequest('https://GITHUB.com/Example/Project/pull/42')).toBe(ref);
   expect(pullRequestRepository('git@github.com:Example/Project.git')).toBe(repository);
+});
+
+it.each([`${ref}?tab=checks`, `${repository}/pull/042`])(
+  'replaces legacy selector %s through authenticated CLI binding',
+  async (legacy) => {
+    work.createTask({ key: 'legacy', type: 'implementation', status: 'REVIEW', pr_ref: legacy });
+    const before = work.getTask('legacy')!;
+    await dispatchCli(['task', 'bind-pr', 'legacy', '42']);
+    expect(work.getTask('legacy')).toMatchObject({
+      version: before.version,
+      status: before.status,
+      pr_ref: ref,
+      pr_status: null,
+      pr_observation: null,
+    });
+  },
+);
+
+it('discards an observation of the old PR after rebinding at the same lifecycle version', async () => {
+  const version = work.getTask('task')!.version;
+  await work.bindPullRequest('task', version, ref);
+  const observation = parsePullRequest(fixture(), ref);
+  const rebound = `${repository}/pull/43`;
+  await work.bindPullRequest('task', version, rebound);
+  await expect(
+    work.observePullRequest('task', version, ref, observation, undefined),
+  ).rejects.toThrow('PR reference changed');
+  expect(work.getTask('task')).toMatchObject({
+    version,
+    pr_ref: rebound,
+    pr_status: null,
+    pr_observation: null,
+  });
 });
 
 it('rejects other repositories and unsafe URL inputs before invoking gh', async () => {

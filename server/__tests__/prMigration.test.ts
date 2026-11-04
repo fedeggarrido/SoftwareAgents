@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { parsePullRequest, PullRequestMonitor } from '../src/prMonitor.js';
+import { runMigrations } from '../src/workstore/migrations.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 
@@ -66,9 +67,7 @@ it.each([17, 18])(
           JSON.stringify(parsePullRequest(fixture('gh/open-green.json'), ref)),
           'task',
         );
-        db.exec(
-          "UPDATE tasks SET version = 5 WHERE key = 'task'; INSERT INTO domain_events VALUES (42,'p','task','PR_UPDATED','REVIEW','REVIEW',5,0,'','pr-monitor','2026-01-01');",
-        );
+        db.exec(fixture('workstore-v18-pr-events.sql'));
       }
     } finally {
       db.close();
@@ -76,11 +75,18 @@ it.each([17, 18])(
     work = await openWorkStore({ repositoryPath: root, projectId: 'p' });
     expect(work.getTask('task')).toMatchObject({
       status: 'REVIEW',
+      version: version === 17 ? 4 : 6,
       pr_ref: version === 17 ? 'legacy-branch' : ref,
       review_ref: { sha: 'sha' },
       pr_observation: null,
     });
     expect(work.listDomainEvents()[0]).toMatchObject({ id: 41, type: 'TASK_TRANSITIONED' });
+    if (version === 18) {
+      expect(work.listDomainEvents().slice(1)).toMatchObject([
+        { id: 42, type: 'PR_UPDATED', task_version: 5 },
+        { id: 43, type: 'PR_UPDATED', task_version: 6 },
+      ]);
+    }
     expect(work.listTaskDependencies('task')[0].depends_on_key).toBe('dependency');
     expect(work.getExecution('execution')!.session_id).toBe('session');
     expect(work.getHumanDecision('decision')!.answer).toBe('Answer');
@@ -93,7 +99,8 @@ it.each([17, 18])(
       projectId: 'p',
       read: async () => fixture('gh/merged.json'),
     }).tick();
-    expect(work.listDomainEvents().at(-1)!.id).toBeGreaterThan(version === 17 ? 41 : 42);
+    expect(work.listDomainEvents().at(-1)!.id).toBeGreaterThan(version === 17 ? 41 : 43);
+    expect(work.getTask('task')!.version).toBe(version === 17 ? 4 : 6);
     const check = new DatabaseSync(file);
     try {
       expect(check.prepare('SELECT version FROM schema_version').get()!.version).toBe(19);
@@ -102,6 +109,21 @@ it.each([17, 18])(
         'append-only',
       );
       expect(() => check.exec('DELETE FROM domain_events WHERE id = 41')).toThrow('append-only');
+      const insert = check.prepare(
+        "INSERT INTO domain_events (project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at) VALUES ('p','task',?,'REVIEW','REVIEW',4,0,'','test','2026-01-04')",
+      );
+      // Both PR kinds may share a version with each other and its existing transition.
+      insert.run('PR_UPDATED');
+      insert.run('PR_MERGED');
+      expect(
+        check
+          .prepare(
+            "SELECT type FROM domain_events WHERE task_version = 4 AND (id = 41 OR actor = 'test') ORDER BY id",
+          )
+          .all(),
+      ).toEqual([{ type: 'TASK_TRANSITIONED' }, { type: 'PR_UPDATED' }, { type: 'PR_MERGED' }]);
+      expect(() => insert.run('TASK_TRANSITIONED')).toThrow('UNIQUE');
+      expect(() => insert.run('UNKNOWN')).toThrow('CHECK');
       for (const table of [
         'technical_designs',
         'adr_reservations',
@@ -118,3 +140,24 @@ it.each([17, 18])(
     }
   },
 );
+
+it.each([17, 18])('rolls back every schema change when migration from v%s fails', (version) => {
+  // This test needs no repository or profile writes.
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-migration-rollback-'));
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(fixture('workstore-v17.sql'));
+    if (version === 18) db.exec(fixture('workstore-v18-upgrade.sql'));
+    // A collision forces failure after migration has begun altering the schema.
+    db.exec('CREATE TABLE domain_events_transition_version (sentinel TEXT) STRICT');
+    const before = db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all();
+    expect(() => runMigrations(db)).toThrow('domain_events_transition_version');
+    expect(db.prepare('SELECT version FROM schema_version').get()!.version).toBe(version);
+    expect(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()).toEqual(
+      before,
+    );
+    db.exec('BEGIN; ROLLBACK');
+  } finally {
+    db.close();
+  }
+});

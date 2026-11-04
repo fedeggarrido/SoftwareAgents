@@ -11,7 +11,7 @@ import { readCharacterDetail } from '../src/characterDetail.js';
 import { GH_PR_MAX_BUFFER_BYTES, PR_MAX_CHECKS, PR_MAX_STRING_CHARS } from '../src/constants.js';
 import { DomainEventRelay } from '../src/domainEventRelay.js';
 import { parsePullRequest, PullRequestMonitor, readPullRequest } from '../src/prMonitor.js';
-import { terminateExecutionTree } from '../src/workstore/processRecovery.js';
+import { processStartIdentity, terminateExecutionTree } from '../src/workstore/processRecovery.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { WorkStoreBoardSource } from '../src/workStoreBoardSource.js';
@@ -35,6 +35,8 @@ let work: WorkStore;
 let file: string;
 
 beforeEach(async () => {
+  vi.mocked(processStartIdentity).mockReset().mockResolvedValue('identity');
+  vi.mocked(terminateExecutionTree).mockReset().mockResolvedValue(undefined);
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-monitor-'));
   vi.stubEnv('HOME', root);
   vi.stubEnv('USERPROFILE', root);
@@ -70,6 +72,7 @@ function monitor(
 
 describe('PR observations through the real WorkStore and relay', () => {
   it('keeps open green work in REVIEW and projects PR/CI to snapshots, detail and board', async () => {
+    const version = work.getTask('SA-055')!.version;
     const poller = monitor();
     await poller.tick();
     expect(work.getTask('SA-055')).toMatchObject({
@@ -78,7 +81,7 @@ describe('PR observations through the real WorkStore and relay', () => {
       pr_status: { state: 'OPEN', ci: 'success', reviewDecision: 'APPROVED' },
     });
     expect(work.listDecisions()).toEqual([]);
-    const version = work.getTask('SA-055')!.version;
+    expect(work.getTask('SA-055')!.version).toBe(version);
     await poller.tick();
     expect(work.getTask('SA-055')!.version).toBe(version);
     const store = new AgentStateStore();
@@ -102,15 +105,82 @@ describe('PR observations through the real WorkStore and relay', () => {
     }
   });
 
+  it('relays same-version PR updates across snapshots and refreshes observation-only projections', async () => {
+    const version = work.getTask('SA-055')!.version;
+    const state = new AgentStateStore();
+    const broadcast = vi.spyOn(state, 'broadcast');
+    const relay = new DomainEventRelay(state, { projectId: 'p', workStoreFile: () => file });
+    const source = new WorkStoreBoardSource();
+    const read = vi.fn(async () => fixture('open-green'));
+    const poller = monitor(read);
+    try {
+      expect(relay.snapshot().lastEventId).toBeNull();
+      await poller.tick();
+      const green = (await source.read(file, 'p', Date.now()))!;
+      expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('success');
+      // A later snapshot must not advance the established cursor past pending notices.
+      expect(relay.snapshot().tasks[0]).toMatchObject({ version, prStatus: { ci: 'success' } });
+      relay.tick();
+      const changed = { ...parsePullRequest(fixture('open-green'), ref), ci: 'pending' as const };
+      await work.observePullRequest('SA-055', version, ref, changed, undefined);
+      expect(relay.snapshot().tasks[0]).toMatchObject({ version, prStatus: { ci: 'pending' } });
+      relay.tick();
+      expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('pending');
+      const pending = (await source.read(file, 'p', Date.now()))!;
+      expect(pending.items[0].prStatus?.ci).toBe('pending');
+      expect(pending).not.toEqual(green);
+      expect(work.listDomainEvents().map((event) => event.task_version)).toEqual([
+        version,
+        version,
+      ]);
+      expect(broadcast.mock.calls.map(([message]) => message)).toEqual(
+        work.listDomainEvents().map((event) => ({
+          type: 'domainEvent',
+          event: expect.objectContaining({
+            eventId: event.id,
+            kind: 'pr.updated',
+            taskVersion: version,
+          }),
+        })),
+      );
+      const events = work.listDomainEvents();
+      await work.recordPullRequestError('SA-055', ref, 'unavailable');
+      relay.tick();
+      expect(work.getTask('SA-055')).toMatchObject({ version, pr_status: changed });
+      expect(work.listDomainEvents()).toEqual(events);
+      expect(relay.snapshot().tasks[0].prObservation?.error).toBe('unavailable');
+      const unavailable = (await source.read(file, 'p', Date.now()))!;
+      expect(unavailable.items[0].prObservation?.error).toBe('unavailable');
+      expect(unavailable).not.toEqual(pending);
+      expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('unavailable');
+      await work.observePullRequest('SA-055', version, ref, changed, undefined);
+      expect(work.listDomainEvents()).toEqual(events);
+      expect((await source.read(file, 'p', Date.now()))!.items[0].prObservation?.error).toBeNull();
+      expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('pending');
+      expect(broadcast).toHaveBeenCalledTimes(2);
+    } finally {
+      await poller.dispose();
+      source.dispose();
+      relay.dispose();
+      state.dispose();
+    }
+  });
+
   it('blocks failed checks with their names, ignoring neutral and skipped checks', async () => {
+    const version = work.getTask('SA-055')!.version;
     await monitor(vi.fn(async () => fixture('failed'))).tick();
     expect(work.getTask('SA-055')).toMatchObject({
+      version: version + 1,
       status: 'BLOCKED',
       blocked_reason: 'CI failed: build, lint, security, tests',
     });
     expect(work.listDomainEvents().map((event) => event.type)).toEqual([
       'TASK_TRANSITIONED',
       'PR_UPDATED',
+    ]);
+    expect(work.listDomainEvents().map((event) => event.task_version)).toEqual([
+      version + 1,
+      version + 1,
     ]);
     await monitor().tick();
     expect(work.getTask('SA-055')!.status).toBe('BLOCKED');
@@ -150,6 +220,7 @@ describe('PR observations through the real WorkStore and relay', () => {
   it('requests one cleanup per merged PR, leaving closed tasks closed', async () => {
     work.createTask({ key: 'done', type: 'implementation', status: 'DONE' });
     await work.bindPullRequest('done', work.getTask('done')!.version, ref);
+    const version = work.getTask('done')!.version;
     const store = new AgentStateStore();
     const broadcast = vi.spyOn(store, 'broadcast');
     const relay = new DomainEventRelay(store, { projectId: 'p', workStoreFile: () => file });
@@ -173,7 +244,7 @@ describe('PR observations through the real WorkStore and relay', () => {
           decisionId: expect.any(String),
         }),
       });
-      expect(work.getTask('done')!.status).toBe('DONE');
+      expect(work.getTask('done')).toMatchObject({ status: 'DONE', version });
       await monitor(vi.fn(async () => fixture('merged'))).tick();
       expect(work.listDecisions()).toHaveLength(2);
       expect(work.listDomainEvents().filter((event) => event.type === 'PR_MERGED')).toHaveLength(2);
@@ -221,6 +292,147 @@ describe('PR observations through the real WorkStore and relay', () => {
     expect(work.getTask('SA-055')!.blocked_reason).toBe('human hold');
     expect(work.listDecisions()).toEqual([]);
     expect(work.getTask('SA-055')!.pr_status).toBeNull();
+    const version = work.getTask('SA-055')!.version;
+    await monitor().tick();
+    expect(work.getTask('SA-055')).toMatchObject({
+      version,
+      status: 'BLOCKED',
+      blocked_reason: 'human hold',
+      pr_status: { ci: 'success' },
+    });
+  });
+
+  it.each(['observation', 'rebinding'] as const)(
+    'allows %s during a paused release without changing its reservation fence',
+    async (operation) => {
+      work.createTask({ key: 'leased', type: 'implementation', status: 'QUEUED', pr_ref: ref });
+      const lease = await work.claim('leased', 'owner');
+      await work.createExecution({
+        key: 'execution',
+        task_key: 'leased',
+        agent_template_version: 'v1',
+        executor: 'codex',
+        model_id: 'test',
+        session_id: null,
+        pid: 12345,
+        pid_started_at: 'identity',
+        started_at: new Date().toISOString(),
+        system_prompt_hash: 'hash',
+        project_brain_sha: 'sha',
+        task_version: lease.version,
+        tool_policy_version: 'v1',
+      });
+      let entered!: () => void;
+      let resume!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const resumed = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      vi.mocked(terminateExecutionTree).mockImplementationOnce(async () => {
+        entered();
+        await resumed;
+      });
+      const releasing = work.release('leased', 'owner');
+      await paused;
+      const reservation = work.listLeaseRecoveries();
+      expect(reservation).toMatchObject([{ task_key: 'leased', task_version: lease.version }]);
+      const rebound = ref.replace('/42', '/43');
+      try {
+        if (operation === 'observation') {
+          await work.observePullRequest(
+            'leased',
+            lease.version,
+            ref,
+            parsePullRequest(fixture('failed'), ref),
+            undefined,
+          );
+          expect(work.getTask('leased')!.pr_status?.ci).toBe('failure');
+          expect(terminateExecutionTree).toHaveBeenCalledTimes(1);
+        } else {
+          await work.bindPullRequest('leased', lease.version, rebound);
+          expect(work.getTask('leased')!.pr_ref).toBe(rebound);
+        }
+        expect(work.getTask('leased')).toMatchObject({
+          version: lease.version,
+          status: 'LEASED',
+          lease_owner: 'owner',
+        });
+        expect(work.listLeaseRecoveries()).toEqual(reservation);
+      } finally {
+        resume();
+        await releasing;
+      }
+      expect(work.getTask('leased')).toMatchObject({
+        version: lease.version + 1,
+        status: 'FAILED_RETRYABLE',
+        lease_owner: null,
+        lease_expires_at: null,
+        pr_ref: operation === 'rebinding' ? rebound : ref,
+      });
+      expect(work.getExecution('execution')!.tree_closed_at).toBeTruthy();
+      expect(work.listLeaseRecoveries()).toEqual([]);
+    },
+  );
+
+  it('allows observation while process registration awaits its identity', async () => {
+    work.createTask({ key: 'launch', type: 'implementation', status: 'QUEUED', pr_ref: ref });
+    const lease = await work.claim('launch', 'owner');
+    await work.createExecution({
+      key: 'execution',
+      task_key: 'launch',
+      agent_template_version: 'v1',
+      executor: 'codex',
+      model_id: 'test',
+      session_id: null,
+      pid: null,
+      started_at: new Date().toISOString(),
+      system_prompt_hash: 'hash',
+      project_brain_sha: 'sha',
+      task_version: lease.version,
+      tool_policy_version: 'v1',
+    });
+    let identify!: (identity: string) => void;
+    vi.mocked(processStartIdentity).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        identify = resolve;
+      }),
+    );
+    const registration = work.setExecutionProcess('execution', 'owner', 12345);
+    try {
+      expect(processStartIdentity).toHaveBeenCalledWith(12345);
+      await work.observePullRequest(
+        'launch',
+        lease.version,
+        ref,
+        parsePullRequest(fixture('failed'), ref),
+        undefined,
+      );
+      expect(work.getTask('launch')).toMatchObject({
+        version: lease.version,
+        status: 'LEASED',
+        lease_owner: 'owner',
+        lease_expires_at: lease.lease_expires_at,
+        pr_status: { ci: 'failure' },
+      });
+    } finally {
+      identify('identity');
+      await registration;
+    }
+    expect(work.getExecution('execution')).toMatchObject({
+      pid: 12345,
+      pid_started_at: 'identity',
+      tree_closed_at: null,
+    });
+    expect(work.getTask('launch')).toMatchObject({
+      version: lease.version,
+      status: 'LEASED',
+      lease_owner: 'owner',
+      lease_expires_at: lease.lease_expires_at,
+    });
+    expect(work.listLeaseRecoveries()).toEqual([]);
+    expect(terminateExecutionTree).not.toHaveBeenCalled();
   });
 
   it('coalesces overlapping polls and discards a response after disposal', async () => {
@@ -394,6 +606,11 @@ describe('PR observations through the real WorkStore and relay', () => {
           .owner!.session,
       ).toBe('session');
       const task = work.getTask('leased')!;
+      expect(task.version).toBe(lease.version);
+      expect(work.listDomainEvents('leased').map((event) => event.task_version)).toEqual([
+        lease.version,
+        lease.version,
+      ]);
       await work.transition('leased', task.version, 'RUNNING', 'start', 'owner');
       relay.tick();
       expect(broadcast).toHaveBeenCalledWith({
@@ -469,8 +686,10 @@ describe('PR observations through the real WorkStore and relay', () => {
     work.createTask({ key: 'active-merge', type: 'implementation', status: 'QUEUED' });
     await work.bindPullRequest('active-merge', work.getTask('active-merge')!.version, ref);
     await work.claim('active-merge', 'owner');
+    const leasedVersion = work.getTask('active-merge')!.version;
     await monitor(vi.fn(async () => fixture('merged'))).tick();
     expect(work.getTask('active-merge')).toMatchObject({
+      version: leasedVersion,
       status: 'LEASED',
       lease_owner: 'owner',
       pr_status: { state: 'MERGED' },
@@ -481,14 +700,41 @@ describe('PR observations through the real WorkStore and relay', () => {
         .every((decision) => !decision.context.startsWith('pr-cleanup/active-merge\n')),
     ).toBe(true);
     await work.release('active-merge', 'owner');
+    const version = work.getTask('active-merge')!.version;
+    const state = new AgentStateStore();
+    const broadcast = vi.spyOn(state, 'broadcast');
+    const relay = new DomainEventRelay(state, { projectId: 'p', workStoreFile: () => file });
+    relay.snapshot();
     const cleanups = () =>
       work
         .listDecisions()
         .filter((decision) => decision.context.startsWith('pr-cleanup/active-merge\n'));
-    await monitor(vi.fn(async () => fixture('merged'))).tick();
-    expect(cleanups()).toHaveLength(1);
-    await monitor(vi.fn(async () => fixture('merged'))).tick();
-    expect(cleanups()).toHaveLength(1);
+    try {
+      await monitor(vi.fn(async () => fixture('merged'))).tick();
+      expect(cleanups()).toHaveLength(1);
+      expect(work.getTask('active-merge')!.version).toBe(version);
+      const decisionId = cleanups()[0].id;
+      expect(work.listDomainEvents('active-merge').at(-1)).toMatchObject({
+        type: 'PR_MERGED',
+        task_version: version,
+        reason: decisionId,
+      });
+      relay.tick();
+      expect(broadcast).toHaveBeenCalledWith({
+        type: 'domainEvent',
+        event: expect.objectContaining({
+          kind: 'pr.merged',
+          taskKey: 'active-merge',
+          taskVersion: version,
+          decisionId,
+        }),
+      });
+      await monitor(vi.fn(async () => fixture('merged'))).tick();
+      expect(cleanups()).toHaveLength(1);
+    } finally {
+      relay.dispose();
+      state.dispose();
+    }
   });
 });
 

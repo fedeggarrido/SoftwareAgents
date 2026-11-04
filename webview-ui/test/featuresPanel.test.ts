@@ -11,15 +11,19 @@ import {
   getFeaturesStore,
   setFeaturesStore,
 } from '../src/office/featuresStore.js';
+import { emptyIdeasStore, setIdeasStore } from '../src/office/ideasStore.js';
 
 const lifecycle = vi.hoisted(() => ({
   effects: [] as Array<() => void>,
   state: 'connected',
   send: vi.fn(),
+  sendIdeas: vi.fn(),
 }));
 vi.mock('../src/transport/index.js', () => ({
   transport: {
-    send: lifecycle.send,
+    // Keep the existing feature-read assertions separate from the new draft reads.
+    send: (message: { type: string }) =>
+      message.type === 'requestIdeas' ? lifecycle.sendIdeas(message) : lifecycle.send(message),
     get state() {
       return lifecycle.state;
     },
@@ -87,12 +91,39 @@ beforeEach(() => {
   lifecycle.effects = [];
   lifecycle.state = 'connected';
   lifecycle.send.mockClear();
+  lifecycle.sendIdeas.mockClear();
+  setIdeasStore(emptyIdeasStore());
   close.mockClear();
   project('P');
   setFeaturesStore(beginFeaturesRequest(emptyFeaturesStore(), 'P', 'r'));
   respond();
 });
 describe('FEAT-002-T06 panel acceptance', () => {
+  it('SA-109 shows pending ideas separately in the FeaturesPanel', async () => {
+    setIdeasStore({
+      ...emptyIdeasStore(),
+      snapshot: {
+        type: 'ideasSnapshot',
+        requestId: 'ideas',
+        projectId: 'P',
+        canSubmit: true,
+        errorCode: null,
+        ideas: [
+          {
+            key: 'FEAT-021',
+            command:
+              'pixel-agents feature run FEAT-021 --request .softwareagents/ideas/P/FEAT-021.md --confirm',
+          },
+        ],
+      },
+    });
+    const html = await render();
+    expect(html).toContain('Ideas pendientes · sin FeatureSpec');
+    expect(html).toContain('data-state="idea_pending"');
+    expect(html).toContain('data-state="in_development"');
+    project('Q');
+    expect(await render()).not.toContain('FEAT-021');
+  });
   it('shows a shared alert and retry only for read errors, with contained panel layout', async () => {
     respond({ status: 'read_error', reason: 'query_failed' });
     const html = await render();

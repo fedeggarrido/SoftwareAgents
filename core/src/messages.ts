@@ -8,6 +8,8 @@
  */
 
 export type ServerMessage =
+  | IdeasSnapshot
+  | SubmitIdeaResult
   | FeaturesSnapshot
   | AuditLogSnapshot
   | ProviderCapabilities
@@ -51,6 +53,8 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestIdeas
+  | SubmitIdea
   | RequestFeatures
   | RequestAuditLog
   | WebviewReady
@@ -80,6 +84,46 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface IdeasSnapshot {
+  type: 'ideasSnapshot';
+  requestId: string;
+  projectId: string | null;
+  canSubmit: boolean;
+  errorCode: IdeaErrorCode | null;
+  ideas: IdeaSummary[];
+}
+
+export type IdeaErrorCode =
+  | 'denied'
+  | 'unsupported_adapter'
+  | 'no_project'
+  | 'missing_manifest'
+  | 'invalid_manifest'
+  | 'unknown_project'
+  | 'invalid_request'
+  | 'empty_text'
+  | 'too_large'
+  | 'unsafe_storage'
+  | 'unavailable'
+  | 'ids_exhausted'
+  | 'audit_failed';
+
+export interface IdeaSummary {
+  key: string;
+  command: string;
+}
+
+export interface SubmitIdeaResult {
+  type: 'submitIdeaResult';
+  requestId: string;
+  projectId: string;
+  status: IdeaSubmitStatus;
+  errorCode: IdeaErrorCode | null;
+  idea: IdeaSummary | null;
+}
+
+export type IdeaSubmitStatus = 'saved' | 'rejected' | 'failed';
 
 export interface FeaturesSnapshot {
   type: 'featuresSnapshot';
@@ -890,6 +934,18 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestIdeas {
+  type: 'requestIdeas';
+  requestId: string;
+}
+
+export interface SubmitIdea {
+  type: 'submitIdea';
+  requestId: string;
+  projectId: string;
+  text: string;
 }
 
 export interface RequestFeatures {

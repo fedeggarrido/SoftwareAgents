@@ -4,6 +4,51 @@ El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
 operador. No incluye diseño técnico ni implementación de esa vista.
 
+## Ideas desde la oficina (SA-109)
+
+«Nueva idea» guarda el texto literal como borrador pendiente en el checkout
+vinculado: `.softwareagents/ideas/<Project>/FEAT-NNN.md`. La identidad del Project
+separa borradores al cambiar el manifiesto. Esa ubicación pasa sin cambios por
+el validador real de `--request`: archivo regular, sin symlinks/junctions, hasta
+1 MiB en UTF-8 y texto no vacío. El servidor elige el primer id libre entre
+FEAT-001 y FEAT-999, omite Features registradas, FeatureSpecs del Brain e ideas
+guardadas. Reservas vacías con creación exclusiva en el Git common dir
+(`softwareagents/idea-reservations/<Project>/<FEAT>`) coordinan envíos concurrentes,
+incluso desde distintos worktrees. El request también se crea en exclusiva en el
+checkout de esa oficina. No sobrescribe archivos ni toca el índice Git.
+Los borradores son datos locales, fuera del Brain; no se versionan automáticamente.
+La lista muestra los borradores del checkout vinculado a la oficina. Una reserva
+interrumpida conserva su id: antes de retirarla manualmente, comprobar que no queda
+ningún escritor y que no existe su request en otro checkout.
+
+El diálogo confirma id y comando exacto, por ejemplo:
+
+```powershell
+pixel-agents feature run FEAT-001 --request .softwareagents/ideas/softwareagents/FEAT-001.md --confirm
+```
+
+Ejecutarlo desde el checkout indicado sigue requiriendo la confirmación humana
+SA-107. Guardar no crea FeatureSpec, Task, Execution ni commit y no concede
+autoridad. Features muestra una sección separada «Ideas pendientes · sin
+FeatureSpec» con ids y comandos, sin copiar el texto; una idea ya registrada como
+Feature deja de aparecer en esa sección. La auditoría solo conserva id y hash
+SHA-256, nunca texto, y los errores usan códigos fijos sin excepciones ni contenido.
+
+Usa el WS existente y `ClientMessageContext.privileged` (token de la oficina),
+con comprobación de privilegio antes de leer el Project. Sin token el diálogo
+explica que es de solo lectura. Sin binding o con `project.yaml` ausente/inválido,
+explica qué falta y no guarda. Si se pierde la confirmación, consultar la lista:
+los envíos nunca se encolan ni se repiten automáticamente al reconectar. Un fallo
+de auditoría posterior al guardado conserva el id y avisa de la confirmación
+pendiente, para evitar duplicados por reintento.
+
+Disponible en standalone. En VS Code se deshabilita explícitamente: ese control
+aún no tiene un contrato de selección de Project. No toma una carpeta arbitraria
+del editor como autoridad. SA-110 añadirá entrevista y SA-111 planificación y
+aprobación; ambas pueden consumir estos borradores sin confundirlos con Features.
+Las guardas de rutas comparten el límite de `taskPath`: no aíslan a un proceso
+hostil del mismo usuario que sustituya directorios entre validación y apertura.
+
 ## Uso y prueba real de Claude
 
 Desde el checkout **principal** de un Managed Project actualizado, en Windows,

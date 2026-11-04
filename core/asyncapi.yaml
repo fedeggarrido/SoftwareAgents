@@ -77,6 +77,8 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/IdeasSnapshot'
+        - $ref: '#/components/schemas/SubmitIdeaResult'
         - $ref: '#/components/schemas/FeaturesSnapshot'
         - $ref: '#/components/schemas/AuditLogSnapshot'
         # Provider capabilities
@@ -135,6 +137,8 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestIdeas'
+        - $ref: '#/components/schemas/SubmitIdea'
         - $ref: '#/components/schemas/RequestFeatures'
         - $ref: '#/components/schemas/RequestAuditLog'
         - $ref: '#/components/schemas/WebviewReady'
@@ -167,6 +171,112 @@ components:
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
+
+    RequestIdeas:
+      description: Read draft ids and submission readiness for the server-bound Project. Privilege is checked before probing the Project.
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: requestIdeas
+        requestId:
+          type: string
+
+    SubmitIdea:
+      description: Privileged draft storage only. No client-selected feature id, authority grant, spec, commit or execution. Text is untrusted, nonempty and at most 1 MiB in UTF-8.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, text]
+      properties:
+        type:
+          const: submitIdea
+        requestId:
+          type: string
+        projectId:
+          type: string
+        text:
+          type: string
+
+    IdeasSnapshot:
+      description: Correlated point-to-point readiness and draft ids only; never includes idea text. Pending drafts are distinct from FeatureSpecs.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, canSubmit, errorCode, ideas]
+      properties:
+        type:
+          const: ideasSnapshot
+        requestId:
+          type: string
+        projectId:
+          type: [string, 'null']
+        canSubmit:
+          type: boolean
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/IdeaErrorCode'
+            - type: 'null'
+        ideas:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdeaSummary'
+
+    SubmitIdeaResult:
+      description: Correlated result; saved with audit_failed means the draft exists but its audit confirmation failed. Never retry automatically. No text or exception details.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, status, errorCode, idea]
+      properties:
+        type:
+          const: submitIdeaResult
+        requestId:
+          type: string
+        projectId:
+          type: string
+        status:
+          $ref: '#/components/schemas/IdeaSubmitStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/IdeaErrorCode'
+            - type: 'null'
+        idea:
+          oneOf:
+            - $ref: '#/components/schemas/IdeaSummary'
+            - type: 'null'
+
+    IdeaSubmitStatus:
+      type: string
+      enum: [saved, rejected, failed]
+
+    IdeaErrorCode:
+      type: string
+      enum:
+        [
+          denied,
+          unsupported_adapter,
+          no_project,
+          missing_manifest,
+          invalid_manifest,
+          unknown_project,
+          invalid_request,
+          empty_text,
+          too_large,
+          unsafe_storage,
+          unavailable,
+          ids_exhausted,
+          audit_failed,
+        ]
+
+    IdeaSummary:
+      type: object
+      additionalProperties: false
+      required: [key, command]
+      properties:
+        key:
+          type: string
+          pattern: '^FEAT-\d{3}$'
+        command:
+          type: string
 
     RequestFeatures:
       description: Read-only WorkStore projection; same existing connection privilege and bound-Project guard as requestAuditLog. No new authority or mutation.

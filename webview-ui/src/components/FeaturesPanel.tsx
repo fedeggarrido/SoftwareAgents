@@ -18,7 +18,9 @@ import {
   viewState,
   visibleFeatures,
 } from '../office/featuresStore.js';
+import { requestIdeas, useIdeasStore } from '../office/ideasStore.js';
 import { transport } from '../transport/index.js';
+import { IdeasList } from './IdeasList.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -36,6 +38,7 @@ function requestFeatures(projectId: string) {
 export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const store = useFeaturesStore();
   const executor = useExecutorStore();
+  const ideas = useIdeasStore();
   const connectionState = useSyncExternalStore(subscribeTransport, transportState, transportState);
   const projectId = executor.needsSnapshot ? null : (executor.state?.projectId ?? null);
 
@@ -47,12 +50,17 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
     if (getFeaturesStore().projectId !== projectId) requestFeatures(projectId);
   }, [isOpen, projectId, store.projectId, connectionState]);
 
+  useEffect(() => {
+    if (isOpen && connectionState === 'connected') requestIdeas(transport);
+  }, [isOpen, projectId, connectionState]);
+
   if (!isOpen) return null;
   // A Project switch must hide the old rows even before the effect clears them.
   const selectedStore =
     store.projectId === projectId && connectionState === 'connected' ? store : emptyFeaturesStore();
   const state = viewState(selectedStore);
   const refresh = () => {
+    if (connectionState === 'connected') requestIdeas(transport);
     if (projectId && connectionState === 'connected') requestFeatures(projectId);
   };
   return (
@@ -73,6 +81,11 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
           </Button>
         )}
       </PanelHeading>
+      {connectionState === 'connected' &&
+        ideas.snapshot &&
+        (!projectId || ideas.snapshot.projectId === projectId) && (
+          <IdeasList ideas={ideas.snapshot.ideas} />
+        )}
       {!projectId ? (
         <p>Sin Project seleccionado</p>
       ) : (

@@ -33,6 +33,7 @@ import {
   parseSetExecutorLevels,
   toggleResult,
 } from './executorState.js';
+import { handleIdeaMessage } from './featureIdeas.js';
 import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
@@ -112,6 +113,11 @@ export function handleClientMessage(
   const adapter = store.getAdapter();
 
   switch (msg.type) {
+    case 'requestIdeas':
+    case 'submitIdea':
+      handleIdeaMessage(msg, send, ctx.privileged === true);
+      break;
+
     case 'webviewReady':
       handleWebviewReady(send, ctx);
       // Capability-gated: legacy clients never receive executorState.

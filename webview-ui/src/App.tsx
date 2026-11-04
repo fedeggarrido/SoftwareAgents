@@ -14,6 +14,7 @@ import { FeaturesPanel } from './components/FeaturesPanel.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
+import { NewIdeaDialog } from './components/NewIdeaDialog.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -54,6 +55,7 @@ function getOfficeState(): OfficeState {
 }
 
 function App() {
+  const [isNewIdeaOpen, setIsNewIdeaOpen] = useState(false);
   // Browser runtime (dev or static dist): dispatch mock messages after the
   // useExtensionMessages listener has been registered.
   useEffect(() => {
@@ -531,6 +533,7 @@ function App() {
         isAuditOpen={isAuditOpen}
         isFeaturesOpen={isFeaturesOpen}
         onToggleFeatures={() => setIsFeaturesOpen((v) => !v)}
+        onNewIdea={() => setIsNewIdeaOpen(true)}
         onToggleAudit={() => setIsAuditOpen((v) => !v)}
         onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
@@ -560,6 +563,14 @@ function App() {
         />
       </div>
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
+      {isNewIdeaOpen && (
+        <NewIdeaDialog
+          onClose={() => {
+            setIsNewIdeaOpen(false);
+            setIsFeaturesOpen(true);
+          }}
+        />
+      )}
       <MeetingPanel />
       <VersionIndicator
         currentVersion={extensionVersion}

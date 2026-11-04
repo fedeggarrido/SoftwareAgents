@@ -17,6 +17,12 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `featureIdeas.ts` (SA-109): borradores locales `.softwareagents/ideas/<Project>/FEAT-NNN.md`,
+  ids reservados con creación exclusiva y colisiones con Features/Brain/ideas.
+  `requestIdeas`/`submitIdea` usan el WS privilegiado existente; solo id/hash en
+  auditoría, sin lanzar ni aprobar. El request queda listo para el validador CLI.
+  [Contrato y límites](../feature-pipeline.md#ideas-desde-la-oficina-sa-109).
+
 - `commands/feature.ts`, `requirements.ts` (SA-041): petición → FeatureSpec
   validado con Given/When/Then y EARS, vía worker `brain_write`; aprobación humana
   vinculada al SHA y Human Decisions. [Feature pipeline](../feature-pipeline.md).
@@ -80,6 +86,12 @@ para lecturas puntuales.
 
 Consumen la proyección compartida de `webview-ui/src/office/boardStore.ts`.
 Las acciones se envían por Transport y el runtime valida su autoridad.
+
+- `NewIdeaDialog.tsx`, `IdeasList.tsx` y `office/ideasStore.ts` (SA-109): «Nueva
+  idea» en la barra, guardado confirmado y comando de continuación; IdeasList
+  separa los pendientes de las Features reales dentro de FeaturesPanel. Errores
+  de Project/privilegio visibles y ningún reenvío automático. VS Code explica la
+  deshabilitación hasta disponer de selección de Project para este control.
 
 - `CompanyHud.tsx`: resumen de actividad, cuotas observadas y control de autopilot.
 - `BacklogPanel.tsx`: tareas por fase, prioridad, propiedad y eventos recientes,

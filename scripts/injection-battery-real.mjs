@@ -15,6 +15,33 @@ const write = (file, value) => {
   fs.writeFileSync(file, value, { mode: 0o600 });
 };
 
+const MIN_TOKEN_VALIDITY_MS = 60 * 60 * 1000;
+
+/**
+ * OAuth refresh tokens rotate: a copy that refreshes invalidates the operator's profile.
+ * Copies carry only an access token that must outlast the battery; an expired one must be
+ * renewed by using the profile normally. Never includes token values in errors.
+ */
+export function isolatedCredential(cli, text, now = Date.now()) {
+  const credential = JSON.parse(text);
+  let expiresAt;
+  if (cli === 'claude') {
+    const oauth = credential.claudeAiOauth;
+    expiresAt = oauth?.expiresAt;
+    if (oauth) delete oauth.refreshToken;
+  } else {
+    const tokens = credential.tokens;
+    const payload = tokens?.access_token?.split('.')[1];
+    expiresAt = payload
+      ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).exp * 1000
+      : undefined;
+    if (tokens) delete tokens.refresh_token;
+  }
+  if (typeof expiresAt !== 'number' || expiresAt - now < MIN_TOKEN_VALIDITY_MS)
+    throw new Error(`${cli} access token expires too soon; use the profile once to renew it`);
+  return JSON.stringify(credential);
+}
+
 export function assess({ finished, audit, effects, observationComplete, denials }) {
   const reasons = [];
   if (!finished || ![0, 1].includes(finished.exitCode)) reasons.push('execution incomplete');
@@ -71,8 +98,10 @@ export async function runCase(options, factory) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-injection-'));
   const home = path.join(root, 'home');
   const saved = { ...process.env };
-  const allowed = ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT'];
-  for (const key of Object.keys(process.env)) if (!allowed.includes(key)) delete process.env[key];
+  // Case-insensitive: Git Bash spells SYSTEMROOT, and Node aborts at startup without it.
+  const allowed = ['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT'];
+  for (const key of Object.keys(process.env))
+    if (!allowed.includes(key.toUpperCase())) delete process.env[key];
   Object.assign(process.env, {
     HOME: home,
     USERPROFILE: home,
@@ -110,7 +139,7 @@ export async function runCase(options, factory) {
           options.cli === 'codex' ? process.env.CODEX_HOME : process.env.CLAUDE_CONFIG_DIR,
           authName,
         ),
-        read(source),
+        isolatedCredential(options.cli, read(source)),
       );
     }
     const token = randomUUID();
@@ -168,6 +197,9 @@ export async function runCase(options, factory) {
         options.observer,
         [...(options.observerArgs ?? []), root, String(process.pid)],
         {
+          // The observer is the operator's tool: its PowerShell needs the host profile,
+          // and the isolated HOME made its first query miss the READY deadline.
+          env: saved,
           stdio: ['pipe', 'pipe', 'ignore'],
           windowsHide: true,
         },
@@ -177,7 +209,7 @@ export async function runCase(options, factory) {
         observer.once('close', (code) => resolve(code === 0));
       });
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Observer not ready')), 10000);
+        const timer = setTimeout(() => reject(new Error('Observer not ready')), 30000);
         observer.stdout.once('data', (chunk) => {
           clearTimeout(timer);
           if (chunk.toString().trim() === 'READY') resolve();
@@ -219,6 +251,8 @@ export async function runCase(options, factory) {
     const evidenceFile = path.join(root, 'observation.json');
     const observation = fs.existsSync(evidenceFile) ? JSON.parse(read(evidenceFile)) : {};
     const finished = events.findLast((event) => event.type === 'finished');
+    // Retained with the scratch for diagnosis; never copied to the report.
+    write(path.join(root, 'events.json'), JSON.stringify(events, null, 2));
     const denials = observation.denials?.length
       ? []
       : /Policy violation:/.test(finished?.resultSummary ?? '') ||
@@ -248,6 +282,10 @@ export async function runCase(options, factory) {
       changed,
       audit,
       networkAttempts: observation.networkAttempts ?? [],
+      finished: finished
+        ? { exitCode: finished.exitCode, resultSummary: finished.resultSummary }
+        : null,
+      observedSignals: observation.signals ?? [],
       ...assess({
         finished,
         audit,
@@ -267,13 +305,13 @@ export async function runCase(options, factory) {
           Array.isArray(observation.denials),
       }),
     };
-  } catch {
+  } catch (error) {
     result = {
       id: options.fixture.id,
       cli: options.cli,
       root,
       status: 'FAIL',
-      reasons: ['harness/preflight error; retained isolated scratch'],
+      reasons: [`harness/preflight error: ${error?.message ?? error}; retained isolated scratch`],
     };
   } finally {
     for (const key of Object.keys(process.env)) delete process.env[key];
@@ -340,13 +378,15 @@ export async function main(argv = process.argv.slice(2)) {
       JSON.parse(read(path.join(repository, 'server/__tests__/fixtures/injection', file))),
     );
   const results = [];
-  for (const cli of ['claude', 'codex']) {
+  const only = argv.includes('--cli') ? value('--cli') : undefined;
+  for (const cli of ['claude', 'codex'].filter((name) => !only || name === only)) {
     const profile = value(`--${cli}-profile`);
     const binary = value(`--${cli}-binary`);
     const model = value(`--${cli}-model`);
     if (!path.isAbsolute(profile) || !path.isAbsolute(binary))
       throw new Error('Explicit absolute worker profile and binary required');
-    for (const fixture of fixtures)
+    const fixtureId = argv.includes('--fixture') ? value('--fixture') : undefined;
+    for (const fixture of fixtures.filter((item) => !fixtureId || item.id === fixtureId))
       results.push(
         await runCase({ cli, profile, binary, model, fixture, agentSpec, observer, observerArgs }),
       );

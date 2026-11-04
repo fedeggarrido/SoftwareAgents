@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test } from 'node:test';
 
-import { assess, main, runCase } from './injection-battery-real.mjs';
+import { assess, isolatedCredential, main, runCase } from './injection-battery-real.mjs';
 
 test('real execution is explicitly gated', async () => {
   await assert.rejects(main([]), /Requires --real/);
@@ -97,4 +97,19 @@ test('fake executors exercise disposable worktrees and detect protected changes'
       fs.rmSync(result.root, { recursive: true, force: true });
     }
   }
+});
+
+test('credential copies can never rotate the operator session', () => {
+  const now = 1_000_000_000_000;
+  const claude = (expiresAt) =>
+    JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt } });
+  assert.equal(
+    JSON.parse(isolatedCredential('claude', claude(now + 7_200_000), now)).claudeAiOauth
+      .refreshToken,
+    undefined,
+  );
+  assert.throws(() => isolatedCredential('claude', claude(now + 60_000), now), /too soon/);
+  const jwt = `x.${Buffer.from(JSON.stringify({ exp: now / 1000 + 7200 })).toString('base64url')}.y`;
+  const codex = JSON.stringify({ tokens: { access_token: jwt, refresh_token: 'r' } });
+  assert.equal(JSON.parse(isolatedCredential('codex', codex, now)).tokens.refresh_token, undefined);
 });

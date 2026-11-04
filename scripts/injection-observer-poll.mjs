@@ -25,7 +25,10 @@ export function classifyCommand(name = '', command = '') {
     network:
       /\b(?:curl|wget|Invoke-WebRequest|irm|iwr|gh|ssh|nc)(?:\.exe)?\b/i.test(text) ||
       /\bgit(?:\.exe)?\b[^\r\n]*\b(?:push|fetch)\b/i.test(text),
-    connector: /mcp/i.test(text),
+    // The executor's own flags that disable MCP are not connector use.
+    connector: /mcp/i.test(
+      text.replace(/--strict-mcp-config|--mcp-config\s+"?[^\s"]*mcp\.json"?/gi, ''),
+    ),
     gitPush: /\bgit(?:\.exe)?\b[^\r\n]*\bpush\b/i.test(text),
   };
 }

@@ -1567,6 +1567,37 @@ class SqliteWorkStore implements WorkStore {
       this.assertNotRecovering(taskId);
       const task = this.getTask(taskId);
       if (!task || task.version !== version) throw new Error('Task changed before manual retry');
+      if (task.status === 'BLOCKED' && task.blocked_reason?.startsWith(PR_CI_FAILURE_PREFIX)) {
+        // CI blocks only idle work, so its previous state is safe to restore. Still-red CI
+        // blocks again on the next poll; only this human operation ever unblocks.
+        this.assertNoDecisionGate(taskId);
+        if (!reason.trim()) throw new Error('Manual retry requires a reason');
+        const blockedBy = this.listDomainEvents(taskId)
+          .filter((event) => event.type === 'TASK_TRANSITIONED' && event.to_status === 'BLOCKED')
+          .at(-1);
+        if (!blockedBy) throw new Error('CI block has no recorded transition');
+        const now = new Date().toISOString();
+        beforeCommit();
+        this.db
+          .prepare(
+            'UPDATE tasks SET status = ?, version = version + 1, blocked_reason = NULL, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+          )
+          .run(blockedBy.from_status, now, this.projectId, taskId, version);
+        this.db
+          .prepare(
+            "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', 'BLOCKED', ?, ?, ?, ?, 'human', ?)",
+          )
+          .run(
+            this.projectId,
+            taskId,
+            blockedBy.from_status,
+            version + 1,
+            task.attempt,
+            'manual_retry: ' + reason,
+            now,
+          );
+        return this.getTask(taskId)!;
+      }
       if (!task.feature_key || !this.getFeature(task.feature_key))
         throw new Error('Manual retry requires a feature task');
       if (task.lease_owner || task.lease_expires_at)
@@ -1659,6 +1690,9 @@ class SqliteWorkStore implements WorkStore {
     await this.write(() => {
       let task = assertCurrent();
       const previous = task.pr_status;
+      // Polls can commit out of order after a busy retry; newer evidence always wins.
+      const latest = task.pr_observation?.lastSuccessAt ?? previous?.observedAt;
+      if (latest !== undefined && latest !== null && status.observedAt < latest) return;
       const merged =
         status.state === 'MERGED' &&
         !(previous?.ref === ref && previous.state === 'MERGED' && previous.url === status.url);

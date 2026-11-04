@@ -682,6 +682,48 @@ describe('PR observations through the real WorkStore and relay', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores an observation older than the latest one', async () => {
+    work.createTask({ key: 'order', type: 'implementation', status: 'QUEUED' });
+    await work.bindPullRequest('order', work.getTask('order')!.version, ref);
+    const version = work.getTask('order')!.version;
+    const observe = (name: string, at: number) =>
+      work.observePullRequest(
+        'order',
+        version,
+        ref,
+        parsePullRequest(fixture(name), ref, at),
+        undefined,
+      );
+    await observe('open-green', 2000);
+    await observe('failed', 1000);
+    expect(work.getTask('order')).toMatchObject({
+      status: 'QUEUED',
+      pr_status: { ci: 'success', observedAt: 2000 },
+    });
+  });
+
+  it('lets only a human retry restore a CI-blocked task to its previous state', async () => {
+    work.createTask({ key: 'ci-block', type: 'implementation', status: 'QUEUED' });
+    await work.bindPullRequest('ci-block', work.getTask('ci-block')!.version, ref);
+    const observe = (name: string, at: number) =>
+      work.observePullRequest(
+        'ci-block',
+        work.getTask('ci-block')!.version,
+        ref,
+        parsePullRequest(fixture(name), ref, at),
+        undefined,
+      );
+    await observe('failed', 1000);
+    expect(work.getTask('ci-block')!.status).toBe('BLOCKED');
+    await observe('open-green', 2000);
+    expect(work.getTask('ci-block')!.status).toBe('BLOCKED');
+    const task = work.getTask('ci-block')!;
+    const retried = await work.retryTask('ci-block', task.version, 'CI fixed', () => {});
+    expect(retried).toMatchObject({ status: 'QUEUED', blocked_reason: null });
+    await observe('failed', 3000);
+    expect(work.getTask('ci-block')!.status).toBe('BLOCKED');
+  });
+
   it('defers the merge cleanup while a worker holds the task, then asks once', async () => {
     work.createTask({ key: 'active-merge', type: 'implementation', status: 'QUEUED' });
     await work.bindPullRequest('active-merge', work.getTask('active-merge')!.version, ref);

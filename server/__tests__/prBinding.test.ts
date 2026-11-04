@@ -5,6 +5,7 @@ import * as path from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli } from '../src/cli.js';
 import {
   parsePullRequest,
@@ -107,6 +108,39 @@ it('requires operator ingress for binding and leaves the task untouched', async 
   expect(work.getTask('task')!.pr_ref).toBeNull();
 });
 
+it('retries a monitor CI block through CLI human ingress with intent and committed audit', async () => {
+  await dispatchCli(['task', 'bind-pr', 'task', '42']);
+  const poller = new PullRequestMonitor({
+    repositoryPath: root,
+    projectId: 'p',
+    read: async () => fs.readFileSync(path.join(__dirname, 'fixtures/gh/failed.json'), 'utf8'),
+  });
+  await poller.tick();
+  expect(work.getTask('task')).toMatchObject({ status: 'BLOCKED', ci_restore_status: 'REVIEW' });
+  const blocked = work.getTask('task')!;
+  vi.stubEnv('SA_MANAGED_EXECUTION', 'yes');
+  await expect(dispatchCli(['task', 'retry', 'task', '--reason', 'CI fixed'])).rejects.toThrow(
+    'human operator',
+  );
+  expect(work.getTask('task')).toEqual(blocked);
+  vi.stubEnv('SA_MANAGED_EXECUTION', undefined);
+  await dispatchCli(['task', 'retry', 'task', '--reason', 'CI fixed']);
+  expect(work.getTask('task')).toMatchObject({
+    status: 'REVIEW',
+    version: blocked.version + 1,
+    ci_restore_status: null,
+    blocked_reason: null,
+  });
+  expect(
+    new AuditLog()
+      .read('p')
+      .flatMap((row) => (row.corrupt ? [] : [row.entry]))
+      .filter((entry) => entry.action === 'manual_retry')
+      .map((entry) => entry.outcome.status),
+  ).toEqual(['intent', 'committed']);
+  await poller.dispose();
+});
+
 it('fences stale bindings and refuses another repository at the store entry point', async () => {
   const before = work.getTask('task')!;
   await work.bindPullRequest('task', before.version, ref);
@@ -145,10 +179,15 @@ it('discards an observation of the old PR after rebinding at the same lifecycle 
   const version = work.getTask('task')!.version;
   await work.bindPullRequest('task', version, ref);
   const observation = parsePullRequest(fixture(), ref);
+  const poll = (await work.beginPullRequestPoll(
+    'task',
+    ref,
+    work.getTask('task')!.pr_binding_generation!,
+  ))!;
   const rebound = `${repository}/pull/43`;
   await work.bindPullRequest('task', version, rebound);
   await expect(
-    work.observePullRequest('task', version, ref, observation, undefined),
+    work.observePullRequest('task', version, ref, observation, undefined, poll),
   ).rejects.toThrow('PR reference changed');
   expect(work.getTask('task')).toMatchObject({
     version,

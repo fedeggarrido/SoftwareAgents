@@ -262,12 +262,18 @@ export class PullRequestMonitor {
       for (const task of store.listTasks()) {
         if (this.stopped) break;
         if (!task.pr_ref) continue;
+        const poll = await store.beginPullRequestPoll(
+          task.key,
+          task.pr_ref,
+          task.pr_binding_generation!,
+        );
+        if (!poll) continue;
         let pr: PullRequestStatus;
         try {
           if (canonicalPullRequest(task.pr_ref) !== task.pr_ref)
             throw new Error('Binding requires canonical identity');
         } catch {
-          await store.recordPullRequestError(task.key, task.pr_ref, 'binding_required');
+          await store.recordPullRequestError(task.key, task.pr_ref, 'binding_required', poll);
           continue;
         }
         try {
@@ -279,7 +285,7 @@ export class PullRequestMonitor {
           pr = parsePullRequest(json, task.pr_ref);
         } catch {
           if (this.stopped) break;
-          await store.recordPullRequestError(task.key, task.pr_ref, 'unavailable');
+          await store.recordPullRequestError(task.key, task.pr_ref, 'unavailable', poll);
           if (!this.unavailableLogged) {
             log(
               '[PR monitor] gh unavailable, unauthenticated or unreadable; observation unavailable.',
@@ -296,6 +302,7 @@ export class PullRequestMonitor {
             task.pr_ref,
             pr,
             pr.state === 'MERGED' ? cleanupDecision(task, pr) : undefined,
+            poll,
           );
         } catch {
           // Includes concurrent Task changes. Retry against a fresh generation next poll.

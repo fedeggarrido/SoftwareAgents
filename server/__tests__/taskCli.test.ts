@@ -12,6 +12,7 @@ import { compileAgent } from '../src/agentCompiler.js';
 import { AuditLog } from '../src/auditLog.js';
 import { runTaskCommand } from '../src/commands/task.js';
 import { TASK_CLI_INPUT_BYTES } from '../src/constants.js';
+import { PullRequestMonitor } from '../src/prMonitor.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../src/workstore/WorkStore.js';
 import { operatorTokenServer } from './helpers/operatorToken.js';
@@ -217,6 +218,62 @@ it('imports the spec title and backfills legacy NULL titles at open from the reg
   } finally {
     db.close();
   }
+});
+
+it('keeps a human hold and its reason through a decision, failing CI and task retry', async () => {
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
+  const store = await open();
+  store.createTask({ key: 'human-hold', type: 'code', feature_key: 'FEAT-001', status: 'READY' });
+  await store.bindPullRequest(
+    'human-hold',
+    store.getTask('human-hold')!.version,
+    'https://github.com/example/project/pull/42',
+  );
+  const reason = 'Human hold pending scope agreement';
+  await store.transition(
+    'human-hold',
+    store.getTask('human-hold')!.version,
+    'BLOCKED',
+    reason,
+    'human',
+  );
+  await store.openDecision({
+    id: 'human-gate',
+    context: 'Review scope',
+    options: [
+      { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+    ],
+    recommendation: 'Review',
+    disagreement: [],
+    impact: 'Review needed',
+    urgency: 'high',
+    requestedBy: 'system',
+    blocks: ['human-hold'],
+  });
+  const poller = new PullRequestMonitor({
+    repositoryPath: repo,
+    projectId: 'test',
+    read: async () => fs.readFileSync(path.join(__dirname, 'fixtures/gh/failed.json'), 'utf8'),
+  });
+  await poller.tick();
+  expect(store.getTask('human-hold')).toMatchObject({
+    status: 'WAITING_HUMAN',
+    blocked_reason: reason,
+    ci_restore_status: null,
+    pr_status: { ci: 'failure' },
+  });
+  await store.resolveDecision('human-gate', 'review', 'operator', () => {});
+  const held = store.getTask('human-hold')!;
+  expect(held).toMatchObject({
+    status: 'BLOCKED',
+    blocked_reason: reason,
+    ci_restore_status: null,
+  });
+  const result = await cli('retry', 'human-hold', '--reason', 'CI fixed');
+  expect(result.code).toBe(1);
+  expect(result.err).toContain('Task status does not allow manual retry: BLOCKED');
+  expect(store.getTask('human-hold')).toEqual(held);
+  await poller.dispose();
 });
 
 it('retries QA with a backup, human audit and preserved reports', async () => {

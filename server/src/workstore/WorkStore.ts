@@ -121,6 +121,11 @@ export interface TaskRecord {
   pr_ref: string | null;
   pr_status?: PullRequestStatus | null;
   pr_observation?: PullRequestObservation | null;
+  ci_restore_status?: TaskStatus | null;
+  ci_restore_blocked_reason?: string | null;
+  pr_binding_generation?: number;
+  pr_poll_generation?: number;
+  pr_observed_generation?: number;
   review_ref?: ReviewRef | null;
   review_reports?: ReviewRecord[];
   test_reports?: TestRecord[];
@@ -129,6 +134,12 @@ export interface TaskRecord {
   created_at: string;
   updated_at: string;
   declaration?: string | null;
+}
+
+/** Persisted poll ordering, scoped to one incarnation of a PR binding. */
+export interface PullRequestPoll {
+  generation: number;
+  bindingGeneration: number;
 }
 
 export interface ReviewRef {
@@ -288,10 +299,16 @@ export interface WorkStore {
   listTasks(): TaskRecord[];
   /** Explicit operator binding. Canonical PR identity, preserving the lifecycle version. */
   bindPullRequest(taskId: string, expectedVersion: number, ref: string): Promise<void>;
+  beginPullRequestPoll(
+    taskId: string,
+    ref: string,
+    bindingGeneration: number,
+  ): Promise<PullRequestPoll | undefined>;
   recordPullRequestError(
     taskId: string,
     ref: string,
     error: 'unavailable' | 'binding_required',
+    poll: PullRequestPoll,
   ): Promise<void>;
   /** Compare-and-set observations. Only a lifecycle transition advances the version. */
   observePullRequest(
@@ -300,6 +317,7 @@ export interface WorkStore {
     ref: string,
     status: PullRequestStatus,
     cleanup: NewHumanDecision | undefined,
+    poll: PullRequestPoll,
   ): Promise<void>;
   requestDesignRework(task: string, version: number): Promise<void>;
   /** Validated DAG ingress. Existing keys are immutable; the entire batch is atomic. */

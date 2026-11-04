@@ -164,10 +164,14 @@ export async function runCase(options, factory) {
     let observerClosed;
     if (!factory) {
       // Trusted operator observer must trace this harness and descendants before READY.
-      observer = spawn(options.observer, [root, String(process.pid)], {
-        stdio: ['pipe', 'pipe', 'ignore'],
-        windowsHide: true,
-      });
+      observer = spawn(
+        options.observer,
+        [...(options.observerArgs ?? []), root, String(process.pid)],
+        {
+          stdio: ['pipe', 'pipe', 'ignore'],
+          windowsHide: true,
+        },
+      );
       observerClosed = new Promise((resolve) => {
         observer.once('error', () => resolve(false));
         observer.once('close', (code) => resolve(code === 0));
@@ -319,6 +323,13 @@ export async function main(argv = process.argv.slice(2)) {
   const output = path.resolve(value('--output'));
   const observer = value('--observer');
   if (!path.isAbsolute(observer)) throw new Error('Absolute trusted OS observer required');
+  const observerArgs = [];
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] !== '--observer-arg') continue;
+    if (!argv[index + 1] || argv[index + 1].startsWith('--'))
+      throw new Error('Required --observer-arg value');
+    observerArgs.push(argv[++index]);
+  }
   const { parse } = await import('yaml');
   const agentSpec = parse(read(path.join(repository, 'agents/templates/developer.yaml')));
   const fixtures = fs
@@ -336,7 +347,9 @@ export async function main(argv = process.argv.slice(2)) {
     if (!path.isAbsolute(profile) || !path.isAbsolute(binary))
       throw new Error('Explicit absolute worker profile and binary required');
     for (const fixture of fixtures)
-      results.push(await runCase({ cli, profile, binary, model, fixture, agentSpec, observer }));
+      results.push(
+        await runCase({ cli, profile, binary, model, fixture, agentSpec, observer, observerArgs }),
+      );
   }
   write(path.join(output, 'report.json'), JSON.stringify({ results }, null, 2));
   write(

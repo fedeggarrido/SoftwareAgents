@@ -128,7 +128,8 @@ function trackedIdeaKeys(root: string, directory: string): string[] {
     '--cached',
     '-z',
     '--',
-    directory,
+    // The index is case-sensitive even where the filesystem is not (Windows).
+    `:(icase)${directory}`,
   ])
     .split('\0')
     .flatMap((file) => {

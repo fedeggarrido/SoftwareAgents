@@ -180,6 +180,21 @@ describe('SA-109 draft ingress', () => {
     expect(fs.readFileSync(path.join(root, '.git/index'))).toEqual(index);
   });
 
+  it('skips a tracked draft whose directory differs only by case', () => {
+    const tracked = `${FEATURE_IDEAS_DIRECTORY.replace('ideas', 'Ideas')}/ideas-project/FEAT-001.md`;
+    childProcess.execFileSync(
+      'git',
+      [
+        'update-index',
+        '--add',
+        '--cacheinfo',
+        `100644,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,${tracked}`,
+      ],
+      { cwd: root, windowsHide: true },
+    );
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-002');
+  });
+
   it('reserves an existing runtime branch even without a WorkStore row', () => {
     const git = vi.mocked(childProcess.execFileSync);
     git

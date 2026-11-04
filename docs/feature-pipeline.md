@@ -70,14 +70,14 @@ El panel muestra carga y errores específicos de ideas con reintento. Las lectur
 y envíos tienen un plazo de 15 segundos. Reconectar solicita otra lectura y
 conserva un envío sin confirmar como incierto.
 
-El WebSocket limita cada mensaje a 8 MiB (`WS_MAX_PAYLOAD_BYTES`) antes de
+El WebSocket limita cada mensaje a 32 MiB (cabe un layout importado de 256×256) (`WS_MAX_PAYLOAD_BYTES`) antes de
 parsear JSON, para clientes con y sin privilegio. Una idea de 1 MiB con caracteres
 de control ocupa hasta 6 MiB al escaparse, más el sobre JSON. Se revisaron también
 `saveLayout` (editor de hasta 64×64, colores, alfombras, muebles, mascotas y áreas),
 `saveAgentSeats` y `saveAreaMappings`. Los fixtures completos de 4096 entradas
 caben en ese límite. Los demás mensajes llevan controles escalares o cadenas.
 El contrato admite strings y colecciones sin máximo, por lo que mensajes
-artificiales o importaciones mayores de 8 MiB quedan sujetos a este nuevo límite.
+artificiales o importaciones mayores de 32 MiB quedan sujetos a este nuevo límite.
 
 SA-110 añadirá entrevista y SA-111 planificación y
 aprobación; ambas pueden consumir estos borradores sin confundirlos con Features.

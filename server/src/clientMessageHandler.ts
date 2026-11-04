@@ -72,6 +72,8 @@ export interface AssetCache {
 }
 
 export interface ClientMessageContext {
+  /** Embedded VS Code has no Project selection contract for draft ingress. */
+  ideasSupported?: boolean;
   store: AgentStateStore;
   runtime?: AgentRuntime;
   cache: AssetCache | null;
@@ -115,7 +117,7 @@ export function handleClientMessage(
   switch (msg.type) {
     case 'requestIdeas':
     case 'submitIdea':
-      handleIdeaMessage(msg, send, ctx.privileged === true);
+      handleIdeaMessage(msg, send, ctx.privileged === true, ctx.ideasSupported !== false);
       break;
 
     case 'webviewReady':

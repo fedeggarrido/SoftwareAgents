@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect } from 'react';
 
 import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
@@ -18,7 +18,8 @@ import {
   viewState,
   visibleFeatures,
 } from '../office/featuresStore.js';
-import { requestIdeas, useIdeasStore } from '../office/ideasStore.js';
+import { ideaErrorText, requestIdeas } from '../office/ideasStore.js';
+import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
 import { IdeasList } from './IdeasList.js';
 import { Button } from './ui/Button.js';
@@ -26,9 +27,6 @@ import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
 
 let requestSequence = 0;
-const subscribeTransport = (listener: () => void) => transport.onStateChange(listener);
-const transportState = () => transport.state;
-
 function requestFeatures(projectId: string) {
   const requestId = `features-${++requestSequence}`;
   setFeaturesStore(beginFeaturesRequest(getFeaturesStore(), projectId, requestId));
@@ -38,9 +36,8 @@ function requestFeatures(projectId: string) {
 export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const store = useFeaturesStore();
   const executor = useExecutorStore();
-  const ideas = useIdeasStore();
-  const connectionState = useSyncExternalStore(subscribeTransport, transportState, transportState);
   const projectId = executor.needsSnapshot ? null : (executor.state?.projectId ?? null);
+  const { store: ideas, connection: connectionState } = useIdeasConnection(isOpen, projectId);
 
   useEffect(() => {
     if (!isOpen || !projectId || connectionState !== 'connected') {
@@ -49,10 +46,6 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
     }
     if (getFeaturesStore().projectId !== projectId) requestFeatures(projectId);
   }, [isOpen, projectId, store.projectId, connectionState]);
-
-  useEffect(() => {
-    if (isOpen && connectionState === 'connected') requestIdeas(transport);
-  }, [isOpen, projectId, connectionState]);
 
   if (!isOpen) return null;
   // A Project switch must hide the old rows even before the effect clears them.
@@ -81,11 +74,22 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
           </Button>
         )}
       </PanelHeading>
-      {connectionState === 'connected' &&
-        ideas.snapshot &&
-        (!projectId || ideas.snapshot.projectId === projectId) && (
+      <div aria-label="Ideas pendientes">
+        {connectionState !== 'connected' ? (
+          <p role="status">Sin conexión para leer ideas pendientes.</p>
+        ) : !ideas.snapshot ? (
+          <p role="status">Cargando ideas pendientes…</p>
+        ) : ideas.snapshot.errorCode ? (
+          <PanelError
+            cause={`No se pudieron leer las ideas. ${ideaErrorText(ideas.snapshot.errorCode)}`}
+            onRetry={() => requestIdeas(transport)}
+          />
+        ) : !projectId || ideas.snapshot.projectId === projectId ? (
           <IdeasList ideas={ideas.snapshot.ideas} />
+        ) : (
+          <p role="status">Cargando ideas pendientes…</p>
         )}
+      </div>
       {!projectId ? (
         <p>Sin Project seleccionado</p>
       ) : (

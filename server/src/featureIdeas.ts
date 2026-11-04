@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -19,6 +19,7 @@ import {
   FEATURE_IDEAS_DIRECTORY,
   TASK_CLI_INPUT_BYTES,
 } from './constants.js';
+import { evalGit } from './evalTasks.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { gitCommonDir, openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
 
@@ -66,8 +67,14 @@ function featureKeys(root: string, projectId: string): Set<string> {
   try {
     return new Set(
       db
-        .prepare('SELECT key FROM features WHERE project_id = ?')
-        .all(projectId)
+        .prepare(
+          `SELECT key FROM features WHERE project_id = ?
+          UNION SELECT feature_key AS key FROM feature_runs WHERE project_id = ?
+          UNION SELECT substr(key, 1, 8) AS key FROM tasks WHERE project_id = ?
+            AND (key GLOB 'FEAT-[0-9][0-9][0-9]' OR key GLOB 'FEAT-[0-9][0-9][0-9]-*')
+          UNION SELECT feature_key AS key FROM tasks WHERE project_id = ? AND feature_key IS NOT NULL`,
+        )
+        .all(projectId, projectId, projectId, projectId)
         .map((row) => {
           if (typeof row.key !== 'string' || !/^FEAT-\d{3}$/.test(row.key))
             return fail('unavailable');
@@ -102,37 +109,135 @@ function ideaKeys(root: string, projectId: string): string[] {
 
 /** Also reserve FeatureSpec files that have not yet been registered in WorkStore. */
 function artifactKeys(root: string, brain: string): string[] {
-  const directory = taskPath(root, `${brain}/features`);
-  if (!fs.existsSync(directory)) return [];
-  return fs.readdirSync(directory).flatMap((name) => {
-    const match = /^(FEAT-\d{3})\.ya?ml$/.exec(name);
-    return match ? [match[1]] : [];
+  return [`${brain}/features`, `${brain}/features/requests`].flatMap((relative) => {
+    const directory = taskPath(root, relative);
+    if (!fs.existsSync(directory)) return [];
+    return fs.readdirSync(directory).flatMap((name) => {
+      const match = /^(FEAT-\d{3})\.(?:ya?ml|md)$/.exec(name);
+      return match ? [match[1]] : [];
+    });
   });
 }
 
-/** Empty, durable reservations coordinate offices in different linked checkouts too.
- * A crash can strand a reservation; never steal it while a writer may still be alive.
- */
-function reserveId(common: string, directory: string, key: string): boolean {
+/** Read this checkout's index, including paths deleted from disk and sparse entries. */
+function trackedIdeaKeys(root: string, directory: string): string[] {
+  return evalGit(root, [
+    '-c',
+    'core.fsmonitor=false',
+    'ls-files',
+    '--cached',
+    '-z',
+    '--',
+    directory,
+  ])
+    .split('\0')
+    .flatMap((file) => {
+      const match = /(?:^|\/)(FEAT-\d{3})\.md(?:\/|$)/i.exec(file);
+      return match ? [match[1].toUpperCase()] : [];
+    });
+}
+
+/** Existing runtime branches remain occupied even when their WorkStore row is absent. */
+function branchKeys(root: string): string[] {
+  return evalGit(root, ['for-each-ref', '--format=%(refname)', 'refs/heads/sa/FEAT-*'])
+    .split('\n')
+    .flatMap((ref) => {
+      const match = /^refs\/heads\/sa\/(FEAT-\d{3})(?:$|-)/.exec(ref);
+      return match ? [match[1]] : [];
+    });
+}
+
+/** Local-only exclusion. Failure is reported without exposing filesystem diagnostics. */
+function excludeIdeas(common: string): void {
   try {
-    const file = taskPath(common, `${directory}/${key}`);
+    taskDirectory(common, 'info');
+    const file = taskPath(common, 'info/exclude');
+    let previous = '';
+    if (fs.existsSync(file)) {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.nlink !== 1) return fail('unsafe_storage');
+      previous = fs.readFileSync(file, 'utf8');
+    }
+    const rule = `/${FEATURE_IDEAS_DIRECTORY}/`;
+    if (previous.split(/\r?\n/).includes(rule)) return;
+    fs.appendFileSync(file, `${previous && !previous.endsWith('\n') ? '\n' : ''}${rule}\n`, {
+      mode: 0o600,
+    });
+  } catch {
+    console.warn('[featureIdeas] Local Git exclusion unavailable. Drafts can still be saved.');
+  }
+}
+
+interface OwnedFile {
+  file: string;
+  stat: fs.Stats;
+}
+
+/** Never remove a replacement entry. Failed cleanup leaves owner metadata for inspection. */
+function removeOwned(root: string, relative: string, owned: OwnedFile): boolean {
+  try {
+    const current = fs.lstatSync(taskPath(root, relative));
+    if (!current.isFile() || current.ino !== owned.stat.ino || current.dev !== owned.stat.dev)
+      return false;
+    fs.unlinkSync(owned.file);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
+/** Durable, inspectable reservations coordinate linked checkouts. Never steal a crash's id. */
+function reserveId(common: string, relative: string, metadata: object): OwnedFile | null {
+  try {
+    const file = taskPath(common, relative);
     let fd: number;
     try {
       fd = fs.openSync(file, 'wx', 0o600);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const stat = fs.lstatSync(taskPath(common, `${directory}/${key}`));
+      const stat = fs.lstatSync(taskPath(common, relative));
       if (!stat.isFile() || stat.nlink !== 1) return fail('unsafe_storage');
-      return false;
+      return null;
     }
+    const owned = { file, stat: fs.fstatSync(fd) };
     try {
+      fs.writeFileSync(fd, JSON.stringify(metadata), 'utf8');
+      fs.fsyncSync(fd);
+    } catch (error) {
+      removeOwned(common, relative, owned);
+      throw error;
+    } finally {
+      fs.closeSync(fd);
+    }
+    return owned;
+  } catch {
+    return fail('unsafe_storage');
+  }
+}
+
+function publishIdea(root: string, relative: string, staging: string, text: string): void {
+  const file = taskPath(root, staging);
+  const fd = fs.openSync(file, 'wx', 0o600);
+  const owned = { file, stat: fs.fstatSync(fd) };
+  try {
+    try {
+      if (!owned.stat.isFile() || owned.stat.nlink !== 1) return fail('unsafe_storage');
+      fs.writeFileSync(fd, text, 'utf8');
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }
-    return true;
-  } catch {
-    return fail('unsafe_storage');
+    if (readTaskInput(root, staging) !== text) return fail('unsafe_storage');
+    // Resolve again immediately before publication, including the existing staging file.
+    const real = fs.realpathSync.native(file);
+    if (taskPath(root, staging) !== real) return fail('unsafe_storage');
+    const current = fs.lstatSync(real);
+    if (current.ino !== owned.stat.ino || current.dev !== owned.stat.dev || current.nlink !== 1)
+      return fail('unsafe_storage');
+    // link is atomic and fails with EEXIST. rename would overwrite on POSIX.
+    fs.linkSync(real, taskPath(root, relative));
+  } finally {
+    removeOwned(root, staging, owned);
   }
 }
 
@@ -191,7 +296,10 @@ export function submitIdea(
     for (const key of artifactKeys(config.repoRoot, config.project.brain.path)) used.add(key);
     for (const key of ideaKeys(config.repoRoot, config.project.id)) used.add(key);
     const directory = ideaDirectory(config.project.id);
+    for (const key of trackedIdeaKeys(config.repoRoot, directory)) used.add(key);
+    for (const key of branchKeys(config.repoRoot)) used.add(key);
     const common = gitCommonDir(config.repoRoot);
+    excludeIdeas(common);
     const reservations = `${FEATURE_IDEA_RESERVATIONS_DIRECTORY}/${config.project.id}`;
     try {
       taskDirectory(config.repoRoot, directory);
@@ -202,42 +310,29 @@ export function submitIdea(
     for (let id = FEATURE_ID_MIN; id <= FEATURE_ID_MAX; id++) {
       const key = `FEAT-${String(id).padStart(FEATURE_ID_DIGITS, '0')}`;
       if (used.has(key)) continue;
-      if (!reserveId(common, reservations, key)) continue;
       const relative = `${directory}/${key}.md`;
-      const file = taskPath(config.repoRoot, relative);
-      let fd: number;
+      const owner = randomUUID();
+      const staging = `${directory}/.${key}-${owner}.stage`;
+      const reservationPath = `${reservations}/${key}`;
+      const reservation = reserveId(common, reservationPath, {
+        owner,
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+        checkout: config.repoRoot,
+        staging,
+        destination: relative,
+      });
+      if (!reservation) continue;
       try {
-        // Separate exclusive creation in the checkout never overwrites an existing
-        // entry (including a tracked file, symlink or junction).
-        fd = fs.openSync(file, 'wx', 0o600);
+        publishIdea(config.repoRoot, relative, staging, request.text);
       } catch (error) {
+        removeOwned(common, reservationPath, reservation);
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           ideaKeys(config.repoRoot, config.project.id); // Refuse links introduced by another writer.
           continue;
         }
         throw error;
       }
-      try {
-        if (!fs.fstatSync(fd).isFile() || fs.fstatSync(fd).nlink !== 1)
-          return fail('unsafe_storage');
-        fs.writeFileSync(fd, request.text, 'utf8');
-        fs.fsyncSync(fd);
-      } catch (error) {
-        // Remove only our own failed exclusive creation, never a replacement entry.
-        const owned = fs.fstatSync(fd);
-        try {
-          const current = fs.lstatSync(taskPath(config.repoRoot, relative));
-          if (current.isFile() && current.ino === owned.ino && current.dev === owned.dev)
-            fs.unlinkSync(file);
-        } catch {
-          // Filesystem failure: retain the reservation rather than touch another file.
-        }
-        throw error;
-      } finally {
-        fs.closeSync(fd);
-      }
-      // Exercise exactly the CLI's reader, with the unchanged text and byte limit.
-      if (readTaskInput(config.repoRoot, relative) !== request.text) return fail('unsafe_storage');
       const idea = summary(key, config.project.id);
       const ideaHash = createHash('sha256').update(request.text).digest('hex');
       try {

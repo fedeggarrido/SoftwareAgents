@@ -23,7 +23,12 @@ vi.mock('node:child_process', async (original) => {
 });
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof import('node:fs')>();
-  return { ...actual, fsyncSync: vi.fn(actual.fsyncSync) };
+  return {
+    ...actual,
+    fsyncSync: vi.fn(actual.fsyncSync),
+    writeFileSync: vi.fn(actual.writeFileSync),
+    linkSync: vi.fn(actual.linkSync),
+  };
 });
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -40,12 +45,29 @@ describe('SA-109 draft ingress', () => {
   });
   const file = (key: string) =>
     path.join(root, FEATURE_IDEAS_DIRECTORY, 'ideas-project', `${key}.md`);
-  beforeEach(() => {
+  const bundleWriter = () => {
+    const bundle = path.join(home, 'feature-ideas.cjs');
+    buildSync({
+      entryPoints: [path.join(__dirname, '../src/featureIdeas.ts')],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      external: ['node:sqlite'],
+      logLevel: 'silent',
+    });
+    return bundle;
+  };
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.mocked(fs.fsyncSync).mockReset().mockImplementation(actual.fsyncSync);
+    vi.mocked(fs.writeFileSync).mockReset().mockImplementation(actual.writeFileSync);
+    vi.mocked(fs.linkSync).mockReset().mockImplementation(actual.linkSync);
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-ideas-'));
     home = path.join(root, 'home');
     vi.stubEnv('HOME', home);
+    childProcess.execFileSync('git', ['init', '--quiet'], { cwd: root, windowsHide: true });
     fs.mkdirSync(path.join(root, '.git', 'softwareagents'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.git', 'index'), 'unchanged index');
     fs.mkdirSync(path.join(root, '.softwareagents'), { recursive: true });
     fs.writeFileSync(
       path.join(root, '.softwareagents/project.yaml'),
@@ -58,6 +80,10 @@ describe('SA-109 draft ingress', () => {
         brain: { path: '.softwareagents/brain' },
       }),
     );
+    childProcess.execFileSync('git', ['add', '.softwareagents/project.yaml'], {
+      cwd: root,
+      windowsHide: true,
+    });
     vi.spyOn(company, 'companyWorkspaceRoot').mockReturnValue(root);
   });
   afterEach(() => {
@@ -94,6 +120,7 @@ describe('SA-109 draft ingress', () => {
     const exec = vi.mocked(childProcess.execFileSync);
     exec.mockClear();
     const manifest = fs.readFileSync(path.join(root, '.softwareagents/project.yaml'));
+    const index = fs.readFileSync(path.join(root, '.git/index'));
     const launch = vi.fn();
     const ctx = {
       privileged: true,
@@ -128,12 +155,66 @@ describe('SA-109 draft ingress', () => {
       expect(value).not.toContain('con acentos');
     expect(launch).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
-    expect(fs.readFileSync(path.join(root, '.git/index'), 'utf8')).toBe('unchanged index');
+    expect(exec).toHaveBeenCalled();
+    for (const call of exec.mock.calls)
+      expect(call[1]?.some((arg) => ['ls-files', 'for-each-ref'].includes(String(arg)))).toBe(true);
+    expect(fs.readFileSync(path.join(root, '.git/index'))).toEqual(index);
     expect(fs.readFileSync(path.join(root, '.softwareagents/project.yaml'))).toEqual(manifest);
     expect(fs.existsSync(path.join(root, '.git/softwareagents/work.sqlite3'))).toBe(false);
     expect(fs.existsSync(path.join(root, '.softwareagents/brain'))).toBe(false);
     expect(readIdeas('r', true, root).ideas.map((idea) => idea.key)).toEqual(['FEAT-001']);
+  });
+
+  it('skips a real tracked draft deleted from disk, preserving its index entry', () => {
+    fs.mkdirSync(path.dirname(file('FEAT-001')), { recursive: true });
+    fs.writeFileSync(file('FEAT-001'), 'tracked content');
+    childProcess.execFileSync(
+      'git',
+      ['add', '-f', '--', `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`],
+      { cwd: root, windowsHide: true },
+    );
+    const index = fs.readFileSync(path.join(root, '.git/index'));
+    fs.unlinkSync(file('FEAT-001'));
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-002');
+    expect(fs.existsSync(file('FEAT-001'))).toBe(false);
+    expect(fs.readFileSync(path.join(root, '.git/index'))).toEqual(index);
+  });
+
+  it('reserves an existing runtime branch even without a WorkStore row', () => {
+    const git = vi.mocked(childProcess.execFileSync);
+    git
+      .mockImplementationOnce(git.getMockImplementation()!)
+      .mockReturnValueOnce('refs/heads/sa/FEAT-001-integration\n');
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-002');
+  });
+
+  it('excludes drafts locally and idempotently, preserving existing exclude contents', () => {
+    const exclude = path.join(root, '.git/info/exclude');
+    fs.writeFileSync(exclude, '# local rules\nkeep-me');
+    const warn = vi.spyOn(console, 'warn');
+    expect(submitIdea(request(), true, root).status).toBe('saved');
+    expect(submitIdea(request(), true, root).status).toBe('saved');
+    expect(fs.readFileSync(exclude, 'utf8')).toBe(
+      `# local rules\nkeep-me\n/${FEATURE_IDEAS_DIRECTORY}/\n`,
+    );
+    expect(warn).not.toHaveBeenCalled();
+    expect(
+      childProcess.execFileSync('git', ['check-ignore', '--', file('FEAT-001')], {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      }),
+    ).toContain('FEAT-001.md');
+  });
+
+  it('saves with a fixed diagnostic if the local exclude cannot be updated', () => {
+    fs.unlinkSync(path.join(root, '.git/info/exclude'));
+    fs.mkdirSync(path.join(root, '.git/info/exclude'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(submitIdea(request(), true, root).status).toBe('saved');
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      '[featureIdeas] Local Git exclusion unavailable. Drafts can still be saved.',
+    );
   });
 
   it('dispatch defaults to unprivileged and VS Code returns an explicit reason', () => {
@@ -182,6 +263,26 @@ describe('SA-109 draft ingress', () => {
     }
   });
 
+  it('reserves pending runs and requirements tasks before a FeatureSpec exists', () => {
+    const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
+    try {
+      runMigrations(db);
+      db.exec(`INSERT INTO projects VALUES ('ideas-project', 'now');
+        INSERT INTO feature_runs(project_id,feature_key,state) VALUES ('ideas-project','FEAT-001','{}');
+        INSERT INTO tasks(project_id,key,type,status,priority,version,attempt,max_attempts,created_at,updated_at)
+        VALUES ('ideas-project','FEAT-002','requirements','READY',0,1,0,3,'now','now');`);
+      fs.mkdirSync(path.join(root, '.softwareagents/brain/features/requests'), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, '.softwareagents/brain/features/requests/FEAT-003.md'),
+        'pinned request',
+      );
+      expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-004');
+      expect(db.prepare('SELECT count(*) AS n FROM features').get()?.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it.each([
     ['empty', '', 'empty_text'],
     ['whitespace', ' \n\t ', 'empty_text'],
@@ -220,6 +321,7 @@ describe('SA-109 draft ingress', () => {
     fs.mkdirSync(path.join(linked, '.softwareagents'), { recursive: true });
     fs.mkdirSync(gitdir, { recursive: true });
     fs.writeFileSync(path.join(gitdir, 'commondir'), '../..');
+    fs.writeFileSync(path.join(gitdir, 'HEAD'), 'ref: refs/heads/linked\n');
     fs.writeFileSync(path.join(linked, '.git'), `gitdir: ${gitdir}`);
     fs.copyFileSync(
       path.join(root, '.softwareagents/project.yaml'),
@@ -231,6 +333,11 @@ describe('SA-109 draft ingress', () => {
       'other checkout',
     );
     expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-003');
+    expect(
+      fs
+        .readFileSync(path.join(root, '.git/info/exclude'), 'utf8')
+        .split(`/${FEATURE_IDEAS_DIRECTORY}/`),
+    ).toHaveLength(2);
     expect(readIdeas('r', true, root).ideas.map((idea) => idea.key)).toEqual([
       'FEAT-001',
       'FEAT-003',
@@ -318,31 +425,168 @@ describe('SA-109 draft ingress', () => {
     );
   });
 
-  it('removes its own partial file on write failure and returns only a fixed code', () => {
-    vi.mocked(fs.fsyncSync).mockImplementation((fd) => {
-      if (fs.fstatSync(fd).size) throw new Error('private filesystem diagnostic');
+  it('releases its own reservation after repeated write failures without consuming ids', () => {
+    let syncs = 0;
+    vi.mocked(fs.fsyncSync).mockImplementation(() => {
+      if (++syncs % 2 === 0) throw new Error('private filesystem diagnostic');
     });
-    expect(submitIdea(request(), true, root)).toMatchObject({
-      status: 'failed',
-      errorCode: 'unavailable',
-      idea: null,
-    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(submitIdea(request(), true, root)).toMatchObject({
+        status: 'failed',
+        errorCode: 'unavailable',
+        idea: null,
+      });
+      expect(
+        fs.readdirSync(path.join(root, '.git/softwareagents/idea-reservations/ideas-project')),
+      ).toEqual([]);
+    }
     expect(fs.existsSync(file('FEAT-001'))).toBe(false);
     expect(readIdeas('r', true, root).ideas).toEqual([]);
     vi.mocked(fs.fsyncSync).mockRestore();
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
+  });
+
+  it('releases reservations whose own metadata sync fails', () => {
+    vi.mocked(fs.fsyncSync).mockImplementation(() => {
+      throw new Error('sync failure');
+    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(submitIdea(request(), true, root).status).toBe('failed');
+      expect(
+        fs.readdirSync(path.join(root, '.git/softwareagents/idea-reservations/ideas-project')),
+      ).toEqual([]);
+    }
+    vi.mocked(fs.fsyncSync).mockRestore();
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
+  });
+
+  it('does not remove a replacement reservation while handling a failed write', () => {
+    let syncs = 0;
+    vi.mocked(fs.fsyncSync).mockImplementation(() => {
+      if (++syncs === 2) {
+        const reservation = path.join(
+          root,
+          '.git/softwareagents/idea-reservations/ideas-project/FEAT-001',
+        );
+        fs.writeFileSync(`${reservation}.replacement`, 'another owner');
+        fs.renameSync(`${reservation}.replacement`, reservation);
+        throw new Error('write failed');
+      }
+    });
+    expect(submitIdea(request(), true, root).status).toBe('failed');
+    expect(
+      fs.readFileSync(
+        path.join(root, '.git/softwareagents/idea-reservations/ideas-project/FEAT-001'),
+        'utf8',
+      ),
+    ).toBe('another owner');
+    expect(fs.existsSync(file('FEAT-001'))).toBe(false);
+  });
+
+  it('keeps partial staging outside snapshots, and publishes only synced validated content', () => {
+    const write = fs.writeFileSync;
+    const actual = vi.mocked(write).getMockImplementation()!;
+    vi.mocked(write).mockImplementation((...args: Parameters<typeof write>) => {
+      if (typeof args[0] === 'number' && args[1] === request().text) {
+        actual(args[0], 'partial', 'utf8');
+        expect(fs.existsSync(file('FEAT-001'))).toBe(false);
+        expect(readIdeas('during-write', true, root).ideas).toEqual([]);
+        // Restore descriptor position for the real full write below.
+        fs.ftruncateSync(args[0], 0);
+        fs.writeSync(args[0], String(args[1]), 0, 'utf8');
+        return;
+      }
+      return actual(...args);
+    });
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
+    expect(fs.readFileSync(file('FEAT-001'), 'utf8')).toBe(request().text);
+    expect(fs.readdirSync(path.dirname(file('FEAT-001')))).toEqual(['FEAT-001.md']);
+    const reservation = JSON.parse(
+      fs.readFileSync(
+        path.join(root, '.git/softwareagents/idea-reservations/ideas-project/FEAT-001'),
+        'utf8',
+      ),
+    );
+    expect(reservation).toMatchObject({
+      pid: process.pid,
+      checkout: root,
+      destination: `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`,
+    });
+    expect(reservation.owner).toBeTruthy();
+    expect(reservation.staging).toContain(reservation.owner);
+  });
+
+  it('does not overwrite a destination created just before publication', () => {
+    const link = vi.mocked(fs.linkSync).getMockImplementation()!;
+    vi.mocked(fs.linkSync).mockImplementationOnce((source, destination) => {
+      fs.writeFileSync(destination, 'another writer');
+      link(source, destination);
+    });
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-002');
+    expect(fs.readFileSync(file('FEAT-001'), 'utf8')).toBe('another writer');
+    expect(
+      fs.existsSync(
+        path.join(root, '.git/softwareagents/idea-reservations/ideas-project/FEAT-001'),
+      ),
+    ).toBe(false);
+  });
+
+  it('validates staged contents before publication and releases a failed validation id', () => {
+    let syncs = 0;
+    vi.mocked(fs.fsyncSync).mockImplementation((fd) => {
+      if (++syncs === 2) fs.writeSync(fd, 'tampered', 0, 'utf8');
+    });
+    vi.mocked(fs.linkSync).mockClear();
+    expect(submitIdea(request(), true, root).errorCode).toBe('unsafe_storage');
+    expect(fs.linkSync).not.toHaveBeenCalled();
+    expect(fs.existsSync(file('FEAT-001'))).toBe(false);
+    vi.mocked(fs.fsyncSync).mockRestore();
+    expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
+  });
+
+  it('leaves an inspectable owned reservation after process interruption, hiding partial staging', async () => {
+    const child = childProcess.fork(
+      path.join(__dirname, 'fixtures/submit-feature-idea.cjs'),
+      [bundleWriter()],
+      {
+        env: { ...process.env, HOME: home },
+        silent: true,
+      },
+    );
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('message', () => resolve());
+        child.once('error', reject);
+        child.once('exit', () => reject(new Error('Draft child exited before readiness')));
+      });
+      const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
+      child.send({ root, text: 'must not be published', interrupt: true });
+      expect(await exited).toBe(73);
+      const reservation = JSON.parse(
+        fs.readFileSync(
+          path.join(root, '.git/softwareagents/idea-reservations/ideas-project/FEAT-001'),
+          'utf8',
+        ),
+      );
+      expect(reservation).toMatchObject({ pid: child.pid, checkout: root });
+      expect(reservation.owner).toBeTruthy();
+      expect(fs.readFileSync(path.join(root, reservation.staging), 'utf8')).toBe(
+        'interrupted draft',
+      );
+      expect(fs.existsSync(file('FEAT-001'))).toBe(false);
+      expect(readIdeas('after-crash', true, root).ideas).toEqual([]);
+      expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-002');
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await new Promise<void>((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve();
+        else child.once('exit', () => resolve());
+      });
+    }
   });
 
   it('allocates distinct ids for genuinely concurrent processes', async () => {
-    const bundle = path.join(home, 'feature-ideas.cjs');
-    buildSync({
-      entryPoints: [path.join(__dirname, '../src/featureIdeas.ts')],
-      outfile: bundle,
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      external: ['node:sqlite'],
-      logLevel: 'silent',
-    });
+    const bundle = bundleWriter();
     const children = Array.from({ length: 4 }, () =>
       childProcess.fork(path.join(__dirname, 'fixtures/submit-feature-idea.cjs'), [bundle], {
         env: { ...process.env, HOME: home },

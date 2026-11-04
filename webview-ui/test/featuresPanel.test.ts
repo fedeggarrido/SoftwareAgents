@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FeatureRow, FeaturesSnapshot } from '../../core/src/messages.js';
 import { emptyExecutorStore, setExecutorStore } from '../src/office/executorStore.js';
@@ -14,7 +14,8 @@ import {
 import { emptyIdeasStore, setIdeasStore } from '../src/office/ideasStore.js';
 
 const lifecycle = vi.hoisted(() => ({
-  effects: [] as Array<() => void>,
+  effects: [] as Array<() => void | (() => void)>,
+  cleanups: [] as Array<() => void>,
   state: 'connected',
   send: vi.fn(),
   sendIdeas: vi.fn(),
@@ -33,7 +34,7 @@ vi.mock('../src/transport/index.js', () => ({
 vi.mock('react', async (original) => ({
   ...(await original<typeof import('react')>()),
   useSyncExternalStore: (_: unknown, get: () => unknown) => get(),
-  useEffect: (effect: () => void) => {
+  useEffect: (effect: () => void | (() => void)) => {
     lifecycle.effects.push(effect);
   },
 }));
@@ -47,7 +48,10 @@ const render = async () => renderToStaticMarkup(await tree());
 async function flush(isOpen = true) {
   lifecycle.effects = [];
   await tree(isOpen);
-  for (const effect of lifecycle.effects) effect();
+  for (const effect of lifecycle.effects) {
+    const cleanup = effect();
+    if (cleanup) lifecycle.cleanups.push(cleanup);
+  }
 }
 const project = (projectId: string) =>
   setExecutorStore({
@@ -88,6 +92,7 @@ function respond(over: Partial<FeaturesSnapshot> = {}) {
   );
 }
 beforeEach(() => {
+  vi.useFakeTimers();
   lifecycle.effects = [];
   lifecycle.state = 'connected';
   lifecycle.send.mockClear();
@@ -98,7 +103,43 @@ beforeEach(() => {
   setFeaturesStore(beginFeaturesRequest(emptyFeaturesStore(), 'P', 'r'));
   respond();
 });
+afterEach(() => {
+  for (const cleanup of lifecycle.cleanups.splice(0)) cleanup();
+  vi.useRealTimers();
+});
 describe('FEAT-002-T06 panel acceptance', () => {
+  it('SA-109 shows ideas-specific loading, storage errors and a working retry', async () => {
+    expect(await render()).toContain('Cargando ideas pendientes');
+    setIdeasStore({
+      ...emptyIdeasStore(),
+      snapshot: {
+        type: 'ideasSnapshot',
+        requestId: 'ideas',
+        projectId: 'P',
+        canSubmit: false,
+        errorCode: 'unsafe_storage',
+        ideas: [],
+      },
+    });
+    const html = await render();
+    expect(html).toContain('No se pudieron leer las ideas');
+    expect(html).toContain('ruta de ideas');
+    expect(html).toContain('Reintentar');
+    const node = await tree();
+    function retry(node: unknown): (() => void) | undefined {
+      if (Array.isArray(node)) return node.map(retry).find(Boolean);
+      if (!node || typeof node !== 'object') return;
+      const props = (node as ReactElement<{ onRetry?: () => void; children?: unknown }>).props;
+      return props?.onRetry ?? retry(props?.children);
+    }
+    retry(node)!();
+    expect(lifecycle.sendIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'requestIdeas' }),
+    );
+    expect(await render()).toContain('Cargando ideas pendientes');
+    lifecycle.state = 'reconnecting';
+    expect(await render()).toContain('Sin conexión para leer ideas pendientes');
+  });
   it('SA-109 shows pending ideas separately in the FeaturesPanel', async () => {
     setIdeasStore({
       ...emptyIdeasStore(),

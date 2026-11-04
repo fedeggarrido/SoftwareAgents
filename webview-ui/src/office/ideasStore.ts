@@ -26,7 +26,8 @@ export const emptyIdeasStore = (): IdeasStore => ({
 
 export function applyIdeasSnapshot(store: IdeasStore, message: IdeasSnapshot): IdeasStore {
   if (store.requestId !== message.requestId) return store;
-  const changed = store.snapshot?.projectId && store.snapshot.projectId !== message.projectId;
+  const bound = store.snapshot?.projectId ?? store.pending?.projectId ?? store.result?.projectId;
+  const changed = bound && bound !== message.projectId;
   return {
     ...store,
     snapshot: message,
@@ -121,8 +122,22 @@ export const useIdeasStore = () => useSyncExternalStore(subscribeIdeasStore, get
 let sequence = 0;
 export function requestIdeas(transport: MessageTransport): void {
   const requestId = `ideas-${++sequence}`;
-  setIdeasStore({ ...current, requestId });
-  transport.send({ type: 'requestIdeas', requestId });
+  setIdeasStore({ ...current, requestId, snapshot: null });
+  try {
+    transport.send({ type: 'requestIdeas', requestId });
+  } catch {
+    setIdeasStore({
+      ...current,
+      snapshot: {
+        type: 'ideasSnapshot',
+        requestId,
+        projectId: null,
+        canSubmit: false,
+        errorCode: 'unavailable',
+        ideas: [],
+      },
+    });
+  }
 }
 export function sendIdea(text: string, transport: MessageTransport): void {
   if (transport.state !== 'connected') return;

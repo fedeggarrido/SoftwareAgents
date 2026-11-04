@@ -11,15 +11,35 @@ vinculado: `.softwareagents/ideas/<Project>/FEAT-NNN.md`. La identidad del Proje
 separa borradores al cambiar el manifiesto. Esa ubicación pasa sin cambios por
 el validador real de `--request`: archivo regular, sin symlinks/junctions, hasta
 1 MiB en UTF-8 y texto no vacío. El servidor elige el primer id libre entre
-FEAT-001 y FEAT-999, omite Features registradas, FeatureSpecs del Brain e ideas
-guardadas. Reservas vacías con creación exclusiva en el Git common dir
+FEAT-001 y FEAT-999. Omite Features registradas, runs pendientes o históricos,
+tareas de requisitos/diseño, ramas `sa/FEAT-NNN*`, FeatureSpecs y requests del
+Brain, ideas guardadas y destinos presentes en el índice aunque falten del disco.
+La consulta del índice usa `git ls-files --cached -z` con fsmonitor desactivado.
+Reservas con creación exclusiva en el Git common dir
 (`softwareagents/idea-reservations/<Project>/<FEAT>`) coordinan envíos concurrentes,
-incluso desde distintos worktrees. El request también se crea en exclusiva en el
-checkout de esa oficina. No sobrescribe archivos ni toca el índice Git.
-Los borradores son datos locales, fuera del Brain; no se versionan automáticamente.
+incluso desde distintos worktrees. Cada reserva registra UUID del propietario, PID,
+fecha, checkout, staging y destino, sin texto del request. El staging exclusivo
+`.FEAT-NNN-<owner>.stage` queda fuera de la enumeración. Se escribe, sincroniza y
+valida con el lector CLI. Antes de publicar se vuelve a comprobar su realpath
+dentro del checkout y su identidad de archivo. Un hardlink publica el contenido
+completo atómicamente y falla si existe el destino. Después se retira el staging.
+Los fallos manejados retiran el staging y la reserva propios comprobando su
+identidad. Las reservas de guardados correctos permanecen para coordinar worktrees.
+
+Los borradores son datos locales, fuera del Brain. Se añade idempotentemente
+`/.softwareagents/ideas/` al `info/exclude` del Git common dir, preservando su
+contenido anterior y el índice. El guardado normal queda sin avisos. Si falla
+esta exclusión, el guardado continúa y el servidor emite únicamente
+`[featureIdeas] Local Git exclusion unavailable. Drafts can still be saved.`.
 La lista muestra los borradores del checkout vinculado a la oficina. Una reserva
-interrumpida conserva su id: antes de retirarla manualmente, comprobar que no queda
-ningún escritor y que no existe su request en otro checkout.
+interrumpida conserva su id. Antes de recuperarla manualmente, comprobar que el
+escritor identificado terminó y revisar staging/destino en el checkout registrado
+y requests del mismo Project en otros checkouts. El PID por sí solo no acredita
+identidad tras un reinicio. Si existe un destino completo, conservarlo y retirar
+solo su staging verificado. Si falta, inspeccionar el staging antes de retirarlo
+y liberar su reserva. Una interrupción entre link y retirada de staging puede
+dejar dos enlaces al archivo completo y producir `unsafe_storage` hasta esa
+recuperación. Las reservas vacías heredadas se conservan para inspección manual.
 
 El diálogo confirma id y comando exacto, por ejemplo:
 
@@ -44,7 +64,22 @@ pendiente, para evitar duplicados por reintento.
 
 Disponible en standalone. En VS Code se deshabilita explícitamente: ese control
 aún no tiene un contrato de selección de Project. No toma una carpeta arbitraria
-del editor como autoridad. SA-110 añadirá entrevista y SA-111 planificación y
+del editor como autoridad. El contexto del servidor transmite esta restricción
+al dispatcher compartido, también para WebSockets embebidos con token válido.
+El panel muestra carga y errores específicos de ideas con reintento. Las lecturas
+y envíos tienen un plazo de 15 segundos. Reconectar solicita otra lectura y
+conserva un envío sin confirmar como incierto.
+
+El WebSocket limita cada mensaje a 8 MiB (`WS_MAX_PAYLOAD_BYTES`) antes de
+parsear JSON, para clientes con y sin privilegio. Una idea de 1 MiB con caracteres
+de control ocupa hasta 6 MiB al escaparse, más el sobre JSON. Se revisaron también
+`saveLayout` (editor de hasta 64×64, colores, alfombras, muebles, mascotas y áreas),
+`saveAgentSeats` y `saveAreaMappings`. Los fixtures completos de 4096 entradas
+caben en ese límite. Los demás mensajes llevan controles escalares o cadenas.
+El contrato admite strings y colecciones sin máximo, por lo que mensajes
+artificiales o importaciones mayores de 8 MiB quedan sujetos a este nuevo límite.
+
+SA-110 añadirá entrevista y SA-111 planificación y
 aprobación; ambas pueden consumir estos borradores sin confundirlos con Features.
 Las guardas de rutas comparten el límite de `taskPath`: no aíslan a un proceso
 hostil del mismo usuario que sustituya directorios entre validación y apertura.

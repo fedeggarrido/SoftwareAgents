@@ -1,45 +1,27 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 
-import { IDEA_REQUEST_TIMEOUT_MS, IDEA_TEXTAREA_ROWS } from '../constants.js';
+import { IDEA_TEXTAREA_ROWS } from '../constants.js';
 import {
   getIdeasStore,
   ideaDialogState,
   ideaErrorText,
-  invalidateIdeas,
   requestIdeas,
   sendIdea,
   setIdeasStore,
-  useIdeasStore,
 } from '../office/ideasStore.js';
+import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
-const subscribeTransport = (listener: () => void) => transport.onStateChange(listener);
-const transportState = () => transport.state;
-
 export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('');
-  const store = useIdeasStore();
-  const connection = useSyncExternalStore(subscribeTransport, transportState, transportState);
-  const state = ideaDialogState(store, connection === 'connected');
   useEffect(() => {
     // A new dialog can compose another idea, but never replay an uncertain submission.
     setIdeasStore({ ...getIdeasStore(), result: null });
-    if (transport.state === 'connected') requestIdeas(transport);
   }, []);
-  useEffect(() => {
-    if (!store.pending) return;
-    const requestId = store.pending.requestId;
-    const timer = setTimeout(() => {
-      if (getIdeasStore().pending?.requestId === requestId)
-        setIdeasStore(invalidateIdeas(getIdeasStore()));
-    }, IDEA_REQUEST_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [store.pending]);
-  useEffect(() => {
-    if (connection === 'connected' && !getIdeasStore().requestId) requestIdeas(transport);
-  }, [connection]);
+  const { store, connection } = useIdeasConnection(true);
+  const state = ideaDialogState(store, connection === 'connected');
   const close = () => {
     if (!getIdeasStore().pending) onClose();
   };
@@ -98,6 +80,9 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
               >
                 Consultar ideas pendientes
               </Button>
+            )}
+            {state === 'disabled' && (
+              <Button onClick={() => requestIdeas(transport)}>Reintentar lectura de ideas</Button>
             )}
           </>
         )}

@@ -241,6 +241,8 @@ export const VERIFIER_FEEDBACK_FIELD_CHARS = 256;
 export const VERIFIER_STYLE_RETRIES = 1;
 // SA-027: bounded TaskDAG/FeatureSpec input and fixed-memory backup copying.
 export const TASK_CLI_INPUT_BYTES = 1024 * 1024;
+/** 6x JSON escaping of a 1 MiB idea plus envelope; also fits full 64x64 layouts. */
+export const WS_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
 // Draft requests live in the checkout so the real --request validator can read them.
 export const FEATURE_IDEAS_DIRECTORY = '.softwareagents/ideas';
 export const FEATURE_IDEA_RESERVATIONS_DIRECTORY = 'softwareagents/idea-reservations';

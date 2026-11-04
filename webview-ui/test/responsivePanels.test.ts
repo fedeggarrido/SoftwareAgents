@@ -19,7 +19,7 @@ vi.mock('react', async (original) => ({
   useSyncExternalStore: (_: unknown, get: () => unknown) => get(),
 }));
 
-it('contains panels and all five navigation targets at 390px, with keyboard and touch access', async (context) => {
+it('contains panels and all six navigation targets at 390px, with keyboard and touch access', async (context) => {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
@@ -132,9 +132,9 @@ it('contains panels and all five navigation targets at 390px, with keyboard and 
         ),
       ).toBe(true);
       const buttons = page.locator('.bottom-toolbar > button');
-      expect(await buttons.count()).toBe(5);
+      expect(await buttons.count()).toBe(6);
       const widths: number[] = [];
-      for (let index = 0; index < 5; index++) {
+      for (let index = 0; index < 6; index++) {
         const button = buttons.nth(index);
         const box = (await button.boundingBox())!;
         widths.push(box.width);

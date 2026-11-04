@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuditLog } from '../src/auditLog.js';
@@ -16,6 +17,14 @@ import { FEATURE_IDEAS_DIRECTORY, TASK_CLI_INPUT_BYTES } from '../src/constants.
 import { handleIdeaMessage, readIdeas, submitIdea } from '../src/featureIdeas.js';
 import { runMigrations } from '../src/workstore/migrations.js';
 
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn), execFileSync: vi.fn(actual.execFileSync) };
+});
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  return { ...actual, fsyncSync: vi.fn(actual.fsyncSync) };
+});
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,
@@ -80,8 +89,10 @@ describe('SA-109 draft ingress', () => {
   });
 
   it('dispatches privileged drafts without starting work, changing tracked files or the index, or logging text', () => {
-    const spawn = vi.spyOn(childProcess, 'spawn');
-    const exec = vi.spyOn(childProcess, 'execFileSync');
+    const spawn = vi.mocked(childProcess.spawn);
+    spawn.mockClear();
+    const exec = vi.mocked(childProcess.execFileSync);
+    exec.mockClear();
     const manifest = fs.readFileSync(path.join(root, '.softwareagents/project.yaml'));
     const launch = vi.fn();
     const ctx = {
@@ -308,10 +319,8 @@ describe('SA-109 draft ingress', () => {
   });
 
   it('removes its own partial file on write failure and returns only a fixed code', () => {
-    const sync = fs.fsyncSync;
-    vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+    vi.mocked(fs.fsyncSync).mockImplementationOnce((fd) => {
       if (fs.fstatSync(fd).size) throw new Error('private filesystem diagnostic');
-      sync(fd);
     });
     expect(submitIdea(request(), true, root)).toMatchObject({
       status: 'failed',
@@ -323,8 +332,18 @@ describe('SA-109 draft ingress', () => {
   });
 
   it('allocates distinct ids for genuinely concurrent processes', async () => {
+    const bundle = path.join(home, 'feature-ideas.cjs');
+    buildSync({
+      entryPoints: [path.join(__dirname, '../src/featureIdeas.ts')],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      external: ['node:sqlite'],
+      logLevel: 'silent',
+    });
     const children = Array.from({ length: 4 }, () =>
-      childProcess.fork(path.join(__dirname, 'fixtures/submit-feature-idea.cjs'), [], {
+      childProcess.fork(path.join(__dirname, 'fixtures/submit-feature-idea.cjs'), [bundle], {
         env: { ...process.env, HOME: home },
         silent: true,
       }),

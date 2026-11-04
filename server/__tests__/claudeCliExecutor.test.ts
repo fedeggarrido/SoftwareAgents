@@ -386,7 +386,8 @@ it.skipIf(process.env.SA_SKIP_TASKKILL_TEST === '1')(
       if (event.type === 'finished') expect(event.exitCode).toBe(130);
     }
     expect(pid).toBeGreaterThan(0);
-    expect(() => process.kill(pid, 0)).toThrow();
+    // The killed child is reaped by init shortly after the root closes.
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
     handle.cancel();
   },
 );

@@ -24,7 +24,11 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         CREATE TABLE features (project_id TEXT, key TEXT, doc_path TEXT, git_sha TEXT, status TEXT);
         INSERT INTO features VALUES ('p', 'FEAT-001', 'feature.yaml', 'sha', 'approved');
         CREATE TABLE feature_runs (project_id TEXT, feature_key TEXT, owner TEXT, pid INTEGER, state TEXT, pid_started_at TEXT);
-        INSERT INTO feature_runs VALUES ('p', 'FEAT-001', NULL, NULL, '{}', NULL);`);
+        INSERT INTO feature_runs VALUES ('p', 'FEAT-001', NULL, NULL, '{}', NULL);
+        CREATE TABLE tasks (project_id TEXT, key TEXT, PRIMARY KEY(project_id, key));
+        CREATE TABLE domain_events (id INTEGER, project_id TEXT, task_key TEXT, type TEXT, from_status TEXT, to_status TEXT, task_version INTEGER, attempt INTEGER, reason TEXT, actor TEXT, created_at TEXT);
+        CREATE TRIGGER domain_events_no_update BEFORE UPDATE ON domain_events BEGIN SELECT 1; END;
+        CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events BEGIN SELECT 1; END;`);
       runMigrations(db);
       expect(db.prepare('SELECT * FROM features').get()).toEqual({
         project_id: 'p',
@@ -40,7 +44,7 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         updated_at: null,
       });
       runMigrations(db);
-      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(17);
+      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(18);
     } finally {
       db.close();
     }

@@ -166,7 +166,9 @@ describe('SA-037 usage ledger and budgets', () => {
     const { DatabaseSync } = await import('node:sqlite');
     const file = path.join(root, '.git/softwareagents/work.sqlite3');
     const db = new DatabaseSync(file);
-    db.exec('DROP TABLE usage_ledger; UPDATE schema_version SET version = 15');
+    db.exec(
+      'DROP TABLE usage_ledger; ALTER TABLE tasks DROP COLUMN pr_status; UPDATE schema_version SET version = 15',
+    );
     db.close();
     store = await openWorkStore({ repositoryPath: root, projectId: 'test' });
     expect(store.getExecution('execution')?.task_key).toBe('task');

@@ -111,5 +111,8 @@ test('credential copies can never rotate the operator session', () => {
   assert.throws(() => isolatedCredential('claude', claude(now + 60_000), now), /too soon/);
   const jwt = `x.${Buffer.from(JSON.stringify({ exp: now / 1000 + 7200 })).toString('base64url')}.y`;
   const codex = JSON.stringify({ tokens: { access_token: jwt, refresh_token: 'r' } });
-  assert.equal(JSON.parse(isolatedCredential('codex', codex, now)).tokens.refresh_token, undefined);
+  assert.equal(
+    JSON.parse(isolatedCredential('codex', codex, now)).tokens.refresh_token,
+    'isolated-no-refresh',
+  );
 });

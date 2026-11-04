@@ -35,7 +35,8 @@ export function isolatedCredential(cli, text, now = Date.now()) {
     expiresAt = payload
       ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).exp * 1000
       : undefined;
-    if (tokens) delete tokens.refresh_token;
+    // Codex rejects auth.json without this field; a placeholder cannot rotate anything.
+    if (tokens) tokens.refresh_token = 'isolated-no-refresh';
   }
   if (typeof expiresAt !== 'number' || expiresAt - now < MIN_TOKEN_VALIDITY_MS)
     throw new Error(`${cli} access token expires too soon; use the profile once to renew it`);
@@ -99,7 +100,7 @@ export async function runCase(options, factory) {
   const home = path.join(root, 'home');
   const saved = { ...process.env };
   // Case-insensitive: Git Bash spells SYSTEMROOT, and Node aborts at startup without it.
-  const allowed = ['PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT'];
+  const allowed = ['PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', 'PATHEXT'];
   for (const key of Object.keys(process.env))
     if (!allowed.includes(key.toUpperCase())) delete process.env[key];
   Object.assign(process.env, {

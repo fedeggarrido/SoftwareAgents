@@ -20,7 +20,7 @@ it('migrates populated v16 with backup, persists human decisions and derives ide
     const db = new DatabaseSync(filename);
     try {
       db.exec(
-        'DROP TABLE finding_decisions; ALTER TABLE tasks DROP COLUMN pr_observation; ALTER TABLE tasks DROP COLUMN pr_status; UPDATE schema_version SET version = 16',
+        'DROP TRIGGER tasks_clear_ci_restore; ALTER TABLE tasks DROP COLUMN ci_restore_status; ALTER TABLE tasks DROP COLUMN pr_binding_generation; ALTER TABLE tasks DROP COLUMN pr_poll_generation; ALTER TABLE tasks DROP COLUMN pr_observed_generation; DROP TABLE finding_decisions; ALTER TABLE tasks DROP COLUMN pr_observation; ALTER TABLE tasks DROP COLUMN pr_status; UPDATE schema_version SET version = 16',
       );
       db.prepare(
         `INSERT INTO executions(project_id,key,task_key,agent_template_version,executor,model_id,started_at,system_prompt_hash,project_brain_sha,task_version,tool_policy_version,agent_role) VALUES ('p','E','T','v1','codex','actual-model','2026-01-01','hash','sha',1,'v1','reviewer')`,

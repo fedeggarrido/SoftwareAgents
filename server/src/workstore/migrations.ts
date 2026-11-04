@@ -183,6 +183,41 @@ const migrations = [
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;
   CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events
     BEGIN SELECT RAISE(ABORT, 'Domain events are append-only'); END;`,
+  `ALTER TABLE tasks ADD COLUMN ci_restore_status TEXT
+    CHECK(ci_restore_status IN ('DRAFT','READY','QUEUED','REVIEW','QA','FAILED_RETRYABLE','WAITING_QUOTA'));
+  ALTER TABLE tasks ADD COLUMN pr_binding_generation INTEGER NOT NULL DEFAULT 0 CHECK(pr_binding_generation >= 0);
+  ALTER TABLE tasks ADD COLUMN pr_poll_generation INTEGER NOT NULL DEFAULT 0 CHECK(pr_poll_generation >= 0);
+  ALTER TABLE tasks ADD COLUMN pr_observed_generation INTEGER NOT NULL DEFAULT 0 CHECK(pr_observed_generation >= 0);
+  -- Recover provenance from the recorded actor, never from human-readable reason text.
+  UPDATE tasks SET ci_restore_status = (
+    SELECT CASE WHEN event.from_status IN ('DRAFT','READY','QUEUED','REVIEW','QA','FAILED_RETRYABLE','WAITING_QUOTA')
+      THEN event.from_status ELSE COALESCE((
+        SELECT saved.value FROM domain_events AS suspension
+        JOIN human_decisions AS decision ON decision.project_id = suspension.project_id AND decision.key = suspension.reason
+        JOIN json_each(CASE WHEN json_valid(decision.previous_states) THEN decision.previous_states ELSE '{}' END) AS saved
+          ON saved.key = event.task_key
+        WHERE suspension.project_id = event.project_id AND suspension.task_key = event.task_key
+          AND suspension.type = 'TASK_TRANSITIONED' AND suspension.to_status = 'WAITING_HUMAN'
+          AND suspension.task_version = event.task_version - 1
+          AND saved.value IN ('DRAFT','READY','QUEUED','REVIEW','QA','FAILED_RETRYABLE','WAITING_QUOTA')
+        LIMIT 1
+      ), 'READY') END
+    FROM domain_events AS event
+    WHERE event.project_id = tasks.project_id AND event.task_key = tasks.key
+      AND event.type = 'TASK_TRANSITIONED' AND event.to_status = 'BLOCKED' AND event.actor = 'pr-monitor'
+      AND NOT EXISTS (SELECT 1 FROM domain_events AS later
+        WHERE later.project_id = event.project_id AND later.task_key = event.task_key
+          AND later.type = 'TASK_TRANSITIONED' AND later.id > event.id
+          AND later.to_status <> 'WAITING_HUMAN'
+          AND NOT (later.from_status = 'WAITING_HUMAN' AND later.to_status = 'BLOCKED'
+            AND EXISTS (SELECT 1 FROM human_decisions AS decision
+              WHERE decision.project_id = later.project_id
+                AND later.reason IN (decision.key, 'Reconcile expired decision: ' || decision.key))))
+    ORDER BY event.id DESC LIMIT 1
+  ) WHERE status IN ('BLOCKED','WAITING_HUMAN');
+  CREATE TRIGGER tasks_clear_ci_restore AFTER UPDATE OF status ON tasks
+    WHEN NEW.status NOT IN ('BLOCKED','WAITING_HUMAN') AND NEW.ci_restore_status IS NOT NULL
+    BEGIN UPDATE tasks SET ci_restore_status = NULL WHERE project_id = NEW.project_id AND key = NEW.key; END;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

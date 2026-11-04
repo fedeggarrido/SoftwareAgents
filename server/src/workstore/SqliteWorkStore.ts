@@ -1579,7 +1579,7 @@ class SqliteWorkStore implements WorkStore {
       if (!task || task.version !== version) throw new Error('Task changed before manual retry');
       if (task.lease_owner || task.lease_expires_at)
         throw new Error('Manual retry refuses a task with a lease');
-      if (task.status === 'BLOCKED' && task.ci_restore_status) {
+      if (['BLOCKED', 'WAITING_HUMAN'].includes(task.status) && task.ci_restore_status) {
         this.assertNoDecisionGate(taskId);
         if (!reason.trim()) throw new Error('Manual retry requires a reason');
         const restore = task.ci_restore_status;
@@ -1598,16 +1598,24 @@ class SqliteWorkStore implements WorkStore {
         beforeCommit();
         this.db
           .prepare(
-            'UPDATE tasks SET status = ?, version = version + 1, ci_restore_status = NULL, blocked_reason = NULL, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?',
+            'UPDATE tasks SET status = ?, version = version + 1, ci_restore_status = NULL, ci_restore_blocked_reason = NULL, blocked_reason = ?, updated_at = ? WHERE project_id = ? AND key = ? AND version = ?',
           )
-          .run(restore, now, this.projectId, taskId, version);
+          .run(
+            restore,
+            task.ci_restore_blocked_reason ?? null,
+            now,
+            this.projectId,
+            taskId,
+            version,
+          );
         this.db
           .prepare(
-            "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', 'BLOCKED', ?, ?, ?, ?, 'human', ?)",
+            "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, ?, ?, ?, ?, 'human', ?)",
           )
           .run(
             this.projectId,
             taskId,
+            task.status,
             restore,
             version + 1,
             task.attempt,
@@ -1775,31 +1783,43 @@ class SqliteWorkStore implements WorkStore {
           .get(this.projectId, taskId, `PR ${status.url} merged`);
       if (requestCleanup && (!decision || decision.blocks.length))
         throw new Error('Merged PR requires a manual cleanup decision');
-      if (status.ci === 'failure' && !active && !closed && task.status !== 'BLOCKED') {
+      let restore: unknown = task.ci_restore_status ?? task.status;
+      const canBlock = status.ci === 'failure' && !active && !closed && task.status !== 'BLOCKED';
+      // A suspension may hide a human block. Unknown saved states never grant CI ownership.
+      if (canBlock && restore === 'WAITING_HUMAN') {
+        const gate = this.listDecisions().find(
+          (d) => d.status !== 'answered' && d.blocks.includes(taskId),
+        );
+        const row = gate
+          ? this.db
+              .prepare(
+                "SELECT saved.value FROM human_decisions AS decision JOIN json_each(CASE WHEN json_valid(decision.previous_states) THEN decision.previous_states ELSE '{}' END) AS saved ON saved.key = ? WHERE decision.project_id = ? AND decision.key = ?",
+              )
+              .get(taskId, this.projectId, gate.id)
+          : undefined;
+        restore = row?.value;
+      }
+      if (
+        canBlock &&
+        typeof restore === 'string' &&
+        isTaskStatus(restore) &&
+        CI_RESTORE_STATUSES.includes(restore)
+      ) {
         // CI has no worker authority. Even expired leases remain owned until recovery releases them.
-        let restore = task.ci_restore_status ?? task.status;
-        if (restore === 'WAITING_HUMAN') {
-          const gate = this.listDecisions().find(
-            (d) => d.status !== 'answered' && d.blocks.includes(taskId),
-          );
-          const row = gate
-            ? this.db
-                .prepare(
-                  'SELECT previous_states FROM human_decisions WHERE project_id = ? AND key = ?',
-                )
-                .get(this.projectId, gate.id)
-            : undefined;
-          restore = row?.previous_states
-            ? JSON.parse(row.previous_states as string)[taskId]
-            : 'READY';
-        }
-        if (!CI_RESTORE_STATUSES.includes(restore)) restore = 'READY';
         const now = new Date().toISOString();
         this.db
           .prepare(
-            'UPDATE tasks SET status = ?, blocked_reason = ?, ci_restore_status = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
+            'UPDATE tasks SET status = ?, blocked_reason = ?, ci_restore_status = ?, ci_restore_blocked_reason = ?, version = version + 1, updated_at = ? WHERE project_id = ? AND key = ?',
           )
-          .run('BLOCKED', reason, restore, now, this.projectId, taskId);
+          .run(
+            'BLOCKED',
+            reason,
+            restore,
+            task.ci_restore_status ? (task.ci_restore_blocked_reason ?? null) : task.blocked_reason,
+            now,
+            this.projectId,
+            taskId,
+          );
         this.db
           .prepare(
             "INSERT INTO domain_events (project_id, task_key, type, from_status, to_status, task_version, attempt, reason, actor, created_at) VALUES (?, ?, 'TASK_TRANSITIONED', ?, 'BLOCKED', ?, ?, ?, ?, ?)",

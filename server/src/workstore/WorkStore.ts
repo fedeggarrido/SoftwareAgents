@@ -122,6 +122,7 @@ export interface TaskRecord {
   pr_status?: PullRequestStatus | null;
   pr_observation?: PullRequestObservation | null;
   ci_restore_status?: TaskStatus | null;
+  ci_restore_blocked_reason?: string | null;
   pr_binding_generation?: number;
   pr_poll_generation?: number;
   pr_observed_generation?: number;

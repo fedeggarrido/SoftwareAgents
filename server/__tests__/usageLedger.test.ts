@@ -167,7 +167,7 @@ describe('SA-037 usage ledger and budgets', () => {
     const file = path.join(root, '.git/softwareagents/work.sqlite3');
     const db = new DatabaseSync(file);
     db.exec(
-      'DROP TRIGGER tasks_clear_ci_restore; ALTER TABLE tasks DROP COLUMN ci_restore_status; ALTER TABLE tasks DROP COLUMN pr_binding_generation; ALTER TABLE tasks DROP COLUMN pr_poll_generation; ALTER TABLE tasks DROP COLUMN pr_observed_generation; DROP TABLE usage_ledger; ALTER TABLE tasks DROP COLUMN pr_observation; ALTER TABLE tasks DROP COLUMN pr_status; UPDATE schema_version SET version = 15',
+      'DROP TRIGGER tasks_clear_ci_restore; ALTER TABLE tasks DROP COLUMN ci_restore_status; ALTER TABLE tasks DROP COLUMN ci_restore_blocked_reason; ALTER TABLE tasks DROP COLUMN pr_binding_generation; ALTER TABLE tasks DROP COLUMN pr_poll_generation; ALTER TABLE tasks DROP COLUMN pr_observed_generation; DROP TABLE usage_ledger; ALTER TABLE tasks DROP COLUMN pr_observation; ALTER TABLE tasks DROP COLUMN pr_status; UPDATE schema_version SET version = 15',
     );
     db.close();
     store = await openWorkStore({ repositoryPath: root, projectId: 'test' });

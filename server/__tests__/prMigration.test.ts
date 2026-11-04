@@ -80,10 +80,16 @@ it.each([17, 18, 19])(
             ('p','human-block','implementation','BLOCKED',1,5,2,3,'CI failed: build','2026-01-01','2026-01-01'),
             ('p','suspended-ci','implementation','WAITING_HUMAN',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
             ('p','decision-first','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
-            ('p','ci-first','implementation','BLOCKED',1,7,2,3,'CI failed: build','2026-01-01','2026-01-01');
+            ('p','ci-first','implementation','BLOCKED',1,7,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','hidden-human','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','unknown-state','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','orphan-ci','implementation','WAITING_HUMAN',1,7,2,3,'CI failed: build','2026-01-01','2026-01-01');
           INSERT INTO human_decisions (project_id,key,question,answer,actor,decided_at,previous_states)
           VALUES ('p','decision-gate','Review','review','human','2026-01-01','{"decision-first":"REVIEW"}'),
-            ('p','ci-gate','Review','review','human','2026-01-01','{"ci-first":"BLOCKED"}');
+            ('p','ci-gate','Review','review','human','2026-01-01','{"ci-first":"BLOCKED"}'),
+            ('p','human-gate','Review','review','human','2026-01-01','{"hidden-human":"BLOCKED"}'),
+            ('p','unknown-gate','Review','review','human','2026-01-01','{}'),
+            ('p','orphan-gate','Review','review','human','2026-01-01','{"orphan-ci":"REVIEW"}');
           INSERT INTO domain_events (project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at)
           VALUES ('p','ci-block','TASK_TRANSITIONED','REVIEW','BLOCKED',5,2,'CI failed: build','pr-monitor','2026-01-01'),
             ('p','human-block','TASK_TRANSITIONED','RUNNING','BLOCKED',5,2,'CI failed: build','worker','2026-01-01'),
@@ -93,7 +99,35 @@ it.each([17, 18, 19])(
             ('p','decision-first','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
             ('p','ci-first','TASK_TRANSITIONED','REVIEW','BLOCKED',5,2,'CI failed: build','pr-monitor','2026-01-01'),
             ('p','ci-first','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',6,2,'ci-gate','system','2026-01-01'),
-            ('p','ci-first','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',7,2,'ci-gate','human','2026-01-01');`);
+            ('p','ci-first','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',7,2,'ci-gate','human','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','READY','BLOCKED',4,2,'Human hold','human','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',5,2,'human-gate','system','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','unknown-state','TASK_TRANSITIONED','REVIEW','WAITING_HUMAN',5,2,'unknown-gate','system','2026-01-01'),
+            ('p','unknown-state','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','REVIEW','WAITING_HUMAN',5,2,'orphan-gate','system','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',7,2,'manual_retry: CI fixed','human','2026-01-01');`);
+        db.prepare('UPDATE human_decisions SET escalation = ? WHERE key = ?').run(
+          JSON.stringify({
+            id: 'orphan-gate',
+            context: 'Review change',
+            options: [
+              { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+            ],
+            recommendation: 'Review',
+            disagreement: [],
+            impact: 'Review needed',
+            urgency: 'high',
+            requestedBy: 'system',
+            status: 'answered',
+            blocks: ['orphan-ci'],
+            answer: 'review',
+            answeredBy: 'human',
+            answeredAt: '2026-01-01',
+          }),
+          'orphan-gate',
+        );
       }
     } finally {
       db.close();
@@ -146,6 +180,31 @@ it.each([17, 18, 19])(
       });
       await expect(work.retryTask('human-block', 5, 'Try again', audit)).rejects.toThrow();
       expect(audit).toHaveBeenCalledTimes(1);
+      for (const key of ['hidden-human', 'unknown-state']) {
+        const held = work.getTask(key)!;
+        expect(held).toMatchObject({ status: 'BLOCKED', ci_restore_status: null });
+        await expect(work.retryTask(key, held.version, 'CI fixed', audit)).rejects.toThrow();
+        expect(work.getTask(key)).toEqual(held);
+      }
+      expect(audit).toHaveBeenCalledTimes(1);
+      expect(work.getTask('orphan-ci')).toMatchObject({
+        status: 'WAITING_HUMAN',
+        version: 7,
+        ci_restore_status: 'REVIEW',
+        feature_key: null,
+      });
+      await work.retryTask('orphan-ci', 7, 'CI fixed', audit);
+      expect(work.getTask('orphan-ci')).toMatchObject({
+        status: 'REVIEW',
+        version: 8,
+        attempt: 2,
+        ci_restore_status: null,
+      });
+      expect(work.listDomainEvents('orphan-ci').at(-1)).toMatchObject({
+        from_status: 'WAITING_HUMAN',
+        to_status: 'REVIEW',
+        actor: 'human',
+      });
       for (const key of ['decision-first', 'ci-first']) {
         const blocked = work.getTask(key)!;
         expect(blocked).toMatchObject({ status: 'BLOCKED', ci_restore_status: 'REVIEW' });

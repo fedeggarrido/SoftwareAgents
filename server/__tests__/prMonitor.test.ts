@@ -316,6 +316,8 @@ describe('PR observations through the real WorkStore and relay', () => {
     await poller.tick();
     expect(work.getTask('SA-055')).toMatchObject({
       ...before,
+      pr_poll_generation: before!.pr_poll_generation! + 2,
+      pr_observed_generation: before!.pr_observed_generation! + 2,
       pr_observation: { lastSuccessAt: null, error: 'unavailable' },
     });
     expect(work.listDomainEvents()).toEqual([]);
@@ -882,6 +884,102 @@ describe('PR observations through the real WorkStore and relay', () => {
       expect(work.listDecisions()[0].status).toBe('answered');
       expect(audit).toHaveBeenCalledTimes(1);
       await red.dispose();
+    },
+  );
+
+  it.each(['BLOCKED', 'unknown', null])(
+    'leaves a suspended human block unowned when its saved state is %s',
+    async (saved) => {
+      await work.transition(
+        'SA-055',
+        work.getTask('SA-055')!.version,
+        'BLOCKED',
+        'Human hold',
+        'human',
+      );
+      await work.openDecision(reviewDecision());
+      const db = new DatabaseSync(file);
+      try {
+        db.prepare('UPDATE human_decisions SET previous_states = ? WHERE key = ?').run(
+          JSON.stringify({ 'SA-055': saved }),
+          'gate',
+        );
+      } finally {
+        db.close();
+      }
+      const before = work.getTask('SA-055')!;
+      await monitor(async () => fixture('failed')).tick();
+      expect(work.getTask('SA-055')).toMatchObject({
+        status: 'WAITING_HUMAN',
+        version: before.version,
+        blocked_reason: 'Human hold',
+        ci_restore_status: null,
+        ci_restore_blocked_reason: null,
+        pr_status: { ci: 'failure' },
+      });
+    },
+  );
+
+  it.each(['direct', 'decision-first', 'ci-first'])(
+    'preserves infrastructure admission through CI and retry (%s)',
+    async (order) => {
+      const diagnostic = 'Verifier infrastructure: test runner unavailable';
+      work.createTask({
+        key: 'developer',
+        type: 'code',
+        agent_role: 'developer',
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+        pr_ref: ref,
+      });
+      // A real claim of the identical pre-CI state proves the baseline admission.
+      work.createTask({
+        key: 'baseline',
+        type: 'code',
+        agent_role: 'developer',
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+      });
+      const db = new DatabaseSync(file);
+      try {
+        db.prepare('UPDATE tasks SET blocked_reason = ? WHERE key IN (?, ?)').run(
+          diagnostic,
+          'developer',
+          'baseline',
+        );
+      } finally {
+        db.close();
+      }
+      expect(await work.claim('baseline', 'baseline-owner')).toMatchObject({ status: 'LEASED' });
+      if (order === 'ci-first') await monitor(async () => fixture('failed')).tick();
+      if (order !== 'direct')
+        await work.openDecision({ ...reviewDecision(), blocks: ['developer'] });
+      if (order !== 'ci-first') await monitor(async () => fixture('failed')).tick();
+      expect(work.getTask('developer')).toMatchObject({
+        ci_restore_status: 'FAILED_RETRYABLE',
+        ci_restore_blocked_reason: diagnostic,
+      });
+      if (order !== 'direct') await work.resolveDecision('gate', 'review', 'operator', () => {});
+      const retried = await work.retryTask(
+        'developer',
+        work.getTask('developer')!.version,
+        'CI fixed',
+        () => {},
+      );
+      expect(retried).toMatchObject({
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+        blocked_reason: diagnostic,
+        ci_restore_status: null,
+        ci_restore_blocked_reason: null,
+      });
+      expect(await work.claim('developer', 'owner')).toMatchObject({
+        status: 'LEASED',
+        lease_owner: 'owner',
+      });
     },
   );
 

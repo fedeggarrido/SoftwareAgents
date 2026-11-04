@@ -29,7 +29,7 @@ export class FeaturesReadFailure extends Error {
 }
 
 /** Resolve Git metadata using files only, including linked worktrees. */
-function gitCommonDir(root: string): string {
+export function gitCommonDir(root: string): string {
   const marker = path.join(fs.realpathSync.native(root), '.git');
   let gitDir = marker;
   if (!fs.statSync(marker).isDirectory()) {

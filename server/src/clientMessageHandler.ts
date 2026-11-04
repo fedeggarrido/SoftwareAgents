@@ -33,6 +33,7 @@ import {
   parseSetExecutorLevels,
   toggleResult,
 } from './executorState.js';
+import { handleIdeaMessage } from './featureIdeas.js';
 import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
@@ -71,6 +72,8 @@ export interface AssetCache {
 }
 
 export interface ClientMessageContext {
+  /** Embedded VS Code has no Project selection contract for draft ingress. */
+  ideasSupported?: boolean;
   store: AgentStateStore;
   runtime?: AgentRuntime;
   cache: AssetCache | null;
@@ -112,6 +115,11 @@ export function handleClientMessage(
   const adapter = store.getAdapter();
 
   switch (msg.type) {
+    case 'requestIdeas':
+    case 'submitIdea':
+      handleIdeaMessage(msg, send, ctx.privileged === true, ctx.ideasSupported !== false);
+      break;
+
     case 'webviewReady':
       handleWebviewReady(send, ctx);
       // Capability-gated: legacy clients never receive executorState.

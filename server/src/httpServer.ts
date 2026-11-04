@@ -26,6 +26,7 @@ import {
   OPERATOR_PROOF_PATH,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
+  WS_MAX_PAYLOAD_BYTES,
 } from './constants.js';
 import { serverProof } from './serverProof.js';
 import type { AgentState } from './types.js';
@@ -111,7 +112,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   });
 
   await app.register(fastifyCors, { origin: true });
-  await app.register(fastifyWebsocket);
+  await app.register(fastifyWebsocket, { options: { maxPayload: WS_MAX_PAYLOAD_BYTES } });
 
   // Static SPA serving (standalone mode only)
   if (!options.embedded && options.staticDir) {
@@ -280,6 +281,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       onSetHooksEnabled: options.onSetHooksEnabled,
       onReloadAssets: options.onReloadAssets,
       privileged,
+      ideasSupported: !options.embedded,
     };
     const onExecutorStateChanged = () => refreshExecutorState(send, ctx);
     store.on('executorStateChanged', onExecutorStateChanged);

@@ -21,6 +21,7 @@ interface BottomToolbarProps {
   onToggleAudit: () => void;
   isFeaturesOpen: boolean;
   onToggleFeatures: () => void;
+  onNewIdea: () => void;
   workspaceFolders: WorkspaceFolder[];
 }
 
@@ -36,6 +37,7 @@ export function BottomToolbar({
   onToggleAudit,
   isFeaturesOpen,
   onToggleFeatures,
+  onNewIdea,
   workspaceFolders,
 }: BottomToolbarProps) {
   const board = useBoard();
@@ -175,6 +177,7 @@ export function BottomToolbar({
       >
         Features
       </Button>
+      <Button onClick={onNewIdea}>Nueva idea</Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
         onClick={onToggleSettings}

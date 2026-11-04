@@ -462,3 +462,8 @@
   margin: 0;
   white-space: normal;
 }
+.idea-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 85vh;
+  overflow-y: auto;
+}

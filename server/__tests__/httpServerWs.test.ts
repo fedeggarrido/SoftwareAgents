@@ -4,7 +4,12 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { WS_CLOSE_FORBIDDEN_ORIGIN, WS_CLOSE_UNAUTHORIZED } from '../src/constants.js';
+import {
+  TASK_CLI_INPUT_BYTES,
+  WS_CLOSE_FORBIDDEN_ORIGIN,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_MAX_PAYLOAD_BYTES,
+} from '../src/constants.js';
 
 // Isolated temp HOME: the server writes ~/.pixel-agents/{server.json,servers/}
 // and the consent assertions below read ~/.pixel-agents/config.json.
@@ -225,6 +230,97 @@ describe('/ws connection gate', () => {
     sockets.push(result.socket);
 
     expect(result.accepted).toBe(true);
+  });
+
+  it('refuses draft reads and submissions through the embedded shared dispatcher', async () => {
+    const config = await server.start({ embedded: true, store: new AgentStateStore() });
+    const { socket } = await connect(config.port, { Authorization: `Bearer ${config.token}` });
+    sockets.push(socket);
+    const snapshot = waitForMessage(socket, 'ideasSnapshot');
+    socket.send(JSON.stringify({ type: 'requestIdeas', requestId: 'embedded-read' }));
+    expect(await snapshot).toMatchObject({
+      requestId: 'embedded-read',
+      canSubmit: false,
+      errorCode: 'unsupported_adapter',
+    });
+    const result = waitForMessage(socket, 'submitIdeaResult');
+    socket.send(
+      JSON.stringify({
+        type: 'submitIdea',
+        requestId: 'embedded-submit',
+        projectId: 'P',
+        text: 'draft',
+      }),
+    );
+    expect(await result).toMatchObject({
+      requestId: 'embedded-submit',
+      status: 'rejected',
+      errorCode: 'unsupported_adapter',
+    });
+  });
+
+  it('accepts a worst-case JSON-escaped 1 MiB idea and bounds frames before JSON dispatch', async () => {
+    const { port } = await startStandalone();
+    const { socket } = await connect(port);
+    sockets.push(socket);
+    // Each NUL becomes six ASCII bytes in JSON. Tokenless dispatch must still return denied.
+    const message = JSON.stringify({
+      type: 'submitIdea',
+      requestId: 'large',
+      projectId: 'P',
+      text: '\0'.repeat(TASK_CLI_INPUT_BYTES),
+    });
+    expect(Buffer.byteLength(message)).toBeLessThan(WS_MAX_PAYLOAD_BYTES);
+    const denied = waitForMessage(socket, 'submitIdeaResult');
+    socket.send(message);
+    expect(await denied).toMatchObject({ errorCode: 'denied' });
+    const closed = new Promise<number>((resolve) => socket.once('close', resolve));
+    // Invalid JSON proves the transport limit is enforced before parsing, even without privilege.
+    socket.send('x'.repeat(WS_MAX_PAYLOAD_BYTES + 1));
+    expect(await closed).toBe(1009);
+  });
+
+  it('fits the existing large client messages, including a fully populated 64x64 layout', () => {
+    const cells = Array.from({ length: 64 * 64 }, (_, index) => index);
+    const color = { h: 360, s: 100, b: 100, c: 100, colorize: true };
+    const layout = {
+      version: 1,
+      cols: 64,
+      rows: 64,
+      tiles: cells.map(() => 9),
+      tileColors: cells.map(() => color),
+      carpetTiles: cells.map(() => ({ variant: 99, color, accentColor: color, order: 99 })),
+      furniture: cells.map((i) => ({
+        uid: `furniture-${i}`,
+        type: 'a-long-custom-furniture-asset-name',
+        col: i % 64,
+        row: Math.floor(i / 64),
+        color,
+      })),
+      pets: cells.map((i) => ({
+        uid: `pet-${i}`,
+        type: 'cat',
+        col: i % 64,
+        row: Math.floor(i / 64),
+      })),
+      // eslint-disable-next-line pixel-agents/no-inline-colors -- Serialized layout fixture.
+      areas: cells.map((i) => ({ label: `Area-${i}`, color: '#ffffff' })),
+      areaTiles: cells.map((i) => `Area-${i}`),
+    };
+    for (const message of [
+      { type: 'saveLayout', layout },
+      {
+        type: 'saveAgentSeats',
+        seats: Object.fromEntries(
+          cells.map((i) => [i, { seatId: `seat-${i}`, palette: 9, hueShift: 360 }]),
+        ),
+      },
+      {
+        type: 'saveAreaMappings',
+        mappings: Object.fromEntries(cells.map((i) => [`Area-${i}`, [`/workspace/project-${i}`]])),
+      },
+    ])
+      expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(WS_MAX_PAYLOAD_BYTES);
   });
 });
 

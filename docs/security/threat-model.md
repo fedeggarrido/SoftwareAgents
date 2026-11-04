@@ -51,6 +51,16 @@ herramientas y el handoff limitado de SA-102 permanecen necesarios. Tests de fix
 
 ## Riesgos principales
 
+SA-109 guarda borradores mediante staging exclusivo, fsync, validación y
+publicación atómica sin sobrescritura. Revalida el realpath del staging dentro
+del checkout antes de publicar. Se acepta el riesgo residual de que otro proceso
+del mismo usuario sustituya un directorio padre entre validación y apertura o
+publicación. Node no proporciona aquí apertura relativa a un handle de directorio.
+Las comprobaciones de rutas y propietarios de reservas mantienen el alcance del
+almacén local supervisado. La separación frente a un adversario del mismo usuario
+depende del aislamiento de SO pendiente en SA-058. Los detalles de almacenamiento
+y recuperación están en el [flujo de ideas](../feature-pipeline.md#ideas-desde-la-oficina-sa-109).
+
 Inventario SA-102 y [mapa OWASP Agentic ASI01–ASI10](owasp-agentic.md).
 
 ## Inventario SA-102 de contenido externo (2026-10-30)

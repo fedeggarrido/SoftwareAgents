@@ -36,6 +36,7 @@ import {
   setHooksEnabled as persistHooksEnabled,
   writeConfig,
 } from '../../server/src/configPersistence.js';
+import { handleIdeaMessage } from '../../server/src/featureIdeas.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
@@ -439,7 +440,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (message.type === 'launchAgent') {
+      if (message.type === 'requestIdeas' || message.type === 'submitIdea') {
+        // This adapter has no Project selection contract for these controls yet.
+        handleIdeaMessage(message, (reply) => void this.webview?.postMessage(reply), true, false);
+      } else if (message.type === 'launchAgent') {
         const prevAgentIds = new Set(this.store.keys());
         await launchNewTerminal(
           this.store.nextAgentId,

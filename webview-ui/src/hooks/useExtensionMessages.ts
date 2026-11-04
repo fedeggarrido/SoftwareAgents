@@ -27,6 +27,13 @@ import {
   setFeaturesStore,
 } from '../office/featuresStore.js';
 import { setFloorSprites } from '../office/floorTiles.js';
+import {
+  applyIdeaResult,
+  applyIdeasSnapshot,
+  getIdeasStore,
+  invalidateIdeas,
+  setIdeasStore,
+} from '../office/ideasStore.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
 import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
@@ -373,12 +380,17 @@ export function useExtensionMessages(
         if (next.state?.projectId !== getExecutorStore().state?.projectId) {
           setAuditStore(emptyAuditStore());
           setFeaturesStore(emptyFeaturesStore());
+          setIdeasStore(invalidateIdeas(getIdeasStore()));
         }
         setExecutorStore(next);
       } else if (msg.type === 'auditLog') {
         setAuditStore(applyAuditLog(getAuditStore(), msg));
       } else if (msg.type === 'featuresSnapshot') {
         setFeaturesStore(applyFeaturesSnapshot(getFeaturesStore(), msg));
+      } else if (msg.type === 'ideasSnapshot') {
+        setIdeasStore(applyIdeasSnapshot(getIdeasStore(), msg));
+      } else if (msg.type === 'submitIdeaResult') {
+        setIdeasStore(applyIdeaResult(getIdeasStore(), msg));
       } else if (msg.type === 'executorToggleResult') {
         const settled = applyToggleResult(getExecutorStore(), msg);
         setExecutorStore(settled.store);
@@ -875,6 +887,7 @@ export function useExtensionMessages(
       // panel waits for a connected transport before requesting a fresh log.
       setAuditStore(emptyAuditStore());
       setFeaturesStore(emptyFeaturesStore());
+      setIdeasStore(invalidateIdeas(getIdeasStore()));
     });
     return () => {
       stopAuditLifecycle();

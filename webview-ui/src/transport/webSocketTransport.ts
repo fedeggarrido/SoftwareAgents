@@ -108,8 +108,12 @@ export class WebSocketTransport implements MessageTransport {
       this.ws.send(JSON.stringify(message));
     } else {
       // Mutations are only valid for the live connection and its confirmed revision.
-      if (message.type === 'setExecutorEnabled' || message.type === 'setExecutorLevels')
-        throw new Error('Executor controls require a connected transport');
+      if (
+        message.type === 'setExecutorEnabled' ||
+        message.type === 'setExecutorLevels' ||
+        message.type === 'submitIdea'
+      )
+        throw new Error('Office mutations require a connected transport');
       // Queue messages while connecting (flushed in onopen)
       this.pendingMessages.push(message);
     }

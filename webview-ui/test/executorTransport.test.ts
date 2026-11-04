@@ -148,6 +148,22 @@ describe('executor transport regressions (DOM-free)', () => {
     },
   );
 
+  it('SA-109 never queues a draft if the socket closes before send', () => {
+    FakeSocket.instances[0].open();
+    FakeSocket.instances[0].readyState = 3;
+    const message: ClientMessage = {
+      type: 'submitIdea',
+      projectId: 'P',
+      requestId: 'idea',
+      text: 'untrusted idea',
+    };
+    expect(() => transport.send(message)).toThrow(/connected/);
+    FakeSocket.instances[0].close();
+    vi.advanceTimersByTime(1000);
+    FakeSocket.instances[1].open();
+    expect(FakeSocket.instances[1].sent).toEqual([]);
+  });
+
   it('recovers when the socket closes just before send, while its state still says connected', () => {
     FakeSocket.instances[0].open();
     const message = startToggle('claude', false)!;

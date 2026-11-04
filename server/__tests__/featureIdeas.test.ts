@@ -319,7 +319,7 @@ describe('SA-109 draft ingress', () => {
   });
 
   it('removes its own partial file on write failure and returns only a fixed code', () => {
-    vi.mocked(fs.fsyncSync).mockImplementationOnce((fd) => {
+    vi.mocked(fs.fsyncSync).mockImplementation((fd) => {
       if (fs.fstatSync(fd).size) throw new Error('private filesystem diagnostic');
     });
     expect(submitIdea(request(), true, root)).toMatchObject({
@@ -329,6 +329,7 @@ describe('SA-109 draft ingress', () => {
     });
     expect(fs.existsSync(file('FEAT-001'))).toBe(false);
     expect(readIdeas('r', true, root).ideas).toEqual([]);
+    vi.mocked(fs.fsyncSync).mockRestore();
   });
 
   it('allocates distinct ids for genuinely concurrent processes', async () => {

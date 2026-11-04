@@ -26,7 +26,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-it.each([17, 18])(
+it.each([17, 18, 19])(
   'migrates populated v%s, preserving rows, event IDs and append-only guards across reopening',
   async (version) => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-migration-'));
@@ -60,7 +60,7 @@ it.each([17, 18])(
       INSERT INTO worker_publications VALUES ('p','task','FEAT-001','{"task":"task"}');
       INSERT INTO usage_ledger VALUES ('p','execution','{}');
       INSERT INTO finding_decisions VALUES ('p','execution',0,'{}');`);
-      if (version === 18) {
+      if (version >= 18) {
         db.exec(fixture('workstore-v18-upgrade.sql'));
         db.prepare('UPDATE tasks SET pr_ref = ?, pr_status = ? WHERE key = ?').run(
           ref,
@@ -68,6 +68,66 @@ it.each([17, 18])(
           'task',
         );
         db.exec(fixture('workstore-v18-pr-events.sql'));
+      }
+      if (version === 19) {
+        db.exec(fixture('workstore-v19-upgrade.sql'));
+        db.prepare('UPDATE tasks SET pr_observation = ? WHERE key = ?').run(
+          JSON.stringify({ lastSuccessAt: 9000, attemptedAt: 10000, error: 'unavailable' }),
+          'task',
+        );
+        db.exec(`INSERT INTO tasks (project_id,key,type,status,priority,version,attempt,max_attempts,blocked_reason,created_at,updated_at)
+          VALUES ('p','ci-block','implementation','BLOCKED',1,5,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','human-block','implementation','BLOCKED',1,5,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','suspended-ci','implementation','WAITING_HUMAN',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','decision-first','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','ci-first','implementation','BLOCKED',1,7,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','hidden-human','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','unknown-state','implementation','BLOCKED',1,6,2,3,'CI failed: build','2026-01-01','2026-01-01'),
+            ('p','orphan-ci','implementation','WAITING_HUMAN',1,7,2,3,'CI failed: build','2026-01-01','2026-01-01');
+          INSERT INTO human_decisions (project_id,key,question,answer,actor,decided_at,previous_states)
+          VALUES ('p','decision-gate','Review','review','human','2026-01-01','{"decision-first":"REVIEW"}'),
+            ('p','ci-gate','Review','review','human','2026-01-01','{"ci-first":"BLOCKED"}'),
+            ('p','human-gate','Review','review','human','2026-01-01','{"hidden-human":"BLOCKED"}'),
+            ('p','unknown-gate','Review','review','human','2026-01-01','{}'),
+            ('p','orphan-gate','Review','review','human','2026-01-01','{"orphan-ci":"REVIEW"}');
+          INSERT INTO domain_events (project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at)
+          VALUES ('p','ci-block','TASK_TRANSITIONED','REVIEW','BLOCKED',5,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','human-block','TASK_TRANSITIONED','RUNNING','BLOCKED',5,2,'CI failed: build','worker','2026-01-01'),
+            ('p','suspended-ci','TASK_TRANSITIONED','REVIEW','BLOCKED',5,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','suspended-ci','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',6,2,'gate','system','2026-01-01'),
+            ('p','decision-first','TASK_TRANSITIONED','REVIEW','WAITING_HUMAN',5,2,'decision-gate','system','2026-01-01'),
+            ('p','decision-first','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','ci-first','TASK_TRANSITIONED','REVIEW','BLOCKED',5,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','ci-first','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',6,2,'ci-gate','system','2026-01-01'),
+            ('p','ci-first','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',7,2,'ci-gate','human','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','READY','BLOCKED',4,2,'Human hold','human','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',5,2,'human-gate','system','2026-01-01'),
+            ('p','hidden-human','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','unknown-state','TASK_TRANSITIONED','REVIEW','WAITING_HUMAN',5,2,'unknown-gate','system','2026-01-01'),
+            ('p','unknown-state','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','REVIEW','WAITING_HUMAN',5,2,'orphan-gate','system','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','WAITING_HUMAN','BLOCKED',6,2,'CI failed: build','pr-monitor','2026-01-01'),
+            ('p','orphan-ci','TASK_TRANSITIONED','BLOCKED','WAITING_HUMAN',7,2,'manual_retry: CI fixed','human','2026-01-01');`);
+        db.prepare('UPDATE human_decisions SET escalation = ? WHERE key = ?').run(
+          JSON.stringify({
+            id: 'orphan-gate',
+            context: 'Review change',
+            options: [
+              { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+            ],
+            recommendation: 'Review',
+            disagreement: [],
+            impact: 'Review needed',
+            urgency: 'high',
+            requestedBy: 'system',
+            status: 'answered',
+            blocks: ['orphan-ci'],
+            answer: 'review',
+            answeredBy: 'human',
+            answeredAt: '2026-01-01',
+          }),
+          'orphan-gate',
+        );
       }
     } finally {
       db.close();
@@ -78,14 +138,83 @@ it.each([17, 18])(
       version: version === 17 ? 4 : 6,
       pr_ref: version === 17 ? 'legacy-branch' : ref,
       review_ref: { sha: 'sha' },
-      pr_observation: null,
+      pr_observation:
+        version === 19 ? { lastSuccessAt: 9000, attemptedAt: 10000, error: 'unavailable' } : null,
+      ci_restore_status: null,
+      pr_binding_generation: 0,
+      pr_poll_generation: 0,
+      pr_observed_generation: 0,
     });
     expect(work.listDomainEvents()[0]).toMatchObject({ id: 41, type: 'TASK_TRANSITIONED' });
-    if (version === 18) {
-      expect(work.listDomainEvents().slice(1)).toMatchObject([
+    if (version >= 18) {
+      expect(work.listDomainEvents('task').slice(1)).toMatchObject([
         { id: 42, type: 'PR_UPDATED', task_version: 5 },
         { id: 43, type: 'PR_UPDATED', task_version: 6 },
       ]);
+    }
+    if (version === 19) {
+      expect(work.getTask('ci-block')).toMatchObject({
+        status: 'BLOCKED',
+        version: 5,
+        attempt: 2,
+        ci_restore_status: 'REVIEW',
+      });
+      expect(work.getTask('human-block')).toMatchObject({
+        status: 'BLOCKED',
+        version: 5,
+        attempt: 2,
+        ci_restore_status: null,
+      });
+      expect(work.getTask('suspended-ci')).toMatchObject({
+        status: 'WAITING_HUMAN',
+        version: 6,
+        ci_restore_status: 'REVIEW',
+      });
+      const audit = vi.fn();
+      await work.retryTask('ci-block', 5, 'CI repaired', audit);
+      expect(work.getTask('ci-block')).toMatchObject({
+        status: 'REVIEW',
+        version: 6,
+        attempt: 2,
+        ci_restore_status: null,
+      });
+      await expect(work.retryTask('human-block', 5, 'Try again', audit)).rejects.toThrow();
+      expect(audit).toHaveBeenCalledTimes(1);
+      for (const key of ['hidden-human', 'unknown-state']) {
+        const held = work.getTask(key)!;
+        expect(held).toMatchObject({ status: 'BLOCKED', ci_restore_status: null });
+        await expect(work.retryTask(key, held.version, 'CI fixed', audit)).rejects.toThrow();
+        expect(work.getTask(key)).toEqual(held);
+      }
+      expect(audit).toHaveBeenCalledTimes(1);
+      expect(work.getTask('orphan-ci')).toMatchObject({
+        status: 'WAITING_HUMAN',
+        version: 7,
+        ci_restore_status: 'REVIEW',
+        feature_key: null,
+      });
+      await work.retryTask('orphan-ci', 7, 'CI fixed', audit);
+      expect(work.getTask('orphan-ci')).toMatchObject({
+        status: 'REVIEW',
+        version: 8,
+        attempt: 2,
+        ci_restore_status: null,
+      });
+      expect(work.listDomainEvents('orphan-ci').at(-1)).toMatchObject({
+        from_status: 'WAITING_HUMAN',
+        to_status: 'REVIEW',
+        actor: 'human',
+      });
+      for (const key of ['decision-first', 'ci-first']) {
+        const blocked = work.getTask(key)!;
+        expect(blocked).toMatchObject({ status: 'BLOCKED', ci_restore_status: 'REVIEW' });
+        await work.retryTask(key, blocked.version, 'CI repaired', () => {});
+        expect(work.getTask(key)).toMatchObject({
+          status: 'REVIEW',
+          ci_restore_status: null,
+          attempt: 2,
+        });
+      }
     }
     expect(work.listTaskDependencies('task')[0].depends_on_key).toBe('dependency');
     expect(work.getExecution('execution')!.session_id).toBe('session');
@@ -103,7 +232,7 @@ it.each([17, 18])(
     expect(work.getTask('task')!.version).toBe(version === 17 ? 4 : 6);
     const check = new DatabaseSync(file);
     try {
-      expect(check.prepare('SELECT version FROM schema_version').get()!.version).toBe(19);
+      expect(check.prepare('SELECT version FROM schema_version').get()!.version).toBe(20);
       expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       expect(() => check.exec("UPDATE domain_events SET reason = '' WHERE id = 41")).toThrow(
         'append-only',
@@ -157,6 +286,28 @@ it.each([17, 18])('rolls back every schema change when migration from v%s fails'
       before,
     );
     db.exec('BEGIN; ROLLBACK');
+  } finally {
+    db.close();
+  }
+});
+
+it('rolls back v20 atomically on a populated v19 schema collision', () => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-v20-rollback-'));
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(fixture('workstore-v17.sql'));
+    db.exec(fixture('workstore-v18-upgrade.sql'));
+    db.exec(fixture('workstore-v19-upgrade.sql'));
+    db.exec(
+      "INSERT INTO projects (project_id,created_at) VALUES ('p','2026-01-01'); ALTER TABLE tasks ADD COLUMN pr_binding_generation INTEGER;",
+    );
+    const before = db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all();
+    expect(() => runMigrations(db)).toThrow('pr_binding_generation');
+    expect(db.prepare('SELECT version FROM schema_version').get()!.version).toBe(19);
+    expect(db.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()).toEqual(
+      before,
+    );
+    expect(db.prepare('SELECT * FROM projects').all()).toHaveLength(1);
   } finally {
     db.close();
   }

@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { NewHumanDecision } from '../../core/src/humanDecision.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { readCharacterDetail } from '../src/characterDetail.js';
 import { GH_PR_MAX_BUFFER_BYTES, PR_MAX_CHECKS, PR_MAX_STRING_CHARS } from '../src/constants.js';
@@ -70,6 +71,49 @@ function monitor(
   return new PullRequestMonitor({ repositoryPath: root, projectId: 'p', read, log });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function reviewDecision(): NewHumanDecision {
+  return {
+    id: 'gate',
+    context: 'Review change',
+    options: [
+      { id: 'review', label: 'Review', benefit: 'Confidence', cost: 'Time', risk: 'Delay' },
+    ],
+    recommendation: 'Review',
+    disagreement: [],
+    impact: 'Review needed',
+    urgency: 'high',
+    requestedBy: 'system',
+    blocks: ['SA-055'],
+  };
+}
+
+async function beginPoll(taskId = 'SA-055') {
+  const task = work.getTask(taskId)!;
+  return (await work.beginPullRequestPoll(taskId, task.pr_ref!, task.pr_binding_generation!))!;
+}
+
+async function observePullRequest(
+  ...args: [
+    string,
+    number,
+    string,
+    Parameters<WorkStore['observePullRequest']>[3],
+    Parameters<WorkStore['observePullRequest']>[4],
+  ]
+) {
+  await work.observePullRequest(...args, await beginPoll(args[0]));
+}
+
 describe('PR observations through the real WorkStore and relay', () => {
   it('keeps open green work in REVIEW and projects PR/CI to snapshots, detail and board', async () => {
     const version = work.getTask('SA-055')!.version;
@@ -122,7 +166,7 @@ describe('PR observations through the real WorkStore and relay', () => {
       expect(relay.snapshot().tasks[0]).toMatchObject({ version, prStatus: { ci: 'success' } });
       relay.tick();
       const changed = { ...parsePullRequest(fixture('open-green'), ref), ci: 'pending' as const };
-      await work.observePullRequest('SA-055', version, ref, changed, undefined);
+      await observePullRequest('SA-055', version, ref, changed, undefined);
       expect(relay.snapshot().tasks[0]).toMatchObject({ version, prStatus: { ci: 'pending' } });
       relay.tick();
       expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('pending');
@@ -144,7 +188,7 @@ describe('PR observations through the real WorkStore and relay', () => {
         })),
       );
       const events = work.listDomainEvents();
-      await work.recordPullRequestError('SA-055', ref, 'unavailable');
+      await work.recordPullRequestError('SA-055', ref, 'unavailable', await beginPoll());
       relay.tick();
       expect(work.getTask('SA-055')).toMatchObject({ version, pr_status: changed });
       expect(work.listDomainEvents()).toEqual(events);
@@ -153,7 +197,7 @@ describe('PR observations through the real WorkStore and relay', () => {
       expect(unavailable.items[0].prObservation?.error).toBe('unavailable');
       expect(unavailable).not.toEqual(pending);
       expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('unavailable');
-      await work.observePullRequest('SA-055', version, ref, changed, undefined);
+      await observePullRequest('SA-055', version, ref, changed, undefined);
       expect(work.listDomainEvents()).toEqual(events);
       expect((await source.read(file, 'p', Date.now()))!.items[0].prObservation?.error).toBeNull();
       expect(readCharacterDetail(file, 'p', 'SA-055', 'none')!.ciState).toBe('pending');
@@ -272,6 +316,8 @@ describe('PR observations through the real WorkStore and relay', () => {
     await poller.tick();
     expect(work.getTask('SA-055')).toMatchObject({
       ...before,
+      pr_poll_generation: before!.pr_poll_generation! + 2,
+      pr_observed_generation: before!.pr_observed_generation! + 2,
       pr_observation: { lastSuccessAt: null, error: 'unavailable' },
     });
     expect(work.listDomainEvents()).toEqual([]);
@@ -341,7 +387,7 @@ describe('PR observations through the real WorkStore and relay', () => {
       const rebound = ref.replace('/42', '/43');
       try {
         if (operation === 'observation') {
-          await work.observePullRequest(
+          await observePullRequest(
             'leased',
             lease.version,
             ref,
@@ -402,7 +448,7 @@ describe('PR observations through the real WorkStore and relay', () => {
     const registration = work.setExecutionProcess('execution', 'owner', 12345);
     try {
       expect(processStartIdentity).toHaveBeenCalledWith(12345);
-      await work.observePullRequest(
+      await observePullRequest(
         'launch',
         lease.version,
         ref,
@@ -458,9 +504,12 @@ describe('PR observations through the real WorkStore and relay', () => {
     const before = work.getTask('SA-055')!;
     const pr = parsePullRequest(fixture('merged'), ref);
     await expect(
-      work.observePullRequest(before.key, before.version, ref, pr, undefined),
+      observePullRequest(before.key, before.version, ref, pr, undefined),
     ).rejects.toThrow('manual cleanup decision');
-    expect(work.getTask('SA-055')).toEqual(before);
+    expect(work.getTask('SA-055')).toEqual({
+      ...before,
+      pr_poll_generation: before.pr_poll_generation! + 1,
+    });
     expect(work.listDomainEvents()).toEqual([]);
   });
 
@@ -682,31 +731,333 @@ describe('PR observations through the real WorkStore and relay', () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores an observation older than the latest one', async () => {
+  it('ignores an older poll even when its timestamp is later', async () => {
     work.createTask({ key: 'order', type: 'implementation', status: 'QUEUED' });
     await work.bindPullRequest('order', work.getTask('order')!.version, ref);
     const version = work.getTask('order')!.version;
-    const observe = (name: string, at: number) =>
+    const older = await beginPoll('order');
+    const newer = await beginPoll('order');
+    const observe = (name: string, at: number, poll: typeof older) =>
       work.observePullRequest(
         'order',
         version,
         ref,
         parsePullRequest(fixture(name), ref, at),
         undefined,
+        poll,
       );
-    await observe('open-green', 2000);
-    await observe('failed', 1000);
+    await observe('open-green', 1000, newer);
+    await observe('failed', 2000, older);
     expect(work.getTask('order')).toMatchObject({
       status: 'QUEUED',
-      pr_status: { ci: 'success', observedAt: 2000 },
+      version,
+      pr_status: { ci: 'success', observedAt: 1000 },
     });
+  });
+
+  it('accepts new CI and merge observations after the wall clock moves backward', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(3000);
+    const version = work.getTask('SA-055')!.version;
+    await monitor().tick();
+    clock.mockReturnValue(2000);
+    await monitor(async () => fixture('failed')).tick();
+    expect(work.getTask('SA-055')).toMatchObject({
+      status: 'BLOCKED',
+      version: version + 1,
+      pr_status: { ci: 'failure', observedAt: 2000 },
+    });
+    clock.mockReturnValue(1000);
+    await monitor(async () => fixture('merged')).tick();
+    expect(work.getTask('SA-055')).toMatchObject({
+      status: 'BLOCKED',
+      version: version + 1,
+      pr_status: { state: 'MERGED', observedAt: 1000 },
+      pr_observation: { lastSuccessAt: 1000, attemptedAt: 1000, error: null },
+    });
+    expect(work.listDecisions()).toHaveLength(1);
+    expect(work.listDomainEvents().at(-1)!.type).toBe('PR_MERGED');
+  });
+
+  it.each(['success', 'error'] as const)(
+    'discards delayed %s after a newer error across monitors',
+    async (outcome) => {
+      vi.spyOn(Date, 'now').mockReturnValue(1000);
+      await monitor().tick();
+      const started = deferred<void>();
+      const response = deferred<string>();
+      const older = monitor(async () => {
+        started.resolve();
+        return response.promise;
+      });
+      const pending = older.tick();
+      await started.promise;
+      vi.mocked(Date.now).mockReturnValue(3000);
+      await monitor(async () => {
+        throw new Error('unavailable');
+      }).tick();
+      const before = work.getTask('SA-055')!;
+      const events = work.listDomainEvents();
+      expect(before.pr_observation).toEqual({
+        lastSuccessAt: 1000,
+        attemptedAt: 3000,
+        error: 'unavailable',
+      });
+      vi.mocked(Date.now).mockReturnValue(2000);
+      if (outcome === 'success') response.resolve(fixture('open-green'));
+      else response.reject(new Error('old error'));
+      await pending;
+      expect(work.getTask('SA-055')).toEqual(before);
+      expect(work.listDomainEvents()).toEqual(events);
+      await older.dispose();
+    },
+  );
+
+  it.each(['success', 'error'] as const)(
+    'fences an old binding %s through A -> B -> A',
+    async (outcome) => {
+      const before = work.getTask('SA-055')!;
+      const started = deferred<void>();
+      const response = deferred<string>();
+      const older = monitor(async () => {
+        started.resolve();
+        return response.promise;
+      });
+      const pending = older.tick();
+      await started.promise;
+      await work.bindPullRequest('SA-055', before.version, ref.replace('/42', '/43'));
+      await work.bindPullRequest('SA-055', before.version, ref);
+      expect(
+        await work.beginPullRequestPoll('SA-055', ref, before.pr_binding_generation!),
+      ).toBeUndefined();
+      const rebound = work.getTask('SA-055')!;
+      expect(rebound).toMatchObject({
+        status: 'REVIEW',
+        version: before.version,
+        pr_binding_generation: before.pr_binding_generation! + 2,
+        pr_status: null,
+        pr_observation: null,
+      });
+      if (outcome === 'success') response.resolve(fixture('failed'));
+      else response.reject(new Error('old binding'));
+      await pending;
+      expect(work.getTask('SA-055')).toEqual(rebound);
+      await monitor().tick();
+      expect(work.getTask('SA-055')).toMatchObject({
+        status: 'REVIEW',
+        version: before.version,
+        pr_status: { ci: 'success' },
+      });
+      await older.dispose();
+    },
+  );
+
+  it.each(['decision-first', 'ci-first'] as const)(
+    'restores REVIEW after resolving the gate and retrying (%s)',
+    async (order) => {
+      const red = monitor(async () => fixture('failed'));
+      if (order === 'ci-first') await red.tick();
+      await work.openDecision(reviewDecision());
+      if (order === 'decision-first') await red.tick();
+      const audit = vi.fn();
+      await expect(
+        work.retryTask('SA-055', work.getTask('SA-055')!.version, 'CI fixed', audit),
+      ).rejects.toThrow();
+      expect(audit).not.toHaveBeenCalled();
+      await work.resolveDecision('gate', 'review', 'operator', () => {});
+      expect(work.getTask('SA-055')).toMatchObject({
+        status: 'BLOCKED',
+        ci_restore_status: 'REVIEW',
+      });
+      await monitor().tick();
+      expect(work.getTask('SA-055')!.status).toBe('BLOCKED');
+      const restored = await work.retryTask(
+        'SA-055',
+        work.getTask('SA-055')!.version,
+        'CI fixed',
+        audit,
+      );
+      expect(restored).toMatchObject({
+        status: 'REVIEW',
+        ci_restore_status: null,
+        blocked_reason: null,
+      });
+      expect(work.listDecisions()[0].status).toBe('answered');
+      expect(audit).toHaveBeenCalledTimes(1);
+      await red.dispose();
+    },
+  );
+
+  it.each(['BLOCKED', 'unknown', null])(
+    'leaves a suspended human block unowned when its saved state is %s',
+    async (saved) => {
+      await work.transition(
+        'SA-055',
+        work.getTask('SA-055')!.version,
+        'BLOCKED',
+        'Human hold',
+        'human',
+      );
+      await work.openDecision(reviewDecision());
+      const db = new DatabaseSync(file);
+      try {
+        db.prepare('UPDATE human_decisions SET previous_states = ? WHERE key = ?').run(
+          JSON.stringify({ 'SA-055': saved }),
+          'gate',
+        );
+      } finally {
+        db.close();
+      }
+      const before = work.getTask('SA-055')!;
+      await monitor(async () => fixture('failed')).tick();
+      expect(work.getTask('SA-055')).toMatchObject({
+        status: 'WAITING_HUMAN',
+        version: before.version,
+        blocked_reason: 'Human hold',
+        ci_restore_status: null,
+        ci_restore_blocked_reason: null,
+        pr_status: { ci: 'failure' },
+      });
+    },
+  );
+
+  it.each(['direct', 'decision-first', 'ci-first'])(
+    'preserves infrastructure admission through CI and retry (%s)',
+    async (order) => {
+      const diagnostic = 'Verifier infrastructure: test runner unavailable';
+      work.createTask({
+        key: 'developer',
+        type: 'code',
+        agent_role: 'developer',
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+        pr_ref: ref,
+      });
+      // A real claim of the identical pre-CI state proves the baseline admission.
+      work.createTask({
+        key: 'baseline',
+        type: 'code',
+        agent_role: 'developer',
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+      });
+      const db = new DatabaseSync(file);
+      try {
+        db.prepare('UPDATE tasks SET blocked_reason = ? WHERE key IN (?, ?)').run(
+          diagnostic,
+          'developer',
+          'baseline',
+        );
+      } finally {
+        db.close();
+      }
+      expect(await work.claim('baseline', 'baseline-owner')).toMatchObject({ status: 'LEASED' });
+      if (order === 'ci-first') await monitor(async () => fixture('failed')).tick();
+      if (order !== 'direct')
+        await work.openDecision({ ...reviewDecision(), blocks: ['developer'] });
+      if (order !== 'ci-first') await monitor(async () => fixture('failed')).tick();
+      expect(work.getTask('developer')).toMatchObject({
+        ci_restore_status: 'FAILED_RETRYABLE',
+        ci_restore_blocked_reason: diagnostic,
+      });
+      if (order !== 'direct') await work.resolveDecision('gate', 'review', 'operator', () => {});
+      const retried = await work.retryTask(
+        'developer',
+        work.getTask('developer')!.version,
+        'CI fixed',
+        () => {},
+      );
+      expect(retried).toMatchObject({
+        status: 'FAILED_RETRYABLE',
+        attempt: 2,
+        max_attempts: 3,
+        blocked_reason: diagnostic,
+        ci_restore_status: null,
+        ci_restore_blocked_reason: null,
+      });
+      expect(await work.claim('developer', 'owner')).toMatchObject({
+        status: 'LEASED',
+        lease_owner: 'owner',
+      });
+    },
+  );
+
+  it('refuses a non-monitor RUNNING block with the CI prefix before auditing', async () => {
+    work.createTask({ key: 'manual', type: 'implementation', status: 'QUEUED' });
+    await work.claim('manual', 'owner');
+    await work.transition('manual', work.getTask('manual')!.version, 'RUNNING', 'start', 'owner');
+    const blocked = await work.transition(
+      'manual',
+      work.getTask('manual')!.version,
+      'BLOCKED',
+      'CI failed: operator hold',
+      'owner',
+    );
+    const audit = vi.fn();
+    await expect(work.retryTask('manual', blocked.version, 'retry', audit)).rejects.toThrow();
+    expect(work.getTask('manual')).toEqual(blocked);
+    expect(blocked.ci_restore_status).toBeNull();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it('validates a CI retry lease and dependencies before auditing', async () => {
+    work.createTask({ key: 'queued', type: 'implementation', status: 'QUEUED', pr_ref: ref });
+    await monitor(async () => fixture('failed')).tick();
+    work.createTask({ key: 'dependency', type: 'implementation', status: 'DRAFT' });
+    work.addTaskDependency('queued', 'dependency');
+    const blocked = work.getTask('queued')!;
+    const audit = vi.fn();
+    await expect(work.retryTask('queued', blocked.version, 'retry', audit)).rejects.toThrow(
+      'DEPENDENCIES_NOT_DONE',
+    );
+    expect(work.getTask('queued')).toEqual(blocked);
+    const db = new DatabaseSync(file);
+    try {
+      db.prepare('UPDATE tasks SET lease_owner = ?, lease_expires_at = ? WHERE key = ?').run(
+        'owner',
+        '2099-01-01T00:00:00.000Z',
+        'queued',
+      );
+    } finally {
+      db.close();
+    }
+    await expect(work.retryTask('queued', blocked.version, 'retry', audit)).rejects.toThrow(
+      'lease',
+    );
+    expect(audit).not.toHaveBeenCalled();
+    expect(work.getTask('queued')).toMatchObject({ status: 'BLOCKED', lease_owner: 'owner' });
+  });
+
+  it('clears CI provenance when a human leaves the block before a later ordinary block', async () => {
+    await monitor(async () => fixture('failed')).tick();
+    const blocked = work.getTask('SA-055')!;
+    const ready = await work.transition(
+      'SA-055',
+      blocked.version,
+      'READY',
+      'operator reset',
+      'human',
+    );
+    expect(ready.ci_restore_status).toBeNull();
+    const held = await work.transition(
+      'SA-055',
+      ready.version,
+      'BLOCKED',
+      'CI failed: manual hold',
+      'human',
+    );
+    const audit = vi.fn();
+    await expect(work.retryTask('SA-055', held.version, 'retry', audit)).rejects.toThrow();
+    expect(work.getTask('SA-055')).toEqual(held);
+    expect(audit).not.toHaveBeenCalled();
   });
 
   it('lets only a human retry restore a CI-blocked task to its previous state', async () => {
     work.createTask({ key: 'ci-block', type: 'implementation', status: 'QUEUED' });
     await work.bindPullRequest('ci-block', work.getTask('ci-block')!.version, ref);
     const observe = (name: string, at: number) =>
-      work.observePullRequest(
+      observePullRequest(
         'ci-block',
         work.getTask('ci-block')!.version,
         ref,

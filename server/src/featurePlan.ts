@@ -1,6 +1,5 @@
 import type { FeaturePlan, FeaturePlanError } from '../../core/src/messages.js';
 import type { ProjectConfig } from '../../core/src/project.js';
-import { approveFeature, FeatureApprovedAuditPending } from './commands/feature.js';
 import { companyWorkspaceRoot } from './companyControl.js';
 import { FEATURE_PLAN_REVISION_PATTERN } from './constants.js';
 import { featureIngressActor } from './featureIngress.js';
@@ -93,6 +92,8 @@ export async function handleFeaturePlanMessage(
       projectId: config.project.id,
     });
     try {
+      // Loaded on demand: reads and handler import stay free of the runtime stages.
+      const { approveFeature } = await import('./commands/feature.js');
       await approveFeature(store, config, msg.key, 'human', undefined, {
         gitSha: plan.specSha,
         revision: plan.revision,
@@ -103,7 +104,7 @@ export async function handleFeaturePlanMessage(
     }
   } catch (error) {
     // The approval is durable; only its confirmation entry failed.
-    if (error instanceof FeatureApprovedAuditPending) return reply(null);
+    if ((error as Error).name === 'FeatureApprovedAuditPending') return reply(null);
     reply(
       error instanceof StaleFeaturePlan || error instanceof FeatureRevisionChangedError
         ? 'stale_revision'

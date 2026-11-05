@@ -81,7 +81,7 @@ export class FeaturePlanController {
         loading: false,
         notice: 'Sin conexión. La aprobación requiere volver a leer el plan.',
       });
-      if (state === 'connected') this.refresh();
+      if (state === 'connected') this.read(this.view.notice);
     });
     this.refresh();
     return () => {
@@ -90,10 +90,12 @@ export class FeaturePlanController {
       offState();
     };
   }
-  refresh = () => {
+  /** A manual refresh replaces any earlier notice; an approval keeps its own outcome. */
+  refresh = () => this.read('');
+  private read(notice: string) {
     if (this.view.pending || this.transport.state !== 'connected') return;
     this.readId = `plan-${++sequence}`;
-    this.update({ ...this.view, snapshot: null, loading: true });
+    this.update({ ...this.view, snapshot: null, loading: true, notice });
     this.deadline();
     this.transport.send({
       type: 'requestFeaturePlan',
@@ -101,7 +103,7 @@ export class FeaturePlanController {
       key: this.key,
       requestId: this.readId,
     });
-  };
+  }
   approve = () => {
     const snapshot = this.view.snapshot;
     if (
@@ -142,13 +144,10 @@ export class FeaturePlanController {
         return;
       clearTimeout(this.timer);
       this.approval = null;
-      this.update({
-        snapshot: null,
-        loading: false,
-        pending: false,
-        notice: message.status === 'approved' ? 'Plan aprobado.' : planErrorText(message.errorCode),
-      });
-      this.refresh();
+      const notice =
+        message.status === 'approved' ? 'Plan aprobado.' : planErrorText(message.errorCode);
+      this.update({ snapshot: null, loading: false, pending: false, notice });
+      this.read(notice);
     }
   };
 }

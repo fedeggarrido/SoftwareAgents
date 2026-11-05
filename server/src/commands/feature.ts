@@ -96,6 +96,7 @@ export async function approveFeature(
 }
 
 export class FeatureApprovedAuditPending extends Error {
+  override name = 'FeatureApprovedAuditPending';
   constructor(cause: unknown) {
     super('Feature approved; audit confirmation pending. Inspect WorkStore before retrying.', {
       cause,

@@ -200,3 +200,35 @@ describe('SA-111 plan approval', () => {
     expect(html).not.toContain('Plan aprobado');
   });
 });
+
+describe('SA-111 plan notices', () => {
+  it('clears a read error once a manual refresh loads the plan', () => {
+    const sent: { requestId: string }[] = [];
+    const controller = new FeaturePlanController(
+      {
+        state: 'connected',
+        send: (message: { requestId: string }) => sent.push(message),
+        onMessage: () => () => {},
+        onStateChange: () => () => {},
+      } as unknown as ConstructorParameters<typeof FeaturePlanController>[0],
+      'P',
+      'FEAT-001',
+    );
+    const reply = (errorCode: string | null) =>
+      controller.receive({
+        type: 'featurePlanSnapshot',
+        projectId: 'P',
+        key: 'FEAT-001',
+        requestId: sent[sent.length - 1].requestId,
+        plan: null,
+        canApprove: false,
+        errorCode,
+      } as Parameters<typeof controller.receive>[0]);
+    controller.refresh();
+    reply('unavailable');
+    expect(controller.getSnapshot().notice).toContain('No se pudo leer');
+    controller.refresh();
+    reply(null);
+    expect(controller.getSnapshot().notice).toBe('');
+  });
+});

@@ -17,6 +17,14 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `featurePlan.ts` (SA-111) proyecta el FeatureSpec, TechnicalDesign y DAG ya
+  vinculados mediante lectura SQLite y barreras Git compartidas. Marca secciones
+  ausentes y publica una revisión SHA-256. La aprobación WS exige privilegio del
+  operador, rechaza marcadores gestionados y reutiliza `commands/feature.ts`.
+  El servicio valida de nuevo la revisión bajo transacción, serializa reenvíos y
+  registra una única intención duradera `pending`. El WorkStore acredita el commit.
+  Lectura disponible sin token para el Project vinculado. VS Code rechaza la ruta.
+
 - `featureIdeas.ts` (SA-109): borradores locales `.softwareagents/ideas/<Project>/FEAT-NNN.md`,
   ids reservados con creación exclusiva y colisiones con Features/Brain/ideas.
   `requestIdeas`/`submitIdea` usan el WS privilegiado existente; solo id/hash en
@@ -83,6 +91,12 @@ para lecturas puntuales.
   prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.
 
 ### Paneles (`webview-ui/src/components/`)
+
+- `FeaturePlanDialog.tsx` y `office/featurePlanController.ts` (SA-111) abren «Ver
+  plan» desde FeaturesPanel. Siete secciones de texto literal y aprobación con
+  revisión explícita. Solo lectura sin privilegio, doble clic bloqueado,
+  desconexión/timeout invalidan la capacidad y una revisión obsoleta provoca una
+  lectura nueva. El humano debe volver a aprobar. No editan ni lanzan etapas.
 
 Consumen la proyección compartida de `webview-ui/src/office/boardStore.ts`.
 Las acciones se envían por Transport y el runtime valida su autoridad.

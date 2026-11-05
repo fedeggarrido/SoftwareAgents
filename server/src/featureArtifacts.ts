@@ -4,7 +4,7 @@ import type { ProjectConfig } from '../../core/src/project.js';
 import { architectPaths } from './architect.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { withoutOperatorToken } from './featureIngress.js';
-import { readRequirements, requirementsDocPath } from './requirements.js';
+import { requirementsDocPath, validateRequirements } from './requirements.js';
 import type { FeatureRecord, WorkStore } from './workstore/WorkStore.js';
 
 function git(cwd: string, args: string[]): string {
@@ -17,7 +17,11 @@ function git(cwd: string, args: string[]): string {
 }
 
 /** The feature document lives in its worker branch, even before integration. */
-export function featureDocument(store: WorkStore, config: ProjectConfig, feature: FeatureRecord) {
+export function featureDocument(
+  store: Pick<WorkStore, 'getTask' | 'getDesign'>,
+  config: ProjectConfig,
+  feature: FeatureRecord,
+) {
   const task = store.getTask(feature.key);
   const relative = requirementsDocPath(config.project.brain.path, feature.key);
   const expectedTree = taskPath(config.repoRoot, `.worktrees/${feature.key}`);
@@ -30,6 +34,11 @@ export function featureDocument(store: WorkStore, config: ProjectConfig, feature
     throw new Error('Feature branch or document binding changed');
   const source = readTaskInput(expectedTree, relative);
   const design = store.getDesign(feature.key);
+  const sources = {
+    requirements: source,
+    design: null as string | null,
+    dag: null as string | null,
+  };
   const head = design?.git_sha ?? feature.git_sha;
   if (
     git(expectedTree, ['rev-parse', 'HEAD']).trim() !== head ||
@@ -54,7 +63,9 @@ export function featureDocument(store: WorkStore, config: ProjectConfig, feature
         git(expectedTree, ['show', `:${relative}`]) !== content
       )
         throw new Error('Design SHA no longer matches the branch file');
+      if (relative === paths.doc) sources.design = content;
+      else sources.dag = content;
     }
   }
-  return { spec: readRequirements(expectedTree, relative, feature.key), branch: task.branch };
+  return { spec: validateRequirements(source, feature.key), branch: task.branch, sources };
 }

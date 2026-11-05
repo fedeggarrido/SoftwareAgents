@@ -72,6 +72,7 @@ import type {
   WorkerPublication,
   WorkStore,
 } from './WorkStore.js';
+import { FeatureRevisionChangedError } from './WorkStore.js';
 
 const execute = promisify(execFile);
 const CI_RESTORE_STATUSES: readonly TaskStatus[] = [
@@ -1370,10 +1371,14 @@ class SqliteWorkStore implements WorkStore {
       return reserved.slice(0, count);
     });
   }
-  approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void> {
+  approveFeature(
+    key: string,
+    gitSha: string,
+    beforeCommit: (alreadyApproved: boolean) => void,
+  ): Promise<void> {
     return this.write(() => {
       const feature = this.getFeature(key);
-      if (!feature || feature.git_sha !== gitSha) throw new Error('Feature revision changed');
+      if (!feature || feature.git_sha !== gitSha) throw new FeatureRevisionChangedError();
       if (!['draft', 'in_review', 'approved'].includes(feature.status))
         throw new Error('Feature is not reviewable');
       if (this.listDecisions().some((d) => d.status !== 'answered' && d.blocks.includes(key)))
@@ -1381,7 +1386,8 @@ class SqliteWorkStore implements WorkStore {
       const task = this.getTask(key);
       if (task && (task.lease_owner || task.status === 'WAITING_HUMAN'))
         throw new Error('Feature requirements are still active or waiting for a human');
-      beforeCommit();
+      beforeCommit(feature.status === 'approved');
+      if (feature.status === 'approved') return;
       this.db
         .prepare('UPDATE features SET status = ?, updated_at = ? WHERE project_id = ? AND key = ?')
         .run('approved', new Date().toISOString(), this.projectId, key);

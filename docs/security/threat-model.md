@@ -306,6 +306,18 @@ ni seguridad semántica de sus resúmenes.
 
 ### 5. Token del servidor en la URL
 
+- **SA-111.** `approveFeaturePlan` usa exclusivamente el privilegio decidido por
+  el handshake WS de esta sección. Antes de resolver el Project rechaza conexiones
+  sin privilegio y servidores con marcadores gestionados. El servidor fija `human`
+  al invocar `approveFeature`; campos cliente como `actor` o `privileged` son
+  inválidos. El adapter VS Code y su WS embedded rechazan este control.
+  `requestFeaturePlan` y el listado `requestFeatures` permiten lectura sin token,
+  exclusivamente del Project vinculado. Esa lectura incluye el contenido de los
+  artefactos del plan. El Operator debe controlar quién puede alcanzar su oficina.
+  El contenido se renderiza como texto escapado, sin HTML, Markdown activo,
+  navegación, herramientas ni ejecución. El contenido del plan nunca se registra
+  en logs o auditoría.
+
 - **SA-095 (telemetría):** OTLP/HTTP está desactivado por defecto y solo lo habilita
   Operator config. Activado, salen al collector elegido IDs de traza/Execution/Task,
   proveedor/modelos, rol/nivel/esfuerzo, nombres de herramienta, contadores, tiempos
@@ -384,6 +396,27 @@ ni seguridad semántica de sus resúmenes.
   automatizar el merge; requerir una Human Decision antes de cambiar este Gate.
 
 ### 9. Ingreso humano con token privilegiado (SA-107)
+
+- **SA-111.** La aprobación en oficina conserva el WS privilegiado de §5 y el
+  servicio CLI compartido. No requiere la confirmación TTY del CLI. La presencia
+  de `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` o `CLAUDECODE` en el
+  proceso servidor, incluso con valor vacío, deshabilita y rechaza la aprobación.
+  Son marcadores del servidor, no pruebas de identidad del cliente. No se aceptan
+  marcadores ni actores enviados por el cliente. Un Agent sin privilegio no puede
+  aprobar. La capacidad bearer robada por un proceso sin marcadores conserva el
+  riesgo residual de mismo usuario descrito abajo y exige la separación de SA-058.
+  La revisión enviada es SHA-256 del key, SHA del spec y fuentes completas del
+  FeatureSpec, TechnicalDesign y DAG mostrados. Se comprueba de nuevo bajo la
+  transacción de aprobación y la barrera Git de `featureDocument`. Una revisión
+  obsoleta requiere refresco y otro clic humano. El WorkStore serializa los
+  reenvíos, revalida sus barreras y evita mutar una aprobación existente.
+  CLI y oficina registran una sola intención duradera `pending` por transición,
+  con política, actor y SHA, antes del commit SQLite. Si falla la auditoría se
+  deniega. El WorkStore acredita el commit, ya que el JSONL y SQLite no comparten
+  transacción. Un fallo del commit puede dejar una intención pendiente sin
+  aprobación. No se añade una segunda confirmación JSONL y los reenvíos de una
+  aprobación confirmada no añaden entradas. Los rechazos del servicio conservan
+  su auditoría. No se lanza ninguna etapa al leer o aprobar.
 
 - **Descripción:** borrar `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` y
   `CLAUDECODE` ya no basta para presentar una decisión humana por CLI.

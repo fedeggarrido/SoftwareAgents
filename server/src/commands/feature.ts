@@ -36,10 +36,12 @@ export async function approveFeature(
   key: string,
   actor: PolicyActor,
   audit = new AuditLog(),
+  reviewed?: { gitSha: string; beforeCommit: () => void },
 ) {
   actor = featureIngressActor(actor);
   const policy = evaluatePolicy('approve_featurespec', actor, config.operator.autonomyLevel);
   let reviewedSha: string | null = null;
+  let intentRecorded = false;
   const append = (status: string) =>
     audit.append({
       projectId: store.projectId,
@@ -59,25 +61,37 @@ export async function approveFeature(
       throw new Error('FeatureSpec approval requires the human operator');
     const feature = store.getFeature(key);
     if (!feature) throw new Error('Unknown Feature');
-    reviewedSha = feature.git_sha;
-    await store.approveFeature(key, feature.git_sha, () => {
+    reviewedSha = reviewed?.gitSha ?? feature.git_sha;
+    await store.approveFeature(key, reviewedSha, (alreadyApproved) => {
+      reviewed?.beforeCommit();
       const { spec } = featureDocument(store, config, feature);
       if (spec.openQuestions.length)
         throw new Error('Feature has unresolved product questions; incorporate --answers first');
-      append('pending');
+      // One pending/approved pair per transition.
+      // Replays validate the revision but neither mutate nor append another entry.
+      if (!alreadyApproved && !intentRecorded) {
+        append('pending');
+        intentRecorded = true;
+      }
     });
   } catch (error) {
     append('rejected');
     throw error;
   }
+  if (!intentRecorded) return; // Idempotent replay: nothing transitioned.
   // A committed approval remains committed if confirmation logging fails.
   try {
     append('approved');
   } catch (cause) {
-    throw new Error(
-      'Feature approved; audit confirmation pending. Inspect WorkStore before retrying.',
-      { cause },
-    );
+    throw new FeatureApprovedAuditPending(cause);
+  }
+}
+
+export class FeatureApprovedAuditPending extends Error {
+  constructor(cause: unknown) {
+    super('Feature approved; audit confirmation pending. Inspect WorkStore before retrying.', {
+      cause,
+    });
   }
 }
 
@@ -310,7 +324,8 @@ export async function runFeatureCommand(
       log(`${key}: approved`);
     } else {
       if (!feature) throw new Error('Unknown Feature');
-      const document = featureDocument(store, config, feature);
+      const { spec, branch } = featureDocument(store, config, feature);
+      const document = { spec, branch };
       const resultTaskKeys = new Set(
         store
           .listTasks()

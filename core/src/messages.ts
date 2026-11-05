@@ -8,6 +8,8 @@
  */
 
 export type ServerMessage =
+  | FeaturePlanSnapshot
+  | FeatureApprovalResult
   | IdeasSnapshot
   | SubmitIdeaResult
   | FeaturesSnapshot
@@ -53,6 +55,8 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestFeaturePlan
+  | ApproveFeaturePlan
   | RequestIdeas
   | SubmitIdea
   | RequestFeatures
@@ -84,6 +88,55 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface FeaturePlanSnapshot {
+  type: 'featurePlanSnapshot';
+  projectId: string;
+  requestId: string;
+  key: string;
+  canApprove: boolean;
+  errorCode: FeaturePlanError | null;
+  plan: FeaturePlan | null;
+}
+
+export type FeaturePlanError =
+  | 'denied'
+  | 'unsupported_adapter'
+  | 'invalid_request'
+  | 'unknown_project'
+  | 'unavailable'
+  | 'stale_revision'
+  | 'approval_blocked';
+
+export interface FeaturePlan {
+  key: string;
+  title: string;
+  revision: string;
+  specSha: string;
+  approved: boolean;
+  sections: FeaturePlanSection[];
+}
+
+export interface FeaturePlanSection {
+  id: FeaturePlanSectionId;
+  title: string;
+  content: string | null;
+}
+
+export type FeaturePlanSectionId =
+  'requirements' | 'architecture' | 'tasks' | 'tests' | 'ci' | 'security' | 'documentation';
+
+export interface FeatureApprovalResult {
+  type: 'featureApprovalResult';
+  projectId: string;
+  requestId: string;
+  key: string;
+  revision: string;
+  status: FeatureApprovalStatus;
+  errorCode: FeaturePlanError | null;
+}
+
+export type FeatureApprovalStatus = 'approved' | 'rejected';
 
 export interface IdeasSnapshot {
   type: 'ideasSnapshot';
@@ -934,6 +987,21 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestFeaturePlan {
+  type: 'requestFeaturePlan';
+  projectId: string;
+  requestId: string;
+  key: string;
+}
+
+export interface ApproveFeaturePlan {
+  type: 'approveFeaturePlan';
+  projectId: string;
+  requestId: string;
+  key: string;
+  revision: string;
 }
 
 export interface RequestIdeas {

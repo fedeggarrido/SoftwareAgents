@@ -77,6 +77,8 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/FeaturePlanSnapshot'
+        - $ref: '#/components/schemas/FeatureApprovalResult'
         - $ref: '#/components/schemas/IdeasSnapshot'
         - $ref: '#/components/schemas/SubmitIdeaResult'
         - $ref: '#/components/schemas/FeaturesSnapshot'
@@ -137,6 +139,8 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestFeaturePlan'
+        - $ref: '#/components/schemas/ApproveFeaturePlan'
         - $ref: '#/components/schemas/RequestIdeas'
         - $ref: '#/components/schemas/SubmitIdea'
         - $ref: '#/components/schemas/RequestFeatures'
@@ -171,6 +175,142 @@ components:
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
+
+    RequestFeaturePlan:
+      description: Read the server-bound feature plan. Available to read-only connections. No execution or writes.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key]
+      properties:
+        type:
+          const: requestFeaturePlan
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+          pattern: '^FEAT-\d{3}$'
+
+    ApproveFeaturePlan:
+      description: Privileged connection only. Revision is the hash of the displayed plan. No client actor or stage control.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, revision]
+      properties:
+        type:
+          const: approveFeaturePlan
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+          pattern: '^FEAT-\d{3}$'
+        revision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+
+    FeaturePlanError:
+      type: string
+      enum:
+        [
+          denied,
+          unsupported_adapter,
+          invalid_request,
+          unknown_project,
+          unavailable,
+          stale_revision,
+          approval_blocked,
+        ]
+
+    FeaturePlanSectionId:
+      type: string
+      enum: [requirements, architecture, tasks, tests, ci, security, documentation]
+
+    FeatureApprovalStatus:
+      type: string
+      enum: [approved, rejected]
+
+    FeaturePlanSection:
+      type: object
+      additionalProperties: false
+      required: [id, title, content]
+      properties:
+        id:
+          $ref: '#/components/schemas/FeaturePlanSectionId'
+        title:
+          type: string
+        content:
+          type: [string, 'null']
+
+    FeaturePlan:
+      description: Literal existing FeatureSpec, TechnicalDesign and DAG projection. Null section means missing. Never interpret content as HTML or Markdown. No content in logs or audit.
+      type: object
+      additionalProperties: false
+      required: [key, title, revision, specSha, approved, sections]
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        revision:
+          type: string
+        specSha:
+          type: string
+        approved:
+          type: boolean
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturePlanSection'
+
+    FeaturePlanSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, canApprove, errorCode, plan]
+      properties:
+        type:
+          const: featurePlanSnapshot
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+        canApprove:
+          type: boolean
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturePlanError'
+            - type: 'null'
+        plan:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturePlan'
+            - type: 'null'
+
+    FeatureApprovalResult:
+      description: Point-to-point result. Stale revision requires a fresh plan read and a new human click. No automatic approval retry.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, revision, status, errorCode]
+      properties:
+        type:
+          const: featureApprovalResult
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+        revision:
+          type: string
+        status:
+          $ref: '#/components/schemas/FeatureApprovalStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturePlanError'
+            - type: 'null'
 
     RequestIdeas:
       description: Read draft ids and submission readiness for the server-bound Project. Privilege is checked before probing the Project.

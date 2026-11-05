@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuditLog } from '../src/auditLog.js';
 import { approveFeature, runFeatureCommand } from '../src/commands/feature.js';
+import * as companyControl from '../src/companyControl.js';
+import { developerRequest } from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { handleFeaturePlanMessage, readFeaturePlan } from '../src/featurePlan.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { readRequirements, requirementsDocPath } from '../src/requirements.js';
@@ -117,6 +120,91 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake CLIs)', () => {
+  it('SA-111 shows a literal plan to read-only clients, refuses stale revisions, and approves once over WS', async () => {
+    await run();
+    vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(repo);
+    const config = loadProjectConfig(repo, true)!;
+    const send = vi.fn();
+    const request = {
+      type: 'requestFeaturePlan',
+      projectId: 'test',
+      requestId: 'read',
+      key: 'FEAT-001',
+    };
+    const append = vi.spyOn(AuditLog.prototype, 'append');
+    await handleFeaturePlanMessage(request, send, false);
+    const snapshot = send.mock.calls.at(-1)![0];
+    expect(snapshot.canApprove).toBe(false);
+    expect(
+      snapshot.plan.sections.find((section: { id: string }) => section.id === 'architecture')
+        .content,
+    ).toBeNull();
+    expect(
+      snapshot.plan.sections.find((section: { id: string }) => section.id === 'requirements')
+        .content,
+    ).toContain('Audit view');
+    expect(append).not.toHaveBeenCalled();
+    const approval = { ...request, type: 'approveFeaturePlan', revision: snapshot.plan.revision };
+    await handleFeaturePlanMessage({ ...approval, revision: '0'.repeat(64) }, send, true);
+    expect(send.mock.calls.at(-1)![0].errorCode).toBe('stale_revision');
+    expect(append).not.toHaveBeenCalled();
+    await Promise.all([
+      handleFeaturePlanMessage(approval, send, true),
+      handleFeaturePlanMessage({ ...approval, requestId: 'double-click' }, send, true),
+    ]);
+    await handleFeaturePlanMessage({ ...approval, requestId: 'replay' }, send, true);
+    expect(send.mock.calls.slice(-3).every(([reply]) => reply.status === 'approved')).toBe(true);
+    const approvals = append.mock.calls.filter(([entry]) => entry.action === 'approve_featurespec');
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0][0]).toMatchObject({ actorType: 'human', actorId: 'operator' });
+    expect(JSON.stringify(approvals)).not.toContain('Inspect audit events');
+    expect(readFeaturePlan(config, 'FEAT-001')).toMatchObject({
+      approved: true,
+      revision: approval.revision,
+    });
+  });
+
+  it('SA-111 leaves the Developer gate closed for an unapproved feature through its normal entry', async () => {
+    await run();
+    const store = await storeFor();
+    try {
+      expect(() => developerRequest(store, loadProjectConfig(repo, true)!, 'FEAT-001')).toThrow(
+        'approved FeatureSpec',
+      );
+      const before = launchLog().length;
+      await expect(runFeatureCommand(['develop', 'FEAT-001'], repo, () => {})).rejects.toThrow(
+        'approved FeatureSpec',
+      );
+      expect(launchLog()).toHaveLength(before);
+      expect(store.getFeature('FEAT-001')?.status).toBe('in_review');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('SA-111 revalidates displayed content inside the approval transaction', async () => {
+    await run();
+    const store = await storeFor();
+    try {
+      const config = loadProjectConfig(repo, true)!;
+      const plan = readFeaturePlan(config, 'FEAT-001');
+      const audit = new AuditLog();
+      const append = vi.spyOn(audit, 'append');
+      await expect(
+        approveFeature(store, config, 'FEAT-001', 'human', audit, {
+          gitSha: plan.specSha,
+          beforeCommit: () => {
+            throw new Error('stale_revision');
+          },
+        }),
+      ).rejects.toThrow('stale_revision');
+      expect(store.getFeature('FEAT-001')?.status).toBe('in_review');
+      expect(append.mock.calls.every(([entry]) => entry.outcome.status === 'rejected')).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
   it.each(['claude', 'codex'] as const)(
     'commits a validated spec, registers SHA, shows and approves once through %s',
     async (selected) => {
@@ -161,7 +249,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
               (r) =>
                 !r.corrupt &&
                 r.entry.action === 'approve_featurespec' &&
-                r.entry.outcome.status === 'approved',
+                r.entry.outcome.status === 'pending',
             ),
         ).toBe(true);
         const args = launchLog()[0].args as string[];
@@ -472,7 +560,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
     ).toBe(false);
   });
 
-  it('requires durable approval intent and reports a committed approval if confirmation fails', async () => {
+  it('requires one durable approval intent and makes retries idempotent', async () => {
     await run();
     const store = await storeFor();
     try {
@@ -487,14 +575,15 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
         'audit intent unavailable',
       );
       expect(store.getFeature('FEAT-001')?.status).toBe('in_review');
-      spy.mockImplementation((entry) => {
-        if (entry.outcome.status === 'approved') throw new Error('confirmation unavailable');
-        return append(entry);
-      });
-      await expect(approveFeature(store, config, 'FEAT-001', 'human', audit)).rejects.toThrow(
-        'Feature approved; audit confirmation pending',
-      );
+      spy.mockImplementation(append);
+      spy.mockClear();
+      await Promise.all([
+        approveFeature(store, config, 'FEAT-001', 'human', audit),
+        approveFeature(store, config, 'FEAT-001', 'human', audit),
+      ]);
       expect(store.getFeature('FEAT-001')?.status).toBe('approved');
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy.mock.calls[0][0].outcome.status).toBe('pending');
     } finally {
       store.close();
     }

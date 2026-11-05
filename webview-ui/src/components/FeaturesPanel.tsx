@@ -21,6 +21,7 @@ import {
 import { ideaErrorText, requestIdeas } from '../office/ideasStore.js';
 import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
+import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
@@ -123,6 +124,11 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
                 <span className="text-accent-bright">{feature.key}</span>
                 {feature.title && <span className="feature-title"> · {feature.title}</span>}
               </h3>
+              <FeaturePlanButton
+                key={`${projectId}/${feature.key}`}
+                projectId={projectId}
+                featureKey={feature.key}
+              />
               <span className="feature-state-chip">{featureStateLabel(feature)}</span>
               <div className="feature-progress">
                 {feature.progress && (

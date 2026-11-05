@@ -50,17 +50,24 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
     },
   );
 
-  it.each([false, undefined])('denies privilege %s before project lookup (AC-012)', (privilege) => {
-    handleClientMessage(request, send, { store, cache: null, privileged: privilege });
-    expect(send).toHaveBeenCalledExactlyOnceWith({
-      ...request,
-      type: 'featuresSnapshot',
-      status: 'denied',
-      reason: null,
-      features: [],
-    });
-    expect(featuresView.readFeaturesView).not.toHaveBeenCalled();
-  });
+  it.each([false, undefined])(
+    'SA-111 allows read-only feature discovery with privilege %s',
+    async (privilege) => {
+      handleClientMessage(request, send, { store, cache: null, privileged: privilege });
+      await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        ...request,
+        type: 'featuresSnapshot',
+        status: 'empty',
+        reason: null,
+        features: [],
+      });
+      expect(featuresView.readFeaturesView).toHaveBeenCalledExactlyOnceWith(
+        'bound-root',
+        'selected',
+      );
+    },
+  );
 
   it.each(['other', 'nonexistent'])('rejects unselected Project %s (AC-011)', (projectId) => {
     dispatch({ projectId });

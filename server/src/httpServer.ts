@@ -282,6 +282,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       onReloadAssets: options.onReloadAssets,
       privileged,
       ideasSupported: !options.embedded,
+      featurePlansSupported: !options.embedded,
     };
     const onExecutorStateChanged = () => refreshExecutorState(send, ctx);
     store.on('executorStateChanged', onExecutorStateChanged);

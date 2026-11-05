@@ -37,6 +37,7 @@ import {
   writeConfig,
 } from '../../server/src/configPersistence.js';
 import { handleIdeaMessage } from '../../server/src/featureIdeas.js';
+import { handleFeaturePlanMessage } from '../../server/src/featurePlan.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
@@ -440,7 +441,14 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (message.type === 'requestIdeas' || message.type === 'submitIdea') {
+      if (message.type === 'requestFeaturePlan' || message.type === 'approveFeaturePlan') {
+        await handleFeaturePlanMessage(
+          message,
+          (reply) => void this.webview?.postMessage(reply),
+          false,
+          false,
+        );
+      } else if (message.type === 'requestIdeas' || message.type === 'submitIdea') {
         // This adapter has no Project selection contract for these controls yet.
         handleIdeaMessage(message, (reply) => void this.webview?.postMessage(reply), true, false);
       } else if (message.type === 'launchAgent') {

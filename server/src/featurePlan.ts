@@ -6,7 +6,6 @@ import { featureIngressActor } from './featureIngress.js';
 import { type PlanStore, projectFeaturePlan, StaleFeaturePlan } from './featurePlanProjection.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
-import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { DesignRecord, FeatureRecord, TaskRecord } from './workstore/WorkStore.js';
 import { FeatureRevisionChangedError } from './workstore/WorkStore.js';
 
@@ -87,12 +86,13 @@ export async function handleFeaturePlanMessage(
     const plan = readFeaturePlan(config, msg.key);
     if (!approving) return reply(null, plan);
     if (plan.revision !== msg.revision) return reply('stale_revision');
+    // Loaded on demand: reads and handler import stay free of the write runtime.
+    const { openWorkStore } = await import('./workstore/SqliteWorkStore.js');
     const store = await openWorkStore({
       repositoryPath: config.repoRoot,
       projectId: config.project.id,
     });
     try {
-      // Loaded on demand: reads and handler import stay free of the runtime stages.
       const { approveFeature } = await import('./commands/feature.js');
       await approveFeature(store, config, msg.key, 'human', undefined, {
         gitSha: plan.specSha,

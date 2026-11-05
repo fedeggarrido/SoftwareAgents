@@ -192,10 +192,6 @@ export interface Character {
   frameTimer: number;
   /** Timer for idle wander decisions */
   wanderTimer: number;
-  /** Number of wander moves completed in current roaming cycle */
-  wanderCount: number;
-  /** Max wander moves before returning to seat for rest */
-  wanderLimit: number;
   /** Whether the agent is actively working */
   isActive: boolean;
   /** A reliably associated domain task keeps its character at work between turns. */
@@ -215,7 +211,7 @@ export interface Character {
   waitingAwaitingInput?: boolean;
   /** Countdown timer for bubble (waiting: 2→0, permission: unused) */
   bubbleTimer: number;
-  /** Timer to stay seated while inactive after seat reassignment (counts down to 0) */
+  /** Short turn-end grace period before leaving the seat (counts down to 0). */
   seatTimer: number;
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean;

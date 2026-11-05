@@ -72,8 +72,6 @@ function makeChar(id: number, col: number, row: number): Character {
     frame: 0,
     frameTimer: 0,
     wanderTimer: 0,
-    wanderCount: 0,
-    wanderLimit: 5,
     isActive: false,
     seatId: null,
     bubbleType: null,

@@ -361,11 +361,14 @@ export const RESEARCH_PRICES = { input: 6, output: 15 } as const;
 export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
 /** Ceiling on compiled system + context bytes for any individual research request. */
 export const RESEARCH_REQUEST_MAX_BYTES = 128 * 1024;
-/** Allow for provider framing; UTF-8 bytes otherwise conservatively upper-bound tokens. */
-/** Conservative preflight estimate; actual usage is accounted when reported. */
-export const RESEARCH_BYTES_PER_TOKEN = 3;
+/** Input admission estimate; reported runtime usage remains the final guard. */
+export const RESEARCH_INPUT_ASCII_TOKENS_PER_BYTE = 1 / 2;
+export const RESEARCH_INPUT_NON_ASCII_TOKENS_PER_BYTE = 1;
 /** Prose and brain artifacts can quote a promise, so they never prove delivery. */
 export const RESEARCH_NON_DELIVERY_PATH = /(^|\/)(docs|\.softwareagents)\/|\.(md|mdx|rst|txt)$/i;
+/** Only parsed JS/TS implementation and tests are eligible; other languages fail closed. */
+export const RESEARCH_DELIVERY_SOURCE_PATH = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
+/** Additional allowance for provider framing, separate from runtime-authored input bytes. */
 export const RESEARCH_REQUEST_OVERHEAD_TOKENS = 1024;
 export const RESEARCH_COST_LABEL =
   'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';
@@ -376,9 +379,9 @@ export const FEATURE_RESEARCH_MAX_ITEMS = 1000;
 export const FEATURE_RESEARCH_TEXT_CHARS = 4000;
 export const FEATURE_RESEARCH_EVIDENCE_LIMIT = 12;
 export const FEATURE_RESEARCH_EVIDENCE_NOTICE =
-  'A citation is a pointer to supplied text, not proof of delivery or relevance. FeatureSpec, design and DAG lines are promises, not implementation evidence. Each item needs its own cited delivery evidence; semantic relevance remains subject to human review.';
+  'A citation is a pointer for human review, not proof of delivery or relevance. Code syntax can still cite unrelated or ineffective code. FeatureSpec, design and DAG lines are promises, not implementation evidence. Each item needs its own cited code; behavior and semantic relevance require human verification.';
 export const FEATURE_RESEARCH_STATUSES = [
-  'delivered',
+  'code_cited',
   'partial',
   'missing',
   'not verifiable',

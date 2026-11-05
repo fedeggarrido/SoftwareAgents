@@ -1,7 +1,10 @@
 import { expect, it } from 'vitest';
 
-import { RESEARCH_NON_DELIVERY_PATH } from '../src/constants.js';
-import { type FeatureResearchInput, validateFeatureResearch } from '../src/featureResearch.js';
+import {
+  FEATURE_RESEARCH_SCHEMA,
+  type FeatureResearchInput,
+  validateFeatureResearch,
+} from '../src/featureResearch.js';
 
 // Isolate validation from the Git fixture so trust-boundary regressions can run without processes.
 const input = (): FeatureResearchInput => ({
@@ -23,7 +26,15 @@ const input = (): FeatureResearchInput => ({
     { ref: 'src/nonexistent.ts:1', quote: 'External claim' },
     { ref: 'external:0', quote: 'External claim' },
   ],
-  branchEvidence: new Map([['branch:src/export.ts:1', 'export const available = true;']]),
+  branchEvidence: new Map([
+    [
+      'branch:src/export.ts:1',
+      {
+        quote: 'export const available = true;',
+        tokens: [{ start: 0, end: 6 }],
+      },
+    ],
+  ]),
 });
 
 it.each(['src/nonexistent.ts:1', 'external:0', 'branch:src/export.ts:1'])(
@@ -36,7 +47,7 @@ it.each(['src/nonexistent.ts:1', 'external:0', 'branch:src/export.ts:1'])(
         coverage: [
           {
             id: 'AC-001',
-            status: 'delivered',
+            status: 'code_cited',
             explanation: 'Claim',
             evidence: [{ ref, quote: 'External claim' }],
           },
@@ -49,7 +60,7 @@ it.each(['src/nonexistent.ts:1', 'external:0', 'branch:src/export.ts:1'])(
   },
 );
 
-it.each(['delivered', 'partial', 'missing'])('downgrades promise-only %s claims', (status) => {
+it.each(['code_cited', 'partial', 'missing'])('downgrades promise-only %s claims', (status) => {
   const context = input();
   const report = validateFeatureResearch(
     JSON.stringify({
@@ -70,13 +81,13 @@ it('requires a citation on each item even when another item cites a real code li
       coverage: [
         {
           id: 'AC-001',
-          status: 'delivered',
+          status: 'code_cited',
           explanation: 'Code pointer',
           evidence: [context.evidence[0]],
         },
         {
           id: 'design:tests',
-          status: 'delivered',
+          status: 'code_cited',
           explanation: 'Assumed from other item',
           evidence: [],
         },
@@ -85,12 +96,21 @@ it('requires a citation on each item even when another item cites a real code li
     }),
     context,
   );
-  expect(report.coverage.map((row) => row.status)).toEqual(['delivered', 'not verifiable']);
+  expect(report.coverage.map((row) => row.status)).toEqual(['code_cited', 'not verifiable']);
 });
 
-it.each(['docs/copied-plan.md', 'NOTES.txt', '.softwareagents/brain/x.yaml', 'docs/a.ts'])(
-  'never treats %s as delivery evidence',
-  (file) => expect(RESEARCH_NON_DELIVERY_PATH.test(file)).toBe(true),
-);
-it('keeps code as eligible delivery evidence', () =>
-  expect(RESEARCH_NON_DELIVERY_PATH.test('src/export.ts')).toBe(false));
+// File eligibility is exercised through Git -> provenance -> validation in featureResearch.test.ts.
+
+it('uses code_cited in the schema and rejects the former delivery status', () => {
+  const statuses = FEATURE_RESEARCH_SCHEMA.properties.coverage.items.properties.status.enum;
+  expect(statuses).toEqual(['code_cited', 'partial', 'missing', 'not verifiable']);
+  expect(() =>
+    validateFeatureResearch(
+      JSON.stringify({
+        coverage: [{ id: 'AC-001', status: 'delivered', explanation: 'Claim', evidence: [] }],
+        proposals: [],
+      }),
+      input(),
+    ),
+  ).toThrow('schema validation');
+});

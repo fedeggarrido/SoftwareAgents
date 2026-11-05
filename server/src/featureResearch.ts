@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import * as ts from 'typescript';
 import { parse } from 'yaml';
 
 import type { ProjectConfig } from '../../core/src/project.js';
@@ -15,6 +16,7 @@ import {
   FEATURE_RESEARCH_MAX_ITEMS,
   FEATURE_RESEARCH_STATUSES,
   FEATURE_RESEARCH_TEXT_CHARS,
+  RESEARCH_DELIVERY_SOURCE_PATH,
   RESEARCH_NON_DELIVERY_PATH,
   RESEARCH_REPORT_MAX_BYTES,
   ZONES_GIT_TIMEOUT_MS,
@@ -43,6 +45,11 @@ export interface ReviewEvidence {
   ref: string;
   quote: string;
 }
+interface DeliveryEvidence {
+  quote: string;
+  /** Columns containing a recognized code anchor, excluding comments and literal text. */
+  tokens: { start: number; end: number }[];
+}
 export interface FeatureResearchReview {
   coverage: {
     id: string;
@@ -64,7 +71,7 @@ export interface FeatureResearchInput {
   items: ReviewItem[];
   evidence: ReviewEvidence[];
   /** Runtime-only delivery provenance. Never populated from external IDs or model output. */
-  branchEvidence: ReadonlyMap<string, string>;
+  branchEvidence: ReadonlyMap<string, DeliveryEvidence>;
 }
 export interface SavedFeatureResearch {
   kind: 'feature-research-review';
@@ -147,6 +154,80 @@ function git(root: string, args: string[]): string {
   }
 }
 
+/** Syntax is a conservative provenance gate, never a semantic proof of delivery. */
+function deliveryTokens(file: string, source: string): Map<number, DeliveryEvidence['tokens']> {
+  const lines = new Map<number, DeliveryEvidence['tokens']>();
+  // Do not treat the parser's recovery nodes for renamed prose as implementation.
+  if (
+    ts
+      .transpileModule(source, {
+        fileName: file,
+        compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.Preserve },
+        reportDiagnostics: true,
+      })
+      .diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+  )
+    return lines;
+  const root = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const emptyFunction = (node: ts.Node) =>
+    (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node)) &&
+    node.body &&
+    ts.isBlock(node.body) &&
+    node.body.statements.length === 0;
+  const visit = (node: ts.Node): void => {
+    // Exclude simple text-only/empty wrappers; this is not a semantic code check.
+    if (
+      emptyFunction(node) ||
+      (ts.isVariableStatement(node) &&
+        node.declarationList.declarations.every(
+          ({ initializer }) =>
+            !initializer ||
+            ts.isStringLiteral(initializer) ||
+            ts.isNoSubstitutionTemplateLiteral(initializer) ||
+            emptyFunction(initializer),
+        )) ||
+      (ts.isCallExpression(node) &&
+        /^(it|test|describe)(\.(only|skip|todo))?$/.test(node.expression.getText(root)) &&
+        (/\.(skip|todo)$/.test(node.expression.getText(root)) ||
+          !node.arguments.some(
+            (argument) =>
+              (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) &&
+              !emptyFunction(argument),
+          )))
+    )
+      return;
+    // Bare strings, template/JSX text, identifiers and comments are not code anchors.
+    if (
+      (ts.isVariableStatement(node) &&
+        node.declarationList.declarations.some((declaration) => declaration.initializer)) ||
+      (ts.isFunctionDeclaration(node) && node.body) ||
+      (ts.isClassDeclaration(node) && node.members.length) ||
+      ts.isCallExpression(node) ||
+      ts.isNewExpression(node) ||
+      (ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+      (ts.isReturnStatement(node) && node.expression) ||
+      ts.isThrowStatement(node)
+    ) {
+      const token = node.getFirstToken(root);
+      if (
+        token &&
+        (token.kind === ts.SyntaxKind.Identifier ||
+          (token.kind >= ts.SyntaxKind.FirstKeyword && token.kind <= ts.SyntaxKind.LastKeyword))
+      ) {
+        const { line, character } = root.getLineAndCharacterOfPosition(token.getStart(root));
+        const tokens = lines.get(line + 1) ?? [];
+        tokens.push({ start: character, end: character + token.getWidth(root) });
+        lines.set(line + 1, tokens);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return lines;
+}
+
 /** Only SELECTs on the existing store: no migrations, leases, recovery or status writes. */
 export function featureResearchInput(config: ProjectConfig, key: string): FeatureResearchInput {
   const db = openReadOnlyWorkStore(config.repoRoot);
@@ -226,54 +307,87 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
       new Set(items.map((item) => item.id)).size !== items.length
     )
       throw new Error('Invalid or oversized Feature research plan');
-    const diff = git(config.repoRoot, [
-      'diff',
+    const diffOptions = [
+      '--no-renames',
       '--no-ext-diff',
       '--no-textconv',
       '--no-color',
       '--src-prefix=a/',
       '--dst-prefix=b/',
-      state.initial_main,
-      state.head,
+    ];
+    const revisions = [state.initial_main, state.head];
+    // Bind each patch to an exact NUL-delimited name and a literal pathspec. Never
+    // parse +++ filenames: tabs and C quoting there are presentation, not path data.
+    const files = git(config.repoRoot, [
+      'diff',
+      ...diffOptions,
+      '--name-only',
+      '-z',
+      ...revisions,
       '--',
-    ]);
+    ])
+      .split('\0')
+      .filter(Boolean);
+    const patches: string[] = [];
+    let diffBytes = 0;
     // References have disjoint runtime-owned namespaces; external IDs remain metadata only.
     const evidenceByRef = new Map<string, string>();
-    const branchEvidence = new Map<string, string>();
+    const branchEvidence = new Map<string, DeliveryEvidence>();
     const promises = new Set([feature.doc_path, design!.doc_path, design!.dag_path]);
-    let file: string | undefined,
-      line = 0,
-      oldRemaining = 0,
-      newRemaining = 0;
-    for (const entry of diff.split('\n')) {
-      if (entry.startsWith('diff --git ')) {
-        file = undefined;
-        line = 0;
-        oldRemaining = newRemaining = 0;
-      } else if (oldRemaining || newRemaining) {
-        // Inside a hunk, even "+++ b/path" is literal file content, not a header.
-        if (entry.startsWith(' ') || entry.startsWith('+')) {
-          if (file && newRemaining > 0) {
-            const ref = `branch:${file}:${line}`,
-              quote = entry.slice(1);
-            evidenceByRef.set(ref, quote);
-            if (!promises.has(file) && !RESEARCH_NON_DELIVERY_PATH.test(file))
-              branchEvidence.set(ref, quote);
+    for (const file of files) {
+      const patch = git(config.repoRoot, [
+        'diff',
+        ...diffOptions,
+        ...revisions,
+        '--',
+        `:(literal)${file}`,
+      ]);
+      diffBytes += Buffer.byteLength(patch);
+      if (diffBytes > RESEARCH_REPORT_MAX_BYTES)
+        throw new Error('Feature research Git evidence exceeds size limit');
+      patches.push(patch);
+      let line = 0,
+        oldRemaining = 0,
+        newRemaining = 0;
+      let tokens = new Map<number, DeliveryEvidence['tokens']>();
+      for (const entry of patch.split('\n')) {
+        if (entry.startsWith('diff --git ')) {
+          tokens = new Map();
+          line = 0;
+          oldRemaining = newRemaining = 0;
+        } else if (oldRemaining || newRemaining) {
+          // Inside a hunk, even "+++ b/path" is literal file content, not a header.
+          if (entry.startsWith(' ') || entry.startsWith('+')) {
+            if (newRemaining > 0) {
+              const ref = `branch:${file}:${line}`,
+                quote = entry.slice(1);
+              evidenceByRef.set(ref, quote);
+              if (entry.startsWith('+') && tokens.has(line))
+                branchEvidence.set(ref, { quote, tokens: tokens.get(line)! });
+            }
+            line++;
+            newRemaining--;
           }
-          line++;
-          newRemaining--;
-        }
-        if (entry.startsWith(' ') || entry.startsWith('-')) oldRemaining--;
-      } else if (entry.startsWith('+++ b/')) file = entry.slice('+++ b/'.length);
-      else {
-        const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(entry);
-        if (hunk) {
-          oldRemaining = Number(hunk[1] ?? 1);
-          line = Number(hunk[2]);
-          newRemaining = Number(hunk[3] ?? 1);
+          if (entry.startsWith(' ') || entry.startsWith('-')) oldRemaining--;
+        } else if (entry.startsWith('+++ ') && entry !== '+++ /dev/null') {
+          if (
+            !promises.has(file) &&
+            !RESEARCH_NON_DELIVERY_PATH.test(file) &&
+            RESEARCH_DELIVERY_SOURCE_PATH.test(file) &&
+            !/\.d\.[cm]?ts$/i.test(file)
+          )
+            tokens = deliveryTokens(file, git(config.repoRoot, ['show', `${state.head}:${file}`]));
+        } else {
+          const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(entry);
+          if (hunk) {
+            oldRemaining = Number(hunk[1] ?? 1);
+            line = Number(hunk[2]);
+            newRemaining = Number(hunk[3] ?? 1);
+          }
         }
       }
     }
+    const diff = patches.join('');
     let preResearch: SavedResearch | null = null;
     if (fs.existsSync(taskPath(config.repoRoot, state.request))) {
       const request = readTaskInput(config.repoRoot, state.request);
@@ -305,7 +419,7 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
   }
 }
 
-/** Missing rows and fabricated/absent citations never turn into successful delivery. */
+/** Missing rows and fabricated/absent citations cannot qualify as cited code. */
 export function validateFeatureResearch(
   output: string,
   input: FeatureResearchInput,
@@ -332,14 +446,28 @@ export function validateFeatureResearch(
         const row = report.coverage.find((row) => row.id === item.id);
         const evidence = validEvidence(row?.evidence ?? []);
         // A citation belongs to this row only; it never supplies evidence for other items.
-        const deliveryEvidence = evidence.some((entry) =>
-          input.branchEvidence.get(entry.ref)?.includes(entry.quote),
-        );
+        const deliveryEvidence = evidence.some((entry) => {
+          const source = input.branchEvidence.get(entry.ref);
+          if (!source) return false;
+          // A substring of a comment or test title on a code line is still prose.
+          for (
+            let start = source.quote.indexOf(entry.quote);
+            start >= 0;
+            start = source.quote.indexOf(entry.quote, start + 1)
+          )
+            if (
+              source.tokens.some(
+                (token) => token.start >= start && token.end <= start + entry.quote.length,
+              )
+            )
+              return true;
+          return false;
+        });
         if (!row || !evidence.length || (row.status !== 'not verifiable' && !deliveryEvidence))
           return {
             id: item.id,
             status: 'not verifiable',
-            explanation: 'No verifiable delivery evidence supplied.',
+            explanation: 'No qualifying code citation supplied.',
             evidence: [],
           };
         return { ...row, evidence };
@@ -393,7 +521,7 @@ export function featureResearchMarkdown(result: SavedFeatureResearch): string {
     '## Coverage',
     ...result.report.coverage.map((row) =>
       literal(
-        `${row.id}: ${row.status}\n${row.explanation}\n${row.evidence.map((e) => `${e.ref}: ${e.quote}`).join('\n')}`,
+        `${row.id}: ${row.status === 'code_cited' ? 'Código citado: requiere verificación' : row.status}\n${row.explanation}\n${row.evidence.map((e) => `${e.ref}: ${e.quote}`).join('\n')}`,
       ),
     ),
     '## Improvement proposals',

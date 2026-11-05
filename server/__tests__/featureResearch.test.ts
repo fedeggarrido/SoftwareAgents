@@ -75,7 +75,7 @@ const model = (
     coverage: [
       {
         id: 'AC-001',
-        status: 'delivered',
+        status: 'code_cited',
         explanation: 'Export implemented.',
         evidence: [{ ref: 'branch:src/export.ts:1', quote: 'export const available = true;' }],
       },
@@ -152,7 +152,12 @@ beforeEach(() => {
   git(repo, 'init', '-b', 'main');
   git(repo, 'config', 'core.autocrlf', 'false');
   write(repo, '.gitignore', '.worktrees/\n.softwareagents/ideas/\n');
-  write(repo, 'README.md', 'Fixture\n');
+  write(
+    repo,
+    'README.md',
+    'Fixture\n' + 'This document describes the promised export.\n'.repeat(30),
+  );
+  write(repo, 'src/existing.ts', 'export const baseline = true;\n');
   git(repo, 'add', '.');
   git(repo, 'commit', '-m', 'fixture base');
   const base = git(repo, 'rev-parse', 'HEAD');
@@ -311,9 +316,12 @@ it('writes only report files, preserves status/tasks/decisions/HEAD/refs/index a
   await runResearchCommand(args(), repo, log, { config, executor: model(), audit });
   expect(snapshot()).toEqual(before);
   expect(featureDocument(store, config, feature)).toEqual(beforeDocument);
-  expect(saved().report.coverage.find((row) => row.id === 'AC-001')?.status).toBe('delivered');
+  expect(saved().report.coverage.find((row) => row.id === 'AC-001')?.status).toBe('code_cited');
   expect(saved().report.coverage.find((row) => row.id === 'AC-002')?.status).toBe('not verifiable');
   expect(saved().report.proposals[0].label).toBe('proposal');
+  const markdown = featureResearchMarkdown(saved());
+  expect(markdown).toContain('AC-001: Código citado: requiere verificación');
+  expect(markdown).not.toContain('AC-001: delivered');
   expect(audit.append).not.toHaveBeenCalled();
   expect(JSON.stringify(log.mock.calls)).not.toContain(payload);
 });
@@ -374,7 +382,7 @@ it('keeps partial and missing assessments but never spreads one item citation ac
     return {
       coverage: items.map((item, index) => ({
         id: item.id,
-        status: index === 0 ? 'partial' : index === 1 ? 'missing' : 'delivered',
+        status: index === 0 ? 'partial' : index === 1 ? 'missing' : 'code_cited',
         explanation: 'Assessment of supplied branch evidence.',
         evidence:
           index < 2
@@ -407,7 +415,7 @@ it('downgrades absent, fabricated and pre-research-only delivery evidence and in
       coverage: [
         {
           id: 'AC-001',
-          status: 'delivered',
+          status: 'code_cited',
           explanation: 'Assumed done',
           evidence: [{ ref: 'branch:src/export.ts:900', quote: 'invented' }],
         },
@@ -463,7 +471,7 @@ it.each(['src/nonexistent.ts:1', 'src/export.ts:1', 'branch:src/export.ts:1', 'e
       cost: { estimateUsd: 0.01, capUsd: 1, usedEstimateUsd: 0.001, label: RESEARCH_COST_LABEL },
     });
     const input = featureResearchInput(config, key);
-    expect(input.branchEvidence.get('branch:src/export.ts:1')).toBe(
+    expect(input.branchEvidence.get('branch:src/export.ts:1')?.quote).toBe(
       'export const available = true;',
     );
     expect(new Set(input.evidence.map((entry) => entry.ref)).size).toBe(input.evidence.length);
@@ -473,7 +481,7 @@ it.each(['src/nonexistent.ts:1', 'src/export.ts:1', 'branch:src/export.ts:1', 'e
           coverage: [
             {
               id: 'AC-001',
-              status: 'delivered',
+              status: 'code_cited',
               explanation: 'External claim',
               evidence: [{ ref, quote: source.excerpt }],
             },
@@ -497,13 +505,130 @@ it.each([doc, paths.doc, paths.dag])('downgrades promise-only delivery from %s',
   const report = validateFeatureResearch(
     JSON.stringify({
       coverage: [
-        { id: 'AC-001', status: 'delivered', explanation: 'Plan says done', evidence: [promise] },
+        { id: 'AC-001', status: 'code_cited', explanation: 'Plan says done', evidence: [promise] },
       ],
       proposals: [],
     }),
     input,
   );
   expect(report.coverage[0].status).toBe('not verifiable');
+});
+
+/** Change only the fixture's built branch, preserving its recorded plan binding. */
+function amendBuiltBranch(edit: () => void) {
+  git(repo, 'checkout', 'sa/FEAT-001-integration');
+  edit();
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'fixture research evidence');
+  const db = database();
+  try {
+    const row = db.prepare('SELECT state FROM feature_runs').get() as { state: string };
+    db.prepare('UPDATE feature_runs SET state = ?').run(
+      JSON.stringify({ ...JSON.parse(row.state), head: git(repo, 'rev-parse', 'HEAD') }),
+    );
+  } finally {
+    db.close();
+  }
+  git(repo, 'checkout', 'main');
+}
+
+const claim = (input: ReturnType<typeof featureResearchInput>, ref: string, quote: string) =>
+  validateFeatureResearch(
+    JSON.stringify({
+      coverage: [
+        { id: 'AC-001', status: 'code_cited', explanation: 'Claim', evidence: [{ ref, quote }] },
+      ],
+      proposals: [],
+    }),
+    input,
+  ).coverage[0].status;
+
+it.each(['review notes.md', 'src/export notes.ts', 'src/café notes.ts'])(
+  'binds exact Git filenames to provenance and validation: %s',
+  (file) => {
+    const quote = file.endsWith('.md') ? 'Export is delivered.' : 'export const delivered = true;';
+    amendBuiltBranch(() => write(repo, file, quote + '\n'));
+    // Exercise Git's default C quoting for non-ASCII names as well as its trailing tab.
+    git(repo, 'config', 'core.quotePath', 'true');
+    const input = featureResearchInput(config, key);
+    const ref = `branch:${file}:1`;
+    expect(input.evidence).toContainEqual({ ref, quote });
+    expect(claim(input, ref, quote)).toBe(file.endsWith('.md') ? 'not verifiable' : 'code_cited');
+  },
+);
+
+it.each([
+  ['README', 'Export is delivered.'],
+  ['notes.markdown', 'Export is delivered.'],
+  ['docs/example.ts', 'export const delivered = true;'],
+  ['src/notes.txt', 'Export is delivered.'],
+  ['src/notes.ts', 'Export is delivered.'],
+  ['src/comment.ts', '// Export is delivered.'],
+  ['src/block.ts', '/*\nexport const delivered = true;\n*/'],
+  ['src/template.ts', 'const notes = `\nexport const delivered = true;\n`;'],
+  ['src/literal.ts', '"Export is delivered.";'],
+  ['src/example.d.ts', 'export declare const delivered: true;'],
+])('downgrades documentation/prose from real Git diffs: %s', (file, content) => {
+  amendBuiltBranch(() => write(repo, file, content + '\n'));
+  const input = featureResearchInput(config, key);
+  const line = content.split('\n').findIndex((entry) => entry.includes('delivered')) + 1;
+  const ref = `branch:${file}:${line}`;
+  const quote = content.split('\n')[line - 1];
+  expect(input.evidence).toContainEqual({ ref, quote });
+  expect(input.branchEvidence.has(ref)).toBe(false);
+  expect(claim(input, ref, quote)).toBe('not verifiable');
+});
+
+it('downgrades prose after a documentation rename into a source path', () => {
+  amendBuiltBranch(() => {
+    fs.renameSync(path.join(repo, 'README.md'), path.join(repo, 'src/renamed.ts'));
+    fs.appendFileSync(path.join(repo, 'src/renamed.ts'), 'Export is delivered.\n');
+  });
+  const input = featureResearchInput(config, key);
+  expect(git(repo, 'diff', '--summary', '-M', input.base, input.head)).toContain('rename');
+  const ref = 'branch:src/renamed.ts:32',
+    quote = 'Export is delivered.';
+  expect(input.evidence).toContainEqual({ ref, quote });
+  expect(input.branchEvidence.has(ref)).toBe(false);
+  expect(claim(input, ref, quote)).toBe('not verifiable');
+});
+
+it.each([
+  'export const notes = "Export is delivered.";',
+  'export const notes = `Export is delivered.`;',
+  'it("Export is delivered.");',
+  'test.todo("Export is delivered.");',
+  'it.skip("Export is delivered.", () => expect(true).toBe(true));',
+  'it("Export is delivered.", () => {});',
+  'describe("Export is delivered.", () => {});',
+  'export function available() {} // Export is delivered.',
+  'export const available = () => {}; // Export is delivered.',
+])('excludes string-only declarations, pending/empty tests and empty functions: %s', (quote) => {
+  amendBuiltBranch(() => write(repo, 'src/wrapper.ts', quote + '\n'));
+  const input = featureResearchInput(config, key);
+  const ref = 'branch:src/wrapper.ts:1';
+  expect(input.evidence).toContainEqual({ ref, quote });
+  expect(input.branchEvidence.has(ref)).toBe(false);
+  expect(claim(input, ref, quote)).toBe('not verifiable');
+});
+
+it('requires added code, excluding unchanged context and prose substrings on code/test lines', () => {
+  const test = "it('Export is delivered.', () => expect(true).toBe(true));";
+  amendBuiltBranch(() => {
+    write(repo, 'src/existing.ts', 'export const baseline = true;\n// Export is delivered.\n');
+    write(repo, 'src/export.test.ts', test + '\n');
+    write(repo, 'src/trailing.ts', 'export const delivered = true; // Export is delivered.\n');
+  });
+  const input = featureResearchInput(config, key);
+  const contextRef = 'branch:src/existing.ts:1';
+  expect(input.evidence).toContainEqual({
+    ref: contextRef,
+    quote: 'export const baseline = true;',
+  });
+  expect(claim(input, contextRef, 'export const baseline = true;')).toBe('not verifiable');
+  for (const ref of ['branch:src/export.test.ts:1', 'branch:src/trailing.ts:1'])
+    expect(claim(input, ref, 'Export is delivered.')).toBe('not verifiable');
+  expect(claim(input, 'branch:src/export.test.ts:1', test)).toBe('code_cited');
 });
 
 it.each(['tokens', 'cost', 'request-size'] as const)(
@@ -576,6 +701,7 @@ it('keeps injected diff and web content inside the existing envelope with no too
     expect(envelope.task.diff).toContain(payload);
     expect(envelope.task.preResearch.report.bibliography[0].excerpt).toBe(payload);
     expect(compiled.systemPrompt).not.toContain(payload);
+    expect(compiled.systemPrompt).toContain('with code_cited, partial, missing or not verifiable');
     expect(compiled.claude.allowedTools).toEqual([]);
     expect(compiled.claude.disallowedTools).toEqual(
       expect.arrayContaining([
@@ -593,7 +719,7 @@ it('keeps injected diff and web content inside the existing envelope with no too
       coverage: [
         {
           id: 'AC-001',
-          status: 'delivered',
+          status: 'code_cited',
           explanation: 'External claim only',
           evidence: [{ ref: 'external:0', quote: payload }],
         },
@@ -627,7 +753,7 @@ it.each(['quick', 'deep'] as const)(
       cost: { usedEstimateUsd: policy.maxCostUsd + 0.01 },
     });
     expect(saved().cost.stopReason).toContain('Tope');
-    expect(saved().report.coverage[0].status).toBe('delivered');
+    expect(saved().report.coverage[0].status).toBe('code_cited');
   },
 );
 

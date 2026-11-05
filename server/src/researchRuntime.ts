@@ -1,7 +1,8 @@
 import { compileAgent } from './agentCompiler.js';
 import {
   RESEARCH_BUDGET_HEADROOM_FRACTION,
-  RESEARCH_BYTES_PER_TOKEN,
+  RESEARCH_INPUT_ASCII_TOKENS_PER_BYTE,
+  RESEARCH_INPUT_NON_ASCII_TOKENS_PER_BYTE,
   RESEARCH_REQUEST_MAX_BYTES,
   RESEARCH_REQUEST_OVERHEAD_TOKENS,
 } from './constants.js';
@@ -45,18 +46,25 @@ export function researchBudget(
         },
       );
       const bytes = Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
+      let asciiBytes = 0;
+      for (const byte of Buffer.from(compiled.systemPrompt + compiled.context))
+        if (byte < 0x80) asciiBytes++;
       const estimatedInputTokens =
-        Math.ceil(bytes / RESEARCH_BYTES_PER_TOKEN) + RESEARCH_REQUEST_OVERHEAD_TOKENS;
+        Math.ceil(
+          asciiBytes * RESEARCH_INPUT_ASCII_TOKENS_PER_BYTE +
+            (bytes - asciiBytes) * RESEARCH_INPUT_NON_ASCII_TOKENS_PER_BYTE,
+        ) + RESEARCH_REQUEST_OVERHEAD_TOKENS;
       if (
         bytes > RESEARCH_REQUEST_MAX_BYTES ||
         estimatedInputTokens >= policy.maxTokens - usedTokens ||
         researchCost(estimatedInputTokens, 0) >= maxCostUsd
       ) {
-        stopReason = 'Input budget exhausted in preflight; no model call launched.';
+        stopReason =
+          'Input budget exhausted in preflight; use deep mode or reduce the input. No model call launched.';
         gaps.push(
           'Omitted complete synthesis context (system prompt, output schema and all task data: plan items, diff, branch/external evidence or collected sources); input exceeds remaining tokens, estimated input cost or per-request size limit.',
         );
-        throw new Error('Research input budget exhausted');
+        throw new Error('Research input budget exhausted; use deep mode or reduce the input');
       }
       const handle = underlying.start({
         ...request,

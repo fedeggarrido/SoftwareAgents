@@ -218,13 +218,28 @@ export function useExtensionMessages(
     const meetingSeats = new Map<number, { original: string | null; meeting: string }>();
 
     const restoreMeetingSeats = (os: OfficeState) => {
+      for (const ch of os.characters.values()) ch.isInMeeting = false;
       for (const [id, seats] of meetingSeats) {
         const ch = os.characters.get(id);
-        if (ch?.seatId === seats.meeting && seats.original) {
-          os.reassignSeat(id, seats.original);
+        if (ch?.seatId === seats.meeting) {
+          if (seats.original) os.reassignSeat(id, seats.original);
+          if (ch.seatId === seats.meeting) {
+            const fallback = [...os.seats].find(
+              ([uid, seat]) =>
+                !seat.assigned && !os.isReservedSeat(uid) && os.isWorkstationSeat(uid),
+            );
+            os.reassignSeat(id, fallback?.[0] ?? null);
+            if (!fallback && (ch.isActive || ch.hasDomainWork)) {
+              // Leave the released chair before resuming work without a seat.
+              const distance = (tile: { col: number; row: number }) =>
+                Math.abs(tile.col - ch.tileCol) + Math.abs(tile.row - ch.tileRow);
+              [...os.walkableTiles]
+                .sort((a, b) => distance(a) - distance(b))
+                .some(({ col, row }) => os.walkToTile(id, col, row));
+            }
+          }
         }
       }
-      for (const ch of os.characters.values()) ch.isInMeeting = false;
       meetingSeats.clear();
     };
 
@@ -239,10 +254,12 @@ export function useExtensionMessages(
         const seat = os.freeSeatInArea(/reuni|meeting/i);
         if (!seat) continue;
         const original = ch.seatId;
+        ch.isInMeeting = true;
         os.reassignSeat(id, seat);
         if (ch.seatId === seat) {
           meetingSeats.set(id, { original, meeting: seat });
-          ch.isInMeeting = true;
+        } else {
+          ch.isInMeeting = false;
         }
       }
     };

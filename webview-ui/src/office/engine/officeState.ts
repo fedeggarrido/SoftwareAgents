@@ -148,12 +148,28 @@ export class OfficeState {
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
    *  @param shift Optional pixel shift to apply when grid expands left/up */
   rebuildFromLayout(layout: OfficeLayout, shift?: { col: number; row: number }): void {
+    const previousSeats = this.seats;
     this.layout = layout;
     this.tileMap = layoutToTileMap(layout);
     this.seats = layoutToSeats(layout.furniture);
     this.blockedTiles = getBlockedTiles(layout.furniture);
     this.rebuildFurnitureInstances();
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
+
+    const changedMeetingSeats = new Set<number>();
+    for (const ch of this.characters.values()) {
+      if (!ch.isInMeeting) continue;
+      const previous = ch.seatId ? previousSeats.get(ch.seatId) : undefined;
+      const current = ch.seatId ? this.seats.get(ch.seatId) : undefined;
+      if (
+        !previous ||
+        !current ||
+        previous.seatCol + (shift?.col ?? 0) !== current.seatCol ||
+        previous.seatRow + (shift?.row ?? 0) !== current.seatRow
+      ) {
+        changedMeetingSeats.add(ch.id);
+      }
+    }
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -197,14 +213,14 @@ export class OfficeState {
         const seat = this.seats.get(ch.seatId)!;
         if (!seat.assigned) {
           seat.assigned = true;
-          // Snap character to seat position
-          ch.tileCol = seat.seatCol;
-          ch.tileRow = seat.seatRow;
-          const cx = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
-          const cy = seat.seatRow * TILE_SIZE + TILE_SIZE / 2;
-          ch.x = cx;
-          ch.y = cy;
-          ch.dir = seat.facingDir;
+          if (ch.isActive || ch.hasDomainWork) {
+            // Only working characters return to their reserved seats.
+            ch.tileCol = seat.seatCol;
+            ch.tileRow = seat.seatRow;
+            ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
+            ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2;
+            ch.dir = seat.facingDir;
+          }
           ch.hasWorkstation = this.isWorkstationSeat(ch.seatId);
           continue;
         }
@@ -221,17 +237,64 @@ export class OfficeState {
         this.seats.get(seatId)!.assigned = true;
         ch.seatId = seatId;
         const seat = this.seats.get(seatId)!;
-        ch.tileCol = seat.seatCol;
-        ch.tileRow = seat.seatRow;
-        ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
-        ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2;
-        ch.dir = seat.facingDir;
+        if (ch.isActive || ch.hasDomainWork) {
+          ch.tileCol = seat.seatCol;
+          ch.tileRow = seat.seatRow;
+          ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
+          ch.y = seat.seatRow * TILE_SIZE + TILE_SIZE / 2;
+          ch.dir = seat.facingDir;
+        }
         ch.hasWorkstation = this.isWorkstationSeat(seatId);
       }
     }
 
     // Relocate any characters that ended up outside bounds or on non-walkable tiles
     for (const ch of this.characters.values()) {
+      if (changedMeetingSeats.has(ch.id)) {
+        ch.path = [];
+        ch.moveProgress = 0;
+        ch.state = CharacterState.IDLE;
+        ch.frame = 0;
+        ch.frameTimer = 0;
+        ch.seatTimer = 0;
+        ch.x = ch.tileCol * TILE_SIZE + TILE_SIZE / 2;
+        ch.y = ch.tileRow * TILE_SIZE + TILE_SIZE / 2;
+        if (
+          !this.withOwnSeatUnblocked(ch, () =>
+            isWalkable(ch.tileCol, ch.tileRow, this.tileMap, this.blockedTiles),
+          )
+        ) {
+          this.relocateCharacterToWalkable(ch);
+        }
+        this.sendToSeat(ch.id);
+        continue;
+      }
+      if (ch.seatId && !ch.isActive && !ch.hasDomainWork && !ch.isInMeeting) {
+        const seat = this.seats.get(ch.seatId);
+        if (
+          ch.state === CharacterState.TYPE &&
+          ch.seatTimer > 0 &&
+          ch.hasWorkstation &&
+          seat &&
+          ch.tileCol === seat.seatCol &&
+          ch.tileRow === seat.seatRow &&
+          this.withOwnSeatUnblocked(ch, () =>
+            isWalkable(ch.tileCol, ch.tileRow, this.tileMap, this.blockedTiles),
+          )
+        ) {
+          // Replayed layouts must preserve the remaining turn-end grace period.
+          continue;
+        }
+        ch.path = [];
+        ch.moveProgress = 0;
+        ch.state = CharacterState.IDLE;
+        ch.seatTimer = 0;
+        ch.wanderTimer = 0;
+        if (!isWalkable(ch.tileCol, ch.tileRow, this.tileMap, this.blockedTiles)) {
+          this.relocateCharacterToWalkable(ch);
+        }
+        continue;
+      }
       if (ch.seatId) continue; // seated characters are fine
       if (
         ch.tileCol < 0 ||
@@ -664,11 +727,11 @@ export class OfficeState {
   }
 
   /** Reassign an agent from their current seat to a new seat */
-  reassignSeat(agentId: number, seatId: string): void {
+  reassignSeat(agentId: number, seatId: string | null): void {
     const ch = this.characters.get(agentId);
     if (!ch) return;
-    const seat = this.seats.get(seatId);
-    if (!seat || (seat.assigned && ch.seatId !== seatId)) return;
+    const seat = seatId ? this.seats.get(seatId) : undefined;
+    if (seatId && (!seat || (seat.assigned && ch.seatId !== seatId))) return;
     if (ch.seatId === seatId) return;
     // Unassign old seat
     if (ch.seatId) {
@@ -676,9 +739,19 @@ export class OfficeState {
       if (old) old.assigned = false;
     }
     // Assign new seat
-    seat.assigned = true;
+    if (seat) seat.assigned = true;
     ch.seatId = seatId;
-    ch.hasWorkstation = this.isWorkstationSeat(seatId);
+    ch.hasWorkstation = seatId ? this.isWorkstationSeat(seatId) : false;
+    if (!seat || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting)) {
+      ch.path = [];
+      ch.moveProgress = 0;
+      ch.state = CharacterState.IDLE;
+      ch.frame = 0;
+      ch.frameTimer = 0;
+      ch.seatTimer = 0;
+      ch.wanderTimer = 0;
+      return;
+    }
     // Pathfind to new seat (unblock own seat tile for this query)
     const path = this.withOwnSeatUnblocked(ch, () =>
       findPath(ch.tileCol, ch.tileRow, seat.seatCol, seat.seatRow, this.tileMap, this.blockedTiles),
@@ -695,9 +768,6 @@ export class OfficeState {
       ch.dir = seat.facingDir;
       ch.frame = 0;
       ch.frameTimer = 0;
-      if (!ch.isActive) {
-        ch.seatTimer = INACTIVE_SEAT_TIMER_MIN_SEC + Math.random() * INACTIVE_SEAT_TIMER_RANGE_SEC;
-      }
     }
   }
 
@@ -738,7 +808,7 @@ export class OfficeState {
   /** Send an agent back to their currently assigned seat */
   sendToSeat(agentId: number): void {
     const ch = this.characters.get(agentId);
-    if (!ch || !ch.seatId) return;
+    if (!ch || !ch.seatId || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting)) return;
     const seat = this.seats.get(ch.seatId);
     if (!seat) return;
     const path = this.withOwnSeatUnblocked(ch, () =>
@@ -756,9 +826,6 @@ export class OfficeState {
       ch.dir = seat.facingDir;
       ch.frame = 0;
       ch.frameTimer = 0;
-      if (!ch.isActive) {
-        ch.seatTimer = INACTIVE_SEAT_TIMER_MIN_SEC + Math.random() * INACTIVE_SEAT_TIMER_RANGE_SEC;
-      }
     }
   }
 
@@ -769,11 +836,15 @@ export class OfficeState {
     if (!isWalkable(col, row, this.tileMap, this.blockedTiles)) {
       // Also allow walking to own seat tile (blocked for others but not self)
       const key = this.ownSeatKey(ch);
-      if (!key || key !== `${col},${row}`) return false;
+      if (!key || key !== `${col},${row}` || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting))
+        return false;
     }
-    const path = this.withOwnSeatUnblocked(ch, () =>
-      findPath(ch.tileCol, ch.tileRow, col, row, this.tileMap, this.blockedTiles),
-    );
+    const pathToTile = () =>
+      findPath(ch.tileCol, ch.tileRow, col, row, this.tileMap, this.blockedTiles);
+    const path =
+      ch.isActive || ch.hasDomainWork || ch.isInMeeting
+        ? this.withOwnSeatUnblocked(ch, pathToTile)
+        : pathToTile();
     if (path.length === 0) return false;
     ch.path = path;
     ch.moveProgress = 0;
@@ -888,13 +959,21 @@ export class OfficeState {
   setAgentActive(id: number, active: boolean): void {
     const ch = this.characters.get(id);
     if (ch) {
+      const wasActive = ch.isActive;
       ch.isActive = active;
       if (!active) {
-        // Sentinel -1: signals turn just ended, skip next seat rest timer.
-        // Prevents the WALK handler from setting a 2-4 min rest on arrival.
-        ch.seatTimer = -1;
+        // Only a real turn end starts the grace period. Repeated inactive
+        // notifications must not postpone departure indefinitely.
+        if (wasActive) {
+          ch.seatTimer =
+            ch.state === CharacterState.TYPE && ch.seatId && !ch.isSubagent
+              ? INACTIVE_SEAT_TIMER_MIN_SEC + Math.random() * INACTIVE_SEAT_TIMER_RANGE_SEC
+              : 0;
+        }
         ch.path = [];
         ch.moveProgress = 0;
+      } else {
+        ch.seatTimer = 0;
       }
       this.rebuildFurnitureInstances();
     }
@@ -1224,10 +1303,14 @@ export class OfficeState {
         continue; // skip normal FSM while the effect is (or just was) active
       }
 
-      // Temporarily unblock own seat so character can pathfind to it
-      this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
-      );
+      // Inactive routes keep chairs blocked unless attending a meeting.
+      const update = () =>
+        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles);
+      if (ch.isActive || ch.hasDomainWork || ch.isInMeeting) {
+        this.withOwnSeatUnblocked(ch, update);
+      } else {
+        update();
+      }
 
       // Tick bubble timer for waiting bubbles
       if (ch.bubbleType === 'waiting') {

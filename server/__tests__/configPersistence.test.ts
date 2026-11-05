@@ -18,6 +18,8 @@ import {
   setHooksEnabled,
   writeConfig,
 } from '../src/configPersistence.js';
+import { RESEARCH_LIMITS, RESEARCH_MODE_DEFAULTS } from '../src/constants.js';
+import { researchPolicy } from '../src/researchPolicy.js';
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>();
@@ -164,6 +166,26 @@ describe('configPersistence: areas', () => {
   it('keeps legacy Projects valid with an empty executorLevels map', () => {
     const project = { autonomyLevel: 'A1', allowedExecutors: ['codex'], executorLevels: {} };
     expect(parseProjects({ test: project }).test).toEqual(project);
+  });
+
+  it('accepts legacy research time ceilings without losing Project policy and clamps execution', () => {
+    const policy = {
+      autonomyLevel: 'A1',
+      allowedExecutors: ['claude'],
+      concurrency: { maxExecutions: 2 },
+      research: { maxSeconds: 3600 },
+    };
+    const projects = parseProjects({ test: policy });
+    expect(projectConfigError(projects, 'test')).toBeUndefined();
+    expect(projects.test).toEqual(policy);
+    expect(researchPolicy('deep', projects.test.research).maxSeconds).toBe(
+      RESEARCH_LIMITS.maxSeconds,
+    );
+    expect(researchPolicy('quick', projects.test.research).maxSeconds).toBe(
+      RESEARCH_MODE_DEFAULTS.quick.maxSeconds,
+    );
+    expect(projects.test.research?.maxSeconds).toBe(3600);
+    expect(researchPolicy('deep', { maxSeconds: 30 }).maxSeconds).toBe(30);
   });
 
   describe('parseAreaMappings', () => {

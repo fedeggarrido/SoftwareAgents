@@ -37,18 +37,22 @@ function openRegular(file: string): number {
   return fd;
 }
 
-export function readTaskInput(root: string, relative: string): string {
+export function readTaskInput(
+  root: string,
+  relative: string,
+  maxBytes = TASK_CLI_INPUT_BYTES,
+): string {
   const fd = openRegular(taskPath(root, relative));
   try {
-    if (fs.fstatSync(fd).size > TASK_CLI_INPUT_BYTES) throw new Error('Input exceeds 1 MiB limit');
-    const buffer = Buffer.alloc(TASK_CLI_INPUT_BYTES + 1);
+    if (fs.fstatSync(fd).size > maxBytes) throw new Error('Input exceeds size limit');
+    const buffer = Buffer.alloc(maxBytes + 1);
     let size = 0;
     while (size < buffer.length) {
       const count = fs.readSync(fd, buffer, size, buffer.length - size, null);
       if (!count) break;
       size += count;
     }
-    if (size > TASK_CLI_INPUT_BYTES) throw new Error('Input exceeds 1 MiB limit');
+    if (size > maxBytes) throw new Error('Input exceeds size limit');
     return buffer.toString('utf8', 0, size);
   } finally {
     fs.closeSync(fd);

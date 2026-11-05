@@ -89,6 +89,7 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
             type: 'result',
             result: mode === 'prose' ? 'prose {"candidates":[]}' : '{"candidates":[]}',
             usage: { input_tokens: 2, output_tokens: 2 },
+            total_cost_usd: 0.0123,
           });
           child.stdout.end();
           child.stderr.end();
@@ -115,6 +116,7 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
         prompt: '',
         worktreePath: worktree,
         timeoutMin: 1,
+        researchBudget: { maxCostUsd: 0.8 },
         taskData: { task: { question: 'public question' }, outputSchema: scoutSchema(2) },
       }).events)
         events.push(event);
@@ -123,6 +125,7 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
       expect(args).toContain('--system-prompt');
       expect(args).toContain('--disable-slash-commands');
       expect(args[args.indexOf('--max-turns') + 1]).toBe(String(WEB_SCOUT_MAX_TURNS));
+      expect(args[args.indexOf('--max-budget-usd') + 1]).toBe('0.8');
       expect(args[args.indexOf('--tools') + 1]).toBe('WebSearch');
       expect(environment).toMatchObject({
         HOME: root,
@@ -149,15 +152,24 @@ it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
       expect(process.env.CLICKUP_TOKEN).toBe('fixture-secret');
       expect(settings).toMatchObject({ claudeMdExcludes: ['**'], autoMemoryEnabled: false });
       expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: mode === 'valid' ? 0 : 1 });
+      expect(events.at(-1)).toHaveProperty('costUsd', 0.0123);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   },
 );
 
-it.each(['complete', 'cancel'])(
-  'tracks multiple assistant turns with cache tokens before the final result: %s',
-  async (mode) => {
+it.each([
+  { mode: 'complete', cost: 0.125 },
+  { mode: 'complete', cost: 0 },
+  { mode: 'complete', cost: undefined },
+  { mode: 'complete', cost: 'invalid' },
+  { mode: 'complete', cost: '0.125' },
+  { mode: 'complete', cost: -1 },
+  { mode: 'cancel', cost: undefined },
+])(
+  'tracks multiple assistant turns with cache tokens and parses final CLI cost metadata: $mode, $cost',
+  async ({ mode, cost }) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-usage-'));
     vi.stubEnv('HOME', root);
     vi.stubEnv('USERPROFILE', root);
@@ -206,6 +218,7 @@ it.each(['complete', 'cancel'])(
       {
         type: 'result',
         result: '{"candidates":[]}',
+        total_cost_usd: cost,
         // Cumulative totals also reconcile usage absent from assistant messages.
         usage: {
           input_tokens: 8,
@@ -271,6 +284,9 @@ it.each(['complete', 'cancel'])(
           { type: 'usage', inputTokens: 2, outputTokens: 1 },
         ]);
         expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
+        if (typeof cost === 'number' && cost >= 0)
+          expect(events.at(-1)).toHaveProperty('costUsd', cost);
+        else expect(events.at(-1)).not.toHaveProperty('costUsd');
       } else {
         const cancel = vi.fn();
         await expect(

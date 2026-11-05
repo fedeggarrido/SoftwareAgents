@@ -139,6 +139,11 @@ export class ClaudeCliExecutor implements Executor {
       req.taskData ?? { task: { key: req.taskKey, content: req.prompt } },
     );
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
+    if (
+      req.researchBudget &&
+      (!Number.isFinite(req.researchBudget.maxCostUsd) || req.researchBudget.maxCostUsd <= 0)
+    )
+      throw new Error('Invalid research budget');
     const sessionId = randomUUID();
     const containment: ContainmentContext = {
       worktreeRoot: req.worktreePath,
@@ -259,6 +264,9 @@ export class ClaudeCliExecutor implements Executor {
             '--disable-slash-commands',
             ...(req.model ? ['--model', req.model] : []),
             ...(req.effort ? ['--effort', req.effort] : []),
+            ...(req.researchBudget
+              ? ['--max-budget-usd', String(req.researchBudget.maxCostUsd)]
+              : []),
           ];
           const configEnvironment = claudeConfigEnvironment(options.configDir);
           const environment =
@@ -494,6 +502,13 @@ export class ClaudeCliExecutor implements Executor {
                   }
                 }
                 if (record.type === 'result') {
+                  // Cost is CLI metadata, never parsed from model-authored report text.
+                  costUsd =
+                    typeof record.total_cost_usd === 'number' &&
+                    Number.isFinite(record.total_cost_usd) &&
+                    record.total_cost_usd >= 0
+                      ? record.total_cost_usd
+                      : undefined;
                   summary = record.result || record.errors?.join('\n') || '';
                   resultError = record.is_error === true;
                   if (resultError && isQuotaDiagnostic(summary))
@@ -536,6 +551,7 @@ export class ClaudeCliExecutor implements Executor {
             }
           });
           let summary = '';
+          let costUsd: number | undefined;
           let resultError = false;
           let closed = false;
           let exitCode = 1;
@@ -583,6 +599,7 @@ export class ClaudeCliExecutor implements Executor {
           done = true;
           yield {
             type: 'finished',
+            ...(costUsd !== undefined ? { costUsd } : {}),
             exitCode:
               cancellation.failure || violation
                 ? 1

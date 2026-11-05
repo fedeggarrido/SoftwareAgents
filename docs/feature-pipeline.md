@@ -1580,13 +1580,11 @@ también citan fuentes. Citas exactas, atribuidas y limitadas a `RESEARCH_QUOTE_
 runtime con metadatos normalizados. El resumen describe alcance; afirmaciones de
 contenido deben ir en findings citados. Evidencia insuficiente es un resultado válido.
 
-Presupuestos por ejecución: fuentes 12, tokens observados de entrada+salida 16000,
-tiempo global 120 s por defecto; `quick` limita fuentes a 4. Al agotarse, cancela y
-persiste fuentes y lagunas como entrega parcial, sin inventar síntesis. Si falta uso
-de tokens se descarta la síntesis y marca laguna. El Executor comunica uso después
-del consumo: el límite observado cancela, pero no garantiza evitar un sobrepaso en
-la llamada en curso. `--since` excluye también fuentes sin fecha de publicación
-verificable y lo señala. Las fallas de recopilación son lagunas; informe inválido falla.
+SA-112 aplica los presupuestos y la confirmación de coste descritos abajo.
+Al agotarse el tiempo, los tokens o el coste, conserva fuentes y lagunas como entrega
+parcial. Si falta uso de tokens descarta la síntesis y registra la laguna. `--since`
+excluye fuentes sin fecha de publicación verificable. Los fallos de recopilación,
+descubrimiento y síntesis producen lagunas con diagnósticos fijos sin contenido externo.
 
 Brain guarda `research/<uuid>.json` y `.md` (datos literales protegidos contra markdown
 inyectado), auditados como `research_run` started/completed/partial/failed, sin contenido.
@@ -1619,8 +1617,9 @@ propio, cwd privado, `claudeMdExcludes: ["**"]`, `autoMemoryEnabled: false` y
 `--disable-slash-commands` para excluir instrucciones, memoria y skills. No usa
 `--bare`: ese modo no admite el login de suscripción. Conserva OAuth y los hooks
 del runtime, con settings sources vacíos y MCP estricto. Rechaza un CLAUDE.md
-gestionado local porque no se puede excluir. Requiere un CLI compatible; fallo del scout falla
-cerrado. El único contexto de tarea es la pregunta pública del operador: no incluir
+gestionado local porque no se puede excluir. Requiere un CLI compatible y conserva
+su techo de seis turnos. El fallo del scout conserva un informe parcial.
+El único contexto de tarea es la pregunta pública del operador. No incluir
 secretos ni datos privados en ella. El scout devuelve JSON estricto con hasta
 min(12, maxSources) candidatos (4 en quick), URL HTTP(S) sin credenciales, título
 y motivo cortos. Se rechaza texto adicional. El runtime descarta títulos y motivos,
@@ -1643,7 +1642,84 @@ HTML, restricciones regionales, consentimiento o bloqueos públicos pueden imped
 recuperar evidencia. No hay evasión de acceso ni garantía de disponibilidad.
 
 TODO fase B: Google Books opcional y podcasts.
-TODO fase C: integraciones de investigación con Features, otros roles y UI.
+La investigación posterior al plan pertenece a SA-113.
+
+## Investigación previa al plan (SA-112)
+
+`research run` conserva la recopilación, los adapters, el scout SA-108 y la síntesis
+existentes. El ingreso exige el token y la prueba de servidor de SA-107. Los marcadores
+gestionados deniegan la operación incluso cuando hay token y confirmación de coste.
+
+Los límites se configuran por Project en Operator config, bajo
+`projects.<project-id>.research.modes.quick` y `.deep`.
+
+| Modo  | Fuentes | Tokens observados | Tiempo máximo | Tope estimado USD |
+| ----- | ------- | ----------------- | ------------- | ----------------- |
+| quick | 4       | 16000             | 180 s         | 1                 |
+| deep  | 24      | 100000            | 1800 s        | 10                |
+
+Cada modo admite `maxSources`, `maxTokens`, `maxSeconds` y `maxCostUsd`. Los campos
+históricos al nivel de `research` acotan ambos modos. Los techos absolutos son 100
+fuentes, 1000000 tokens, 1800 segundos y 1000 USD estimados. Defaults y techos viven
+en `server/src/constants.ts`. `--depth standard` se conserva como alias de deep.
+
+Antes de recopilar, escribir o lanzar un modelo, el comando muestra estimación, tope
+y una cadena `confirmation`. La estimación conservadora aplica 15 USD por millón al
+presupuesto de tokens; los supuestos son 6 USD por millón de entrada y 15 de salida.
+El gasto acumulado usa el coste declarado por el CLI al terminar cada llamada.
+El tope es una estimación a precios API y una sola respuesta puede superarlo
+ligeramente; la confirmación y el informe lo indican en español. El comando
+requiere `--accept-cost <confirmation>` con ambos importes exactos, además del ingreso
+humano. Un cambio en esos importes exige otra confirmación.
+
+El CLI de Claude comprueba su presupuesto después de recibir cada respuesta y puede
+superarlo. Antes de cada llamada (scout, síntesis o reintento), el runtime resta del
+presupuesto restante un margen fijo del 20% del tope total, definido por
+`RESEARCH_BUDGET_HEADROOM_FRACTION`. Esa asignación llega al CLI como
+`--max-budget-usd` mediante `researchBudget.maxCostUsd`. Si no queda una asignación
+positiva, no inicia otra llamada. El margen reduce el riesgo de sobrepaso sin
+garantizar un máximo estricto. Coste ausente o inválido se contabiliza como toda la
+asignación de esa llamada, también si falla o se interrumpe. Alcanzar el tope o
+agotar el margen conserva un informe parcial con gasto y motivo de parada, sin
+recortar un sobrepaso observado. Los hallazgos ya validados se conservan.
+`--discover` ejecuta el scout, recopila sus URLs y sintetiza mientras queda presupuesto.
+El precio elegido tampoco constituye una cotización de facturación.
+La limitación de Claude Code está documentada en su guía del bucle de agentes.
+[Claude Code](https://code.claude.com/docs/en/agent-sdk/agent-loop#budget-headroom),
+[precios API](https://platform.claude.com/docs/en/about-claude/pricing).
+
+Para asociar evidencia a un borrador guardado en la oficina, el humano ejecuta
+explícitamente el comando con `--idea FEAT-001 --question "Pregunta pública"`.
+La pregunta pública es explícita. El borrador completo llega únicamente a la síntesis
+en el envelope JSON no confiable. Ejemplo de consulta de los importes antes de lanzar
+
+```sh
+pixel-agents research run --idea FEAT-001 --question "Alternativas y riesgos" --mode quick --discover --confirm
+```
+
+La primera invocación muestra los importes y se rechaza por falta de `--accept-cost`.
+Se repite con esa opción y `--confirm` al final. Todas las etapas son explícitas.
+
+El informe estable vive junto al borrador en
+`.softwareagents/ideas/<project-id>/FEAT-001.research.md` y `.research.json`.
+Un lock exclusivo serializa ejecuciones para una misma idea. Un cierre abrupto deja
+el lock para inspección del operador. El histórico sigue en `Brain/research/<uuid>`.
+El Markdown agrupa alternativas, tecnologías, riesgos y buenas prácticas, con fuente
+por hallazgo y lagunas explícitas. Texto externo, URLs y títulos son bloques literales.
+El JSON conserva procedencia externa, estado parcial, costes y hash del borrador.
+El JSON se publica atómicamente y es la fuente autoritativa para el plan.
+
+`feature run FEAT-001 --request .softwareagents/ideas/<project-id>/FEAT-001.md`
+resuelve el informe hermano si existe, comprueba el hash del borrador y revalida
+fuentes y hallazgos. Requirements recibe exclusivamente el handoff acotado existente,
+separado en `research.result` dentro de `untrusted-context-data`. Los campos `request`
+y `answers` conservan los datos humanos. El informe completo y los archivos handoff
+se rechazan como petición o respuestas. Copiar el Markdown conserva su marcador de
+procedencia externa. Los cambios del borrador invalidan el informe asociado.
+Leer el informe conserva los gates de FeatureSpec y del plan.
+
+Logs y auditoría contienen identidad, estado y metadatos de coste. `--json` devuelve
+metadatos y ruta. El texto del informe se consulta en sus artefactos.
 
 ## Próximos pasos
 

@@ -55,7 +55,15 @@ function normalizeReport(raw: unknown): unknown {
     summary: r.summary,
     findings: Array.isArray(r.findings)
       ? r.findings.map((f) => {
-          const finding = pick(f, ['claim', 'type', 'confidence', 'reason', 'sources', 'quotes']);
+          const finding = pick(f, [
+            'claim',
+            'topic',
+            'type',
+            'confidence',
+            'reason',
+            'sources',
+            'quotes',
+          ]);
           const quotes = (finding as Record<string, unknown>).quotes;
           if (Array.isArray(quotes))
             (finding as Record<string, unknown>).quotes = quotes.map((q) =>

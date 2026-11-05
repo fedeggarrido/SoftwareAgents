@@ -23,6 +23,8 @@ export interface ExecutionRequest {
   tier?: ModelTier;
   selectionReason?: string;
   timeoutMin: number;
+  /** Runtime-owned API-price allowance; a response may overshoot. Never task content. */
+  researchBudget?: { maxCostUsd: number };
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void | Promise<void>;
   /** Persist CLI closure before releasing the registered supervisor root. */
@@ -39,6 +41,7 @@ export function snapshotExecutionRequest(req: ExecutionRequest): ExecutionReques
     flags: [...req.flags],
     agentSpec: req.agentSpec ? structuredClone(req.agentSpec) : undefined,
     taskData: req.taskData ? structuredClone(req.taskData) : undefined,
+    researchBudget: req.researchBudget ? { ...req.researchBudget } : undefined,
   };
 }
 
@@ -51,7 +54,7 @@ export type ExecutionEvent =
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'rateLimit'; retryAfterSec: number; message: string; capacity?: CapacitySnapshot }
   | { type: 'output'; text: string; stream: 'stdout' | 'stderr' }
-  | { type: 'finished'; exitCode: number; resultSummary: string };
+  | { type: 'finished'; exitCode: number; resultSummary: string; costUsd?: number };
 
 export interface ExecutionHandle {
   /** Reserved before a lazy CLI launch; registry persists it before draining events. */

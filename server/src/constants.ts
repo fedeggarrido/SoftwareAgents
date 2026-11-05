@@ -241,6 +241,8 @@ export const VERIFIER_FEEDBACK_FIELD_CHARS = 256;
 export const VERIFIER_STYLE_RETRIES = 1;
 // SA-027: bounded TaskDAG/FeatureSpec input and fixed-memory backup copying.
 export const TASK_CLI_INPUT_BYTES = 1024 * 1024;
+/** Saved reports add a bibliography and metadata to the model's bounded output. */
+export const RESEARCH_REPORT_MAX_BYTES = 4 * 1024 * 1024;
 /** 6x JSON escaping of a 1 MiB idea plus envelope; also fits full 64x64 layouts. */
 export const WS_MAX_PAYLOAD_BYTES = 32 * 1024 * 1024;
 // Draft requests live in the checkout so the real --request validator can read them.
@@ -335,6 +337,31 @@ export const WEB_SCOUT_ENV_ALLOWLIST = [
 export const WEB_SCOUT_ENV_PREFIX_ALLOWLIST = ['ANTHROPIC_', 'LC_'] as const;
 /** Independent CLI ceiling, including runs that stop reporting token usage. */
 export const WEB_SCOUT_MAX_TURNS = 6;
+
+/** Research policy belongs to Operator config, never collected content. */
+export const RESEARCH_MODE_DEFAULTS = {
+  quick: { maxSources: 4, maxTokens: 16000, maxSeconds: 180, maxCostUsd: 1 },
+  deep: { maxSources: 24, maxTokens: 100000, maxSeconds: 1800, maxCostUsd: 10 },
+} as const;
+export const RESEARCH_LIMITS = {
+  maxSources: 100,
+  maxTokens: 1000000,
+  maxSeconds: 1800,
+  maxCostUsd: 1000,
+} as const;
+export const RESEARCH_QUESTION_CHARS = 4000;
+export const RESEARCH_SEED_LIMIT = 100;
+export const RESEARCH_REPORT_SUFFIX = '.research.json';
+export const RESEARCH_MARKDOWN_SUFFIX = '.research.md';
+export const RESEARCH_PRICE_TOKENS = 1000000;
+/** API-equivalent estimate, deliberately conservative for input/cache tokens.
+ * https://platform.claude.com/docs/en/about-claude/pricing */
+export const RESEARCH_PRICES = { input: 6, output: 15 } as const;
+/** Reserve a fixed share of the run cap before every model call. */
+export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
+export const RESEARCH_COST_LABEL =
+  'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';
+export const RESEARCH_TOPICS = ['alternatives', 'technologies', 'risks', 'practices'] as const;
 
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
 export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;

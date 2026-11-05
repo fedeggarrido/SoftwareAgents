@@ -6,7 +6,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WEB_SCOUT_SPEC } from '../../core/src/agentSpec.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { compileAgent, executorSupportsRole } from '../src/agentCompiler.js';
-import { runResearchCommand } from '../src/commands/research.js';
 import type { Executor } from '../src/executors/executor.js';
 import { ResearchAdapters } from '../src/research.js';
 import { redditAdapter } from '../src/researchAdapters/reddit.js';
@@ -15,6 +14,7 @@ import { timedText, youtubeAdapter } from '../src/researchAdapters/youtube.js';
 import type { ResearchHttp } from '../src/researchHttp.js';
 import { discoverUrls, scoutSchema, scoutUrls } from '../src/webScout.js';
 import { operatorToken } from './helpers/operatorToken.js';
+import { runResearchCommand } from './helpers/researchCommand.js';
 
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -253,6 +253,7 @@ it('refetches scout URLs and never forwards scout text to Researcher', async () 
         yield {
           type: 'finished' as const,
           exitCode: 0,
+          costUsd: 0.001,
           resultSummary:
             req.role === 'web-scout'
               ? output()

@@ -6,6 +6,7 @@
     "findings": {"type": "array", "maxItems": 100, "items": {
       "type": "object", "additionalProperties": false, "required": ["claim", "type", "confidence", "reason", "sources"],
       "properties": {
+        "topic": {"enum": ["alternatives", "technologies", "risks", "practices"]},
         "claim": {"$ref": "#/definitions/text"}, "type": {"enum": ["fact", "opinion", "anecdote"]},
         "confidence": {"enum": ["high", "medium", "low"]}, "reason": {"$ref": "#/definitions/text"}, "sources": {"$ref": "#/definitions/sources"},
         "quotes": {"type": "array", "maxItems": 10, "items": {"type": "object", "additionalProperties": false, "required": ["sourceId", "text"], "properties": {"sourceId": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1, "maxLength": 300}}}}

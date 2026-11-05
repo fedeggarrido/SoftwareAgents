@@ -340,8 +340,13 @@ describe('SA-109/110 draft ingress', () => {
     expect(fs.existsSync(path.join(root, FEATURE_IDEAS_DIRECTORY))).toBe(false);
   });
 
-  it('accepts exactly 1 MiB through the real request reader', () => {
-    const text = 'á'.repeat(TASK_CLI_INPUT_BYTES / 2);
+  it('accepts exactly 1 MiB of final file through the real request reader', () => {
+    const overhead = Buffer.byteLength(expectedMarkdown('a')) - 1;
+    const text = 'a'.repeat(TASK_CLI_INPUT_BYTES - overhead);
+    expect(submitIdea(request(text + 'a'), true, root)).toMatchObject({
+      status: 'rejected',
+      errorCode: 'too_large',
+    });
     expect(submitIdea(request(text), true, root).status).toBe('saved');
     expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(
       expectedMarkdown(text),

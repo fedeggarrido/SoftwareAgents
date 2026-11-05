@@ -531,7 +531,7 @@ it('human command uses a fake executor, persists report/cache and audits without
       operator: {
         autonomyLevel: 'A0',
         allowedExecutors: ['claude'],
-        research: { maxSources: 2, maxTokens: 1000, maxSeconds: 5 },
+        research: { maxSources: 2, maxTokens: 16000, maxSeconds: 5 },
       },
     };
     const adapters = new ResearchAdapters();

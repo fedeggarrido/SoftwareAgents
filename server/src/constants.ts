@@ -359,9 +359,30 @@ export const RESEARCH_PRICE_TOKENS = 1000000;
 export const RESEARCH_PRICES = { input: 6, output: 15 } as const;
 /** Reserve a fixed share of the run cap before every model call. */
 export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
+/** Ceiling on compiled system + context bytes for any individual research request. */
+export const RESEARCH_REQUEST_MAX_BYTES = 128 * 1024;
+/** Allow for provider framing; UTF-8 bytes otherwise conservatively upper-bound tokens. */
+/** Conservative preflight estimate; actual usage is accounted when reported. */
+export const RESEARCH_BYTES_PER_TOKEN = 3;
+/** Prose and brain artifacts can quote a promise, so they never prove delivery. */
+export const RESEARCH_NON_DELIVERY_PATH = /(^|\/)(docs|\.softwareagents)\/|\.(md|mdx|rst|txt)$/i;
+export const RESEARCH_REQUEST_OVERHEAD_TOKENS = 1024;
 export const RESEARCH_COST_LABEL =
   'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';
 export const RESEARCH_TOPICS = ['alternatives', 'technologies', 'risks', 'practices'] as const;
+/** Reports live with operational feature artifacts, outside every branch tree. */
+export const FEATURE_RESEARCH_DIRECTORY = 'softwareagents/feature-research';
+export const FEATURE_RESEARCH_MAX_ITEMS = 1000;
+export const FEATURE_RESEARCH_TEXT_CHARS = 4000;
+export const FEATURE_RESEARCH_EVIDENCE_LIMIT = 12;
+export const FEATURE_RESEARCH_EVIDENCE_NOTICE =
+  'A citation is a pointer to supplied text, not proof of delivery or relevance. FeatureSpec, design and DAG lines are promises, not implementation evidence. Each item needs its own cited delivery evidence; semantic relevance remains subject to human review.';
+export const FEATURE_RESEARCH_STATUSES = [
+  'delivered',
+  'partial',
+  'missing',
+  'not verifiable',
+] as const;
 
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
 export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;

@@ -398,6 +398,29 @@ ni seguridad semántica de sus resúmenes.
 
 ### 9. Ingreso humano con token privilegiado (SA-107)
 
+- **SA-113.** `research review <FEAT-ID>` comparte el ingreso humano y la
+  confirmación de coste de `research run`; no hay lanzamiento automático ni desde
+  oficina. Solo lee una Feature con run construida `ready_to_merge`, rama y SHA
+  vinculados, y valida sus promesas mediante `featureDocument`, sin relajar esa
+  barrera. El diff se fija a la base histórica y el SHA construido; Git desactiva
+  diff drivers externos, textconv y escrituras opcionales del índice. FeatureSpec,
+  diseño, DAG, informe previo y diff entran como datos no confiables en el envelope
+  existente. El investigador Claude conserva herramientas vacías, sin red, shell,
+  MCP o delegación. No se propagan instrucciones del diff o las fuentes al sistema.
+  Reutiliza el control de presupuesto SA-112, incluido plazo global, margen de coste,
+  coste desconocido conservador y un único reintento de validación con saldo.
+  Los cortes y fallos conservan cobertura parcial: toda fila sin cita comprobable
+  pasa a `not verifiable`, y las fuentes previas solas no prueban entrega.
+  Las citas se cotejan con líneas del lado nuevo del diff o extractos revalidados;
+  su existencia no prueba pertinencia ni corrección semántica. Las propuestas no
+  crean Tasks ni cambian decisiones. El WorkStore se abre en solo lectura, sin
+  migraciones, recuperación ni escrituras de estado. Solo se publican informes
+  Markdown/JSON con UUID en `softwareagents/feature-research/<Project>/<FEAT>/`
+  del Git common dir, fuera del árbol de las ramas; no se alteran exclusiones Git.
+  El texto se representa literalmente y queda fuera de logs, CLI JSON y auditoría.
+  Se mantienen los riesgos de acceso del mismo usuario, carreras de rutas y falta
+  de sandbox de SO; los fixtures no acreditan resistencia de un modelo real.
+
 - **SA-112.** `research run` mantiene exclusivamente el ingreso CLI de SA-107,
   con rechazo de marcadores gestionados. Antes de recopilar o persistir exige además
   `--accept-cost` con estimación y tope exactos mostrados al operador. Los límites
@@ -483,7 +506,7 @@ ni seguridad semántica de sus resúmenes.
   de VS Code anulan la variable y sus variantes presentes con valores `null` en `env`.
 - **Inventario CLI:** `feature run|approve|rebase`, `feature spec|design --answers`,
   `review finding --accept|--reject`, `learning approve|reject`, `task retry`,
-  `design review|direction|apply-direction`, `research run` y `usage backfill`
+  `design review|direction|apply-direction`, `research run|review` y `usage backfill`
   (salvo `--dry-run`), además de `worker run` directo y `eval run` (también con
   `--yes`). `feature spec --request`, `feature design` sin respuestas,
   `feature develop|review|qa` son etapas del runtime: no registran una aprobación

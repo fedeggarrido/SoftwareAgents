@@ -74,6 +74,16 @@ if (!valid) {
   }
   if (args.includes('--inspect')) {
     const fs = require('fs');
+    // Synthetic persistence probe: emulate session writes only when not explicitly disabled.
+    if (
+      args.includes('--probe-session-persistence') &&
+      !args.includes('--no-session-persistence')
+    ) {
+      const path = require('path');
+      const directory = path.join(process.env.HOME, '.claude', 'projects', 'fixture');
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, 'session.jsonl'), 'Synthetic session retained\n');
+    }
     process.stdout.write(
       JSON.stringify({
         args,

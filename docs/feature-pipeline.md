@@ -4,6 +4,54 @@ El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
 operador. No incluye diseño técnico ni implementación de esa vista.
 
+## Investigación después de construir (SA-113)
+
+`pixel-agents research review FEAT-001 --mode quick --confirm` compara lo entregado
+con el FeatureSpec, el TechnicalDesign, cada tarea del DAG y el informe de
+investigación previo, si existe junto al request original. Es un comando humano
+explícito: nunca se inicia al terminar una build ni desde la oficina. Exige el
+ingreso SA-107, rechaza procesos gestionados y muestra la misma estimación, tope y
+advertencia de coste que `research run`. Tras verlos, repetir con
+`--accept-cost <estimación>,<tope>` y `--confirm`. `--json` devuelve solo metadatos.
+
+Reutiliza los modos `quick|deep`, límites de Operator config, plazo global y
+contabilidad de SA-112, incluido el margen fijo del 20% y la asignación por llamada.
+Una respuesta puede superar el tope estimado; el corte conserva un informe parcial.
+No vuelve a buscar en la web: contrasta las fuentes ya recogidas con el diff.
+
+La Feature debe tener una run `ready_to_merge` con trabajo integrado y su rama
+`sa/FEAT-NNN-integration` presente en el SHA registrado. Sin rama construida se
+rechaza antes de lanzar el modelo o escribir informes. El diff compara el SHA base
+guardado en la run con el SHA construido; sigue siendo útil después del merge a
+main. La lectura del plan conserva íntegra la barrera de `featureDocument` y exige
+que esos documentos también coincidan en la rama construida.
+
+Cada criterio de aceptación, sección disponible del diseño y tarea del DAG tiene
+una fila: `delivered`, `partial`, `missing` o `not verifiable`, explicación y citas
+`file:line` o ids de fuentes. El runtime comprueba referencias y citas literales
+contra las líneas del lado nuevo del diff y las fuentes previas revalidadas. Las
+filas omitidas o sin evidencia comprobable son `not verifiable`; una fuente externa
+por sí sola nunca demuestra entrega. Los binarios, rutas escapadas de Git y código
+sin líneas en el diff pueden quedar sin verificar. Las mejoras aparecen como
+`proposal` y requieren revisión humana: no crean tareas ni conceden autoridad.
+
+El runtime abre el WorkStore existente en solo lectura, sin migraciones ni
+recuperación de leases. No cambia código, Tasks, estado de Feature, decisiones,
+índice, HEAD o ramas. El investigador existente recibe todos los inputs como
+`untrusted-context-data`, sin herramientas de escritura, lectura, red, shell,
+MCP ni delegación. Solo devuelve JSON para validación y publicación por el runtime.
+
+Los informes `.md` y `.json` se guardan junto al almacenamiento operativo de
+Features, en el Git common dir:
+`softwareagents/feature-research/<Project>/<FEAT>/<UUID>.*`. Quedan fuera del árbol
+de cualquier rama, sin modificar exclusiones Git; no afectan las barreras del plan.
+El Markdown indenta literalmente el texto del modelo y de fuentes. Logs, salida
+CLI y auditoría no contienen el informe ni los inputs; este comando no añade eventos
+de auditoría. No sustituye Reviewer, QA, aprobación ni merge humano.
+
+Las pruebas con fixtures están en `server/__tests__/featureResearch.test.ts`; no
+llaman a modelos reales ni acreditan la corrección semántica de sus conclusiones.
+
 ## Ideas desde la oficina (SA-109–110)
 
 «Nueva idea» guía una entrevista breve antes de guardar. Tras la idea, pregunta

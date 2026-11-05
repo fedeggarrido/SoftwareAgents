@@ -6,7 +6,7 @@ import * as path from 'path';
 import { PassThrough } from 'stream';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { WEB_SCOUT_SPEC } from '../../core/src/agentSpec.js';
+import { RESEARCHER_SPEC, WEB_SCOUT_SPEC } from '../../core/src/agentSpec.js';
 import { WEB_SCOUT_MAX_TURNS } from '../src/constants.js';
 import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
@@ -24,6 +24,75 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+it.each(['feature-research-review', 'research-run'])(
+  'launches researcher %s with persistence disabled (simulated process)',
+  async (kind) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'researcher-executor-'));
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('USERPROFILE', root);
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    const sessionFile = path.join(root, 'session.jsonl');
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    let args: string[] = [];
+    vi.mocked(spawn).mockImplementation((_binary, argv) => {
+      args = argv as string[];
+      child.stdin.on('finish', () =>
+        setImmediate(() => {
+          if (!args.includes('--no-session-persistence'))
+            fs.writeFileSync(sessionFile, 'Synthetic retained session');
+          child.stdout.write(
+            JSON.stringify({
+              type: 'result',
+              result: '{}',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            }) + '\n',
+          );
+          child.stdout.end();
+          child.stderr.end();
+          child.emit('close', 0);
+        }),
+      );
+      return child as unknown as ChildProcess;
+    });
+    try {
+      const executor = new ClaudeCliExecutor({
+        binary: 'fixture-only',
+        runtimeDirectory: path.join(root, 'runtime'),
+        containmentHookScript: __filename,
+      });
+      const events: ExecutionEvent[] = [];
+      for await (const event of executor.start({
+        executionId: 'fixture',
+        projectId: 'fixture',
+        taskKey: kind,
+        role: 'researcher',
+        agentSpec: RESEARCHER_SPEC,
+        flags: [],
+        prompt: '',
+        worktreePath: worktree,
+        timeoutMin: 1,
+        taskData: { task: { kind } },
+      }).events)
+        events.push(event);
+      expect(args.filter((arg) => arg === '--no-session-persistence')).toHaveLength(1);
+      expect(args).toContain('--system-prompt');
+      expect(args).not.toContain('--append-system-prompt');
+      expect(fs.existsSync(sessionFile)).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'finished', exitCode: 0 });
+    } finally {
+      const target = path.resolve(root);
+      if (!path.basename(target).startsWith('researcher-executor-'))
+        throw new Error('Unsafe fixture cleanup');
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  },
+);
 
 it.each(['valid', 'Read', 'WebFetch', 'mcp__secret__read', 'Agent', 'prose'])(
   'enforces scout launch and output boundary with simulated CLI: %s',

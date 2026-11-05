@@ -6,6 +6,7 @@ import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import {
   FEATURE_IDEAS_DIRECTORY,
   RESEARCH_MARKDOWN_SUFFIX,
+  RESEARCH_REPORT_MAX_BYTES,
   RESEARCH_REPORT_SUFFIX,
   RESEARCH_TOPICS,
 } from './constants.js';
@@ -116,7 +117,9 @@ export function readIdeaResearch(
   const relative = requestPath.replace(/\.md$/, RESEARCH_REPORT_SUFFIX);
   if (relative === requestPath || !fs.existsSync(taskPath(root, relative))) return undefined;
   try {
-    const saved: SavedResearch = JSON.parse(readTaskInput(root, relative));
+    const saved: SavedResearch = JSON.parse(
+      readTaskInput(root, relative, RESEARCH_REPORT_MAX_BYTES),
+    );
     if (
       !saved ||
       saved.kind !== 'idea-research-report' ||
@@ -145,6 +148,8 @@ export function readIdeaResearch(
 export function writeIdeaResearch(root: string, ideaPath: string, result: SavedResearch): void {
   if (sourceHash(readTaskInput(root, ideaPath)) !== result.ideaHash)
     throw new Error('Idea changed during research. The historical report was retained.');
+  if (Buffer.byteLength(JSON.stringify(result, null, 2)) > RESEARCH_REPORT_MAX_BYTES)
+    throw new Error('Research report exceeds its size limit');
   for (const [suffix, text] of [
     [RESEARCH_MARKDOWN_SUFFIX, researchMarkdown(result)],
     [RESEARCH_REPORT_SUFFIX, JSON.stringify(result, null, 2)],

@@ -177,7 +177,8 @@ export function BottomToolbar({
       >
         Features
       </Button>
-      <Button onClick={onNewIdea}>Nueva idea</Button>
+      {/* Hidden while editing: a wider toolbar would cover the editor toolbar above it. */}
+      {!isEditMode && <Button onClick={onNewIdea}>Nueva idea</Button>}
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
         onClick={onToggleSettings}

@@ -23,7 +23,7 @@ export interface ExecutionRequest {
   tier?: ModelTier;
   selectionReason?: string;
   timeoutMin: number;
-  /** Runtime-owned API-equivalent spending ceiling. Never supplied by task content. */
+  /** Runtime-owned API-price allowance; a response may overshoot. Never task content. */
   researchBudget?: { maxCostUsd: number };
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void | Promise<void>;
@@ -54,7 +54,7 @@ export type ExecutionEvent =
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'rateLimit'; retryAfterSec: number; message: string; capacity?: CapacitySnapshot }
   | { type: 'output'; text: string; stream: 'stdout' | 'stderr' }
-  | { type: 'finished'; exitCode: number; resultSummary: string };
+  | { type: 'finished'; exitCode: number; resultSummary: string; costUsd?: number };
 
 export interface ExecutionHandle {
   /** Reserved before a lazy CLI launch; registry persists it before draining events. */
@@ -67,7 +67,5 @@ export interface ExecutionHandle {
 
 export interface Executor {
   readonly id: ExecutorId;
-  /** Opt-in only for adapters that reserve a worst-case charge before API requests. */
-  readonly hardResearchBudget?: boolean;
   start(req: ExecutionRequest): ExecutionHandle;
 }

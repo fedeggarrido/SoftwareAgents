@@ -33,9 +33,6 @@ export const runResearchCommand: typeof command = async (argv, cwd, log, options
         log?.(JSON.stringify(report));
       } else log?.(line);
     },
-    {
-      ...options,
-      ...(options.executor ? { executor: { ...options.executor, hardResearchBudget: true } } : {}),
-    },
+    options,
   );
 };

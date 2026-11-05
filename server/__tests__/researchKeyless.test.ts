@@ -253,6 +253,7 @@ it('refetches scout URLs and never forwards scout text to Researcher', async () 
         yield {
           type: 'finished' as const,
           exitCode: 0,
+          costUsd: 0.001,
           resultSummary:
             req.role === 'web-scout'
               ? output()

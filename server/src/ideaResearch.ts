@@ -25,7 +25,13 @@ export interface SavedResearch {
   partial: boolean;
   ideaHash?: string;
   report: ResearchReport;
-  cost: { estimateUsd: number; capUsd: number; usedEstimateUsd: number; label: string };
+  cost: {
+    estimateUsd: number;
+    capUsd: number;
+    usedEstimateUsd: number;
+    label: string;
+    stopReason?: string;
+  };
 }
 
 export function ideaResearchPath(projectId: string, key: string): string {
@@ -70,7 +76,7 @@ export function researchMarkdown(result: SavedResearch): string {
         `${source.id}\n${source.title}\n${source.url ?? source.citation}\nRetrieved ${source.retrievedAt}`,
       ),
     ),
-    `## Cost\n\n${result.cost.label}\n\nEstimate ${result.cost.estimateUsd} USD. Cap ${result.cost.capUsd} USD. Usage estimate ${result.cost.usedEstimateUsd} USD.`,
+    `## Coste\n\n${result.cost.label}\n\nEstimación ${result.cost.estimateUsd} USD. Tope ${result.cost.capUsd} USD. Gasto contabilizado ${result.cost.usedEstimateUsd} USD.${result.cost.stopReason ? `\n\nMotivo de parada: ${result.cost.stopReason}` : ''}`,
     '',
   ].join('\n\n');
 }

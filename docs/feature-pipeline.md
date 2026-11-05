@@ -1665,17 +1665,25 @@ en `server/src/constants.ts`. `--depth standard` se conserva como alias de deep.
 
 Antes de recopilar, escribir o lanzar un modelo, el comando muestra estimación, tope
 y una cadena `confirmation`. La estimación conservadora aplica 15 USD por millón al
-presupuesto de tokens. El uso aplica 6 USD por millón de entrada y 15 de salida,
-incluyendo margen para escritura de caché. Son estimaciones a precios API. El comando
+presupuesto de tokens; los supuestos son 6 USD por millón de entrada y 15 de salida.
+El gasto acumulado usa el coste declarado por el CLI al terminar cada llamada.
+El tope es una estimación a precios API y una sola respuesta puede superarlo
+ligeramente; la confirmación y el informe lo indican en español. El comando
 requiere `--accept-cost <confirmation>` con ambos importes exactos, además del ingreso
 humano. Un cambio en esos importes exige otra confirmación.
 
 El CLI de Claude comprueba su presupuesto después de recibir cada respuesta y puede
-superarlo. El runtime exige un Executor que reserve el coste máximo antes de cada
-petición mediante `researchBudget.maxCostUsd`. **El Executor CLI actual carece de
-esa garantía y SA-112 conserva un informe parcial sin iniciar llamadas de modelo.**
-La implementación de un backend con reservas previas queda pendiente de la decisión
-del operador. El precio elegido tampoco constituye una cotización de facturación.
+superarlo. Antes de cada llamada (scout, síntesis o reintento), el runtime resta del
+presupuesto restante un margen fijo del 20% del tope total, definido por
+`RESEARCH_BUDGET_HEADROOM_FRACTION`. Esa asignación llega al CLI como
+`--max-budget-usd` mediante `researchBudget.maxCostUsd`. Si no queda una asignación
+positiva, no inicia otra llamada. El margen reduce el riesgo de sobrepaso sin
+garantizar un máximo estricto. Coste ausente o inválido se contabiliza como toda la
+asignación de esa llamada, también si falla o se interrumpe. Alcanzar el tope o
+agotar el margen conserva un informe parcial con gasto y motivo de parada, sin
+recortar un sobrepaso observado. Los hallazgos ya validados se conservan.
+`--discover` ejecuta el scout, recopila sus URLs y sintetiza mientras queda presupuesto.
+El precio elegido tampoco constituye una cotización de facturación.
 La limitación de Claude Code está documentada en su guía del bucle de agentes.
 [Claude Code](https://code.claude.com/docs/en/agent-sdk/agent-loop#budget-headroom),
 [precios API](https://platform.claude.com/docs/en/about-claude/pricing).

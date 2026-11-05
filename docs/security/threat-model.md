@@ -408,10 +408,16 @@ ni seguridad semántica de sus resúmenes.
   dentro del envelope no confiable.
   El plazo global interrumpe también adapters e iteradores que ignoran la señal.
   Los cortes y fallos conservan un informe parcial. El consumo de tokens es una
-  observación posterior. Para el tope monetario estricto se exige un Executor con
-  reserva previa por petición. **El Executor CLI actual falla cerrado para llamadas
-  de modelo**, porque `--max-budget-usd` permite sobrepasar el tope en la respuesta
-  en curso. El backend con reserva previa queda pendiente de decisión del operador.
+  observación posterior. El tope es una estimación a precios API: una sola respuesta
+  puede superarlo ligeramente, como advierten la confirmación y el informe en español.
+  Antes de cada llamada de scout, síntesis o reintento se resta del presupuesto
+  restante un margen fijo del 20% del tope total y se transmite la asignación positiva
+  como `--max-budget-usd`. El CLI comprueba el presupuesto después de la respuesta;
+  el margen mitiga el sobrepaso sin garantizar un máximo estricto. Cada llamada suma
+  el coste declarado por el CLI; si falta o es inválido, suma toda su asignación.
+  Al alcanzar el tope o quedarse sin margen no se inicia otra llamada y el informe
+  parcial registra gasto y motivo, conservando cualquier sobrepaso y evidencia validada.
+  `--discover` permite scout, recopilación y síntesis dentro de estos límites.
   El informe hermano de la idea conserva procedencia externa y hash del borrador.
   La lectura del plan revalida fuentes y extrae el handoff acotado existente dentro
   de `untrusted-context-data`, separado de `request` y `answers`. Los informes se

@@ -547,6 +547,7 @@ it('human command uses a fake executor, persists report/cache and audits without
           yield {
             type: 'finished' as const,
             exitCode: 0,
+            costUsd: 0.001,
             resultSummary: JSON.stringify(report(source().id)),
           };
         })(),

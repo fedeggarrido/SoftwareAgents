@@ -14,6 +14,7 @@ import {
 import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import {
+  RESEARCH_BUDGET_HEADROOM_FRACTION,
   RESEARCH_COST_LABEL,
   RESEARCH_QUESTION_CHARS,
   RESEARCH_SEED_LIMIT,
@@ -47,7 +48,6 @@ import { webAdapter } from '../researchAdapters/web.js';
 import { isYoutube, youtubeAdapter } from '../researchAdapters/youtube.js';
 import { researchFailureReason } from '../researchHttp.js';
 import {
-  researchCost,
   researchCostConfirmation,
   researchDeadline,
   researchEstimate,
@@ -230,29 +230,47 @@ export async function runResearchCommand(
           options.runtimeDirectory ??
           path.join(os.homedir(), '.pixel-agents', 'research-runtime', id),
       });
-    // Only an adapter with pre-request reservations may spend under a hard cap.
-    // Claude Code's post-response --max-budget-usd cannot supply this guarantee.
+    // Keep fixed headroom from the total cap. This is an estimate, not a reservation.
+    const allowance = () =>
+      policy.maxCostUsd * (1 - RESEARCH_BUDGET_HEADROOM_FRACTION) - usedEstimateUsd;
+    const checkCostStop = () => {
+      if (usedEstimateUsd >= policy.maxCostUsd)
+        stopReason ??= 'Tope estimado de coste alcanzado; informe parcial.';
+      else if (allowance() <= 0)
+        stopReason ??= 'Presupuesto restante sin margen de coste disponible; informe parcial.';
+    };
     const executor: Executor = {
       id: underlying.id,
       start(request) {
-        if (!underlying.hardResearchBudget) {
-          stopReason = 'Executor cannot guarantee a hard cost cap; no model call started.';
-          abort.abort();
-          throw new Error('Research budget exhausted');
-        }
-        if (
-          abort.signal.aborted ||
-          usedTokens >= policy.maxTokens ||
-          usedEstimateUsd >= policy.maxCostUsd
-        ) {
+        checkCostStop();
+        if (abort.signal.aborted || usedTokens >= policy.maxTokens || stopReason) {
           stopReason ??= 'Token/cost budget exhausted.';
-          abort.abort();
           throw new Error('Research budget exhausted');
         }
+        const maxCostUsd = allowance();
         const handle = underlying.start({
           ...request,
-          researchBudget: { maxCostUsd: policy.maxCostUsd - usedEstimateUsd },
+          researchBudget: { maxCostUsd },
         });
+        let accounted = false;
+        const account = (reportedCost?: number) => {
+          if (accounted) return;
+          accounted = true;
+          if (abort.signal.aborted) stopReason ??= 'Time budget exhausted.';
+          if (
+            typeof reportedCost === 'number' &&
+            Number.isFinite(reportedCost) &&
+            reportedCost >= 0
+          )
+            usedEstimateUsd += reportedCost;
+          else {
+            usedEstimateUsd += maxCostUsd;
+            gaps.push(
+              'Coste no disponible o inválido; se contabiliza toda la asignación de la llamada.',
+            );
+          }
+          checkCostStop();
+        };
         const cancel = () => handle.cancel();
         abort.signal.addEventListener('abort', cancel, { once: true });
         return {
@@ -265,16 +283,23 @@ export async function runResearchCommand(
                 if (next.done) break;
                 const event = next.value;
                 if (event.type === 'usage') {
+                  if (
+                    ![event.inputTokens, event.outputTokens].every(
+                      (n) => Number.isFinite(n) && n >= 0,
+                    )
+                  )
+                    throw new Error('Invalid research usage');
                   usedTokens += event.inputTokens + event.outputTokens;
-                  usedEstimateUsd += researchCost(event.inputTokens, event.outputTokens);
-                  if (usedTokens >= policy.maxTokens || usedEstimateUsd >= policy.maxCostUsd) {
-                    stopReason = 'Token/cost budget exhausted.';
+                  if (usedTokens >= policy.maxTokens) {
+                    stopReason = 'Token budget exhausted.';
                     abort.abort();
                   }
                 }
+                if (event.type === 'finished') account(event.costUsd);
                 yield event;
               }
             } finally {
+              account();
               cancel();
               abort.signal.removeEventListener('abort', cancel);
             }
@@ -349,7 +374,7 @@ export async function runResearchCommand(
             : []),
         ];
         for (const operation of operations) {
-          if (abort.signal.aborted || sources.length >= maxSources) {
+          if (abort.signal.aborted || stopReason || sources.length >= maxSources) {
             gaps.push('Collection budget exhausted; coverage is partial.');
             break;
           }
@@ -382,7 +407,7 @@ export async function runResearchCommand(
       bibliography: sources,
     };
     try {
-      if (sources.length && !abort.signal.aborted) {
+      if (sources.length && !abort.signal.aborted && !stopReason) {
         if (executor.id !== 'claude')
           throw new Error('Researcher requires a read-tools-only Claude executor');
         // The CLI's own structured-output check is not deterministic for the model: one retry
@@ -461,6 +486,7 @@ export async function runResearchCommand(
             if (
               attempt === 0 &&
               !abort.signal.aborted &&
+              !stopReason &&
               /schema validation/i.test((error as Error).message)
             )
               continue;
@@ -476,7 +502,7 @@ export async function runResearchCommand(
             : 'Synthesis failed; no validated claims produced.'),
       );
     }
-    if (abort.signal.aborted) gaps.push(stopReason ?? 'Time budget exhausted.');
+    if (stopReason || abort.signal.aborted) gaps.push(stopReason ?? 'Time budget exhausted.');
     report.gaps.push(...new Set(gaps));
     report.discardedSources.push(...discardedSources);
     if (ideaPath)
@@ -498,6 +524,7 @@ export async function runResearchCommand(
         capUsd: policy.maxCostUsd,
         usedEstimateUsd,
         label: RESEARCH_COST_LABEL,
+        ...(stopReason ? { stopReason } : {}),
       },
     };
     // Separate, bounded artifact for downstream tool roles. The full report/cache

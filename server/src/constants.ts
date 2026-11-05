@@ -355,7 +355,10 @@ export const RESEARCH_PRICE_TOKENS = 1000000;
 /** API-equivalent estimate, deliberately conservative for input/cache tokens.
  * https://platform.claude.com/docs/en/about-claude/pricing */
 export const RESEARCH_PRICES = { input: 6, output: 15 } as const;
-export const RESEARCH_COST_LABEL = 'Estimated USD at API prices (not subscription billing)';
+/** Reserve a fixed share of the run cap before every model call. */
+export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
+export const RESEARCH_COST_LABEL =
+  'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';
 export const RESEARCH_TOPICS = ['alternatives', 'technologies', 'risks', 'practices'] as const;
 
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */

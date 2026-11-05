@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import type {
+  IdeaAnswer,
   IdeaErrorCode,
   IdeasSnapshot,
   IdeaSummary,
@@ -33,6 +35,54 @@ const fail = (code: IdeaErrorCode): never => {
 };
 const failureCode = (error: unknown): IdeaErrorCode =>
   error instanceof IdeaFailure ? error.code : 'unavailable';
+
+function validateAnswers(value: unknown): IdeaAnswer[] {
+  if (!Array.isArray(value) || value.length !== IDEA_QUESTIONS.length)
+    return fail('invalid_request');
+  const seen = new Set<string>();
+  for (const answer of value) {
+    if (
+      !answer ||
+      typeof answer !== 'object' ||
+      Object.keys(answer).some((key) => !['questionId', 'choice', 'text'].includes(key)) ||
+      !IDEA_QUESTIONS.some((question) => question.id === answer.questionId) ||
+      seen.has(answer.questionId) ||
+      typeof answer.text !== 'string' ||
+      !['answer', 'decide'].includes(answer.choice)
+    )
+      return fail('invalid_request');
+    seen.add(answer.questionId);
+    if (
+      (answer.choice === 'answer' && !answer.text.trim()) ||
+      (answer.choice === 'decide' && answer.text !== '') ||
+      Buffer.from(answer.text, 'utf8').toString('utf8') !== answer.text
+    )
+      return fail('invalid_request');
+    if (Buffer.byteLength(answer.text, 'utf8') > TASK_CLI_INPUT_BYTES) return fail('too_large');
+  }
+  return value;
+}
+
+/** Indent every untrusted line, including CR-only lines, as literal Markdown code. */
+function literalMarkdown(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+function interviewMarkdown(text: string, answers: IdeaAnswer[]): string {
+  const answered: string[] = [];
+  const assumptions: string[] = [];
+  for (const question of IDEA_QUESTIONS) {
+    const answer = answers.find((entry) => entry.questionId === question.id)!;
+    const heading = `### ${question.label}\n\n`;
+    if (answer.choice === 'decide') assumptions.push(`${heading}${IDEA_ASSUMPTION_TEXT}`);
+    else answered.push(`${heading}${literalMarkdown(answer.text)}`);
+  }
+  return `# Idea\n\n${literalMarkdown(text)}\n\n## Respuestas\n\n${answered.join('\n\n') || 'Ninguna.'}\n\n## Supuestos\n\n${assumptions.join('\n\n') || 'Ninguno.'}\n`;
+}
 
 function preparedProject(root: string | undefined) {
   if (!root) return fail('no_project');
@@ -271,7 +321,7 @@ export function readIdeas(
 }
 
 export function submitIdea(
-  request: { requestId: string; projectId: string; text: unknown },
+  request: { requestId: string; projectId: string; text: unknown; answers: unknown },
   privileged: boolean,
   root = companyWorkspaceRoot(),
 ): SubmitIdeaResult {
@@ -290,6 +340,13 @@ export function submitIdea(
   if (!request.text.trim()) return { ...base, errorCode: 'empty_text' };
   if (Buffer.from(request.text, 'utf8').toString('utf8') !== request.text)
     return { ...base, errorCode: 'invalid_request' };
+  let markdown: string;
+  try {
+    markdown = interviewMarkdown(request.text, validateAnswers(request.answers));
+    if (Buffer.byteLength(markdown, 'utf8') > TASK_CLI_INPUT_BYTES) return fail('too_large');
+  } catch (error) {
+    return { ...base, errorCode: failureCode(error) };
+  }
   try {
     const config = preparedProject(root);
     if (request.projectId !== config.project.id) return { ...base, errorCode: 'unknown_project' };
@@ -325,7 +382,7 @@ export function submitIdea(
       });
       if (!reservation) continue;
       try {
-        publishIdea(config.repoRoot, relative, staging, request.text);
+        publishIdea(config.repoRoot, relative, staging, markdown);
       } catch (error) {
         removeOwned(common, reservationPath, reservation);
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -335,7 +392,7 @@ export function submitIdea(
         throw error;
       }
       const idea = summary(key, config.project.id);
-      const ideaHash = createHash('sha256').update(request.text).digest('hex');
+      const ideaHash = createHash('sha256').update(markdown).digest('hex');
       try {
         new AuditLog().append({
           projectId: config.project.id,
@@ -384,7 +441,7 @@ export function handleIdeaMessage(
           } satisfies IdeasSnapshot)),
     });
   } else if (msg.type === 'submitIdea' && typeof msg.projectId === 'string') {
-    const allowedKeys = ['type', 'requestId', 'projectId', 'text'];
+    const allowedKeys = ['type', 'requestId', 'projectId', 'text', 'answers'];
     const result =
       !privileged || !supported || Object.keys(msg).some((key) => !allowedKeys.includes(key))
         ? ({
@@ -400,7 +457,12 @@ export function handleIdeaMessage(
             idea: null,
           } satisfies SubmitIdeaResult)
         : submitIdea(
-            { requestId: msg.requestId, projectId: msg.projectId, text: msg.text },
+            {
+              requestId: msg.requestId,
+              projectId: msg.projectId,
+              text: msg.text,
+              answers: msg.answers,
+            },
             privileged,
           );
     send({ ...result });

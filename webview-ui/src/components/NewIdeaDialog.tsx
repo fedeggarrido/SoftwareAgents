@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../../core/src/ideaInterview.js';
+import type { IdeaAnswer, IdeaAnswerChoice } from '../../../core/src/messages.js';
 import { IDEA_TEXTAREA_ROWS } from '../constants.js';
 import {
   getIdeasStore,
@@ -16,18 +18,59 @@ import { Modal } from './ui/Modal.js';
 
 export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('');
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<
+    Record<string, { text: string; choice: IdeaAnswerChoice | null }>
+  >({});
+  const [confirmDiscard, setConfirmDiscard] = useState<'close' | 'consult' | null>(null);
   useEffect(() => {
     // A new dialog can compose another idea, but never replay an uncertain submission.
     setIdeasStore({ ...getIdeasStore(), result: null });
   }, []);
   const { store, connection } = useIdeasConnection(true);
   const state = ideaDialogState(store, connection === 'connected');
-  const close = () => {
-    if (!getIdeasStore().pending) onClose();
+  const finishClose = (consult = false) => {
+    if (consult) {
+      setIdeasStore({ ...getIdeasStore(), uncertain: false });
+      requestIdeas(transport);
+    }
+    onClose();
+  };
+  const close = (consult = false) => {
+    if (getIdeasStore().pending) return;
+    if (
+      state !== 'saved' &&
+      (text.length || Object.values(answers).some((answer) => answer.text.length || answer.choice))
+    )
+      setConfirmDiscard(consult ? 'consult' : 'close');
+    else finishClose(consult);
   };
   const writable = state === 'editing' || state === 'error';
+  const question = IDEA_QUESTIONS[step - 1];
+  const answer = question ? answers[question.id] : undefined;
+  const reviewing = step === IDEA_QUESTIONS.length + 1;
+  const complete = IDEA_QUESTIONS.every((entry) => {
+    const value = answers[entry.id];
+    return value?.choice === 'decide' || (value?.choice === 'answer' && !!value.text.trim());
+  });
+  const canContinue =
+    step === 0
+      ? !!text.trim()
+      : answer?.choice === 'decide' || (answer?.choice === 'answer' && !!answer.text.trim());
+  const updateAnswer = (choice: IdeaAnswerChoice, value = answer?.text ?? '') => {
+    if (question) setAnswers({ ...answers, [question.id]: { choice, text: value } });
+  };
+  const save = () => {
+    if (!writable || !text.trim() || !complete) return;
+    const submission: IdeaAnswer[] = IDEA_QUESTIONS.map((entry) => ({
+      questionId: entry.id,
+      choice: answers[entry.id].choice!,
+      text: answers[entry.id].choice === 'decide' ? '' : answers[entry.id].text,
+    }));
+    sendIdea(text, submission, transport);
+  };
   return (
-    <Modal isOpen onClose={close} title="Nueva idea" className="idea-dialog">
+    <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
       <div
         role="dialog"
         aria-modal="true"
@@ -37,7 +80,15 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
         <p>
           Describe lo que necesitas. Guardar deja un borrador pendiente; no inicia ningún trabajo.
         </p>
-        {state === 'saved' && store.result?.idea ? (
+        {confirmDiscard ? (
+          <div role="alertdialog" aria-label="Descartar borrador" className="flex flex-col gap-8">
+            <p>El borrador tiene contenido sin guardar. ¿Quieres descartarlo?</p>
+            <Button onClick={() => setConfirmDiscard(null)}>Seguir editando</Button>
+            <Button onClick={() => finishClose(confirmDiscard === 'consult')}>
+              Descartar borrador
+            </Button>
+          </div>
+        ) : state === 'saved' && store.result?.idea ? (
           <div role="status">
             <p>
               Idea guardada: <strong>{store.result.idea.key}</strong> · pendiente
@@ -49,15 +100,82 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <>
-            <label htmlFor="new-idea-text">Tu idea</label>
-            <textarea
-              id="new-idea-text"
-              rows={IDEA_TEXTAREA_ROWS}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              disabled={!writable}
-              className="bg-bg-dark text-text border-2 border-border p-8 w-full"
-            />
+            <p role="status">
+              Paso {step + 1} de {IDEA_QUESTIONS.length + 2}
+            </p>
+            {step === 0 && (
+              <>
+                <label htmlFor="new-idea-text">Tu idea</label>
+                <textarea
+                  id="new-idea-text"
+                  rows={IDEA_TEXTAREA_ROWS}
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  disabled={!writable}
+                  className="bg-bg-dark text-text border-2 border-border p-8 w-full"
+                />
+              </>
+            )}
+            {question && (
+              <fieldset disabled={!writable} className="min-w-0 flex flex-col gap-8">
+                <legend>{question.label}</legend>
+                <p id="idea-question-helper">{question.helper}</p>
+                <label>
+                  <input
+                    type="radio"
+                    name="idea-choice"
+                    value="answer"
+                    checked={answer?.choice === 'answer'}
+                    onChange={() => updateAnswer('answer')}
+                  />{' '}
+                  Responder
+                </label>
+                <label htmlFor="idea-answer">Tu respuesta</label>
+                <textarea
+                  id="idea-answer"
+                  rows={IDEA_TEXTAREA_ROWS}
+                  aria-describedby="idea-question-helper"
+                  value={answer?.text ?? ''}
+                  disabled={!writable || answer?.choice === 'decide'}
+                  onChange={(event) => updateAnswer('answer', event.target.value)}
+                  className="bg-bg-dark text-text border-2 border-border p-8 w-full"
+                />
+                <label>
+                  <input
+                    type="radio"
+                    name="idea-choice"
+                    value="decide"
+                    checked={answer?.choice === 'decide'}
+                    onChange={() => updateAnswer('decide')}
+                  />{' '}
+                  Decide tú
+                </label>
+                {answer?.choice === 'decide' && <p>{IDEA_ASSUMPTION_TEXT}</p>}
+                {!answer?.text.trim() && answer?.choice !== 'decide' && (
+                  <p>Escribe una respuesta o elige «Decide tú» para continuar.</p>
+                )}
+              </fieldset>
+            )}
+            {reviewing && (
+              <section className="idea-review" aria-label="Revisar entrevista">
+                <h3>Idea</h3>
+                <p>{text}</p>
+                {IDEA_QUESTIONS.map((entry) => (
+                  <div key={entry.id}>
+                    <h3>{entry.label}</h3>
+                    <p>
+                      {answers[entry.id]?.choice === 'decide'
+                        ? IDEA_ASSUMPTION_TEXT
+                        : answers[entry.id]?.text}
+                    </p>
+                  </div>
+                ))}
+                <p>
+                  Las preguntas adaptativas llegarán mediante Requirements (openQuestions) al panel
+                  de Decisiones cuando inicies el flujo con el comando.
+                </p>
+              </section>
+            )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
               {state === 'loading' && 'Comprobando el Project…'}
               {state === 'disabled' && ideaErrorText(store.snapshot?.errorCode)}
@@ -67,26 +185,29 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
               {state === 'uncertain' &&
                 'No se pudo confirmar el guardado. Consulta las ideas pendientes antes de enviar otra; el envío no se repetirá automáticamente.'}
             </div>
-            <Button disabled={!writable || !text.trim()} onClick={() => sendIdea(text, transport)}>
-              {state === 'saving' ? 'Guardando…' : 'Guardar idea'}
-            </Button>
-            {state === 'uncertain' && (
-              <Button
-                onClick={() => {
-                  setIdeasStore({ ...getIdeasStore(), uncertain: false });
-                  requestIdeas(transport);
-                  onClose();
-                }}
-              >
-                Consultar ideas pendientes
+            {step > 0 && (
+              <Button disabled={!writable} onClick={() => setStep(step - 1)}>
+                Anterior
               </Button>
+            )}
+            {reviewing ? (
+              <Button disabled={!writable || !text.trim() || !complete} onClick={save}>
+                {state === 'saving' ? 'Guardando…' : 'Guardar idea'}
+              </Button>
+            ) : (
+              <Button disabled={!writable || !canContinue} onClick={() => setStep(step + 1)}>
+                Siguiente
+              </Button>
+            )}
+            {state === 'uncertain' && (
+              <Button onClick={() => close(true)}>Consultar ideas pendientes</Button>
             )}
             {state === 'disabled' && (
               <Button onClick={() => requestIdeas(transport)}>Reintentar lectura de ideas</Button>
             )}
           </>
         )}
-        <Button disabled={state === 'saving'} onClick={close}>
+        <Button disabled={state === 'saving'} onClick={() => close()}>
           Cerrar
         </Button>
       </div>

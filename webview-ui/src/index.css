@@ -464,6 +464,11 @@
 }
 .idea-dialog {
   width: min(560px, calc(100vw - 32px));
+  min-width: 0; /* The base Modal's min-w-xs would otherwise overflow phone viewports. */
   max-height: 85vh;
   overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.idea-review p {
+  white-space: pre-wrap;
 }

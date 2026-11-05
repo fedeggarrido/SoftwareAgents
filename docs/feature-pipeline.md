@@ -4,9 +4,27 @@ El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
 operador. No incluye diseño técnico ni implementación de esa vista.
 
-## Ideas desde la oficina (SA-109)
+## Ideas desde la oficina (SA-109–110)
 
-«Nueva idea» guarda el texto literal como borrador pendiente en el checkout
+«Nueva idea» guía una entrevista breve antes de guardar. Tras la idea, pregunta
+objetivo, usuarios, alcance, fuera de alcance, criterio de éxito, restricciones y
+riesgos. El catálogo y sus ayudas están en `core/src/ideaInterview.ts` para su
+reutilización. Cada pregunta exige respuesta o «Decide tú», que se presenta como
+un supuesto que el analista debe proponer para revisión humana. La revisión final
+muestra todas las elecciones. Volver conserva el texto, incluso al alternar una
+respuesta con «Decide tú». Cerrar con contenido pide confirmar el descarte.
+El borrador vive solo en el estado del componente hasta guardar.
+
+`SubmitIdea.answers` lleva las siete elecciones estructuradas. El servidor rechaza
+ids desconocidos o duplicados, elecciones ausentes y respuestas vacías sin
+«Decide tú». Construye las secciones fijas `Idea`, `Respuestas` y `Supuestos`,
+con cada línea de texto libre indentada como código Markdown para impedir que
+inyecte encabezados o supuestos. El límite de 1 MiB se aplica al archivo completo,
+incluidas entrevista y estructura. La auditoría guarda el hash del Markdown final.
+Las preguntas adaptativas llegan por Requirements `openQuestions` al panel de
+Decisiones al iniciar el flujo mediante el comando existente.
+
+La entrevista se guarda como borrador Markdown pendiente en el checkout
 vinculado: `.softwareagents/ideas/<Project>/FEAT-NNN.md`. La identidad del Project
 separa borradores al cambiar el manifiesto. Esa ubicación pasa sin cambios por
 el validador real de `--request`: archivo regular, sin symlinks/junctions, hasta
@@ -79,7 +97,7 @@ caben en ese límite. Los demás mensajes llevan controles escalares o cadenas.
 El contrato admite strings y colecciones sin máximo, por lo que mensajes
 artificiales o importaciones mayores de 32 MiB quedan sujetos a este nuevo límite.
 
-SA-110 añadirá entrevista y SA-111 planificación y
+SA-111 añadirá planificación y
 aprobación; ambas pueden consumir estos borradores sin confundirlos con Features.
 Las guardas de rutas comparten el límite de `taskPath`: no aíslan a un proceso
 hostil del mismo usuario que sustituya directorios entre validación y apertura.

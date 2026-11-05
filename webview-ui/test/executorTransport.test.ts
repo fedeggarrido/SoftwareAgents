@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import type { ClientMessage, ExecutorState } from '../../core/src/messages.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../src/constants.js';
 import { bindExtensionTransportLifecycle } from '../src/hooks/extensionTransportLifecycle.js';
@@ -156,6 +157,11 @@ describe('executor transport regressions (DOM-free)', () => {
       projectId: 'P',
       requestId: 'idea',
       text: 'untrusted idea',
+      answers: IDEA_QUESTIONS.map((question) => ({
+        questionId: question.id,
+        choice: 'decide',
+        text: '',
+      })),
     };
     expect(() => transport.send(message)).toThrow(/connected/);
     FakeSocket.instances[0].close();

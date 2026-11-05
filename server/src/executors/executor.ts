@@ -23,6 +23,8 @@ export interface ExecutionRequest {
   tier?: ModelTier;
   selectionReason?: string;
   timeoutMin: number;
+  /** Runtime-owned API-equivalent spending ceiling. Never supplied by task content. */
+  researchBudget?: { maxCostUsd: number };
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void | Promise<void>;
   /** Persist CLI closure before releasing the registered supervisor root. */
@@ -39,6 +41,7 @@ export function snapshotExecutionRequest(req: ExecutionRequest): ExecutionReques
     flags: [...req.flags],
     agentSpec: req.agentSpec ? structuredClone(req.agentSpec) : undefined,
     taskData: req.taskData ? structuredClone(req.taskData) : undefined,
+    researchBudget: req.researchBudget ? { ...req.researchBudget } : undefined,
   };
 }
 
@@ -64,5 +67,7 @@ export interface ExecutionHandle {
 
 export interface Executor {
   readonly id: ExecutorId;
+  /** Opt-in only for adapters that reserve a worst-case charge before API requests. */
+  readonly hardResearchBudget?: boolean;
   start(req: ExecutionRequest): ExecutionHandle;
 }

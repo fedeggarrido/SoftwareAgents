@@ -336,6 +336,28 @@ export const WEB_SCOUT_ENV_PREFIX_ALLOWLIST = ['ANTHROPIC_', 'LC_'] as const;
 /** Independent CLI ceiling, including runs that stop reporting token usage. */
 export const WEB_SCOUT_MAX_TURNS = 6;
 
+/** Research policy belongs to Operator config, never collected content. */
+export const RESEARCH_MODE_DEFAULTS = {
+  quick: { maxSources: 4, maxTokens: 16000, maxSeconds: 180, maxCostUsd: 1 },
+  deep: { maxSources: 24, maxTokens: 100000, maxSeconds: 1800, maxCostUsd: 10 },
+} as const;
+export const RESEARCH_LIMITS = {
+  maxSources: 100,
+  maxTokens: 1000000,
+  maxSeconds: 1800,
+  maxCostUsd: 1000,
+} as const;
+export const RESEARCH_QUESTION_CHARS = 4000;
+export const RESEARCH_SEED_LIMIT = 100;
+export const RESEARCH_REPORT_SUFFIX = '.research.json';
+export const RESEARCH_MARKDOWN_SUFFIX = '.research.md';
+export const RESEARCH_PRICE_TOKENS = 1000000;
+/** API-equivalent estimate, deliberately conservative for input/cache tokens.
+ * https://platform.claude.com/docs/en/about-claude/pricing */
+export const RESEARCH_PRICES = { input: 6, output: 15 } as const;
+export const RESEARCH_COST_LABEL = 'Estimated USD at API prices (not subscription billing)';
+export const RESEARCH_TOPICS = ['alternatives', 'technologies', 'risks', 'practices'] as const;
+
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
 export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;
 

@@ -10,7 +10,6 @@ import { RESEARCHER_SPEC } from '../../core/src/agentSpec.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { RESEARCH_EXCERPT_CHARS, RESEARCH_HTTP_BYTES } from '../../core/src/research.js';
 import { compileAgent, executorSupportsRole } from '../src/agentCompiler.js';
-import { runResearchCommand } from '../src/commands/research.js';
 import { parseProjects } from '../src/configPersistence.js';
 import type { Executor } from '../src/executors/executor.js';
 import {
@@ -37,6 +36,7 @@ import {
 import { exampleAdapter } from './fixtures/research/exampleAdapter.js';
 import * as redditFixture from './fixtures/research/reddit.json';
 import { operatorToken } from './helpers/operatorToken.js';
+import { runResearchCommand } from './helpers/researchCommand.js';
 
 vi.mock('dns/promises', () => ({ lookup: vi.fn() }));
 vi.mock('https', async (original) => ({

@@ -398,6 +398,31 @@ ni seguridad semántica de sus resúmenes.
 
 ### 9. Ingreso humano con token privilegiado (SA-107)
 
+- **SA-112.** `research run` mantiene exclusivamente el ingreso CLI de SA-107,
+  con rechazo de marcadores gestionados. Antes de recopilar o persistir exige además
+  `--accept-cost` con estimación y tope exactos mostrados al operador. Los límites
+  proceden de Operator config por Project, validados contra techos de runtime.
+  Pregunta, idea, resultados del scout, páginas e informe son datos sin autoridad
+  para modificar límites, permisos o etapas. El scout sigue limitado a seis turnos
+  y recibe únicamente la pregunta pública explícita. El borrador llega a síntesis
+  dentro del envelope no confiable.
+  El plazo global interrumpe también adapters e iteradores que ignoran la señal.
+  Los cortes y fallos conservan un informe parcial. El consumo de tokens es una
+  observación posterior. Para el tope monetario estricto se exige un Executor con
+  reserva previa por petición. **El Executor CLI actual falla cerrado para llamadas
+  de modelo**, porque `--max-budget-usd` permite sobrepasar el tope en la respuesta
+  en curso. El backend con reserva previa queda pendiente de decisión del operador.
+  El informe hermano de la idea conserva procedencia externa y hash del borrador.
+  La lectura del plan revalida fuentes y extrae el handoff acotado existente dentro
+  de `untrusted-context-data`, separado de `request` y `answers`. Los informes se
+  rechazan como entrada humana. Un lock exclusivo serializa publicación y gasto
+  por idea, y el JSON autoritativo se publica atómicamente. Un crash deja el lock
+  para inspección. Ninguna lectura lanza etapas. Logs, `--json` y auditoría omiten
+  texto externo y el contenido del informe.
+  Los importes son estimaciones a precios API, con supuestos fijados en constantes.
+  La semántica de sobrepaso del CLI figura en la documentación de Claude Code.
+  [Claude Code](https://code.claude.com/docs/en/agent-sdk/agent-loop#budget-headroom).
+
 - **SA-111.** La aprobación en oficina conserva el WS privilegiado de §5 y el
   servicio CLI compartido. No requiere la confirmación TTY del CLI. La presencia
   de `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` o `CLAUDECODE` en el

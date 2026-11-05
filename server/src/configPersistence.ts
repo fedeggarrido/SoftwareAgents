@@ -22,6 +22,7 @@ import {
   tierPolicySchema,
   validateModelTiers,
 } from './modelTiers.js';
+import { researchLimitSchema } from './researchPolicy.js';
 import { compileSchema, SchemaValidationError } from './schemaValidation.js';
 
 export interface AdapterSettings {
@@ -179,9 +180,12 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
       type: 'object',
       additionalProperties: false,
       properties: {
-        maxSources: { type: 'integer', minimum: 1, maximum: 100 },
-        maxTokens: { type: 'integer', minimum: 1, maximum: 1000000 },
-        maxSeconds: { type: 'integer', minimum: 1, maximum: 3600 },
+        ...researchLimitSchema.properties,
+        modes: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { quick: researchLimitSchema, deep: researchLimitSchema },
+        },
         search: {
           type: 'object',
           additionalProperties: false,

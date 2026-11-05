@@ -10,6 +10,7 @@ import { featureDocument } from '../featureArtifacts.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { projectFeaturePlan, StaleFeaturePlan } from '../featurePlanProjection.js';
 import { assertFeatureRunIngress, runFeature } from '../featureRun.js';
+import { featureRequestInput, readHumanFeatureInput } from '../ideaResearch.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
 import {
@@ -23,7 +24,7 @@ import { rebaseFeatureTask } from '../taskRebase.js';
 import { runWorker, type WorkerOptions } from '../worker.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
-import { readTaskInput, taskPath } from './taskFiles.js';
+import { taskPath } from './taskFiles.js';
 
 const USAGE =
   'Usage: pixel-agents feature run <FEAT-ID> [--request <file.md>] [--json] | spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
@@ -206,7 +207,7 @@ export async function runFeatureCommand(
                   !d.answer?.startsWith('{'))),
           );
         if (!decision) throw new Error('Missing Requirements decision');
-        const answers = readTaskInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
+        const answers = readHumanFeatureInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
         if (!answers.trim()) throw new Error('Answers must not be empty');
         answersHash = createHash('sha256').update(answers).digest('hex');
         append('pending');
@@ -234,14 +235,14 @@ export async function runFeatureCommand(
         log(`${key}: already registered (${feature.status}, ${feature.git_sha})`);
         return;
       }
-      const request = readTaskInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
+      const input = featureRequestInput(cwd, rest[1]);
       await runWorker(
         { task: key, selectExecutor: true },
         {
           ...workerOptions,
           cwd,
           log,
-          requirements: { key, request },
+          requirements: { key, ...input },
         },
       );
       feature = store.getFeature(key);
@@ -269,7 +270,7 @@ export async function runFeatureCommand(
         if (featureIngressActor() !== 'human')
           throw new Error('Architect answers require the human operator');
         if (!decision) throw new Error('Design is not awaiting answers');
-        const answers = readTaskInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
+        const answers = readHumanFeatureInput(cwd, path.relative(cwd, path.resolve(cwd, rest[1])));
         if (!answers.trim()) throw new Error('Answers must not be empty');
         revision = { gitSha: feature.git_sha, decisionId: decision.id, answers };
       } else if (decision) {

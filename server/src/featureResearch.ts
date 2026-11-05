@@ -15,6 +15,7 @@ import {
   FEATURE_RESEARCH_MAX_ITEMS,
   FEATURE_RESEARCH_STATUSES,
   FEATURE_RESEARCH_TEXT_CHARS,
+  RESEARCH_NON_DELIVERY_PATH,
   RESEARCH_REPORT_MAX_BYTES,
   ZONES_GIT_TIMEOUT_MS,
 } from './constants.js';
@@ -256,7 +257,8 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
             const ref = `branch:${file}:${line}`,
               quote = entry.slice(1);
             evidenceByRef.set(ref, quote);
-            if (!promises.has(file)) branchEvidence.set(ref, quote);
+            if (!promises.has(file) && !RESEARCH_NON_DELIVERY_PATH.test(file))
+              branchEvidence.set(ref, quote);
           }
           line++;
           newRemaining--;

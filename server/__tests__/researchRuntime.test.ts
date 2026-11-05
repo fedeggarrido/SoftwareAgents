@@ -2,7 +2,11 @@ import { expect, it, vi } from 'vitest';
 
 import { RESEARCHER_SPEC } from '../../core/src/agentSpec.js';
 import { compileAgent } from '../src/agentCompiler.js';
-import { RESEARCH_REQUEST_MAX_BYTES, RESEARCH_REQUEST_OVERHEAD_TOKENS } from '../src/constants.js';
+import {
+  RESEARCH_BYTES_PER_TOKEN,
+  RESEARCH_REQUEST_MAX_BYTES,
+  RESEARCH_REQUEST_OVERHEAD_TOKENS,
+} from '../src/constants.js';
 import type { ExecutionRequest, Executor } from '../src/executors/executor.js';
 import { researchCost, researchPolicy } from '../src/researchPolicy.js';
 import { researchBudget } from '../src/researchRuntime.js';
@@ -21,7 +25,10 @@ const request = (): ExecutionRequest => ({
 });
 const inputSize = (req: ExecutionRequest) => {
   const compiled = compileAgent(req.agentSpec!, req.role, req.taskData!);
-  return Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
+  return Math.ceil(
+    (Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context)) /
+      RESEARCH_BYTES_PER_TOKEN,
+  );
 };
 const underlying = (tokens = 0, costUsd = 0): Executor => ({
   id: 'claude',
@@ -77,4 +84,14 @@ it('bounds each request even when the total token and cost budgets are ample', (
   );
   expect(() => budget.executor.start(req)).toThrow('input budget');
   expect(executor.start).not.toHaveBeenCalled();
+});
+
+it('lets a quick synthesis of four normal excerpts reach the model', () => {
+  const req = request();
+  req.taskData!.task = { sources: Array.from({ length: 4 }, () => 'x'.repeat(2500)) };
+  const executor = underlying();
+  researchBudget(executor, researchPolicy('quick', {}), new AbortController(), []).executor.start(
+    req,
+  );
+  expect(executor.start).toHaveBeenCalledOnce();
 });

@@ -1,6 +1,7 @@
 import { compileAgent } from './agentCompiler.js';
 import {
   RESEARCH_BUDGET_HEADROOM_FRACTION,
+  RESEARCH_BYTES_PER_TOKEN,
   RESEARCH_REQUEST_MAX_BYTES,
   RESEARCH_REQUEST_OVERHEAD_TOKENS,
 } from './constants.js';
@@ -44,7 +45,8 @@ export function researchBudget(
         },
       );
       const bytes = Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
-      const estimatedInputTokens = bytes + RESEARCH_REQUEST_OVERHEAD_TOKENS;
+      const estimatedInputTokens =
+        Math.ceil(bytes / RESEARCH_BYTES_PER_TOKEN) + RESEARCH_REQUEST_OVERHEAD_TOKENS;
       if (
         bytes > RESEARCH_REQUEST_MAX_BYTES ||
         estimatedInputTokens >= policy.maxTokens - usedTokens ||

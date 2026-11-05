@@ -362,6 +362,10 @@ export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
 /** Ceiling on compiled system + context bytes for any individual research request. */
 export const RESEARCH_REQUEST_MAX_BYTES = 128 * 1024;
 /** Allow for provider framing; UTF-8 bytes otherwise conservatively upper-bound tokens. */
+/** Conservative preflight estimate; actual usage is accounted when reported. */
+export const RESEARCH_BYTES_PER_TOKEN = 3;
+/** Prose and brain artifacts can quote a promise, so they never prove delivery. */
+export const RESEARCH_NON_DELIVERY_PATH = /(^|\/)(docs|\.softwareagents)\/|\.(md|mdx|rst|txt)$/i;
 export const RESEARCH_REQUEST_OVERHEAD_TOKENS = 1024;
 export const RESEARCH_COST_LABEL =
   'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';

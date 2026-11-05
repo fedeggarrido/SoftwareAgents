@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 
+import { RESEARCH_NON_DELIVERY_PATH } from '../src/constants.js';
 import { type FeatureResearchInput, validateFeatureResearch } from '../src/featureResearch.js';
 
 // Isolate validation from the Git fixture so trust-boundary regressions can run without processes.
@@ -86,3 +87,10 @@ it('requires a citation on each item even when another item cites a real code li
   );
   expect(report.coverage.map((row) => row.status)).toEqual(['delivered', 'not verifiable']);
 });
+
+it.each(['docs/copied-plan.md', 'NOTES.txt', '.softwareagents/brain/x.yaml', 'docs/a.ts'])(
+  'never treats %s as delivery evidence',
+  (file) => expect(RESEARCH_NON_DELIVERY_PATH.test(file)).toBe(true),
+);
+it('keeps code as eligible delivery evidence', () =>
+  expect(RESEARCH_NON_DELIVERY_PATH.test('src/export.ts')).toBe(false));

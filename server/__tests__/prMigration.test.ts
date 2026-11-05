@@ -232,7 +232,7 @@ it.each([17, 18, 19])(
     expect(work.getTask('task')!.version).toBe(version === 17 ? 4 : 6);
     const check = new DatabaseSync(file);
     try {
-      expect(check.prepare('SELECT version FROM schema_version').get()!.version).toBe(20);
+      expect(check.prepare('SELECT version FROM schema_version').get()!.version).toBe(21);
       expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       expect(() => check.exec("UPDATE domain_events SET reason = '' WHERE id = 41")).toThrow(
         'append-only',

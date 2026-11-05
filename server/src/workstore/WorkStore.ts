@@ -8,12 +8,19 @@ import type { TaskRebase } from '../taskRebaseHistory.js';
 import type { TaskStatus } from './taskStateMachine.js';
 
 /** Operational records only. Persisting a Human Decision does not authorize an action. */
+export class FeatureRevisionChangedError extends Error {
+  constructor() {
+    super('Feature revision changed');
+  }
+}
+
 export interface ProjectRecord {
   project_id: string;
   created_at: string;
 }
 
 export interface FeatureRecord {
+  approved_plan_revision?: string | null;
   title?: string | null;
   updated_at?: string | null;
   project_id: string;
@@ -293,7 +300,12 @@ export interface WorkStore {
   /** Durable per-Feature reservations, unique throughout the Project, including failed materialization. */
   reserveAdrNumbers(featureKey: string, count: number, minimum: number): Promise<number[]>;
   /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */
-  approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void>;
+  approveFeature(
+    key: string,
+    gitSha: string,
+    planRevision: string,
+    beforeCommit: (alreadyApproved: boolean) => void,
+  ): Promise<void>;
   createTask(task: NewTask): void;
   getTask(key: string): TaskRecord | undefined;
   listTasks(): TaskRecord[];

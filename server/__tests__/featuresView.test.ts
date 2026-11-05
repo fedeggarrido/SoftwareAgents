@@ -11,7 +11,11 @@ import { type FeaturesSource, projectFeatures, readFeaturesView } from '../src/f
 import { runMigrations } from '../src/workstore/migrations.js';
 import { readMainAncestors } from '../src/workstore/readOnlyWorkStore.js';
 
-vi.mock('node:child_process', () => ({ spawn: vi.fn(), execFileSync: vi.fn() }));
+vi.mock('node:child_process', async (original) => ({
+  execFile: (await original<typeof import('node:child_process')>()).execFile,
+  spawn: vi.fn(),
+  execFileSync: vi.fn(),
+}));
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,

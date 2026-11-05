@@ -472,3 +472,16 @@
 .idea-review p {
   white-space: pre-wrap;
 }
+
+.feature-plan-dialog {
+  width: min(760px, calc(100vw - 32px));
+  min-width: 0;
+  max-height: 85vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.feature-plan-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}

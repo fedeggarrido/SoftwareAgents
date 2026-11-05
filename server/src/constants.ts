@@ -355,3 +355,11 @@ export const PR_MAX_CHECKS = 256;
 export const PR_MAX_TIMESTAMP_CHARS = 40;
 export const PR_CI_REASON_CHARS = 2048;
 export const PR_SHUTDOWN_TIMEOUT_MS = 5000;
+// SA-111 only projects explicitly headed design sections. No inferred plan prose.
+export const FEATURE_PLAN_HEADINGS = {
+  tests: /^(?:pruebas|tests?|testing|test plan|plan de pruebas|validation|validación)$/i,
+  ci: /^(?:ci|ci\/cd|continuous integration|integración continua)$/i,
+  security: /^(?:security|seguridad)$/i,
+  documentation: /^(?:documentation|documentación|docs)$/i,
+} as const;
+export const FEATURE_PLAN_REVISION_PATTERN = /^[a-f0-9]{64}$/;

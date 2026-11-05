@@ -34,6 +34,7 @@ import {
   toggleResult,
 } from './executorState.js';
 import { handleIdeaMessage } from './featureIdeas.js';
+import { handleFeaturePlanMessage } from './featurePlan.js';
 import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
@@ -74,6 +75,8 @@ export interface AssetCache {
 export interface ClientMessageContext {
   /** Embedded VS Code has no Project selection contract for draft ingress. */
   ideasSupported?: boolean;
+  /** Embedded adapters cannot authenticate human plan approval. */
+  featurePlansSupported?: boolean;
   store: AgentStateStore;
   runtime?: AgentRuntime;
   cache: AssetCache | null;
@@ -115,6 +118,15 @@ export function handleClientMessage(
   const adapter = store.getAdapter();
 
   switch (msg.type) {
+    case 'requestFeaturePlan':
+    case 'approveFeaturePlan':
+      void handleFeaturePlanMessage(
+        msg,
+        send,
+        ctx.privileged === true,
+        ctx.featurePlansSupported !== false,
+      );
+      break;
     case 'requestIdeas':
     case 'submitIdea':
       handleIdeaMessage(msg, send, ctx.privileged === true, ctx.ideasSupported !== false);
@@ -176,8 +188,7 @@ export function handleClientMessage(
           reason,
           features: [],
         } satisfies FeaturesSnapshot);
-      // Reuse audit ingress and Project binding; reads have no audit side effects.
-      if (!ctx.privileged) {
+      if (ctx.privileged !== true) {
         reply('denied');
         break;
       }

@@ -5,10 +5,11 @@ import { AgentStateStore } from '../src/agentStateStore.js';
 import * as auditLog from '../src/auditLog.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
 import * as featuresView from '../src/featuresView.js';
+import { loadProjectConfig } from '../src/projectConfig.js';
 
 vi.mock('../src/companyControl.js', () => ({ companyWorkspaceRoot: () => 'bound-root' }));
 vi.mock('../src/projectConfig.js', () => ({
-  loadProjectConfig: () => ({ project: { id: 'selected' }, operator: {} }),
+  loadProjectConfig: vi.fn(() => ({ project: { id: 'selected' }, operator: {} })),
 }));
 vi.mock('../src/configPersistence.js', () => ({
   readConfig: () => ({ projects: {} }),
@@ -23,6 +24,7 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
   beforeEach(() => {
     store = new AgentStateStore();
     send.mockClear();
+    vi.mocked(loadProjectConfig).mockClear();
     vi.spyOn(featuresView, 'readFeaturesView').mockResolvedValue({
       status: 'empty',
       reason: null,
@@ -50,17 +52,21 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
     },
   );
 
-  it.each([false, undefined])('denies privilege %s before project lookup (AC-012)', (privilege) => {
-    handleClientMessage(request, send, { store, cache: null, privileged: privilege });
-    expect(send).toHaveBeenCalledExactlyOnceWith({
-      ...request,
-      type: 'featuresSnapshot',
-      status: 'denied',
-      reason: null,
-      features: [],
-    });
-    expect(featuresView.readFeaturesView).not.toHaveBeenCalled();
-  });
+  it.each([false, undefined])(
+    'denies feature discovery with privilege %s before Project lookup',
+    (privilege) => {
+      handleClientMessage(request, send, { store, cache: null, privileged: privilege });
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        ...request,
+        type: 'featuresSnapshot',
+        status: 'denied',
+        reason: null,
+        features: [],
+      });
+      expect(featuresView.readFeaturesView).not.toHaveBeenCalled();
+      expect(loadProjectConfig).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['other', 'nonexistent'])('rejects unselected Project %s (AC-011)', (projectId) => {
     dispatch({ projectId });

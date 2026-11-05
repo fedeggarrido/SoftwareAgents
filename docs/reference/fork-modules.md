@@ -17,6 +17,17 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `featurePlan.ts` y `featurePlanProjection.ts` (SA-111) proyectan el FeatureSpec,
+  TechnicalDesign y DAG ya vinculados mediante lectura SQLite y barreras Git compartidas. Marcan secciones
+  ausentes y publica una revisión SHA-256. La aprobación WS exige privilegio del
+  operador, rechaza marcadores gestionados y reutiliza `commands/feature.ts`.
+  El servicio valida de nuevo la revisión bajo transacción, serializa reenvíos y
+  guarda `approved_plan_revision` atómicamente con la aprobación y registra un par
+  `pending`/`approved` por nueva vinculación. CLI calcula la revisión con la misma
+  proyección. Lectura y listado exigen conexión privilegiada antes de acceder al
+  Project vinculado. VS Code rechaza la ruta. Un fallo de confirmación tras commit
+  emite un aviso sin contenido y queda como riesgo residual aceptado sin recuperación.
+
 - `featureIdeas.ts` (SA-109): borradores locales `.softwareagents/ideas/<Project>/FEAT-NNN.md`,
   ids reservados con creación exclusiva y colisiones con Features/Brain/ideas.
   `requestIdeas`/`submitIdea` usan el WS privilegiado existente; solo id/hash en
@@ -83,6 +94,15 @@ para lecturas puntuales.
   prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.
 
 ### Paneles (`webview-ui/src/components/`)
+
+- `FeaturePlanDialog.tsx` y `office/featurePlanController.ts` (SA-111) abren «Ver
+  plan» desde FeaturesPanel. Siete secciones de texto literal y aprobación con
+  revisión explícita. Sin privilegio muestran el mensaje de solo lectura. Doble clic bloqueado,
+  desconexión/timeout invalidan la capacidad y una revisión obsoleta provoca una
+  lectura nueva. Una FeatureSpec aprobada con revisión distinta o nula muestra
+  «FeatureSpec aprobada; este plan ha cambiado y no está aprobado» y permite aprobar
+  la revisión actual. El gate de Developer sigue dependiendo solo del estado de
+  Feature. No editan ni lanzan etapas.
 
 Consumen la proyección compartida de `webview-ui/src/office/boardStore.ts`.
 Las acciones se envían por Transport y el runtime valida su autoridad.

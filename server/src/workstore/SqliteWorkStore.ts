@@ -72,6 +72,7 @@ import type {
   WorkerPublication,
   WorkStore,
 } from './WorkStore.js';
+import { FeatureRevisionChangedError } from './WorkStore.js';
 
 const execute = promisify(execFile);
 const CI_RESTORE_STATUSES: readonly TaskStatus[] = [
@@ -1370,21 +1371,39 @@ class SqliteWorkStore implements WorkStore {
       return reserved.slice(0, count);
     });
   }
-  approveFeature(key: string, gitSha: string, beforeCommit: () => void): Promise<void> {
+  approveFeature(
+    key: string,
+    gitSha: string,
+    planRevision: string,
+    beforeCommit: (alreadyApproved: boolean) => void,
+  ): Promise<void> {
     return this.write(() => {
       const feature = this.getFeature(key);
-      if (!feature || feature.git_sha !== gitSha) throw new Error('Feature revision changed');
-      if (!['draft', 'in_review', 'approved'].includes(feature.status))
+      if (!feature || feature.git_sha !== gitSha) throw new FeatureRevisionChangedError();
+      if (!['draft', 'in_review', 'approved', 'ready_to_merge'].includes(feature.status))
         throw new Error('Feature is not reviewable');
       if (this.listDecisions().some((d) => d.status !== 'answered' && d.blocks.includes(key)))
         throw new Error('Feature has unresolved Human Decisions');
       const task = this.getTask(key);
       if (task && (task.lease_owner || task.status === 'WAITING_HUMAN'))
         throw new Error('Feature requirements are still active or waiting for a human');
-      beforeCommit();
+      const specApproved = ['approved', 'ready_to_merge'].includes(feature.status);
+      const alreadyApproved = specApproved && feature.approved_plan_revision === planRevision;
+      beforeCommit(alreadyApproved);
+      if (alreadyApproved) return;
+      if (specApproved) {
+        this.db
+          .prepare(
+            'UPDATE features SET approved_plan_revision = ? WHERE project_id = ? AND key = ?',
+          )
+          .run(planRevision, this.projectId, key);
+        return;
+      }
       this.db
-        .prepare('UPDATE features SET status = ?, updated_at = ? WHERE project_id = ? AND key = ?')
-        .run('approved', new Date().toISOString(), this.projectId, key);
+        .prepare(
+          'UPDATE features SET status = ?, updated_at = ?, approved_plan_revision = ? WHERE project_id = ? AND key = ?',
+        )
+        .run('approved', new Date().toISOString(), planRevision, this.projectId, key);
     });
   }
   createTask(task: NewTask): void {

@@ -42,9 +42,56 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
 
 - Client: `RequestFeatures` = `{ type: 'requestFeatures', projectId: string, requestId: string }`.
 - Server: `FeaturesSnapshot` = `{ type: 'featuresSnapshot', projectId, requestId, status, reason, features: FeatureRow[] }`. Replies are point-to-point and echo both identifiers. Clients discard replies for a different selected Project or obsolete request.
-- The request uses exactly the `requestAuditLog` guard: existing connection privilege first (`denied` otherwise), then the server-bound selected Project (`unknown_project` otherwise). It adds no permissions, tokens, actor flags or ingress routes. Neither rejection returns feature data.
+- `requestFeatures`, `requestFeaturePlan` and `requestAuditLog` require the existing connection privilege before any Project access. Unprivileged requests return `denied` with no feature rows or plan. The server-bound selected Project remains mandatory (`unknown_project` otherwise). No token, actor flag or ingress route is added.
 - Status is `ok`, `empty`, `denied`, `unknown_project` or `read_error`. Only a successful read with no registered features is `empty`. Rejections, errors and empty results carry `features: []`. Only `read_error` has a non-null reason, restricted to `unavailable`, `schema_incompatible`, `query_failed` or `invalid_data`; exception messages and traces never leave the server.
 - `FeatureRow` contains only `key`, nullable `title`, `state` (`merged`, `ready_to_merge`, `in_review`, `in_design`, `in_development`, `unknown`), nullable `rawStatus` for unknown persisted states, nullable `progress {done,total}`, nullable `currentTask {key,step,others}` (step `develop`, `review`, `qa` or null), `gates [{kind,task,expired,command}]`, nullable `integration {branch,sha}` (abbreviated SHA or null), and nullable `lastActivityAt`. Progress null means no imported tasks. Gates use `spec_approval`, `requirements_questions`, `design_questions`, `human_decision`, `waiting_human`, `quota` or `qa_not_tested`; task is nullable. `merged` requires a completed imported DAG and local Git ancestry evidence for the persisted integration HEAD; refs and objects are read without processes or writes.
-- This is a read-only WorkStore projection. Commands are display text for manual use in the operator's terminal; answer commands retain the literal `<fichero-de-respuestas>` placeholder. There are no approve, answer, run, resume, stop or cancel messages or controls. Reads do not write WorkStore, audit, Git or Brain state or launch processes.
+- This is a read-only WorkStore projection. Commands are display text for manual use in the operator's terminal. Answer commands retain the literal `<fichero-de-respuestas>` placeholder. SA-111 adds the separate plan approval messages below. Reads do not write WorkStore, audit, Git or Brain state or launch agents.
 - Each `FeatureRow` also requires a closed `cost` object: `executions` (total ledger executions), `costKnown` (executions with known cost), nullable `costUsd` (sum of known USD costs), nullable `costPerDoneTaskUsd` (cost divided by all DONE tasks of the feature, including DESIGN/REQUIREMENTS), and nullable `cacheHitRate` (the ledger aggregate over executions with both token counters). Null means «sin datos»; known zero remains zero. Partial cost is derived from `0 < costKnown < executions`, with coverage `costKnown de executions`. The existing read-only transaction reads only the selected Project's ledger and attributes entries by exact feature key; unassigned entries count nowhere. A v15 database without `usage_ledger` produces zero executions and null figures. Malformed ledger data fails closed with `invalid_data`; non-finite aggregate figures become null. No ledger payload, model, quota, prompt, path or configured price is exposed, and no extra request or endpoint is added.
 - All projection objects reject additional properties. Producers must sanitize allowed free text too: prompts, model outputs, operator answers, stdout/stderr, full Review/QA reports, absolute paths (including `doc_path`), PIDs, process identities, remote URLs and secrets must never be transmitted. Consumers render titles and other free text as escaped text, never interpreted HTML or Markdown. Schema validation alone cannot sanitize string contents or enforce authorization; the server reader/handler must enforce those requirements.
+
+## Plan review and human approval (SA-111)
+
+- `requestFeaturePlan` carries `projectId`, `requestId` and `key`. It is a read-only
+  request requiring a privileged connection, bound to the server's Project. The reader uses
+  a read-only WorkStore transaction and the existing artifact path and Git guards.
+- `featurePlanSnapshot` echoes those identifiers and carries `plan`, `canApprove`
+  and `errorCode`. A failed read has a null plan and disabled approval. The plan
+  contains its key, title, spec SHA, revision, `specApproved`, `approved` and seven fixed
+  sections. Requirements, architecture and tasks show literal FeatureSpec,
+  TechnicalDesign and DAG sources. Tests, CI, security and documentation project
+  explicit matching Markdown headings from the design. Null content means missing.
+  This explicit plan-content payload is separate from the sanitized FeatureRow
+  summary. No arbitrary filesystem paths, reports or prompts are read for it.
+- `approveFeaturePlan` carries the same identifiers plus the displayed `revision`.
+  All additional fields, including `actor`, are rejected. Privilege comes from
+  the existing WS handshake. Missing privilege and any server managed marker
+  reject before Project access. Embedded VS Code rejects as `unsupported_adapter`.
+- The revision hashes the feature key, spec SHA and complete displayed artifact
+  sources. The shared `approveFeature(store, config, key, 'human')` service
+  accepts the reviewed SHA and plan revision. CLI computes the current revision
+  with the same projection. Both revalidate under the existing SQLite transaction
+  and persist `features.approved_plan_revision` atomically with approval. The existing policy, unresolved-question gates and Git fence
+  apply to CLI and office alike. Approval never starts design or development.
+- `featureApprovalResult` echoes identifiers and revision, with status `approved`
+  or `rejected` and a closed error code. `stale_revision` causes the UI to clear the
+  old plan, fetch its current revision and require another human click. Unknown
+  errors become fixed codes, without exception text or artifact content.
+- `specApproved` reflects Feature status `approved` or `ready_to_merge`. `approved`
+  additionally requires `approved_plan_revision` to match the displayed revision.
+  Legacy null bindings and changed sources show “FeatureSpec aprobada; este plan ha
+  cambiado y no está aprobado” and allow a human to approve the new revision. This
+  only updates the binding for an already approved FeatureSpec. The Developer gate
+  still depends on Feature status alone and the pipeline retains its existing gates.
+- Repeated messages revalidate and return success for the same approved revision,
+  including after `ready_to_merge`, without another mutation or audit entry. CLI and
+  office share one ordered `pending`/`approved` audit pair per new binding. A failed
+  intent write aborts approval. A SQLite commit failure can leave an intent without
+  approval because these stores have separate transactions. A failed confirmation
+  after commit emits a content-free server warning. The approval remains committed,
+  WS returns success and CLI reports the confirmation failure. This accepted residual
+  risk has no recovery mechanism and replay does not fill in the missing confirmation.
+- The dialog correlates Project, feature, request and revision. Double clicks are
+  suppressed synchronously. Disconnects and timeouts invalidate the displayed
+  approval capability. Only reads are retried, and approval requires another click.
+  All content is escaped text, including Markdown and links. Content stays out of
+  logs and audit. The modal overrides its base minimum width for a 375px viewport.

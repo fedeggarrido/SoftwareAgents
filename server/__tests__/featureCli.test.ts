@@ -1,3 +1,5 @@
+import { DatabaseSync } from 'node:sqlite';
+
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
@@ -5,12 +7,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { architectPaths } from '../src/architect.js';
 import { AuditLog } from '../src/auditLog.js';
 import { approveFeature, runFeatureCommand } from '../src/commands/feature.js';
+import * as companyControl from '../src/companyControl.js';
+import { developerRequest } from '../src/developer.js';
 import { EXECUTOR_PROBE_CATALOG } from '../src/executorProbes.js';
+import { handleFeaturePlanMessage, readFeaturePlan } from '../src/featurePlan.js';
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { readRequirements, requirementsDocPath } from '../src/requirements.js';
+import * as workStoreModule from '../src/workstore/SqliteWorkStore.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { operatorToken } from './helpers/operatorToken.js';
 import { readyProbeFor } from './helpers/readyProbe.js';
@@ -32,6 +39,23 @@ const git = (cwd: string, ...args: string[]) =>
 const doc = '.softwareagents/brain/features/FEAT-001.yaml';
 const tree = () => path.join(repo, '.worktrees/FEAT-001');
 const storeFor = () => openWorkStore({ repositoryPath: repo, projectId: 'test' });
+function registerPlanDesign() {
+  const paths = architectPaths('.softwareagents/brain', 'FEAT-001');
+  const specSha = git(tree(), 'rev-parse', 'HEAD');
+  fs.mkdirSync(path.dirname(path.join(tree(), paths.doc)), { recursive: true });
+  fs.writeFileSync(path.join(tree(), paths.doc), '## Seguridad\nReview the new design.\n');
+  fs.writeFileSync(path.join(tree(), paths.dag), 'feature: FEAT-001\ntasks: []\n');
+  git(tree(), 'add', paths.doc, paths.dag);
+  git(tree(), 'commit', '-m', 'fixture plan design');
+  const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+  try {
+    db.prepare(
+      'INSERT INTO technical_designs (project_id, feature_key, doc_path, dag_path, git_sha, feature_sha) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('test', 'FEAT-001', paths.doc, paths.dag, git(tree(), 'rev-parse', 'HEAD'), specSha);
+  } finally {
+    db.close();
+  }
+}
 const launchLog = () =>
   fs
     .readFileSync(launches, 'utf8')
@@ -117,6 +141,234 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake CLIs)', () => {
+  it('SA-111 restricts literal plans to privileged clients, refuses stale revisions, and approves once over WS', async () => {
+    await run();
+    vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(repo);
+    const config = loadProjectConfig(repo, true)!;
+    const send = vi.fn();
+    const request = {
+      type: 'requestFeaturePlan',
+      projectId: 'test',
+      requestId: 'read',
+      key: 'FEAT-001',
+    };
+    const append = vi.spyOn(AuditLog.prototype, 'append');
+    await handleFeaturePlanMessage(request, send, false);
+    expect(send.mock.calls.at(-1)![0]).toMatchObject({
+      plan: null,
+      canApprove: false,
+      errorCode: 'denied',
+    });
+    await handleFeaturePlanMessage(request, send, true);
+    const snapshot = send.mock.calls.at(-1)![0];
+    expect(snapshot.canApprove).toBe(true);
+    expect(
+      snapshot.plan.sections.find((section: { id: string }) => section.id === 'architecture')
+        .content,
+    ).toBeNull();
+    expect(
+      snapshot.plan.sections.find((section: { id: string }) => section.id === 'requirements')
+        .content,
+    ).toContain('Audit view');
+    expect(append).not.toHaveBeenCalled();
+    const approval = { ...request, type: 'approveFeaturePlan', revision: snapshot.plan.revision };
+    await handleFeaturePlanMessage({ ...approval, revision: '0'.repeat(64) }, send, true);
+    expect(send.mock.calls.at(-1)![0].errorCode).toBe('stale_revision');
+    expect(append).not.toHaveBeenCalled();
+    await Promise.all([
+      handleFeaturePlanMessage(approval, send, true),
+      handleFeaturePlanMessage({ ...approval, requestId: 'double-click' }, send, true),
+    ]);
+    expect(
+      append.mock.calls.filter(([entry]) => entry.action === 'approve_featurespec'),
+    ).toHaveLength(2);
+    await handleFeaturePlanMessage({ ...approval, requestId: 'replay' }, send, true);
+    expect(
+      append.mock.calls.filter(([entry]) => entry.action === 'approve_featurespec'),
+    ).toHaveLength(2);
+    expect(send.mock.calls.slice(-3).every(([reply]) => reply.status === 'approved')).toBe(true);
+    const approvals = append.mock.calls.filter(([entry]) => entry.action === 'approve_featurespec');
+    expect(approvals.map(([entry]) => entry.outcome.status)).toEqual(['pending', 'approved']);
+    expect(approvals[0][0]).toMatchObject({ actorType: 'human', actorId: 'operator' });
+    expect(JSON.stringify(approvals)).not.toContain('Inspect audit events');
+    expect(readFeaturePlan(config, 'FEAT-001')).toMatchObject({
+      approved: true,
+      revision: approval.revision,
+    });
+  });
+
+  it('SA-111 leaves the Developer gate closed for an unapproved feature through its normal entry', async () => {
+    await run();
+    const store = await storeFor();
+    try {
+      expect(() => developerRequest(store, loadProjectConfig(repo, true)!, 'FEAT-001')).toThrow(
+        'approved FeatureSpec',
+      );
+      const before = launchLog().length;
+      await expect(runFeatureCommand(['develop', 'FEAT-001'], repo, () => {})).rejects.toThrow(
+        'approved FeatureSpec',
+      );
+      expect(launchLog()).toHaveLength(before);
+      expect(store.getFeature('FEAT-001')?.status).toBe('in_review');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('SA-111 revalidates displayed content inside the approval transaction', async () => {
+    await run();
+    vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(repo);
+    const config = loadProjectConfig(repo, true)!;
+    const plan = readFeaturePlan(config, 'FEAT-001');
+    const originalOpen = workStoreModule.openWorkStore;
+    const open = vi
+      .spyOn(workStoreModule, 'openWorkStore')
+      .mockImplementationOnce(async (options) => {
+        const store = await originalOpen(options);
+        // The WS handler has already read the displayed revision. Publish new sources
+        // before its approval transaction, retaining the same FeatureSpec SHA.
+        registerPlanDesign();
+        return store;
+      });
+    const append = vi.spyOn(AuditLog.prototype, 'append');
+    const send = vi.fn();
+    await handleFeaturePlanMessage(
+      {
+        type: 'approveFeaturePlan',
+        projectId: 'test',
+        requestId: 'race',
+        key: 'FEAT-001',
+        revision: plan.revision,
+      },
+      send,
+      true,
+    );
+    expect(open).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        status: 'rejected',
+        errorCode: 'stale_revision',
+      }),
+    );
+    const current = readFeaturePlan(config, 'FEAT-001');
+    expect(current.specSha).toBe(plan.specSha);
+    expect(current.revision).not.toBe(plan.revision);
+    const store = await storeFor();
+    try {
+      expect(store.getFeature('FEAT-001')).toMatchObject({
+        status: 'in_review',
+        approved_plan_revision: null,
+      });
+      expect(append.mock.calls.map(([entry]) => entry.outcome.status)).toEqual(['rejected']);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('binds CLI and WS approvals to their exact plan and replays after ready_to_merge', async () => {
+    await run();
+    vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(repo);
+    const config = loadProjectConfig(repo, true)!;
+    const first = readFeaturePlan(config, 'FEAT-001');
+    const append = vi.spyOn(AuditLog.prototype, 'append');
+    await runFeatureCommand(['approve', 'FEAT-001'], repo, () => {});
+    const store = await storeFor();
+    try {
+      expect(store.getFeature('FEAT-001')?.approved_plan_revision).toBe(first.revision);
+      registerPlanDesign();
+      const current = readFeaturePlan(config, 'FEAT-001');
+      expect(current).toMatchObject({ specApproved: true, approved: false });
+      expect(current.revision).not.toBe(first.revision);
+      const before = store.getFeature('FEAT-001');
+      const send = vi.fn();
+      const request = { projectId: 'test', requestId: 'new-plan', key: 'FEAT-001' };
+      await handleFeaturePlanMessage({ ...request, type: 'requestFeaturePlan' }, send, true);
+      expect(send.mock.calls.at(-1)![0]).toMatchObject({ canApprove: true, plan: current });
+      const approval = { ...request, type: 'approveFeaturePlan', revision: current.revision };
+      await handleFeaturePlanMessage(approval, send, true);
+      expect(send.mock.calls.at(-1)![0].status).toBe('approved');
+      expect(store.getFeature('FEAT-001')).toEqual({
+        ...before,
+        approved_plan_revision: current.revision,
+      });
+      expect(readFeaturePlan(config, 'FEAT-001').approved).toBe(true);
+      expect(append.mock.calls.map(([entry]) => entry.outcome.status)).toEqual([
+        'pending',
+        'approved',
+        'pending',
+        'approved',
+      ]);
+      const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+      try {
+        db.prepare(
+          "UPDATE features SET status = 'ready_to_merge' WHERE project_id = ? AND key = ?",
+        ).run('test', 'FEAT-001');
+      } finally {
+        db.close();
+      }
+      const progressed = store.getFeature('FEAT-001');
+      expect(readFeaturePlan(config, 'FEAT-001')).toMatchObject({
+        specApproved: true,
+        approved: true,
+      });
+      await handleFeaturePlanMessage(approval, send, true);
+      await runFeatureCommand(['approve', 'FEAT-001'], repo, () => {});
+      expect(send.mock.calls.at(-1)![0].status).toBe('approved');
+      expect(store.getFeature('FEAT-001')).toEqual(progressed);
+      expect(append).toHaveBeenCalledTimes(4);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('warns without content if audit confirmation fails after a committed WS approval', async () => {
+    await run();
+    vi.spyOn(companyControl, 'companyWorkspaceRoot').mockReturnValue(repo);
+    const plan = readFeaturePlan(loadProjectConfig(repo, true)!, 'FEAT-001');
+    const originalAppend = AuditLog.prototype.append;
+    const append = vi.spyOn(AuditLog.prototype, 'append').mockImplementation(function (
+      this: AuditLog,
+      entry,
+    ) {
+      if (entry.outcome.status === 'approved') throw new Error('private audit failure');
+      return originalAppend.call(this, entry);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const send = vi.fn();
+    const approval = {
+      type: 'approveFeaturePlan',
+      projectId: 'test',
+      requestId: 'audit-failure',
+      key: 'FEAT-001',
+      revision: plan.revision,
+    };
+    await handleFeaturePlanMessage(approval, send, true);
+    expect(send.mock.calls.at(-1)![0].status).toBe('approved');
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      '[feature] Approval committed but audit confirmation failed',
+    );
+    const store = await storeFor();
+    try {
+      expect(store.getFeature('FEAT-001')).toMatchObject({
+        status: 'approved',
+        approved_plan_revision: plan.revision,
+      });
+      await handleFeaturePlanMessage(approval, send, true);
+      expect(send.mock.calls.at(-1)![0].status).toBe('approved');
+      expect(append.mock.calls.map(([entry]) => entry.outcome.status)).toEqual([
+        'pending',
+        'approved',
+      ]);
+      expect(
+        new AuditLog()
+          .read('test')
+          .filter((row) => !row.corrupt && row.entry.action === 'approve_featurespec'),
+      ).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it.each(['claude', 'codex'] as const)(
     'commits a validated spec, registers SHA, shows and approves once through %s',
     async (selected) => {
@@ -161,7 +413,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
               (r) =>
                 !r.corrupt &&
                 r.entry.action === 'approve_featurespec' &&
-                r.entry.outcome.status === 'approved',
+                r.entry.outcome.status === 'pending',
             ),
         ).toBe(true);
         const args = launchLog()[0].args as string[];
@@ -472,7 +724,7 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
     ).toBe(false);
   });
 
-  it('requires durable approval intent and reports a committed approval if confirmation fails', async () => {
+  it('requires one durable approval intent and makes retries idempotent', async () => {
     await run();
     const store = await storeFor();
     try {
@@ -487,14 +739,19 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
         'audit intent unavailable',
       );
       expect(store.getFeature('FEAT-001')?.status).toBe('in_review');
-      spy.mockImplementation((entry) => {
-        if (entry.outcome.status === 'approved') throw new Error('confirmation unavailable');
-        return append(entry);
-      });
-      await expect(approveFeature(store, config, 'FEAT-001', 'human', audit)).rejects.toThrow(
-        'Feature approved; audit confirmation pending',
-      );
+      spy.mockImplementation(append);
+      spy.mockClear();
+      await Promise.all([
+        approveFeature(store, config, 'FEAT-001', 'human', audit),
+        approveFeature(store, config, 'FEAT-001', 'human', audit),
+      ]);
       expect(store.getFeature('FEAT-001')?.status).toBe('approved');
+      expect(spy.mock.calls.map(([entry]) => entry.outcome.status)).toEqual([
+        'pending',
+        'approved',
+      ]);
+      await approveFeature(store, config, 'FEAT-001', 'human', audit);
+      expect(spy).toHaveBeenCalledTimes(2);
     } finally {
       store.close();
     }

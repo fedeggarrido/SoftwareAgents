@@ -476,3 +476,4 @@ export const PR_DISPLAY_REFRESH_MS = 5000;
 // A lost draft response must be reconciled from the list, never replayed automatically.
 export const IDEA_REQUEST_TIMEOUT_MS = 15_000;
 export const IDEA_TEXTAREA_ROWS = 6;
+export const FEATURE_PLAN_TIMEOUT_MS = 15_000;

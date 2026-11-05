@@ -8,6 +8,7 @@ import { CliUsageError } from '../cliErrors.js';
 import { developerRequest, lastDeveloperFailure, pushDeveloperBranch } from '../developer.js';
 import { featureDocument } from '../featureArtifacts.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
+import { projectFeaturePlan, StaleFeaturePlan } from '../featurePlanProjection.js';
 import { assertFeatureRunIngress, runFeature } from '../featureRun.js';
 import { evaluatePolicy, type PolicyActor } from '../policy.js';
 import { loadProjectConfig } from '../projectConfig.js';
@@ -36,10 +37,13 @@ export async function approveFeature(
   key: string,
   actor: PolicyActor,
   audit = new AuditLog(),
+  reviewed?: { gitSha: string; revision: string },
 ) {
   actor = featureIngressActor(actor);
   const policy = evaluatePolicy('approve_featurespec', actor, config.operator.autonomyLevel);
   let reviewedSha: string | null = null;
+  let reviewedRevision: string | null = null;
+  let intentRecorded = false;
   const append = (status: string) =>
     audit.append({
       projectId: store.projectId,
@@ -52,32 +56,51 @@ export async function approveFeature(
       riskLevel: 'high',
       taskKey: key,
       executionId: null,
-      outcome: { status, detail: JSON.stringify({ gitSha: reviewedSha }) },
+      outcome: {
+        status,
+        detail: JSON.stringify({ gitSha: reviewedSha, revision: reviewedRevision }),
+      },
     });
   try {
     if (actor !== 'human' || policy.outcome !== 'allow')
       throw new Error('FeatureSpec approval requires the human operator');
     const feature = store.getFeature(key);
     if (!feature) throw new Error('Unknown Feature');
-    reviewedSha = feature.git_sha;
-    await store.approveFeature(key, feature.git_sha, () => {
+    reviewedSha = reviewed?.gitSha ?? feature.git_sha;
+    reviewedRevision = reviewed?.revision ?? projectFeaturePlan(store, config, key).revision;
+    await store.approveFeature(key, reviewedSha, reviewedRevision, (alreadyApproved) => {
+      if (projectFeaturePlan(store, config, key).revision !== reviewedRevision)
+        throw new StaleFeaturePlan();
       const { spec } = featureDocument(store, config, feature);
       if (spec.openQuestions.length)
         throw new Error('Feature has unresolved product questions; incorporate --answers first');
-      append('pending');
+      // One pending/approved pair per approved plan revision.
+      // Replays validate the revision but neither mutate nor append another entry.
+      if (!alreadyApproved && !intentRecorded) {
+        append('pending');
+        intentRecorded = true;
+      }
     });
   } catch (error) {
     append('rejected');
     throw error;
   }
+  if (!intentRecorded) return; // Idempotent replay: nothing transitioned.
   // A committed approval remains committed if confirmation logging fails.
   try {
     append('approved');
   } catch (cause) {
-    throw new Error(
-      'Feature approved; audit confirmation pending. Inspect WorkStore before retrying.',
-      { cause },
-    );
+    console.warn('[feature] Approval committed but audit confirmation failed');
+    throw new FeatureApprovedAuditPending(cause);
+  }
+}
+
+export class FeatureApprovedAuditPending extends Error {
+  override name = 'FeatureApprovedAuditPending';
+  constructor(cause: unknown) {
+    super('Feature approved; audit confirmation pending. Inspect WorkStore before retrying.', {
+      cause,
+    });
   }
 }
 
@@ -310,7 +333,8 @@ export async function runFeatureCommand(
       log(`${key}: approved`);
     } else {
       if (!feature) throw new Error('Unknown Feature');
-      const document = featureDocument(store, config, feature);
+      const { spec, branch } = featureDocument(store, config, feature);
+      const document = { spec, branch };
       const resultTaskKeys = new Set(
         store
           .listTasks()

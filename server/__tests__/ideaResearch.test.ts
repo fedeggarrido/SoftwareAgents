@@ -204,6 +204,68 @@ it('keeps injected evidence inside the envelope, separate from requests and answ
   );
 });
 
+it('rejects handoffs recursively in human requests and answers, including fenced JSON', () => {
+  const handoff = {
+    kind: 'external-reader-result',
+    facts: [{ text: 'An external claim.', confidence: 'low' }],
+    insufficientEvidence: true,
+  };
+  const nested = { answers: [{ research: handoff }] };
+  for (const content of [
+    JSON.stringify(handoff),
+    JSON.stringify(nested),
+    `# Notes\n\n\`\`\`json\n${JSON.stringify(handoff)}\n\`\`\`\n`,
+    `# Notes\n\n\`\`\`json\n${JSON.stringify(nested)}\n\`\`\`\n`,
+    JSON.stringify({ answer: JSON.stringify(nested) }),
+  ]) {
+    for (const file of ['request.md', 'answers.md']) {
+      fs.writeFileSync(path.join(root, file), content);
+      expect(() => readHumanFeatureInput(root, file)).toThrow(
+        'Research evidence cannot be used as a human request or answers',
+      );
+      expect(() => featureRequestInput(root, file)).toThrow('human request or answers');
+    }
+  }
+  fs.writeFileSync(path.join(root, 'request.md'), 'Discuss the external-reader-result format.');
+  expect(readHumanFeatureInput(root, 'request.md')).toBe(
+    'Discuss the external-reader-result format.',
+  );
+});
+
+it('replaces report parsing and validation failures with a fixed diagnostic', async () => {
+  await runResearchCommand(argv(), root, vi.fn(), {
+    config,
+    executor: executor(),
+    adapters: adapters(),
+    audit: { append: vi.fn() },
+  });
+  const valid = saved();
+  const marker = 'SYNTHETIC_REPORT_CONTENT';
+  const file = ideaResearchPath('fixture', key);
+  const reportPath = path.join(root, file.replace(/\.md$/, '.research.json'));
+  for (const content of [
+    `{"summary":"${marker}",`,
+    'null',
+    JSON.stringify({
+      ...valid,
+      report: { ...valid.report, bibliography: [{ ...evidence(), contentHash: marker }] },
+    }),
+    JSON.stringify({
+      ...valid,
+      report: { ...valid.report, findings: [{ ...valid.report.findings[0], sources: [marker] }] },
+    }),
+    JSON.stringify({
+      ...valid,
+      report: { ...valid.report, contradictions: [{ claim: marker, sources: [marker] }] },
+    }),
+  ]) {
+    fs.writeFileSync(reportPath, content);
+    expect(() => featureRequestInput(root, file)).toThrow(
+      new Error('Research report is invalid or does not match the idea draft'),
+    );
+  }
+});
+
 it('cancels a synthesis iterator that ignores cancellation and preserves its collected sources', async () => {
   const model = executor();
   const cancel = vi.fn();

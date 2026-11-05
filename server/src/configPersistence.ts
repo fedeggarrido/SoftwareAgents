@@ -181,6 +181,8 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
       additionalProperties: false,
       properties: {
         ...researchLimitSchema.properties,
+        // Legacy project ceilings had no upper bound; researchPolicy clamps execution.
+        maxSeconds: { type: 'integer', exclusiveMinimum: 0 },
         modes: {
           type: 'object',
           additionalProperties: false,

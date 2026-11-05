@@ -31,7 +31,7 @@ export function researchPolicy(mode: ResearchMode, config: ResearchOperatorConfi
       (value !== undefined &&
         (!Number.isFinite(value) ||
           value <= 0 ||
-          value > RESEARCH_LIMITS[name] ||
+          (name !== 'maxSeconds' && value > RESEARCH_LIMITS[name]) ||
           (name !== 'maxCostUsd' && !Number.isInteger(value))))
     )
       throw new Error('Invalid research budgets');

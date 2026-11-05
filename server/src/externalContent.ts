@@ -55,7 +55,10 @@ export function validateExternalReaderResult(value: unknown): ExternalReaderResu
 // Fences must start a line: diff context/added lines (' ', '+', '-') never open one.
 const FENCED_JSON = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)^```/gm;
 
-export function containsExternalContent(value: unknown): boolean {
+export function containsExternalContent(
+  value: unknown,
+  options: { rejectHandoffs?: boolean } = {},
+): boolean {
   if (typeof value === 'string') {
     // Structural only: a diff or source file that merely mentions the marker (e.g. while
     // developing this module) is not external content. Whole-string JSON and fenced JSON
@@ -68,11 +71,11 @@ export function containsExternalContent(value: unknown): boolean {
       } catch {
         return false; // Not JSON: plain text carries no runtime provenance.
       }
-      return typeof parsed !== 'string' && containsExternalContent(parsed);
+      return typeof parsed !== 'string' && containsExternalContent(parsed, options);
     });
   }
   if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some(containsExternalContent);
+  if (Array.isArray(value)) return value.some((entry) => containsExternalContent(entry, options));
   const object = value as Record<string, unknown>;
   if (
     object.kind === 'untrusted-external-text' ||
@@ -83,11 +86,13 @@ export function containsExternalContent(value: unknown): boolean {
     return true;
   // An invalid reader result is untrusted, never a reason to stop inspecting siblings.
   if (object.kind === 'external-reader-result') {
+    // Bounded evidence is allowed downstream, but never as human-authored input.
+    if (options.rejectHandoffs) return true;
     try {
       validateExternalReaderResult(object);
     } catch {
       return true;
     }
   }
-  return Object.values(object).some(containsExternalContent);
+  return Object.values(object).some((entry) => containsExternalContent(entry, options));
 }

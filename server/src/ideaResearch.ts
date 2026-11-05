@@ -91,19 +91,12 @@ export function reportHandoff(report: ResearchReport): ExternalReaderResult {
   return result;
 }
 
-/** A full report can never become the human request or an answer file. */
+/** Reports and bounded handoffs can never become the human request or an answer file. */
 export function readHumanFeatureInput(root: string, relative: string): string {
   const text = readTaskInput(root, relative);
-  let kind: unknown;
-  try {
-    kind = (JSON.parse(text) as { kind?: unknown } | null)?.kind;
-  } catch {
-    // Human Markdown is the usual input.
-  }
   if (
     /\.(?:research\.(?:md|json)|handoff\.json)$/.test(relative) ||
-    kind === 'external-reader-result' ||
-    containsExternalContent(text)
+    containsExternalContent(text, { rejectHandoffs: true })
   )
     throw new Error('Research evidence cannot be used as a human request or answers');
   return text;
@@ -116,24 +109,30 @@ export function readIdeaResearch(
 ): { path: string; result: ExternalReaderResult } | undefined {
   const relative = requestPath.replace(/\.md$/, RESEARCH_REPORT_SUFFIX);
   if (relative === requestPath || !fs.existsSync(taskPath(root, relative))) return undefined;
-  const saved: SavedResearch = JSON.parse(readTaskInput(root, relative));
-  if (
-    saved.kind !== 'idea-research-report' ||
-    saved.provenance !== 'untrusted-external' ||
-    saved.ideaHash !== sourceHash(request) ||
-    typeof saved.partial !== 'boolean' ||
-    !saved.report ||
-    !Array.isArray(saved.report.bibliography)
-  )
-    throw new Error('Research report does not match the idea draft');
-  const sources: SourceItem[] = saved.report.bibliography.map(validateSourceItem);
-  const report = validateResearchReport(
-    JSON.stringify({ ...saved.report, discardedSources: [], bibliography: [] }),
-    sources,
-  );
-  const result = reportHandoff(report);
-  result.insufficientEvidence ||= saved.partial;
-  return { path: relative, result };
+  try {
+    const saved: SavedResearch = JSON.parse(readTaskInput(root, relative));
+    if (
+      !saved ||
+      saved.kind !== 'idea-research-report' ||
+      saved.provenance !== 'untrusted-external' ||
+      saved.ideaHash !== sourceHash(request) ||
+      typeof saved.partial !== 'boolean' ||
+      !saved.report ||
+      !Array.isArray(saved.report.bibliography)
+    )
+      throw new Error('Invalid research report');
+    const sources: SourceItem[] = saved.report.bibliography.map(validateSourceItem);
+    const report = validateResearchReport(
+      JSON.stringify({ ...saved.report, discardedSources: [], bibliography: [] }),
+      sources,
+    );
+    const result = reportHandoff(report);
+    result.insufficientEvidence ||= saved.partial;
+    return { path: relative, result };
+  } catch {
+    // Parser and validator diagnostics may contain arbitrary report content.
+    throw new Error('Research report is invalid or does not match the idea draft');
+  }
 }
 
 /** JSON is the authoritative plan input and is published last by atomic rename. */

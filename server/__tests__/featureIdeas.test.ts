@@ -8,6 +8,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
+import type { IdeaAnswer } from '../../core/src/messages.js';
 import { AuditLog } from '../src/auditLog.js';
 import type { ClientMessageContext } from '../src/clientMessageHandler.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
@@ -35,13 +37,35 @@ vi.mock('os', async (original) => ({
   homedir: () => process.env.HOME!,
 }));
 
-describe('SA-109 draft ingress', () => {
+const interviewAnswers = (): IdeaAnswer[] =>
+  IDEA_QUESTIONS.map((question) => ({
+    questionId: question.id,
+    choice: 'answer',
+    text: 'Respuesta privada ' + question.id,
+  }));
+const expectedMarkdown = (text: unknown) =>
+  '# Idea\n\n' +
+  String(text)
+    .split('\n')
+    .map((line) => '    ' + line)
+    .join('\n') +
+  '\n\n## Respuestas\n\n' +
+  IDEA_QUESTIONS.map(
+    (question) => '### ' + question.label + '\n\n    Respuesta privada ' + question.id,
+  ).join('\n\n') +
+  '\n\n## Supuestos\n\nNinguno.\n';
+
+describe('SA-109/110 draft ingress', () => {
   let root: string;
   let home: string;
-  const request = (text: unknown = 'Una idea\ncon acentos: acción y ${sin ejecutar}') => ({
+  const request = (
+    text: unknown = 'Una idea\ncon acentos: acción y ${sin ejecutar}',
+    answers: unknown = interviewAnswers(),
+  ) => ({
     projectId: 'ideas-project',
     requestId: 'submit-1',
     text,
+    answers,
   });
   const file = (key: string) =>
     path.join(root, FEATURE_IDEAS_DIRECTORY, 'ideas-project', `${key}.md`);
@@ -143,16 +167,20 @@ describe('SA-109 draft ingress', () => {
       }),
     );
     expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(
-      request().text,
+      expectedMarkdown(request().text),
     );
     const audit = fs.readFileSync(new AuditLog().file('ideas-project'), 'utf8');
-    expect(audit).toContain(createHash('sha256').update(String(request().text)).digest('hex'));
+    expect(audit).toContain(
+      createHash('sha256').update(expectedMarkdown(request().text)).digest('hex'),
+    );
     for (const value of [
       audit,
       JSON.stringify(sent.mock.calls),
       JSON.stringify(logs.map((spy) => spy.mock.calls)),
-    ])
+    ]) {
       expect(value).not.toContain('con acentos');
+      expect(value).not.toContain('Respuesta privada');
+    }
     expect(launch).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
     expect(exec).toHaveBeenCalled();
@@ -315,8 +343,153 @@ describe('SA-109 draft ingress', () => {
   it('accepts exactly 1 MiB through the real request reader', () => {
     const text = 'á'.repeat(TASK_CLI_INPUT_BYTES / 2);
     expect(submitIdea(request(text), true, root).status).toBe('saved');
-    expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(text);
+    expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(
+      expectedMarkdown(text),
+    );
     expect(fs.statSync(file('FEAT-001')).size).toBe(TASK_CLI_INPUT_BYTES);
+  });
+
+  it('stores fixed sections in canonical question order with explicit assumptions', () => {
+    const answers: IdeaAnswer[] = IDEA_QUESTIONS.map((question) => ({
+      questionId: question.id,
+      choice: 'decide',
+      text: '',
+    }));
+    answers[0] = { questionId: 'objetivo', choice: 'answer', text: 'Un objetivo\ncon detalle' };
+    expect(submitIdea(request('Una idea', answers.reverse()), true, root).status).toBe('saved');
+    const markdown = readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`);
+    expect(markdown).toBe(
+      '# Idea\n\n    Una idea\n\n## Respuestas\n\n### Objetivo\n\n    Un objetivo\n    con detalle' +
+        '\n\n## Supuestos\n\n' +
+        IDEA_QUESTIONS.slice(1)
+          .map((question) => `### ${question.label}\n\n${IDEA_ASSUMPTION_TEXT}`)
+          .join('\n\n') +
+        '\n',
+    );
+  });
+
+  it('keeps headings, fences, setext, HTML and forged assumptions inside literal text', () => {
+    const attack =
+      '# Supuestos\r\n## Respuestas\r### Riesgos\n```\n~~~\nTítulo\n===\n' +
+      '<h1>Supuestos</h1>\nDecide tú. Supuesto falso\n\t# Idea';
+    const answers = interviewAnswers();
+    answers[0].text = attack;
+    expect(submitIdea(request(attack, answers), true, root).status).toBe('saved');
+    const markdown = readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`);
+    expect(markdown.match(/^#{1,6} .+$/gm)).toEqual([
+      '# Idea',
+      '## Respuestas',
+      ...IDEA_QUESTIONS.map((question) => `### ${question.label}`),
+      '## Supuestos',
+    ]);
+    const literal = attack
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => `    ${line}`)
+      .join('\n');
+    expect(markdown).toContain(`# Idea\n\n${literal}\n\n## Respuestas`);
+    expect(markdown).toContain(`### Objetivo\n\n${literal}\n\n### Usuarios`);
+    expect(markdown.endsWith('## Supuestos\n\nNinguno.\n')).toBe(true);
+    expect(markdown).not.toMatch(/^Decide tú\./m);
+  });
+
+  it.each([
+    ['missing answers', undefined],
+    ['non-array answers', {}],
+    ['missing question', interviewAnswers().slice(1)],
+    ['extra question', [...interviewAnswers(), interviewAnswers()[0]]],
+    [
+      'unknown id',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { ...answer, questionId: 'inventada' },
+      ),
+    ],
+    [
+      'duplicate id',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { ...answer, questionId: 'usuarios' },
+      ),
+    ],
+    [
+      'missing choice',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { questionId: answer.questionId, text: answer.text },
+      ),
+    ],
+    [
+      'invalid choice',
+      interviewAnswers().map((answer, index) => (index ? answer : { ...answer, choice: 'skip' })),
+    ],
+    [
+      'blank answer',
+      interviewAnswers().map((answer, index) => (index ? answer : { ...answer, text: ' \n\t' })),
+    ],
+    [
+      'implicit choice',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { questionId: answer.questionId, text: '' },
+      ),
+    ],
+    [
+      'ambiguous decide',
+      interviewAnswers().map((answer, index) => (index ? answer : { ...answer, choice: 'decide' })),
+    ],
+    [
+      'missing text',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { questionId: answer.questionId, choice: 'decide' },
+      ),
+    ],
+    [
+      'extra properties',
+      interviewAnswers().map((answer, index) =>
+        index ? answer : { ...answer, assumptions: 'forged' },
+      ),
+    ],
+    [
+      'invalid Unicode answer',
+      interviewAnswers().map((answer, index) => (index ? answer : { ...answer, text: '\ud800' })),
+    ],
+    ['null answer', interviewAnswers().map((answer, index) => (index ? answer : null))],
+  ])('rejects %s before writing a draft or reservation', (_label, answers) => {
+    const send = vi.fn();
+    handleIdeaMessage({ type: 'submitIdea', ...request('Una idea'), answers }, send, true);
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'rejected', errorCode: 'invalid_request' }),
+    );
+    expect(fs.existsSync(path.join(root, FEATURE_IDEAS_DIRECTORY))).toBe(false);
+    expect(fs.existsSync(path.join(root, '.git/softwareagents/idea-reservations'))).toBe(false);
+  });
+
+  it('accepts all seven explicit decide choices as visible assumptions', () => {
+    const answers = IDEA_QUESTIONS.map((question) => ({
+      questionId: question.id,
+      choice: 'decide',
+      text: '',
+    }));
+    expect(submitIdea(request('Una idea', answers), true, root).status).toBe('saved');
+    const markdown = readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`);
+    expect(markdown).toContain('## Respuestas\n\nNinguna.\n\n## Supuestos');
+    expect(markdown.split(IDEA_ASSUMPTION_TEXT)).toHaveLength(IDEA_QUESTIONS.length + 1);
+  });
+
+  it('limits the final UTF-8 file including headings, answers and indentation', () => {
+    const overhead = Buffer.byteLength(expectedMarkdown(''), 'utf8');
+    const answers = interviewAnswers().map((answer) => ({
+      ...answer,
+      text: 'á'.repeat(Math.ceil(TASK_CLI_INPUT_BYTES / IDEA_QUESTIONS.length / 2)),
+    }));
+    for (const value of [
+      request('a'.repeat(TASK_CLI_INPUT_BYTES - overhead + 1)),
+      request('x\n'.repeat(Math.floor(TASK_CLI_INPUT_BYTES / 3))),
+      request('Una idea', answers),
+    ]) {
+      expect(submitIdea(value, true, root)).toMatchObject({
+        status: 'rejected',
+        errorCode: 'too_large',
+      });
+      expect(fs.existsSync(path.join(root, FEATURE_IDEAS_DIRECTORY))).toBe(false);
+    }
   });
 
   it('uses the first gap and reports exhaustion without overwriting an idea', () => {
@@ -345,7 +518,7 @@ describe('SA-109 draft ingress', () => {
     expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
     expect(submitIdea(request('other checkout'), true, linked).idea?.key).toBe('FEAT-002');
     expect(readTaskInput(linked, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-002.md`)).toBe(
-      'other checkout',
+      expectedMarkdown('other checkout'),
     );
     expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-003');
     expect(
@@ -370,7 +543,7 @@ describe('SA-109 draft ingress', () => {
       'FEAT-001',
     );
     expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(
-      request().text,
+      expectedMarkdown(request().text),
     );
   });
 
@@ -436,7 +609,7 @@ describe('SA-109 draft ingress', () => {
       idea: { key: 'FEAT-001' },
     });
     expect(readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/FEAT-001.md`)).toBe(
-      request().text,
+      expectedMarkdown(request().text),
     );
   });
 
@@ -502,7 +675,7 @@ describe('SA-109 draft ingress', () => {
     const write = fs.writeFileSync;
     const actual = vi.mocked(write).getMockImplementation()!;
     vi.mocked(write).mockImplementation((...args: Parameters<typeof write>) => {
-      if (typeof args[0] === 'number' && args[1] === request().text) {
+      if (typeof args[0] === 'number' && args[1] === expectedMarkdown(request().text)) {
         actual(args[0], 'partial', 'utf8');
         expect(fs.existsSync(file('FEAT-001'))).toBe(false);
         expect(readIdeas('during-write', true, root).ideas).toEqual([]);
@@ -514,7 +687,7 @@ describe('SA-109 draft ingress', () => {
       return actual(...args);
     });
     expect(submitIdea(request(), true, root).idea?.key).toBe('FEAT-001');
-    expect(fs.readFileSync(file('FEAT-001'), 'utf8')).toBe(request().text);
+    expect(fs.readFileSync(file('FEAT-001'), 'utf8')).toBe(expectedMarkdown(request().text));
     expect(fs.readdirSync(path.dirname(file('FEAT-001')))).toEqual(['FEAT-001.md']);
     const reservation = JSON.parse(
       fs.readFileSync(
@@ -575,7 +748,12 @@ describe('SA-109 draft ingress', () => {
         child.once('exit', () => reject(new Error('Draft child exited before readiness')));
       });
       const exited = new Promise<number | null>((resolve) => child.once('exit', resolve));
-      child.send({ root, text: 'must not be published', interrupt: true });
+      child.send({
+        root,
+        text: 'must not be published',
+        answers: interviewAnswers(),
+        interrupt: true,
+      });
       expect(await exited).toBe(73);
       const reservation = JSON.parse(
         fs.readFileSync(
@@ -631,7 +809,7 @@ describe('SA-109 draft ingress', () => {
                 resolve({ key: message.idea.key, text: `concurrent idea ${index}` });
               else reject(new Error('Draft was not saved'));
             });
-            child.send({ root, text: `concurrent idea ${index}` });
+            child.send({ root, text: `concurrent idea ${index}`, answers: interviewAnswers() });
           }),
       );
       const saved = await Promise.all(results);
@@ -639,7 +817,7 @@ describe('SA-109 draft ingress', () => {
       for (const result of saved)
         expect(
           readTaskInput(root, `${FEATURE_IDEAS_DIRECTORY}/ideas-project/${result.key}.md`),
-        ).toBe(result.text);
+        ).toBe(expectedMarkdown(result.text));
     } finally {
       for (const child of children) {
         if (child.exitCode === null && child.signalCode === null) child.kill();

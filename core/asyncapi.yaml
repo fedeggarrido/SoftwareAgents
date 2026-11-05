@@ -184,10 +184,10 @@ components:
           type: string
 
     SubmitIdea:
-      description: Privileged draft storage only. No client-selected feature id, authority grant, spec, commit or execution. Text is untrusted, nonempty and at most 1 MiB in UTF-8.
+      description: Privileged draft storage only. No client-selected feature id, authority grant, spec, commit or execution. Untrusted text and a complete fixed interview are rendered as Markdown by the server. The built file is at most 1 MiB in UTF-8.
       type: object
       additionalProperties: false
-      required: [type, requestId, projectId, text]
+      required: [type, requestId, projectId, text, answers]
       properties:
         type:
           const: submitIdea
@@ -195,6 +195,34 @@ components:
           type: string
         projectId:
           type: string
+        text:
+          type: string
+        answers:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: '#/components/schemas/IdeaAnswer'
+
+    IdeaQuestionId:
+      type: string
+      enum:
+        [objetivo, usuarios, alcance, fuera_de_alcance, criterio_de_exito, restricciones, riesgos]
+
+    IdeaAnswerChoice:
+      type: string
+      enum: [answer, decide]
+
+    IdeaAnswer:
+      description: Exactly one entry per fixed question. An answer requires nonempty text. Decide requires empty text and becomes an explicit analyst assumption for human review. Unknown ids, duplicate ids, missing choices and extra properties are rejected by the server.
+      type: object
+      additionalProperties: false
+      required: [questionId, choice, text]
+      properties:
+        questionId:
+          $ref: '#/components/schemas/IdeaQuestionId'
+        choice:
+          $ref: '#/components/schemas/IdeaAnswerChoice'
         text:
           type: string
 

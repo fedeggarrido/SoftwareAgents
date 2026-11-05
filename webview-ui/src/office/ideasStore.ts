@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import type {
+  IdeaAnswer,
   IdeaErrorCode,
   IdeasSnapshot,
   SubmitIdea,
@@ -84,7 +85,9 @@ export function ideaErrorText(code: IdeaErrorCode | null | undefined): string {
     case 'empty_text':
       return 'Escribe una idea antes de guardarla.';
     case 'too_large':
-      return 'La idea supera el límite de 1 MiB en UTF-8.';
+      return 'La idea y la entrevista superan el límite de 1 MiB en UTF-8 del archivo final.';
+    case 'invalid_request':
+      return 'Responde cada pregunta o marca «Decide tú» antes de guardar.';
     case 'unsafe_storage':
       return 'No se puede guardar: la ruta de ideas contiene un enlace o no es un archivo regular seguro.';
     case 'ids_exhausted':
@@ -139,13 +142,13 @@ export function requestIdeas(transport: MessageTransport): void {
     });
   }
 }
-export function sendIdea(text: string, transport: MessageTransport): void {
+export function sendIdea(text: string, answers: IdeaAnswer[], transport: MessageTransport): void {
   if (transport.state !== 'connected') return;
   const requestId = `idea-submit-${++sequence}`;
   const next = beginIdeaSubmit(current, requestId);
   if (next === current || !next.pending) return;
   setIdeasStore(next);
-  const message: SubmitIdea = { type: 'submitIdea', ...next.pending, text };
+  const message: SubmitIdea = { type: 'submitIdea', ...next.pending, text, answers };
   try {
     transport.send(message);
   } catch {

@@ -946,7 +946,25 @@ export interface SubmitIdea {
   requestId: string;
   projectId: string;
   text: string;
+  answers: IdeaAnswer[];
 }
+
+export interface IdeaAnswer {
+  questionId: IdeaQuestionId;
+  choice: IdeaAnswerChoice;
+  text: string;
+}
+
+export type IdeaQuestionId =
+  | 'objetivo'
+  | 'usuarios'
+  | 'alcance'
+  | 'fuera_de_alcance'
+  | 'criterio_de_exito'
+  | 'restricciones'
+  | 'riesgos';
+
+export type IdeaAnswerChoice = 'answer' | 'decide';
 
 export interface RequestFeatures {
   type: 'requestFeatures';

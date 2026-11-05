@@ -466,4 +466,8 @@
   width: min(560px, calc(100vw - 32px));
   max-height: 85vh;
   overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.idea-review p {
+  white-space: pre-wrap;
 }

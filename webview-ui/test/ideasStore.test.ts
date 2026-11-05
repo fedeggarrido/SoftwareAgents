@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { IdeasSnapshot, SubmitIdeaResult } from '../../core/src/messages.js';
+import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
+import type { IdeaAnswer, IdeasSnapshot, SubmitIdeaResult } from '../../core/src/messages.js';
 import type { MessageTransport } from '../../core/src/transport.js';
 import {
   applyIdeaResult,
@@ -36,6 +37,11 @@ const saved: SubmitIdeaResult = {
       'pixel-agents feature run FEAT-001 --request .softwareagents/ideas/P/FEAT-001.md --confirm',
   },
 };
+const answers: IdeaAnswer[] = IDEA_QUESTIONS.map((question) => ({
+  questionId: question.id,
+  choice: 'decide',
+  text: '',
+}));
 const ready = () => ({ ...emptyIdeasStore(), requestId: 'read', snapshot });
 beforeEach(() => setIdeasStore(emptyIdeasStore()));
 
@@ -114,16 +120,18 @@ describe('SA-109 dialog state without DOM', () => {
     const transport = { state: 'connected', send } as unknown as MessageTransport;
     setIdeasStore(ready());
     const text = 'Quiero <script>alert(1)</script> $(sin ejecutar)';
-    sendIdea(text, transport);
-    sendIdea(text, transport);
+    sendIdea(text, answers, transport);
+    sendIdea(text, answers, transport);
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0][0]).toEqual({
       type: 'submitIdea',
       projectId: 'P',
       requestId: getIdeasStore().pending!.requestId,
       text,
+      answers,
     });
     expect(Object.keys(send.mock.calls[0][0]).sort()).toEqual([
+      'answers',
       'projectId',
       'requestId',
       'text',
@@ -136,7 +144,7 @@ describe('SA-109 dialog state without DOM', () => {
       throw new Error('closed');
     });
     setIdeasStore(ready());
-    sendIdea('idea', { state: 'connected', send } as unknown as MessageTransport);
+    sendIdea('idea', answers, { state: 'connected', send } as unknown as MessageTransport);
     expect(getIdeasStore().uncertain).toBe(true);
     expect(getIdeasStore().pending).toBeNull();
     expect(send).toHaveBeenCalledOnce();

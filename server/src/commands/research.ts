@@ -14,7 +14,6 @@ import {
 import { AuditLog } from '../auditLog.js';
 import { CliUsageError } from '../cliErrors.js';
 import {
-  RESEARCH_BUDGET_HEADROOM_FRACTION,
   RESEARCH_COST_LABEL,
   RESEARCH_QUESTION_CHARS,
   RESEARCH_SEED_LIMIT,
@@ -53,10 +52,12 @@ import {
   researchEstimate,
   researchPolicy,
 } from '../researchPolicy.js';
+import { researchBudget } from '../researchRuntime.js';
 import { discoverUrls } from '../webScout.js';
+import { runResearchReviewCommand } from './researchReview.js';
 import { readTaskInput, taskPath } from './taskFiles.js';
 
-interface ResearchCommandOptions {
+export interface ResearchCommandOptions {
   config?: ProjectConfig;
   executor?: Executor;
   adapters?: ResearchAdapters;
@@ -69,9 +70,10 @@ export async function runResearchCommand(
   log = console.log,
   options: ResearchCommandOptions = {},
 ): Promise<void> {
+  if (argv[0] === 'review') return runResearchReviewCommand(argv, cwd, log, options);
   if (argv[0] === 'run') argv = await confirmHumanIngress(argv);
   const usage =
-    'Usage: pixel-agents research run --question <text> [--discover] [--kinds paper,book,web,thread,video] [--mode quick|deep] [--idea FEAT-ID] [--accept-cost estimate,cap] [--since YYYY-MM-DD] [--source <url>...] [--json]';
+    'Usage: pixel-agents research review <FEAT-ID> [--mode quick|deep] [--accept-cost estimate,cap] [--json] | run --question <text> [--discover] [--kinds paper,book,web,thread,video] [--mode quick|deep] [--idea FEAT-ID] [--accept-cost estimate,cap] [--since YYYY-MM-DD] [--source <url>...] [--json]';
   if (argv[0] !== 'run') throw new CliUsageError(usage);
   let question = '',
     depth: ResearchMode = 'quick',
@@ -214,9 +216,6 @@ export async function runResearchCommand(
       }
     }
   };
-  let usedTokens = 0,
-    usedEstimateUsd = 0;
-  let stopReason: string | undefined;
   const release = ideaPath ? claimIdeaResearch(config.repoRoot, ideaPath) : () => {};
   const timer = setTimeout(() => abort.abort(), policy.maxSeconds * 1000);
   try {
@@ -230,83 +229,8 @@ export async function runResearchCommand(
           options.runtimeDirectory ??
           path.join(os.homedir(), '.pixel-agents', 'research-runtime', id),
       });
-    // Keep fixed headroom from the total cap. This is an estimate, not a reservation.
-    const allowance = () =>
-      policy.maxCostUsd * (1 - RESEARCH_BUDGET_HEADROOM_FRACTION) - usedEstimateUsd;
-    const checkCostStop = () => {
-      if (usedEstimateUsd >= policy.maxCostUsd)
-        stopReason ??= 'Tope estimado de coste alcanzado; informe parcial.';
-      else if (allowance() <= 0)
-        stopReason ??= 'Presupuesto restante sin margen de coste disponible; informe parcial.';
-    };
-    const executor: Executor = {
-      id: underlying.id,
-      start(request) {
-        checkCostStop();
-        if (abort.signal.aborted || usedTokens >= policy.maxTokens || stopReason) {
-          stopReason ??= 'Token/cost budget exhausted.';
-          throw new Error('Research budget exhausted');
-        }
-        const maxCostUsd = allowance();
-        const handle = underlying.start({
-          ...request,
-          researchBudget: { maxCostUsd },
-        });
-        let accounted = false;
-        const account = (reportedCost?: number) => {
-          if (accounted) return;
-          accounted = true;
-          if (abort.signal.aborted) stopReason ??= 'Time budget exhausted.';
-          if (
-            typeof reportedCost === 'number' &&
-            Number.isFinite(reportedCost) &&
-            reportedCost >= 0
-          )
-            usedEstimateUsd += reportedCost;
-          else {
-            usedEstimateUsd += maxCostUsd;
-            gaps.push(
-              'Coste no disponible o inválido; se contabiliza toda la asignación de la llamada.',
-            );
-          }
-          checkCostStop();
-        };
-        const cancel = () => handle.cancel();
-        abort.signal.addEventListener('abort', cancel, { once: true });
-        return {
-          cancel,
-          events: (async function* () {
-            try {
-              const iterator = handle.events[Symbol.asyncIterator]();
-              for (;;) {
-                const next = await researchDeadline(iterator.next(), abort.signal);
-                if (next.done) break;
-                const event = next.value;
-                if (event.type === 'usage') {
-                  if (
-                    ![event.inputTokens, event.outputTokens].every(
-                      (n) => Number.isFinite(n) && n >= 0,
-                    )
-                  )
-                    throw new Error('Invalid research usage');
-                  usedTokens += event.inputTokens + event.outputTokens;
-                  if (usedTokens >= policy.maxTokens) {
-                    stopReason = 'Token budget exhausted.';
-                    abort.abort();
-                  }
-                }
-                if (event.type === 'finished') account(event.costUsd);
-                yield event;
-              }
-            } finally {
-              account();
-              cancel();
-              abort.signal.removeEventListener('abort', cancel);
-            }
-          })(),
-        };
-      },
-    };
+    const budget = researchBudget(underlying, policy, abort, gaps);
+    const { executor } = budget;
     try {
       if (discover) {
         const result = await researchDeadline(
@@ -374,7 +298,7 @@ export async function runResearchCommand(
             : []),
         ];
         for (const operation of operations) {
-          if (abort.signal.aborted || stopReason || sources.length >= maxSources) {
+          if (abort.signal.aborted || budget.stopReason || sources.length >= maxSources) {
             gaps.push('Collection budget exhausted; coverage is partial.');
             break;
           }
@@ -392,7 +316,7 @@ export async function runResearchCommand(
       }
     } catch {
       gaps.push(
-        stopReason ??
+        budget.stopReason ??
           (abort.signal.aborted
             ? 'Time budget exhausted.'
             : 'Discovery failed; evidence is partial.'),
@@ -407,7 +331,7 @@ export async function runResearchCommand(
       bibliography: sources,
     };
     try {
-      if (sources.length && !abort.signal.aborted && !stopReason) {
+      if (sources.length && !abort.signal.aborted && !budget.stopReason) {
         if (executor.id !== 'claude')
           throw new Error('Researcher requires a read-tools-only Claude executor');
         // The CLI's own structured-output check is not deterministic for the model: one retry
@@ -454,7 +378,7 @@ export async function runResearchCommand(
                     event.outputTokens < 0
                   )
                     throw new Error('Invalid research usage');
-                  if (usedTokens >= policy.maxTokens) {
+                  if (budget.usedTokens >= policy.maxTokens) {
                     exhausted = true;
                     handle.cancel();
                   }
@@ -486,7 +410,7 @@ export async function runResearchCommand(
             if (
               attempt === 0 &&
               !abort.signal.aborted &&
-              !stopReason &&
+              !budget.stopReason &&
               /schema validation/i.test((error as Error).message)
             )
               continue;
@@ -496,13 +420,14 @@ export async function runResearchCommand(
       }
     } catch {
       gaps.push(
-        stopReason ??
+        budget.stopReason ??
           (abort.signal.aborted
             ? 'Time budget exhausted.'
             : 'Synthesis failed; no validated claims produced.'),
       );
     }
-    if (stopReason || abort.signal.aborted) gaps.push(stopReason ?? 'Time budget exhausted.');
+    if (budget.stopReason || abort.signal.aborted)
+      gaps.push(budget.stopReason ?? 'Time budget exhausted.');
     report.gaps.push(...new Set(gaps));
     report.discardedSources.push(...discardedSources);
     if (ideaPath)
@@ -522,9 +447,9 @@ export async function runResearchCommand(
       cost: {
         estimateUsd,
         capUsd: policy.maxCostUsd,
-        usedEstimateUsd,
+        usedEstimateUsd: budget.usedEstimateUsd,
         label: RESEARCH_COST_LABEL,
-        ...(stopReason ? { stopReason } : {}),
+        ...(budget.stopReason ? { stopReason: budget.stopReason } : {}),
       },
     };
     // Separate, bounded artifact for downstream tool roles. The full report/cache

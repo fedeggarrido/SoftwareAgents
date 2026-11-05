@@ -362,6 +362,17 @@ export const RESEARCH_BUDGET_HEADROOM_FRACTION = 0.2;
 export const RESEARCH_COST_LABEL =
   'El tope es una estimación a precios API, no la facturación de la suscripción. Una sola respuesta puede superarlo ligeramente.';
 export const RESEARCH_TOPICS = ['alternatives', 'technologies', 'risks', 'practices'] as const;
+/** Reports live with operational feature artifacts, outside every branch tree. */
+export const FEATURE_RESEARCH_DIRECTORY = 'softwareagents/feature-research';
+export const FEATURE_RESEARCH_MAX_ITEMS = 1000;
+export const FEATURE_RESEARCH_TEXT_CHARS = 4000;
+export const FEATURE_RESEARCH_EVIDENCE_LIMIT = 12;
+export const FEATURE_RESEARCH_STATUSES = [
+  'delivered',
+  'partial',
+  'missing',
+  'not verifiable',
+] as const;
 
 /** Ceiling for reading a process start time (PowerShell can take several seconds on a loaded Windows host). */
 export const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;

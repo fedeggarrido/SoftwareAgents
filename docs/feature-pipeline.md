@@ -6,7 +6,7 @@ operador. No incluye diseño técnico ni implementación de esa vista.
 
 ## Investigación después de construir (SA-113)
 
-`pixel-agents research review FEAT-001 --mode quick --confirm` compara lo entregado
+`pixel-agents research review FEAT-001 --mode quick --confirm` compara el código citado
 con el FeatureSpec, el TechnicalDesign, cada tarea del DAG y el informe de
 investigación previo, si existe junto al request original. Es un comando humano
 explícito: nunca se inicia al terminar una build ni desde la oficina. Exige el
@@ -18,6 +18,18 @@ Reutiliza los modos `quick|deep`, límites de Operator config, plazo global y
 contabilidad de SA-112, incluido el margen fijo del 20% y la asignación por llamada.
 Una respuesta puede superar el tope estimado; el corte conserva un informe parcial.
 No vuelve a buscar en la web: contrasta las fuentes ya recogidas con el diff.
+Antes de lanzar síntesis o reintento, el presupuesto compartido estima **bytes
+ASCII / 2 + bytes no ASCII**, redondeado hacia arriba, más 1.024 tokens de framing,
+para el sistema compilado (incluido el esquema) y el contexto. Rechaza si esa
+estimación alcanza los tokens restantes o agota el coste de entrada disponible,
+o si se supera el tamaño máximo por petición. El rechazo indica usar `deep` o
+reducir la entrada. No añade llamadas de red ni requiere claves. Sin tokenizer
+exacto, esta estimación puede subestimar el consumo real: la cancelación por uso
+de tokens reportado en runtime sigue siendo la guarda final.
+El fixture quick de revisión con esquema real, metadatos, 60 líneas añadidas y
+sin investigación previa usa 17.557 bytes ASCII: ceil(17.557 / 2) + 1.024 = 9.803
+tokens, dejando 6.197 para salida. Son tamaños de inputs compilados, no mediciones
+del tokenizer de Claude.
 
 La Feature debe tener una run `ready_to_merge` con trabajo integrado y su rama
 `sa/FEAT-NNN-integration` presente en el SHA registrado. Sin rama construida se
@@ -27,12 +39,32 @@ main. La lectura del plan conserva íntegra la barrera de `featureDocument` y ex
 que esos documentos también coincidan en la rama construida.
 
 Cada criterio de aceptación, sección disponible del diseño y tarea del DAG tiene
-una fila: `delivered`, `partial`, `missing` o `not verifiable`, explicación y citas
+una fila: `code_cited` («Código citado: requiere verificación»), `partial`,
+`missing` o `not verifiable`, explicación y citas
 `file:line` o ids de fuentes. El runtime comprueba referencias y citas literales
 contra las líneas del lado nuevo del diff y las fuentes previas revalidadas. Las
 filas omitidas o sin evidencia comprobable son `not verifiable`; una fuente externa
-por sí sola nunca demuestra entrega. Los binarios, rutas escapadas de Git y código
-sin líneas en el diff pueden quedar sin verificar. Las mejoras aparecen como
+por sí sola nunca demuestra entrega. La procedencia del código citado exige una línea
+**añadida** en un archivo JS/TS (`js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts`,
+`cts`), de implementación o tests, fuera de `docs/`, `.softwareagents/` y los
+documentos del plan; se excluyen declaraciones `*.d.ts`, `*.d.mts` y `*.d.cts`.
+El parser existente de TypeScript exige sintaxis válida y reconoce declaraciones
+con implementación, llamadas, asignaciones, retornos y lanzamientos de error.
+La cita debe abarcar un token de código reconocido: contexto sin cambios,
+comentarios, strings aislados, texto de plantillas/JSX y títulos de tests no
+bastan, ni tampoco README sin extensión, `.markdown` o prosa renombrada a `.ts`.
+Tampoco califican declaraciones que solo contienen strings, wrappers de tests
+vacíos o pendientes, ni funciones vacías.
+Las rutas se obtienen de `git diff --name-only -z`, delimitadas por NUL; los espacios y
+el quoting de los encabezados de presentación no cambian referencias ni filtros.
+Cada patch se obtiene con su ruta literal, sin asociar archivos por esos encabezados.
+Los renombrados se comparan como borrado/alta y se analiza el archivo nuevo completo.
+Otras extensiones, sintaxis no reconocida, archivos inválidos y binarios quedan
+sin verificar. `code_cited` es un puntero para revisión humana, **no prueba entrega
+ni pertinencia**. Límite conocido: una cita de código con sintaxis válida puede
+ser irrelevante o ineficaz; las heurísticas de texto no prueban comportamiento ni
+cumplimiento de criterios. La semántica sigue requiriendo verificación humana.
+Las mejoras aparecen como
 `proposal` y requieren revisión humana: no crean tareas ni conceden autoridad.
 
 El runtime abre el WorkStore existente en solo lectura, sin migraciones ni
@@ -51,6 +83,15 @@ de auditoría. No sustituye Reviewer, QA, aprobación ni merge humano.
 
 Las pruebas con fixtures están en `server/__tests__/featureResearch.test.ts`; no
 llaman a modelos reales ni acreditan la corrección semántica de sus conclusiones.
+`researchRuntime.test.ts` fija recuentos BPE independientes obtenidos offline con
+tiktoken 0.13.0, vocabulario de 256 bytes y la única unión ` a`, patrón
+`[\s\S]+`, sin tokens especiales ni vocabulario descargado: 33.812 bytes densos
+son 16.906 tokens; cada extracto normal de 2.400 bytes es 2.400 tokens. Es una
+referencia adversaria reproducible, no el tokenizer de Claude. El fixture denso
+compilado ocupa 36.719 bytes ASCII: ceil(36.719 / 2) + 1.024 = 19.384 rechaza quick
+antes del lanzamiento; dividir por tres lo admitiría con una estimación de 13.264
+tokens. Los números esperados de ambos fixtures son independientes de las constantes
+de admisión.
 
 ## Ideas desde la oficina (SA-109–110)
 

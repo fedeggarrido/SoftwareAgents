@@ -412,7 +412,25 @@ ni seguridad semántica de sus resúmenes.
   Los cortes y fallos conservan cobertura parcial: toda fila sin cita comprobable
   pasa a `not verifiable`, y las fuentes previas solas no prueban entrega.
   Las citas se cotejan con líneas del lado nuevo del diff o extractos revalidados;
-  su existencia no prueba pertinencia ni corrección semántica. Las propuestas no
+  solo líneas añadidas en archivos de implementación/tests JS/TS con sintaxis
+  válida pueden aportar procedencia del código citado. El parser de TypeScript identifica
+  tokens de declaraciones con implementación, llamadas, asignaciones, retornos y
+  lanzamientos de error; la cita debe abarcar uno. Se excluyen `docs/`,
+  `.softwareagents/`, documentos del plan y declaraciones de tipos. Comentarios,
+  strings aislados, texto de plantillas/JSX, títulos de tests y contexto sin cambios
+  no aportan tokens de código. Se excluyen además declaraciones que solo contienen
+  strings, wrappers de tests vacíos o pendientes y funciones vacías.
+  La lista positiva de extensiones rechaza también
+  README sin extensión y `.markdown`; renombrar prosa a código no evita el análisis
+  sintáctico del archivo nuevo completo. Git entrega nombres delimitados por NUL
+  (`--name-only -z`); cada patch se vincula a su ruta literal sin interpretar
+  espacios, tabs ni escapes de sus encabezados. Los renombrados se
+  descomponen en borrado/alta. Otras extensiones y sintaxis sin reconocer se degradan
+  a `not verifiable`. El estado `code_cited` se muestra como «Código citado: requiere
+  verificación»: es un puntero para revisión humana, no una prueba de entrega.
+  Límite conocido: código con sintaxis válida puede ser irrelevante o ineficaz;
+  las heurísticas de texto no prueban pertinencia, comportamiento correcto ni
+  cumplimiento de criterios. Las propuestas no
   crean Tasks ni cambian decisiones. El WorkStore se abre en solo lectura, sin
   migraciones, recuperación ni escrituras de estado. Solo se publican informes
   Markdown/JSON con UUID en `softwareagents/feature-research/<Project>/<FEAT>/`
@@ -431,7 +449,16 @@ ni seguridad semántica de sus resúmenes.
   dentro del envelope no confiable.
   El plazo global interrumpe también adapters e iteradores que ignoran la señal.
   Los cortes y fallos conservan un informe parcial. El consumo de tokens es una
-  observación posterior. El tope es una estimación a precios API: una sola respuesta
+  observación posterior. Antes de cada síntesis o reintento, `researchBudget`
+  estima ceil(bytes ASCII / 2 + bytes no ASCII) del sistema compilado (esquema incluido)
+  y contexto, más 1.024 tokens de framing, y comprueba tamaño, tokens restantes y
+  coste de entrada antes de llamar al Executor. El rechazo indica usar `deep` o
+  reducir la entrada. No llama a una API para contar tokens. La estimación cubre el
+  input escrito por el runtime, no mide el contexto que pueda añadir el proveedor;
+  el framing es una reserva fija. Sin tokenizer exacto puede subestimar el consumo:
+  la cancelación por uso de tokens reportado en runtime sigue siendo la guarda final.
+  Los fixtures BPE independientes son adversarios locales, no medidas
+  del tokenizer de Claude. El tope es una estimación a precios API: una sola respuesta
   puede superarlo ligeramente, como advierten la confirmación y el informe en español.
   Antes de cada llamada de scout, síntesis o reintento se resta del presupuesto
   restante un margen fijo del 20% del tope total y se transmite la asignación positiva

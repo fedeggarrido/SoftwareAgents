@@ -23,6 +23,7 @@ const snapshot = (requestId: string, canApprove = true): FeaturePlanSnapshot => 
     title: '<script>alert(1)</script>',
     revision: 'a'.repeat(64),
     specSha: 'b'.repeat(40),
+    specApproved: false,
     approved: false,
     sections: FEATURE_PLAN_SECTIONS.map((section) => ({
       ...section,
@@ -156,5 +157,46 @@ describe('SA-111 plan approval', () => {
     expect(css).toMatch(
       /\.feature-plan-dialog\s*\{[^}]*width: min\(760px, calc\(100vw - 32px\)\);[^}]*min-width: 0;/,
     );
+  });
+  it('shows the read-only message and no plan after a denied read', async () => {
+    const h = harness();
+    h.receive({ ...snapshot(h.read().requestId, false), plan: null, errorCode: 'denied' });
+    h.controller.approve();
+    expect(h.send).toHaveBeenCalledTimes(1);
+    const componentPath = '../src/components/FeaturePlanDialog.js';
+    const { FeaturePlanView } = await import(componentPath);
+    const html = renderToStaticMarkup(
+      createElement(FeaturePlanView, {
+        featureKey: 'FEAT-001',
+        view: h.controller.getSnapshot(),
+        onClose() {},
+        onApprove() {},
+        onRefresh() {},
+      }),
+    );
+    expect(html).toContain(
+      'Solo lectura. La aprobación requiere una conexión privilegiada del operador.',
+    );
+    expect(html).not.toContain('Aprobar plan');
+    expect(html).not.toContain('Requisitos');
+    h.stop();
+  });
+  it('distinguishes FeatureSpec approval from the displayed plan and enables a new human approval', async () => {
+    const response = snapshot('r');
+    response.plan!.specApproved = true;
+    const componentPath = '../src/components/FeaturePlanDialog.js';
+    const { FeaturePlanView } = await import(componentPath);
+    const html = renderToStaticMarkup(
+      createElement(FeaturePlanView, {
+        featureKey: 'FEAT-001',
+        view: { snapshot: response, pending: false, loading: false, notice: '' },
+        onClose() {},
+        onApprove() {},
+        onRefresh() {},
+      }),
+    );
+    expect(html).toContain('FeatureSpec aprobada; este plan ha cambiado y no está aprobado');
+    expect(html).toContain('Aprobar plan');
+    expect(html).not.toContain('Plan aprobado');
   });
 });

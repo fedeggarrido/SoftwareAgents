@@ -39,15 +39,74 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         status: 'approved',
         title: null,
         updated_at: null,
+        approved_plan_revision: null,
       });
       expect(db.prepare('SELECT state, updated_at FROM feature_runs').get()).toEqual({
         state: '{}',
         updated_at: null,
       });
       runMigrations(db);
-      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(20);
+      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(21);
     } finally {
       db.close();
+    }
+  });
+
+  it('commits the plan binding with approval and only changes that binding on reapproval', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-plan-binding-'));
+    execFileSync('git', ['init', root], { windowsHide: true, stdio: 'pipe' });
+    const store = await openWorkStore({ repositoryPath: root, projectId: 'p' });
+    const db = new DatabaseSync(path.join(root, '.git/softwareagents/work.sqlite3'));
+    try {
+      store.createFeature({
+        key: 'FEAT-001',
+        doc_path: 'spec.yaml',
+        git_sha: 'sha',
+        status: 'in_review',
+      });
+      const initial = store.getFeature('FEAT-001');
+      await expect(
+        store.approveFeature('FEAT-001', 'sha', 'a'.repeat(64), () => {
+          throw new Error('intent failed');
+        }),
+      ).rejects.toThrow('intent failed');
+      expect(store.getFeature('FEAT-001')).toEqual(initial);
+      const check = vi.fn();
+      await store.approveFeature('FEAT-001', 'sha', 'a'.repeat(64), check);
+      expect(check).toHaveBeenLastCalledWith(false);
+      expect(store.getFeature('FEAT-001')).toMatchObject({
+        status: 'approved',
+        approved_plan_revision: 'a'.repeat(64),
+      });
+      // Existing approved rows acquire a binding without a lifecycle or activity write.
+      db.exec('UPDATE features SET approved_plan_revision = NULL');
+      const legacy = store.getFeature('FEAT-001');
+      await store.approveFeature('FEAT-001', 'sha', 'b'.repeat(64), check);
+      expect(check).toHaveBeenLastCalledWith(false);
+      expect(store.getFeature('FEAT-001')).toEqual({
+        ...legacy,
+        approved_plan_revision: 'b'.repeat(64),
+      });
+      db.exec("UPDATE features SET status = 'ready_to_merge'");
+      const progressed = store.getFeature('FEAT-001');
+      await store.approveFeature('FEAT-001', 'sha', 'b'.repeat(64), check);
+      expect(check).toHaveBeenLastCalledWith(true);
+      expect(store.getFeature('FEAT-001')).toEqual(progressed);
+      await expect(
+        store.approveFeature('FEAT-001', 'sha', 'c'.repeat(64), () => {
+          throw new Error('revision changed');
+        }),
+      ).rejects.toThrow('revision changed');
+      expect(store.getFeature('FEAT-001')).toEqual(progressed);
+      await store.approveFeature('FEAT-001', 'sha', 'c'.repeat(64), check);
+      expect(check).toHaveBeenLastCalledWith(false);
+      expect(store.getFeature('FEAT-001')).toEqual({
+        ...progressed,
+        approved_plan_revision: 'c'.repeat(64),
+      });
+    } finally {
+      db.close();
+      store.close();
     }
   });
 
@@ -71,9 +130,10 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         updated_at: '2026-01-01T01:00:00.000Z',
       });
       clock.mockReturnValue('2026-01-01T02:00:00.000Z');
-      await store.approveFeature('FEAT-001', 'sha', () => {});
+      await store.approveFeature('FEAT-001', 'sha', 'a'.repeat(64), () => {});
       expect(store.getFeature('FEAT-001')).toMatchObject({
         status: 'approved',
+        approved_plan_revision: 'a'.repeat(64),
         updated_at: '2026-01-01T02:00:00.000Z',
       });
       const state: FeatureRunState = {

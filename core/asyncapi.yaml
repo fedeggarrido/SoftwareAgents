@@ -177,7 +177,7 @@ components:
     # ── Server message variants ────────────────────────────────────
 
     RequestFeaturePlan:
-      description: Read the server-bound feature plan. Available to read-only connections. No execution or writes.
+      description: Read the server-bound feature plan. Requires a privileged connection before any Project access. No execution or writes.
       type: object
       additionalProperties: false
       required: [type, projectId, requestId, key]
@@ -248,7 +248,7 @@ components:
       description: Literal existing FeatureSpec, TechnicalDesign and DAG projection. Null section means missing. Never interpret content as HTML or Markdown. No content in logs or audit.
       type: object
       additionalProperties: false
-      required: [key, title, revision, specSha, approved, sections]
+      required: [key, title, revision, specSha, specApproved, approved, sections]
       properties:
         key:
           type: string
@@ -258,7 +258,11 @@ components:
           type: string
         specSha:
           type: string
+        specApproved:
+          description: FeatureSpec operational status is approved or ready_to_merge.
+          type: boolean
         approved:
+          description: This exact plan revision has a persisted human approval binding.
           type: boolean
         sections:
           type: array

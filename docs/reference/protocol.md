@@ -42,7 +42,7 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
 
 - Client: `RequestFeatures` = `{ type: 'requestFeatures', projectId: string, requestId: string }`.
 - Server: `FeaturesSnapshot` = `{ type: 'featuresSnapshot', projectId, requestId, status, reason, features: FeatureRow[] }`. Replies are point-to-point and echo both identifiers. Clients discard replies for a different selected Project or obsolete request.
-- SA-111 permits `requestFeatures` on read-only connections so they can discover and inspect plans. The server-bound selected Project remains mandatory (`unknown_project` otherwise). `requestAuditLog` retains its privilege check. No token, actor flag or ingress route is added.
+- `requestFeatures`, `requestFeaturePlan` and `requestAuditLog` require the existing connection privilege before any Project access. Unprivileged requests return `denied` with no feature rows or plan. The server-bound selected Project remains mandatory (`unknown_project` otherwise). No token, actor flag or ingress route is added.
 - Status is `ok`, `empty`, `denied`, `unknown_project` or `read_error`. Only a successful read with no registered features is `empty`. Rejections, errors and empty results carry `features: []`. Only `read_error` has a non-null reason, restricted to `unavailable`, `schema_incompatible`, `query_failed` or `invalid_data`; exception messages and traces never leave the server.
 - `FeatureRow` contains only `key`, nullable `title`, `state` (`merged`, `ready_to_merge`, `in_review`, `in_design`, `in_development`, `unknown`), nullable `rawStatus` for unknown persisted states, nullable `progress {done,total}`, nullable `currentTask {key,step,others}` (step `develop`, `review`, `qa` or null), `gates [{kind,task,expired,command}]`, nullable `integration {branch,sha}` (abbreviated SHA or null), and nullable `lastActivityAt`. Progress null means no imported tasks. Gates use `spec_approval`, `requirements_questions`, `design_questions`, `human_decision`, `waiting_human`, `quota` or `qa_not_tested`; task is nullable. `merged` requires a completed imported DAG and local Git ancestry evidence for the persisted integration HEAD; refs and objects are read without processes or writes.
 - This is a read-only WorkStore projection. Commands are display text for manual use in the operator's terminal. Answer commands retain the literal `<fichero-de-respuestas>` placeholder. SA-111 adds the separate plan approval messages below. Reads do not write WorkStore, audit, Git or Brain state or launch agents.
@@ -52,11 +52,11 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
 ## Plan review and human approval (SA-111)
 
 - `requestFeaturePlan` carries `projectId`, `requestId` and `key`. It is a read-only
-  request available without a token, bound to the server's Project. The reader uses
+  request requiring a privileged connection, bound to the server's Project. The reader uses
   a read-only WorkStore transaction and the existing artifact path and Git guards.
 - `featurePlanSnapshot` echoes those identifiers and carries `plan`, `canApprove`
   and `errorCode`. A failed read has a null plan and disabled approval. The plan
-  contains its key, title, spec SHA, revision, approved state and seven fixed
+  contains its key, title, spec SHA, revision, `specApproved`, `approved` and seven fixed
   sections. Requirements, architecture and tasks show literal FeatureSpec,
   TechnicalDesign and DAG sources. Tests, CI, security and documentation project
   explicit matching Markdown headings from the design. Null content means missing.
@@ -68,18 +68,28 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
   reject before Project access. Embedded VS Code rejects as `unsupported_adapter`.
 - The revision hashes the feature key, spec SHA and complete displayed artifact
   sources. The shared `approveFeature(store, config, key, 'human')` service
-  accepts the reviewed SHA and an additional synchronous check under its existing
-  SQLite transaction. The existing policy, unresolved-question gates and Git fence
+  accepts the reviewed SHA and plan revision. CLI computes the current revision
+  with the same projection. Both revalidate under the existing SQLite transaction
+  and persist `features.approved_plan_revision` atomically with approval. The existing policy, unresolved-question gates and Git fence
   apply to CLI and office alike. Approval never starts design or development.
 - `featureApprovalResult` echoes identifiers and revision, with status `approved`
   or `rejected` and a closed error code. `stale_revision` causes the UI to clear the
   old plan, fetch its current revision and require another human click. Unknown
   errors become fixed codes, without exception text or artifact content.
-- Repeated messages revalidate and return success for the same approved revision
-  without another mutation or audit intent. CLI and office share a single durable
-  `pending` audit intent per transition. WorkStore confirms the committed state.
-  Failed JSONL writes abort approval. A SQLite commit failure can leave an intent
-  without approval because these stores have separate transactions.
+- `specApproved` reflects Feature status `approved` or `ready_to_merge`. `approved`
+  additionally requires `approved_plan_revision` to match the displayed revision.
+  Legacy null bindings and changed sources show “FeatureSpec aprobada; este plan ha
+  cambiado y no está aprobado” and allow a human to approve the new revision. This
+  only updates the binding for an already approved FeatureSpec. The Developer gate
+  still depends on Feature status alone and the pipeline retains its existing gates.
+- Repeated messages revalidate and return success for the same approved revision,
+  including after `ready_to_merge`, without another mutation or audit entry. CLI and
+  office share one ordered `pending`/`approved` audit pair per new binding. A failed
+  intent write aborts approval. A SQLite commit failure can leave an intent without
+  approval because these stores have separate transactions. A failed confirmation
+  after commit emits a content-free server warning. The approval remains committed,
+  WS returns success and CLI reports the confirmation failure. This accepted residual
+  risk has no recovery mechanism and replay does not fill in the missing confirmation.
 - The dialog correlates Project, feature, request and revision. Double clicks are
   suppressed synchronously. Disconnects and timeouts invalidate the displayed
   approval capability. Only reads are retried, and approval requires another click.

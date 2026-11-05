@@ -12,7 +12,7 @@ export interface PlanView {
 export const planErrorText = (code: FeaturePlanSnapshot['errorCode']): string => {
   switch (code) {
     case 'denied':
-      return 'Solo el operador puede aprobar desde una conexión privilegiada.';
+      return 'Solo lectura. La aprobación requiere una conexión privilegiada del operador.';
     case 'unsupported_adapter':
       return 'Abre la oficina standalone para revisar y aprobar el plan.';
     case 'stale_revision':

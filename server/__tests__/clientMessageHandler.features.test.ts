@@ -5,10 +5,11 @@ import { AgentStateStore } from '../src/agentStateStore.js';
 import * as auditLog from '../src/auditLog.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
 import * as featuresView from '../src/featuresView.js';
+import { loadProjectConfig } from '../src/projectConfig.js';
 
 vi.mock('../src/companyControl.js', () => ({ companyWorkspaceRoot: () => 'bound-root' }));
 vi.mock('../src/projectConfig.js', () => ({
-  loadProjectConfig: () => ({ project: { id: 'selected' }, operator: {} }),
+  loadProjectConfig: vi.fn(() => ({ project: { id: 'selected' }, operator: {} })),
 }));
 vi.mock('../src/configPersistence.js', () => ({
   readConfig: () => ({ projects: {} }),
@@ -23,6 +24,7 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
   beforeEach(() => {
     store = new AgentStateStore();
     send.mockClear();
+    vi.mocked(loadProjectConfig).mockClear();
     vi.spyOn(featuresView, 'readFeaturesView').mockResolvedValue({
       status: 'empty',
       reason: null,
@@ -51,21 +53,18 @@ describe('requestFeatures (AC-006, AC-010, AC-011, AC-012)', () => {
   );
 
   it.each([false, undefined])(
-    'SA-111 allows read-only feature discovery with privilege %s',
-    async (privilege) => {
+    'denies feature discovery with privilege %s before Project lookup',
+    (privilege) => {
       handleClientMessage(request, send, { store, cache: null, privileged: privilege });
-      await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
       expect(send).toHaveBeenCalledExactlyOnceWith({
         ...request,
         type: 'featuresSnapshot',
-        status: 'empty',
+        status: 'denied',
         reason: null,
         features: [],
       });
-      expect(featuresView.readFeaturesView).toHaveBeenCalledExactlyOnceWith(
-        'bound-root',
-        'selected',
-      );
+      expect(featuresView.readFeaturesView).not.toHaveBeenCalled();
+      expect(loadProjectConfig).not.toHaveBeenCalled();
     },
   );
 

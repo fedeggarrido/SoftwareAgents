@@ -53,6 +53,16 @@ describe('SA-111 plan boundary', () => {
     expect(plan.sections.find((section) => section.id === 'ci')?.content).toBeNull();
     feature.status = 'approved';
     expect(projectFeaturePlan(store, config, feature.key)).toMatchObject({
+      specApproved: true,
+      approved: false,
+    });
+    feature.approved_plan_revision = null;
+    expect(projectFeaturePlan(store, config, feature.key)).toMatchObject({
+      specApproved: true,
+      approved: false,
+    });
+    feature.approved_plan_revision = plan.revision;
+    expect(projectFeaturePlan(store, config, feature.key)).toMatchObject({
       revision: plan.revision,
       approved: true,
     });
@@ -61,7 +71,9 @@ describe('SA-111 plan boundary', () => {
         ...document,
         sources: { ...document.sources, [field]: 'Cambio' },
       });
-      expect(projectFeaturePlan(store, config, feature.key).revision).not.toBe(plan.revision);
+      const changed = projectFeaturePlan(store, config, feature.key);
+      expect(changed.revision).not.toBe(plan.revision);
+      expect(changed).toMatchObject({ specApproved: true, approved: false });
     }
   });
   it.each([false, undefined])(
@@ -81,6 +93,32 @@ describe('SA-111 plan boundary', () => {
             status: 'rejected',
           }),
         );
+        expect(loadProjectConfig).not.toHaveBeenCalled();
+        expect(openWorkStore).not.toHaveBeenCalled();
+      } finally {
+        store.dispose();
+      }
+    },
+  );
+  it.each([false, undefined])(
+    'denies plan reads with privilege %s before Project lookup',
+    (privileged) => {
+      const store = new AgentStateStore();
+      try {
+        handleClientMessage(
+          { type: 'requestFeaturePlan', projectId: 'selected', requestId: 'r', key: 'FEAT-001' },
+          send,
+          { store, cache: null, privileged },
+        );
+        expect(send).toHaveBeenCalledExactlyOnceWith({
+          type: 'featurePlanSnapshot',
+          projectId: 'selected',
+          requestId: 'r',
+          key: 'FEAT-001',
+          plan: null,
+          canApprove: false,
+          errorCode: 'denied',
+        });
         expect(loadProjectConfig).not.toHaveBeenCalled();
         expect(openWorkStore).not.toHaveBeenCalled();
       } finally {
@@ -129,4 +167,15 @@ describe('SA-111 plan boundary', () => {
       ),
     ).toBe('## Seguridad\nTexto literal\n### Riesgos\nRiesgo');
   });
+  it.each(['```', '~~~'])(
+    'closes a %s fence only with a matching marker and whitespace',
+    (marker) => {
+      expect(
+        designSection(
+          `${marker}md\n${marker}still-code\n## Seguridad\nInvented\n${marker} \t\n## Seguridad\nReal`,
+          FEATURE_PLAN_HEADINGS.security,
+        ),
+      ).toBe('## Seguridad\nReal');
+    },
+  );
 });

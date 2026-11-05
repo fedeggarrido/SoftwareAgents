@@ -188,7 +188,10 @@ export function handleClientMessage(
           reason,
           features: [],
         } satisfies FeaturesSnapshot);
-      // SA-111 permits read-only feature discovery so these clients can open plans.
+      if (ctx.privileged !== true) {
+        reply('denied');
+        break;
+      }
       if (executorProject()?.id !== projectId) {
         reply('unknown_project');
         break;

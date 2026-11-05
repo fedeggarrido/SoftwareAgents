@@ -220,6 +220,7 @@ const migrations = [
     WHEN NEW.status NOT IN ('BLOCKED','WAITING_HUMAN') AND NEW.ci_restore_status IS NOT NULL
     BEGIN UPDATE tasks SET ci_restore_status = NULL, ci_restore_blocked_reason = NULL
       WHERE project_id = NEW.project_id AND key = NEW.key; END;`,
+  `ALTER TABLE features ADD COLUMN approved_plan_revision TEXT;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

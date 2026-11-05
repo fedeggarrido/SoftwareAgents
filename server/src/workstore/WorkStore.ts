@@ -20,6 +20,7 @@ export interface ProjectRecord {
 }
 
 export interface FeatureRecord {
+  approved_plan_revision?: string | null;
   title?: string | null;
   updated_at?: string | null;
   project_id: string;
@@ -302,6 +303,7 @@ export interface WorkStore {
   approveFeature(
     key: string,
     gitSha: string,
+    planRevision: string,
     beforeCommit: (alreadyApproved: boolean) => void,
   ): Promise<void>;
   createTask(task: NewTask): void;

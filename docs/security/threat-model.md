@@ -311,9 +311,10 @@ ni seguridad semántica de sus resúmenes.
   sin privilegio y servidores con marcadores gestionados. El servidor fija `human`
   al invocar `approveFeature`; campos cliente como `actor` o `privileged` son
   inválidos. El adapter VS Code y su WS embedded rechazan este control.
-  `requestFeaturePlan` y el listado `requestFeatures` permiten lectura sin token,
-  exclusivamente del Project vinculado. Esa lectura incluye el contenido de los
-  artefactos del plan. El Operator debe controlar quién puede alcanzar su oficina.
+  `requestFeaturePlan` y el listado `requestFeatures` también exigen conexión
+  privilegiada antes de acceder al Project. Sin privilegio responden `denied`, con
+  plan nulo o listado vacío. La UI muestra el mensaje de solo lectura. La lectura
+  privilegiada queda limitada al Project vinculado e incluye sus artefactos del plan.
   El contenido se renderiza como texto escapado, sin HTML, Markdown activo,
   navegación, herramientas ni ejecución. El contenido del plan nunca se registra
   en logs o auditoría.
@@ -409,14 +410,27 @@ ni seguridad semántica de sus resúmenes.
   FeatureSpec, TechnicalDesign y DAG mostrados. Se comprueba de nuevo bajo la
   transacción de aprobación y la barrera Git de `featureDocument`. Una revisión
   obsoleta requiere refresco y otro clic humano. El WorkStore serializa los
-  reenvíos, revalida sus barreras y evita mutar una aprobación existente.
-  CLI y oficina registran una sola intención duradera `pending` por transición,
-  con política, actor y SHA, antes del commit SQLite. Si falla la auditoría se
-  deniega. El WorkStore acredita el commit, ya que el JSONL y SQLite no comparten
-  transacción. Un fallo del commit puede dejar una intención pendiente sin
-  aprobación. No se añade una segunda confirmación JSONL y los reenvíos de una
-  aprobación confirmada no añaden entradas. Los rechazos del servicio conservan
-  su auditoría. No se lanza ninguna etapa al leer o aprobar.
+  reenvíos y revalida sus barreras. CLI calcula la revisión con la misma proyección
+  que WS. `approved_plan_revision`, nullable en bases migradas, se escribe en la
+  transacción de aprobación. El plan solo figura aprobado si su revisión coincide
+  con esa vinculación y el estado de Feature es `approved` o `ready_to_merge`.
+  Una FeatureSpec ya aprobada con otra revisión o vinculación nula permite al humano
+  aprobar el plan actual. Esa operación solo cambia la vinculación. El gate de
+  Developer sigue dependiendo exclusivamente del estado de Feature. El pipeline
+  conserva sus gates existentes.
+  CLI y oficina registran un par ordenado `pending`/`approved` por nueva vinculación,
+  con política, actor, SHA y revisión, sin contenido. `pending` precede al commit
+  SQLite y `approved` lo confirma. Los reenvíos de una revisión coincidente, incluso
+  tras `ready_to_merge`, no añaden entradas. Si falla la intención se deniega y los
+  rechazos del servicio conservan su auditoría.
+  **Riesgo residual aceptado.** JSONL y SQLite no comparten transacción. Un fallo del
+  commit puede dejar una intención sin aprobación. Si falla la confirmación después
+  del commit, la aprobación y su vinculación persisten, el servidor emite un aviso
+  fijo sin contenido, WS devuelve éxito y CLI comunica el fallo de confirmación.
+  No hay recuperación y un reenvío exitoso no repone la confirmación perdida. El
+  historial puede conservar únicamente `pending` para una aprobación comprometida.
+  Revisar esta aceptación si se exige reconstrucción completa desde JSONL.
+  No se lanza ninguna etapa al leer o aprobar.
 
 - **Descripción:** borrar `SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` y
   `CLAUDECODE` ya no basta para presentar una decisión humana por CLI.

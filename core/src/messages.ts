@@ -113,6 +113,7 @@ export interface FeaturePlan {
   title: string;
   revision: string;
   specSha: string;
+  specApproved: boolean;
   approved: boolean;
   sections: FeaturePlanSection[];
 }

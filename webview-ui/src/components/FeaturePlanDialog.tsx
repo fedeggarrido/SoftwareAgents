@@ -99,6 +99,9 @@ export function FeaturePlanView({
                 )}
               </section>
             ))}
+            {plan.specApproved && !plan.approved && (
+              <p>FeatureSpec aprobada; este plan ha cambiado y no está aprobado</p>
+            )}
             {plan.approved ? (
               <p>Plan aprobado</p>
             ) : snapshot.canApprove ? (

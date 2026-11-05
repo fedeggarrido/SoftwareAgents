@@ -1,5 +1,28 @@
 # AsyncAPI protocol contract
 
+## Project preparation (SA-114)
+
+`requestIdeas` adds an optional `preparation` proposal when the server-bound Git
+repository lacks its manifest. It contains the detected id, folder name, default
+branch, sanitised remote and fixed config/Brain paths. Privilege is checked before
+any filesystem probe. `preparationError` explains Git, storage or Operator identity
+conflicts through closed codes. Existing malformed manifests require human repair.
+
+`prepareProject {requestId, name}` uses the existing privileged connection and
+server-selected repository. Extra fields are rejected. Managed server processes
+are refused, including empty managed markers. VS Code returns `unsupported_adapter`.
+`prepareProjectResult {requestId, projectId, status, errorCode}` is point-to-point.
+Status is `created` or `rejected`. `created` with `audit_failed` means the file
+persisted and audit confirmation failed. Clients correlate requests, read ideas
+again after success and retain the draft. A timeout triggers a read to recover
+the current state. Preparation is only sent by an explicit human click.
+
+CLI and WS share `server/src/projectPreparation.ts`. Preparation publishes the
+manifest with an exclusive atomic hard link after fsync of a temporary sibling,
+and creates its Brain directory. The human commits the manifest. Operator grants
+remain in the Operator-owned configuration, with existing ids refused during
+preparation. Git is queried through read-only commands.
+
 FEAT-001 adds the read-only audit messages on the existing WebSocket ingress:
 
 - Client: `RequestAuditLog` = `{ type: 'requestAuditLog', projectId: string, requestId: string }`. Malformed requests with non-string or missing identifiers are ignored.

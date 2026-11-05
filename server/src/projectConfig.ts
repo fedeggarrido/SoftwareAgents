@@ -4,6 +4,7 @@ import { parseDocument } from 'yaml';
 import * as projectSchema from '../../core/schemas/project.schema.json';
 import type { ProjectConfig, ProjectManifest } from '../../core/src/project.js';
 import { projectConfigError, readConfig } from './configPersistence.js';
+import { PROJECT_MANIFEST_PATH } from './constants.js';
 import { resolveInside } from './pathGuard.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 
@@ -26,7 +27,7 @@ export function loadProjectConfig(
   repoRoot: string,
   requireValidOperator = false,
 ): ProjectConfig | null {
-  const file = resolveProjectPath(repoRoot, '.softwareagents/project.yaml', '/project.yaml');
+  const file = resolveProjectPath(repoRoot, PROJECT_MANIFEST_PATH, '/project.yaml');
   let source: string;
   try {
     source = fs.readFileSync(file, 'utf8');

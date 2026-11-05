@@ -414,3 +414,12 @@ export const FEATURE_PLAN_HEADINGS = {
   documentation: /^(?:documentation|documentación|docs)$/i,
 } as const;
 export const FEATURE_PLAN_REVISION_PATTERN = /^[a-f0-9]{64}$/;
+// Project preparation writes only these repository-owned paths.
+export const PROJECT_MANIFEST_PATH = '.softwareagents/project.yaml';
+export const PROJECT_BRAIN_PATH = '.softwareagents/brain';
+export const PROJECT_NAME_MAX_LENGTH = 120;
+export const PROJECT_ID_HASH_LENGTH = 12;
+export const PROJECT_ID_SLUG_LENGTH = 48;
+export const PROJECT_LOCAL_REMOTE = 'local';
+export const PROJECT_FALLBACK_BRANCH = 'main';
+export const PROJECT_LEGACY_BRANCH = 'master';

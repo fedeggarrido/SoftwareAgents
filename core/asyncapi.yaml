@@ -81,6 +81,7 @@ components:
         - $ref: '#/components/schemas/FeatureApprovalResult'
         - $ref: '#/components/schemas/IdeasSnapshot'
         - $ref: '#/components/schemas/SubmitIdeaResult'
+        - $ref: '#/components/schemas/PrepareProjectResult'
         - $ref: '#/components/schemas/FeaturesSnapshot'
         - $ref: '#/components/schemas/AuditLogSnapshot'
         # Provider capabilities
@@ -143,6 +144,7 @@ components:
         - $ref: '#/components/schemas/ApproveFeaturePlan'
         - $ref: '#/components/schemas/RequestIdeas'
         - $ref: '#/components/schemas/SubmitIdea'
+        - $ref: '#/components/schemas/PrepareProject'
         - $ref: '#/components/schemas/RequestFeatures'
         - $ref: '#/components/schemas/RequestAuditLog'
         - $ref: '#/components/schemas/WebviewReady'
@@ -327,6 +329,79 @@ components:
         requestId:
           type: string
 
+    PrepareProject:
+      description: Human preparation of the server-bound Git repository using the existing privileged connection. Managed server processes are refused. No client paths, authority, executors or Git writes.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, name]
+      properties:
+        type:
+          const: prepareProject
+        requestId:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+
+    ProjectPreparation:
+      description: Read-only detected proposal. Remote credentials are removed before transmission. The id is derived from the repository root independently of the editable name.
+      type: object
+      additionalProperties: false
+      required: [id, name, defaultBranch, remote, configPath, brainPath]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        defaultBranch:
+          type: string
+        remote:
+          type: string
+        configPath:
+          type: string
+        brainPath:
+          type: string
+
+    ProjectPreparationError:
+      type: string
+      enum:
+        [
+          denied,
+          unsupported_adapter,
+          invalid_request,
+          not_git,
+          already_exists,
+          unsafe_storage,
+          unsafe_remote,
+          operator_conflict,
+          unavailable,
+          audit_failed,
+        ]
+
+    PrepareProjectResult:
+      description: Correlated preparation result. created with audit_failed means the manifest exists and must not be retried automatically. Exceptions and manifest content are omitted.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, status, errorCode]
+      properties:
+        type:
+          const: prepareProjectResult
+        requestId:
+          type: string
+        projectId:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/ProjectPreparationStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/ProjectPreparationError'
+            - type: 'null'
+
+    ProjectPreparationStatus:
+      type: string
+      enum: [created, rejected]
+
     SubmitIdea:
       description: Privileged draft storage only. No client-selected feature id, authority grant, spec, commit or execution. Untrusted text and a complete fixed interview are rendered as Markdown by the server. The built file is at most 1 MiB in UTF-8.
       type: object
@@ -384,6 +459,10 @@ components:
           type: [string, 'null']
         canSubmit:
           type: boolean
+        preparation:
+          $ref: '#/components/schemas/ProjectPreparation'
+        preparationError:
+          $ref: '#/components/schemas/ProjectPreparationError'
         errorCode:
           oneOf:
             - $ref: '#/components/schemas/IdeaErrorCode'

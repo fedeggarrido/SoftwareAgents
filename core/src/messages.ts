@@ -12,6 +12,7 @@ export type ServerMessage =
   | FeatureApprovalResult
   | IdeasSnapshot
   | SubmitIdeaResult
+  | PrepareProjectResult
   | FeaturesSnapshot
   | AuditLogSnapshot
   | ProviderCapabilities
@@ -59,6 +60,7 @@ export type ClientMessage =
   | ApproveFeaturePlan
   | RequestIdeas
   | SubmitIdea
+  | PrepareProject
   | RequestFeatures
   | RequestAuditLog
   | WebviewReady
@@ -144,9 +146,32 @@ export interface IdeasSnapshot {
   requestId: string;
   projectId: string | null;
   canSubmit: boolean;
+  preparation?: ProjectPreparation;
+  preparationError?: ProjectPreparationError;
   errorCode: IdeaErrorCode | null;
   ideas: IdeaSummary[];
 }
+
+export interface ProjectPreparation {
+  id: string;
+  name: string;
+  defaultBranch: string;
+  remote: string;
+  configPath: string;
+  brainPath: string;
+}
+
+export type ProjectPreparationError =
+  | 'denied'
+  | 'unsupported_adapter'
+  | 'invalid_request'
+  | 'not_git'
+  | 'already_exists'
+  | 'unsafe_storage'
+  | 'unsafe_remote'
+  | 'operator_conflict'
+  | 'unavailable'
+  | 'audit_failed';
 
 export type IdeaErrorCode =
   | 'denied'
@@ -178,6 +203,16 @@ export interface SubmitIdeaResult {
 }
 
 export type IdeaSubmitStatus = 'saved' | 'rejected' | 'failed';
+
+export interface PrepareProjectResult {
+  type: 'prepareProjectResult';
+  requestId: string;
+  projectId: string | null;
+  status: ProjectPreparationStatus;
+  errorCode: ProjectPreparationError | null;
+}
+
+export type ProjectPreparationStatus = 'created' | 'rejected';
 
 export interface FeaturesSnapshot {
   type: 'featuresSnapshot';
@@ -1034,6 +1069,12 @@ export type IdeaQuestionId =
   | 'riesgos';
 
 export type IdeaAnswerChoice = 'answer' | 'decide';
+
+export interface PrepareProject {
+  type: 'prepareProject';
+  requestId: string;
+  name: string;
+}
 
 export interface RequestFeatures {
   type: 'requestFeatures';

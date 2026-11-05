@@ -7,6 +7,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import { AuditLog } from './auditLog.js';
 import type {
   AssetCache,
+  ClientMessageContext,
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
@@ -89,6 +90,7 @@ export class PixelAgentsServer {
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
     onReloadAssets?: ReloadAssetsSideEffect;
+    onProjectPrepared?: ClientMessageContext['onProjectPrepared'];
   }): Promise<ServerConfig> {
     const embedded = options?.embedded ?? true;
     const wantsSpa = !embedded;
@@ -127,6 +129,7 @@ export class PixelAgentsServer {
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),
       onSetHooksEnabled: options?.onSetHooksEnabled,
       onReloadAssets: options?.onReloadAssets,
+      onProjectPrepared: options?.onProjectPrepared,
     });
 
     this.app = app;

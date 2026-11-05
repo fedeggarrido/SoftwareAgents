@@ -11,6 +11,7 @@ import {
   applyIdeasSnapshot,
   emptyIdeasStore,
   getIdeasStore,
+  receiveProjectPreparationResult,
   setIdeasStore,
 } from '../src/office/ideasStore.js';
 
@@ -69,6 +70,7 @@ vi.mock('../src/transport/index.js', () => ({
 }));
 const dialogPath = '../src/components/NewIdeaDialog.js';
 const listPath = '../src/components/IdeasList.js';
+const transportPath = '../src/transport/index.js';
 const snapshot: IdeasSnapshot = {
   type: 'ideasSnapshot',
   requestId: 'r',
@@ -192,6 +194,167 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it('preserves the edited project name across reads and reconnects until the Project changes', async () => {
+    await render();
+    const preparation = {
+      id: 'project-1',
+      name: 'Detected name',
+      defaultBranch: 'main',
+      remote: 'local',
+      configPath: '.softwareagents/project.yaml',
+      brainPath: '.softwareagents/brain',
+    };
+    const unprepared = {
+      projectId: null,
+      canSubmit: false,
+      errorCode: 'missing_manifest' as const,
+    };
+    respond({ ...unprepared, preparation });
+    await render();
+    await change('project-name', 'Edited name');
+    await click('Reintentar lectura de ideas');
+    await render();
+    respond({ ...unprepared, preparation: { ...preparation, name: 'New detection' } });
+    await render();
+    expect(findControl(await tree(), (props) => props.id === 'project-name')?.value).toBe(
+      'Edited name',
+    );
+    lifecycle.state = 'reconnecting';
+    await render();
+    lifecycle.state = 'connected';
+    await render();
+    respond({ ...unprepared, preparation });
+    await render();
+    expect(findControl(await tree(), (props) => props.id === 'project-name')?.value).toBe(
+      'Edited name',
+    );
+    await click('Reintentar lectura de ideas');
+    await render();
+    respond({
+      ...unprepared,
+      preparation: { ...preparation, id: 'project-2', name: 'Other project' },
+    });
+    await render();
+    expect(findControl(await tree(), (props) => props.id === 'project-name')?.value).toBe(
+      'Other project',
+    );
+  });
+
+  it('prepares an unprepared project and continues with the typed idea in the same dialog', async () => {
+    const { transport } = await import(transportPath);
+    await render();
+    respond({
+      projectId: null,
+      canSubmit: false,
+      errorCode: 'missing_manifest',
+      preparation: {
+        id: 'mi-proyecto-123',
+        name: 'Mi proyecto',
+        defaultBranch: 'trunk',
+        remote: 'local',
+        configPath: '.softwareagents/project.yaml',
+        brainPath: '.softwareagents/brain',
+      },
+    });
+    const html = await render();
+    expect(html).toContain('Nombre del proyecto');
+    expect(html).toContain('Mi proyecto');
+    expect(html).toContain('trunk');
+    expect(html).toContain('.softwareagents/project.yaml');
+    expect(html).toContain('commit tú mismo');
+    await change('new-idea-text', 'Idea que se conserva');
+    await change('project-name', 'Nombre humano');
+    await click('Preparar proyecto');
+    expect(lifecycle.send).toHaveBeenLastCalledWith({
+      type: 'prepareProject',
+      requestId: getIdeasStore().preparationPending,
+      name: 'Nombre humano',
+    });
+    expect(findControl(await tree(), (props) => props.children === 'Preparando…')?.disabled).toBe(
+      true,
+    );
+    receiveProjectPreparationResult(
+      {
+        type: 'prepareProjectResult',
+        requestId: getIdeasStore().preparationPending!,
+        projectId: 'mi-proyecto-123',
+        status: 'created',
+        errorCode: null,
+      },
+      transport,
+    );
+    expect(lifecycle.send).toHaveBeenLastCalledWith({
+      type: 'requestIdeas',
+      requestId: getIdeasStore().requestId,
+    });
+    respond({ projectId: 'mi-proyecto-123' });
+    const ready = await render();
+    expect(ready).toContain('Idea que se conserva');
+    expect(ready).toContain('Proyecto preparado');
+    expect(ready).not.toContain('id="project-name"');
+    await click('Siguiente');
+    expect(await render()).toContain(IDEA_QUESTIONS[0].helper);
+    expect(lifecycle.close).not.toHaveBeenCalled();
+    expect(
+      lifecycle.send.mock.calls.filter(([message]) => message.type === 'submitIdea'),
+    ).toHaveLength(0);
+  });
+
+  it('explains read-only preparation and refuses unsupported adapters without a creation form', async () => {
+    await render();
+    respond({ projectId: null, canSubmit: false, errorCode: 'denied' });
+    expect(await render()).toContain('token del operador para preparar el proyecto');
+    expect(await render()).not.toContain('id="project-name"');
+    respond({ projectId: null, canSubmit: false, errorCode: 'unsupported_adapter' });
+    expect(await render()).toContain('VS Code');
+    expect(await render()).not.toContain('id="project-name"');
+  });
+
+  it('reads after a lost preparation answer and ignores late results without replaying creation', async () => {
+    const { transport } = await import(transportPath);
+    await render();
+    respond({
+      projectId: null,
+      canSubmit: false,
+      errorCode: 'missing_manifest',
+      preparation: {
+        id: 'project-1',
+        name: 'Project',
+        defaultBranch: 'main',
+        remote: 'local',
+        configPath: '.softwareagents/project.yaml',
+        brainPath: '.softwareagents/brain',
+      },
+    });
+    await render();
+    await change('new-idea-text', 'Texto antes del timeout');
+    await click('Preparar proyecto');
+    const pending = getIdeasStore().preparationPending!;
+    await vi.advanceTimersByTimeAsync(IDEA_REQUEST_TIMEOUT_MS);
+    await render();
+    expect(
+      lifecycle.send.mock.calls.filter(([message]) => message.type === 'prepareProject'),
+    ).toHaveLength(1);
+    expect(lifecycle.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'requestIdeas' }),
+    );
+    const calls = lifecycle.send.mock.calls.length;
+    receiveProjectPreparationResult(
+      {
+        type: 'prepareProjectResult',
+        requestId: pending,
+        projectId: 'project-1',
+        status: 'created',
+        errorCode: null,
+      },
+      transport,
+    );
+    expect(lifecycle.send).toHaveBeenCalledTimes(calls);
+    respond({ projectId: 'project-1' });
+    expect(await render()).toContain('Texto antes del timeout');
+    await click('Siguiente');
+  });
+
   it('keeps idea and answers when navigating and requires an explicit choice for an empty answer', async () => {
     await render();
     respond();

@@ -19,10 +19,17 @@ import {
   FEATURE_ID_MIN,
   FEATURE_IDEA_RESERVATIONS_DIRECTORY,
   FEATURE_IDEAS_DIRECTORY,
+  PROJECT_MANIFEST_PATH,
   TASK_CLI_INPUT_BYTES,
 } from './constants.js';
 import { evalGit } from './evalTasks.js';
+import { featureIngressActor } from './featureIngress.js';
 import { loadProjectConfig } from './projectConfig.js';
+import {
+  inspectProjectPreparation,
+  projectPreparationError,
+  projectRepositoryRoot,
+} from './projectPreparation.js';
 import { gitCommonDir, openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
 
 class IdeaFailure extends Error {
@@ -87,7 +94,7 @@ function interviewMarkdown(text: string, answers: IdeaAnswer[]): string {
 function preparedProject(root: string | undefined) {
   if (!root) return fail('no_project');
   try {
-    taskPath(root, '.softwareagents/project.yaml');
+    taskPath(root, PROJECT_MANIFEST_PATH);
     const config = loadProjectConfig(root);
     if (!config) return fail('missing_manifest');
     return config;
@@ -316,6 +323,24 @@ export function readIdeas(
       .map((key) => summary(key, config.project.id));
     return { ...base, canSubmit: true, ideas };
   } catch (error) {
+    if (['missing_manifest', 'invalid_manifest', 'no_project'].includes(failureCode(error))) {
+      if (featureIngressActor() !== 'human')
+        return { ...base, errorCode: failureCode(error), preparationError: 'denied' };
+      try {
+        if (!root) return { ...base, errorCode: failureCode(error), preparationError: 'not_git' };
+        const repositoryRoot = projectRepositoryRoot(root);
+        if (repositoryRoot !== fs.realpathSync.native(root))
+          return readIdeas(requestId, privileged, repositoryRoot);
+        const { proposal } = inspectProjectPreparation(repositoryRoot);
+        return { ...base, errorCode: 'missing_manifest', preparation: proposal };
+      } catch (preparationFailure) {
+        return {
+          ...base,
+          errorCode: failureCode(error),
+          preparationError: projectPreparationError(preparationFailure),
+        };
+      }
+    }
     return { ...base, errorCode: failureCode(error) };
   }
 }

@@ -4,6 +4,7 @@ import type {
   IdeaAnswer,
   IdeaErrorCode,
   IdeasSnapshot,
+  PrepareProjectResult,
   SubmitIdea,
   SubmitIdeaResult,
 } from '../../../core/src/messages.js';
@@ -15,6 +16,8 @@ export interface IdeasStore {
   pending: { requestId: string; projectId: string } | null;
   result: SubmitIdeaResult | null;
   uncertain: boolean;
+  preparationPending?: string;
+  preparationResult?: PrepareProjectResult;
 }
 
 export const emptyIdeasStore = (): IdeasStore => ({
@@ -27,12 +30,24 @@ export const emptyIdeasStore = (): IdeasStore => ({
 
 export function applyIdeasSnapshot(store: IdeasStore, message: IdeasSnapshot): IdeasStore {
   if (store.requestId !== message.requestId) return store;
-  const bound = store.snapshot?.projectId ?? store.pending?.projectId ?? store.result?.projectId;
+  const bound =
+    store.snapshot?.projectId ??
+    store.pending?.projectId ??
+    store.result?.projectId ??
+    store.preparationResult?.projectId;
   const changed = bound && bound !== message.projectId;
   return {
     ...store,
     snapshot: message,
-    ...(changed ? { pending: null, result: null, uncertain: !!store.pending } : {}),
+    ...(changed
+      ? {
+          pending: null,
+          result: null,
+          uncertain: !!store.pending,
+          preparationPending: undefined,
+          preparationResult: undefined,
+        }
+      : {}),
   };
 }
 
@@ -65,13 +80,52 @@ export function applyIdeaResult(store: IdeasStore, result: SubmitIdeaResult): Id
 }
 
 export function invalidateIdeas(store: IdeasStore): IdeasStore {
-  return { ...emptyIdeasStore(), uncertain: store.uncertain || !!store.pending };
+  return {
+    ...emptyIdeasStore(),
+    uncertain: store.uncertain || !!store.pending,
+    preparationResult: store.preparationResult,
+  };
+}
+
+export function applyPreparationResult(
+  store: IdeasStore,
+  result: PrepareProjectResult,
+): IdeasStore {
+  if (store.preparationPending !== result.requestId) return store;
+  return { ...store, preparationPending: undefined, preparationResult: result };
+}
+
+export function receiveProjectPreparationResult(
+  result: PrepareProjectResult,
+  transport: MessageTransport,
+): void {
+  const previous = current;
+  const next = applyPreparationResult(previous, result);
+  setIdeasStore(next);
+  if (next !== previous && (result.status === 'created' || result.errorCode === 'already_exists'))
+    requestIdeas(transport);
+}
+
+export function sendProjectPreparation(name: string, transport: MessageTransport): void {
+  if (
+    transport.state !== 'connected' ||
+    !current.snapshot?.preparation ||
+    current.preparationPending
+  )
+    return;
+  const requestId = `project-prepare-${++sequence}`;
+  setIdeasStore({ ...current, preparationPending: requestId, preparationResult: undefined });
+  try {
+    transport.send({ type: 'prepareProject', requestId, name });
+  } catch {
+    setIdeasStore(invalidateIdeas(current));
+  }
 }
 
 export function ideaErrorText(code: IdeaErrorCode | null | undefined): string {
   switch (code) {
     case 'denied':
-      return 'Solo lectura: abre la URL de la oficina con el token del operador para guardar ideas.';
+      return 'Solo lectura. Abre la URL de la oficina con el token del operador para preparar el proyecto y guardar ideas.';
     case 'unsupported_adapter':
       return 'Nueva idea no está disponible en VS Code: este control aún no tiene selección de Project. Abre la oficina standalone del Project.';
     case 'no_project':

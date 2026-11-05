@@ -556,3 +556,44 @@ ni seguridad semántica de sus resúmenes.
   alcance del agente, pendiente en SA-058.
 - **Revisit when:** se ejecute contenido adversarial, se comparta discovery entre
   identidades/Projects, cambien los ingresos o se implemente SA-058.
+
+## Preparación humana del Project (SA-114)
+
+La creación de `.softwareagents/project.yaml` y `.softwareagents/brain` usa un
+servicio común para CLI y oficina. WS exige la conexión privilegiada existente
+antes de descubrir rutas. CLI confirma la creación y valida el token del servidor
+activo mediante SA-107, incluso con `--yes`. La presencia de cualquier marcador
+`SA_MANAGED_EXECUTION`, `SA_AUTOPILOT`, `SA_WORKER` o `CLAUDECODE`, incluido un valor
+vacío, deniega la creación. El servidor determina la raíz Git y acepta únicamente
+el nombre como dato del formulario. VS Code responde `unsupported_adapter`.
+
+El manifiesto describe identidad, remoto, rama y ruta del Brain. La autoridad
+procede de Operator config. El id incluye un hash de la raíz canónica y se rechaza
+si ya existe una configuración del operador para esa identidad. La preparación
+queda así separada de concesiones anteriores. Un nombre acotado y sin controles
+se serializa con la biblioteca YAML. El remoto se limita a HTTP(S), SSH o Git,
+con userinfo, query y fragment eliminados antes de preview, escritura o salida.
+La sintaxis SCP se convierte a URL SSH saneada. Un repositorio sin remoto usa
+`local`. Los formatos restantes requieren revisión humana.
+
+Las rutas fijas pasan por `taskPath`, que valida contención y rechaza enlaces y
+junctions en los componentes descendientes, incluidos enlaces escapando la raíz.
+Toda entrada previa en la ruta del manifiesto, válida, inválida o colgante, causa
+rechazo. La publicación enlaza atómicamente un archivo temporal exclusivo, tras
+fsync, a un destino inexistente. La limpieza comprueba identidad y retira solo
+temporales propios. Los directorios se conservan tras un fallo de E/S, para
+permitir reintentos y proteger una preparación concurrente. Git se consulta con comandos
+de lectura. El humano hace el commit del archivo. Se auditan intención y resultado
+con ids y estados fijos, omitiendo nombre, remoto, rutas y contenido. Un fallo de
+auditoría previo aborta. Un fallo posterior devuelve `created` con `audit_failed`
+y conserva el archivo. El cliente recupera respuestas perdidas leyendo el estado.
+
+Persisten los límites de mismo usuario del SO de §9. La validación de rutas y su
+uso son llamadas separadas, por lo que un proceso hostil con acceso de escritura
+simultáneo puede sustituir directorios entre ellas. El escritor concurrente del
+mismo usuario queda fuera del límite de confianza de esta preparación. Esta
+carrera de sustitución de directorios persiste como riesgo residual. JSONL y
+filesystem tampoco comparten transacción. Un crash puede dejar intención de
+auditoría, temporales o directorios pendientes de inspección. Revisar estas
+condiciones al implementar
+la separación de identidades de SA-058.

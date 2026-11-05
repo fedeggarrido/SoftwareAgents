@@ -54,5 +54,28 @@ export function useIdeasConnection(active: boolean, projectId?: string | null) {
     return () => clearTimeout(timer);
   }, [active, store.pending]);
 
+  useEffect(() => {
+    if (!active || !store.preparationPending) return;
+    const requestId = store.preparationPending;
+    const timer = setTimeout(() => {
+      const current = getIdeasStore();
+      if (current.preparationPending !== requestId) return;
+      setIdeasStore({
+        ...current,
+        preparationPending: undefined,
+        preparationResult: {
+          type: 'prepareProjectResult',
+          requestId,
+          projectId: null,
+          status: 'rejected',
+          errorCode: 'unavailable',
+        },
+      });
+      // Recover by reading. Never replay a preparation whose answer was lost.
+      requestIdeas(transport);
+    }, IDEA_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [active, store.preparationPending]);
+
   return { store, connection };
 }

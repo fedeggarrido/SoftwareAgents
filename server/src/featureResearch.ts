@@ -11,6 +11,7 @@ import {
   FEATURE_PLAN_HEADINGS,
   FEATURE_RESEARCH_DIRECTORY,
   FEATURE_RESEARCH_EVIDENCE_LIMIT,
+  FEATURE_RESEARCH_EVIDENCE_NOTICE,
   FEATURE_RESEARCH_MAX_ITEMS,
   FEATURE_RESEARCH_STATUSES,
   FEATURE_RESEARCH_TEXT_CHARS,
@@ -61,6 +62,8 @@ export interface FeatureResearchInput {
   diff: string;
   items: ReviewItem[];
   evidence: ReviewEvidence[];
+  /** Runtime-only delivery provenance. Never populated from external IDs or model output. */
+  branchEvidence: ReadonlyMap<string, string>;
 }
 export interface SavedFeatureResearch {
   kind: 'feature-research-review';
@@ -74,6 +77,7 @@ export interface SavedFeatureResearch {
   head: string;
   items: ReviewItem[];
   report: FeatureResearchReview;
+  evidenceNotice: string;
   bibliography: SourceItem[];
   gaps: string[];
   cost: SavedResearch['cost'];
@@ -232,8 +236,10 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
       state.head,
       '--',
     ]);
-    // Only new-side lines actually present in the pinned branch diff are delivery evidence.
-    const evidence: ReviewEvidence[] = [];
+    // References have disjoint runtime-owned namespaces; external IDs remain metadata only.
+    const evidenceByRef = new Map<string, string>();
+    const branchEvidence = new Map<string, string>();
+    const promises = new Set([feature.doc_path, design!.doc_path, design!.dag_path]);
     let file: string | undefined,
       line = 0,
       oldRemaining = 0,
@@ -246,8 +252,12 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
       } else if (oldRemaining || newRemaining) {
         // Inside a hunk, even "+++ b/path" is literal file content, not a header.
         if (entry.startsWith(' ') || entry.startsWith('+')) {
-          if (file && newRemaining > 0)
-            evidence.push({ ref: `${file}:${line}`, quote: entry.slice(1) });
+          if (file && newRemaining > 0) {
+            const ref = `branch:${file}:${line}`,
+              quote = entry.slice(1);
+            evidenceByRef.set(ref, quote);
+            if (!promises.has(file)) branchEvidence.set(ref, quote);
+          }
           line++;
           newRemaining--;
         }
@@ -272,7 +282,8 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
         );
     }
     const bibliography = preResearch?.report.bibliography.map(validateSourceItem) ?? [];
-    evidence.push(...bibliography.map((source) => ({ ref: source.id, quote: source.excerpt })));
+    bibliography.forEach((source, index) => evidenceByRef.set(`external:${index}`, source.excerpt));
+    const evidence = [...evidenceByRef].map(([ref, quote]) => ({ ref, quote }));
     db.exec('COMMIT');
     return {
       key,
@@ -285,6 +296,7 @@ export function featureResearchInput(config: ProjectConfig, key: string): Featur
       diff,
       items,
       evidence,
+      branchEvidence,
     };
   } finally {
     db.close();
@@ -317,8 +329,11 @@ export function validateFeatureResearch(
       coverage: input.items.map((item) => {
         const row = report.coverage.find((row) => row.id === item.id);
         const evidence = validEvidence(row?.evidence ?? []);
-        const deliveryEvidence = evidence.some((entry) => /:\d+$/.test(entry.ref));
-        if (!row || !evidence.length || (row.status === 'delivered' && !deliveryEvidence))
+        // A citation belongs to this row only; it never supplies evidence for other items.
+        const deliveryEvidence = evidence.some((entry) =>
+          input.branchEvidence.get(entry.ref)?.includes(entry.quote),
+        );
+        if (!row || !evidence.length || (row.status !== 'not verifiable' && !deliveryEvidence))
           return {
             id: item.id,
             status: 'not verifiable',
@@ -372,6 +387,7 @@ export function featureResearchMarkdown(result: SavedFeatureResearch): string {
     `Feature ${result.feature}. Mode ${result.mode}. Status ${result.partial ? 'partial' : 'complete'}.`,
     `Branch ${result.branch}. Base ${result.base}. Head ${result.head}.`,
     'Untrusted comparison. Proposals require human review and create no tasks.',
+    FEATURE_RESEARCH_EVIDENCE_NOTICE,
     '## Coverage',
     ...result.report.coverage.map((row) =>
       literal(

@@ -203,7 +203,7 @@ export class ClaudeCliExecutor implements Executor {
           fs.writeFileSync(
             settings,
             JSON.stringify({
-              ...(req.role === 'web-scout'
+              ...(['web-scout', 'researcher'].includes(req.role)
                 ? {
                     claudeMdExcludes: ['**'],
                     autoMemoryEnabled: false,
@@ -234,9 +234,8 @@ export class ClaudeCliExecutor implements Executor {
           const args = [
             ...(options.binaryArgs ?? []),
             // Keep subscription OAuth: --bare would require an API key.
-            ...(req.role === 'web-scout'
-              ? ['--no-session-persistence', '--max-turns', String(WEB_SCOUT_MAX_TURNS)]
-              : []),
+            ...(['web-scout', 'researcher'].includes(req.role) ? ['--no-session-persistence'] : []),
+            ...(req.role === 'web-scout' ? ['--max-turns', String(WEB_SCOUT_MAX_TURNS)] : []),
             '-p',
             '--output-format',
             'stream-json',
@@ -256,7 +255,9 @@ export class ClaudeCliExecutor implements Executor {
             tools,
             '--disallowedTools',
             compiled.claude.disallowedTools.join(','),
-            req.role === 'web-scout' ? '--system-prompt' : '--append-system-prompt',
+            ['web-scout', 'researcher'].includes(req.role)
+              ? '--system-prompt'
+              : '--append-system-prompt',
             compiled.claude.appendSystemPrompt,
             '--permission-mode',
             compiled.claude.permissionMode,

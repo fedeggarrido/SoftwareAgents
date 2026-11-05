@@ -5,6 +5,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
 
+import { RESEARCHER_SPEC } from '../../core/src/agentSpec.js';
 import { ClaudeCliExecutor } from '../src/executors/claudeCliExecutor.js';
 import { ExecutionRegistry } from '../src/executors/executionRegistry.js';
 import type { ExecutionEvent, ExecutionRequest } from '../src/executors/executor.js';
@@ -77,6 +78,36 @@ function executor(mode?: string) {
     hookCommand: 'node "trusted-hook.js"',
   });
 }
+it.each(['feature-research-review', 'research-run'])(
+  'disables session persistence for researcher launch %s (synthetic filesystem probe)',
+  async (kind) => {
+    req.role = 'researcher';
+    req.agentSpec = RESEARCHER_SPEC;
+    req.taskData = { task: { kind, text: 'Fixture evidence' } };
+    const cli = new ClaudeCliExecutor({
+      binary: process.execPath,
+      binaryArgs: [
+        path.join(__dirname, 'fixtures/fake-cli.cjs'),
+        'claude',
+        '--inspect',
+        '--probe-session-persistence',
+      ],
+      runtimeDirectory: path.join(root, 'runtime'),
+      containmentHookScript: __filename,
+    });
+    const events: ExecutionEvent[] = [];
+    for await (const event of cli.start(req).events) events.push(event);
+    const inspected = JSON.parse(
+      (events.find((event) => event.type === 'output') as { text: string }).text,
+    );
+    expect(inspected.args.filter((arg: string) => arg === '--no-session-persistence')).toHaveLength(
+      1,
+    );
+    expect(inspected.settings.autoMemoryEnabled).toBe(false);
+    expect(inspected.args[inspected.args.indexOf('--tools') + 1]).toBe('');
+    expect(fs.existsSync(path.join(root, '.claude', 'projects'))).toBe(false);
+  },
+);
 it('pins launch inputs and requires a fresh registered execution for changed options', async () => {
   req.model = 'initial-model';
   req.agentSpec = parse(

@@ -6,6 +6,7 @@ import { RESEARCHER_SPEC } from '../../../core/src/agentSpec.js';
 import type { ResearchMode } from '../../../core/src/research.js';
 import { CliUsageError } from '../cliErrors.js';
 import {
+  FEATURE_RESEARCH_EVIDENCE_NOTICE,
   RESEARCH_COST_LABEL,
   USAGE_BUDGET_MINUTE_MS,
   USAGE_BUDGET_SECOND_MS,
@@ -117,7 +118,25 @@ export async function runResearchReviewCommand(
           timeoutMin: (policy.maxSeconds * USAGE_BUDGET_SECOND_MS) / USAGE_BUDGET_MINUTE_MS,
           prompt: '',
           taskData: {
-            task: { kind: 'feature-research-review', provenance: 'untrusted-external', ...input },
+            // The bound sources already appear as items; bibliography is in preResearch.
+            // Keep the provenance map runtime-only and avoid copying full artifacts twice.
+            task: {
+              kind: 'feature-research-review',
+              provenance: 'untrusted-external',
+              key: input.key,
+              branch: input.branch,
+              base: input.base,
+              head: input.head,
+              items: input.items,
+              diff: input.diff,
+              evidence: input.evidence,
+              preResearch: input.preResearch,
+              deliveryRefs: [...input.branchEvidence.keys()],
+              externalRefs: input.bibliography.map((source, index) => ({
+                ref: `external:${index}`,
+                sourceId: source.id,
+              })),
+            },
             outputSchema: FEATURE_RESEARCH_SCHEMA,
           },
         });
@@ -160,6 +179,8 @@ export async function runResearchReviewCommand(
     }
     if (budget.stopReason || abort.signal.aborted)
       gaps.push(budget.stopReason ?? 'Time budget exhausted.');
+    if (budget.stopReason?.includes('preflight'))
+      gaps.push(`Omitted review items: ${input.items.map((item) => item.id).join(', ')}.`);
     const result: SavedFeatureResearch = {
       kind: 'feature-research-review',
       provenance: 'untrusted-external',
@@ -172,6 +193,7 @@ export async function runResearchReviewCommand(
       head: input.head,
       items: input.items,
       report,
+      evidenceNotice: FEATURE_RESEARCH_EVIDENCE_NOTICE,
       bibliography: input.bibliography,
       gaps,
       cost: {

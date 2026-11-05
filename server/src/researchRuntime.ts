@@ -1,6 +1,11 @@
-import { RESEARCH_BUDGET_HEADROOM_FRACTION } from './constants.js';
+import { compileAgent } from './agentCompiler.js';
+import {
+  RESEARCH_BUDGET_HEADROOM_FRACTION,
+  RESEARCH_REQUEST_MAX_BYTES,
+  RESEARCH_REQUEST_OVERHEAD_TOKENS,
+} from './constants.js';
 import type { Executor } from './executors/executor.js';
-import { researchDeadline, type researchPolicy } from './researchPolicy.js';
+import { researchCost, researchDeadline, type researchPolicy } from './researchPolicy.js';
 
 /** Shared SA-112 accounting: fixed headroom, cancellation and conservative unknown cost. */
 export function researchBudget(
@@ -30,6 +35,27 @@ export function researchBudget(
         throw new Error('Research budget exhausted');
       }
       const maxCostUsd = allowance();
+      if (!request.agentSpec) throw new Error('Research preflight requires an AgentSpec');
+      const compiled = compileAgent(
+        request.agentSpec,
+        request.role,
+        request.taskData ?? {
+          task: { key: request.taskKey, content: request.prompt },
+        },
+      );
+      const bytes = Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
+      const estimatedInputTokens = bytes + RESEARCH_REQUEST_OVERHEAD_TOKENS;
+      if (
+        bytes > RESEARCH_REQUEST_MAX_BYTES ||
+        estimatedInputTokens >= policy.maxTokens - usedTokens ||
+        researchCost(estimatedInputTokens, 0) >= maxCostUsd
+      ) {
+        stopReason = 'Input budget exhausted in preflight; no model call launched.';
+        gaps.push(
+          'Omitted complete synthesis context (system prompt, output schema and all task data: plan items, diff, branch/external evidence or collected sources); input exceeds remaining tokens, estimated input cost or per-request size limit.',
+        );
+        throw new Error('Research input budget exhausted');
+      }
       const handle = underlying.start({
         ...request,
         researchBudget: { maxCostUsd },

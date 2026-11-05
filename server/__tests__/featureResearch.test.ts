@@ -16,6 +16,7 @@ import type { ExecutionEvent, ExecutionRequest, Executor } from '../src/executor
 import { featureDocument } from '../src/featureArtifacts.js';
 import {
   featureResearchInput,
+  featureResearchMarkdown,
   type FeatureResearchReview,
   type SavedFeatureResearch,
   validateFeatureResearch,
@@ -76,7 +77,7 @@ const model = (
         id: 'AC-001',
         status: 'delivered',
         explanation: 'Export implemented.',
-        evidence: [{ ref: 'src/export.ts:1', quote: 'export const available = true;' }],
+        evidence: [{ ref: 'branch:src/export.ts:1', quote: 'export const available = true;' }],
       },
     ],
     proposals: [{ label: 'proposal', text: 'Consider a richer export format.', evidence: [] }],
@@ -237,7 +238,7 @@ beforeEach(() => {
     operator: {
       autonomyLevel: 'A0',
       allowedExecutors: ['claude'],
-      research: { maxSources: 2, maxTokens: 1000, maxSeconds: 5 },
+      research: { maxSources: 2, maxTokens: 16000, maxSeconds: 5 },
     },
   };
   fs.mkdirSync(path.join(repo, '.git/softwareagents'));
@@ -367,7 +368,7 @@ it('refuses a missing recorded built branch before launching or writing reports'
   expect(snapshot()).toEqual(before);
 });
 
-it('retains supported partial and missing assessments and can produce a complete comparison', async () => {
+it('keeps partial and missing assessments but never spreads one item citation across the plan', async () => {
   const executor = model((request) => {
     const items = (request.taskData!.task as { items: { id: string }[] }).items;
     return {
@@ -375,13 +376,21 @@ it('retains supported partial and missing assessments and can produce a complete
         id: item.id,
         status: index === 0 ? 'partial' : index === 1 ? 'missing' : 'delivered',
         explanation: 'Assessment of supplied branch evidence.',
-        evidence: [{ ref: 'src/export.ts:1', quote: 'export const available = true;' }],
+        evidence:
+          index < 2
+            ? [{ ref: 'branch:src/export.ts:1', quote: 'export const available = true;' }]
+            : [],
       })),
       proposals: [],
     };
   });
   await runResearchCommand(args(), repo, vi.fn(), { config, executor });
-  expect(saved().partial).toBe(false);
+  expect(saved().partial).toBe(true);
+  expect(
+    saved()
+      .report.coverage.slice(2)
+      .every((row) => row.status === 'not verifiable'),
+  ).toBe(true);
   expect(
     saved()
       .report.coverage.slice(0, 2)
@@ -391,7 +400,7 @@ it('retains supported partial and missing assessments and can produce a complete
 
 it('downgrades absent, fabricated and pre-research-only delivery evidence and includes every plan item', () => {
   const input = featureResearchInput(config, key);
-  expect(input.evidence).toContainEqual({ ref: 'src/export.ts:3', quote: '++ b/spoof.ts' });
+  expect(input.evidence).toContainEqual({ ref: 'branch:src/export.ts:3', quote: '++ b/spoof.ts' });
   expect(input.evidence.some((entry) => entry.ref.startsWith('spoof.ts:'))).toBe(false);
   const report = validateFeatureResearch(
     JSON.stringify({
@@ -400,7 +409,7 @@ it('downgrades absent, fabricated and pre-research-only delivery evidence and in
           id: 'AC-001',
           status: 'delivered',
           explanation: 'Assumed done',
-          evidence: [{ ref: 'src/export.ts:900', quote: 'invented' }],
+          evidence: [{ ref: 'branch:src/export.ts:900', quote: 'invented' }],
         },
       ],
       proposals: [],
@@ -418,6 +427,118 @@ it('downgrades absent, fabricated and pre-research-only delivery evidence and in
     ]),
   );
 });
+
+it.each(['src/nonexistent.ts:1', 'src/export.ts:1', 'branch:src/export.ts:1', 'external:0'])(
+  'never treats external source ID %s as branch provenance, including collisions',
+  (sourceId) => {
+    const request = ideaResearchPath('fixture', key),
+      draft = 'Build export.\n';
+    write(repo, request, draft);
+    const source = {
+      ...makeSource({
+        adapter: 'web',
+        kind: 'web',
+        url: 'https://example.invalid/evidence',
+        title: 'External claim',
+        excerpt: 'External delivery claim',
+        language: 'en',
+      }),
+      id: sourceId,
+    };
+    writeIdeaResearch(repo, request, {
+      kind: 'idea-research-report',
+      provenance: 'untrusted-external',
+      id: 'fixture',
+      mode: 'quick',
+      partial: false,
+      ideaHash: sourceHash(draft),
+      report: {
+        summary: 'Scope',
+        findings: [],
+        contradictions: [],
+        gaps: [],
+        discardedSources: [],
+        bibliography: [source],
+      },
+      cost: { estimateUsd: 0.01, capUsd: 1, usedEstimateUsd: 0.001, label: RESEARCH_COST_LABEL },
+    });
+    const input = featureResearchInput(config, key);
+    expect(input.branchEvidence.get('branch:src/export.ts:1')).toBe(
+      'export const available = true;',
+    );
+    expect(new Set(input.evidence.map((entry) => entry.ref)).size).toBe(input.evidence.length);
+    for (const ref of [sourceId, 'external:0']) {
+      const report = validateFeatureResearch(
+        JSON.stringify({
+          coverage: [
+            {
+              id: 'AC-001',
+              status: 'delivered',
+              explanation: 'External claim',
+              evidence: [{ ref, quote: source.excerpt }],
+            },
+          ],
+          proposals: [],
+        }),
+        input,
+      );
+      expect(report.coverage[0].status).toBe('not verifiable');
+    }
+  },
+);
+
+it.each([doc, paths.doc, paths.dag])('downgrades promise-only delivery from %s', (file) => {
+  const input = featureResearchInput(config, key);
+  const promise = input.evidence.find(
+    (entry) => entry.ref.startsWith(`branch:${file}:`) && entry.quote.trim(),
+  )!;
+  expect(promise).toBeDefined();
+  expect(input.branchEvidence.has(promise.ref)).toBe(false);
+  const report = validateFeatureResearch(
+    JSON.stringify({
+      coverage: [
+        { id: 'AC-001', status: 'delivered', explanation: 'Plan says done', evidence: [promise] },
+      ],
+      proposals: [],
+    }),
+    input,
+  );
+  expect(report.coverage[0].status).toBe('not verifiable');
+});
+
+it.each(['tokens', 'cost', 'request-size'] as const)(
+  'saves a partial report naming omitted input without launching when preflight exceeds %s',
+  async (limit) => {
+    if (limit === 'tokens') config.operator.research!.maxTokens = 1;
+    if (limit === 'cost') config.operator.research!.maxCostUsd = 0.000001;
+    if (limit === 'request-size') {
+      config.operator.research!.maxTokens = 1_000_000;
+      git(repo, 'checkout', 'sa/FEAT-001-integration');
+      write(repo, 'src/large.ts', 'x'.repeat(300_098));
+      git(repo, 'add', '.');
+      git(repo, 'commit', '-m', 'large evidence');
+      const db = database();
+      const row = db.prepare('SELECT state FROM feature_runs').get() as { state: string };
+      db.prepare('UPDATE feature_runs SET state = ?').run(
+        JSON.stringify({ ...JSON.parse(row.state), head: git(repo, 'rev-parse', 'HEAD') }),
+      );
+      db.close();
+      git(repo, 'checkout', 'main');
+    }
+    const executor = model();
+    await runResearchCommand(args(), repo, vi.fn(), { config, executor });
+    expect(executor.start).not.toHaveBeenCalled();
+    expect(saved().partial).toBe(true);
+    expect(saved().cost.usedEstimateUsd).toBe(0);
+    expect(saved().cost.stopReason).toContain('preflight');
+    expect(saved().gaps.join(' ')).toContain('Omitted complete synthesis context');
+    expect(saved().gaps.join(' ')).toContain('plan items, diff, branch/external evidence');
+    expect(saved().gaps.join(' ')).toContain('Omitted review items: AC-001, AC-002');
+    expect(saved().report.coverage.every((row) => row.status === 'not verifiable')).toBe(true);
+    expect(featureResearchMarkdown(saved())).toContain('A citation is a pointer');
+    expect(featureResearchMarkdown(saved())).toContain('not proof of delivery');
+  },
+);
 
 it('keeps injected diff and web content inside the existing envelope with no tools or authority', async () => {
   const request = ideaResearchPath('fixture', key),
@@ -474,7 +595,7 @@ it('keeps injected diff and web content inside the existing envelope with no too
           id: 'AC-001',
           status: 'delivered',
           explanation: 'External claim only',
-          evidence: [{ ref: source.id, quote: payload }],
+          evidence: [{ ref: 'external:0', quote: payload }],
         },
       ],
       proposals: [],

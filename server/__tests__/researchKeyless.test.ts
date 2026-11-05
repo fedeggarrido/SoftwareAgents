@@ -237,7 +237,7 @@ it('refetches scout URLs and never forwards scout text to Researcher', async () 
       operator: {
         autonomyLevel: 'A0',
         allowedExecutors: ['claude'],
-        research: { maxSources: 2, maxTokens: 100, maxSeconds: 5 },
+        research: { maxSources: 2, maxTokens: 16000, maxSeconds: 5 },
       },
     };
     const http = vi.fn<ResearchHttp>().mockResolvedValue({

@@ -439,16 +439,22 @@ it('utility is not an assertion', () => { new assert.AssertionError({ message: '
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
     const tests = files.filter((file) => /^webview-ui\/test\/.*\.test\.ts$/.test(file)).sort();
     expect(tests.length).toBeGreaterThanOrEqual(18);
-    const commands = await qaCommands(
-      {
-        worktree: tree,
-        reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
-        files: [],
-        task: { changeZones: [], testZones: ['webview-ui/test/'] },
-      } as unknown as ReviewerRequest,
-      scratch,
-      new AbortController().signal,
-    );
+    // QA runs at most QA_MAX_TEST_FILES per Task, so cover every file in bounded batches.
+    const commands = [];
+    for (let start = 0; start < tests.length; start += QA_MAX_TEST_FILES) {
+      commands.push(
+        ...(await qaCommands(
+          {
+            worktree: tree,
+            reviewRef: { sha: git('rev-parse', 'HEAD').trim() },
+            files: [],
+            task: { changeZones: [], testZones: tests.slice(start, start + QA_MAX_TEST_FILES) },
+          } as unknown as ReviewerRequest,
+          scratch,
+          new AbortController().signal,
+        )),
+      );
+    }
     expect(commands.map((row) => row.command)).toEqual(tests.map((file) => 'vitest:' + file));
     // Browser-backed specs skip themselves without Playwright Chromium; the verifier must
     // then fail closed (not_tested), never report them as passed.

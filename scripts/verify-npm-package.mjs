@@ -150,7 +150,7 @@ async function verifyInstalledTarball(tarballPath) {
       env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },
       shell: process.platform === 'win32',
     });
-    if (!help.stdout.includes('Usage: pixel-agents')) {
+    if (!help.stdout.includes('Uso: pixel-agents')) {
       throw new Error('Installed pixel-agents bin did not print CLI help');
     }
 

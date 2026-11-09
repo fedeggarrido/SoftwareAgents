@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import type { IdeasSnapshot, SubmitIdeaResult } from '../../core/src/messages.js';
 import { IDEA_REQUEST_TIMEOUT_MS } from '../src/constants.js';
+import { setOfficeAccess } from '../src/office/accessStore.js';
 import {
   applyIdeaResult,
   applyIdeasSnapshot,
@@ -177,6 +178,7 @@ async function submit() {
   await click('Guardar idea');
 }
 beforeEach(() => {
+  setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
   vi.useFakeTimers();
   lifecycle.state = 'connected';
   lifecycle.states = [];
@@ -194,6 +196,62 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it('retains the interview and answers through disconnect until a new access handshake', async () => {
+    await render();
+    respond();
+    await render();
+    await change('new-idea-text', 'Borrador que debe sobrevivir');
+    await click('Siguiente');
+    await change('idea-answer', 'Respuesta que debe sobrevivir');
+    lifecycle.state = 'reconnecting';
+    setOfficeAccess(null);
+    let html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(html).toContain('<textarea');
+    expect(html).not.toContain('URL con token');
+    expect(html).not.toContain('Solo lectura');
+    expect(findAction(await tree(), 'Siguiente')).toBeDefined();
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    lifecycle.state = 'connected';
+    await render();
+    respond();
+    html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(html).not.toContain('URL con token');
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
+    html = await render();
+    expect(html).toContain('URL con token');
+    expect(html).not.toContain('<textarea');
+    setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
+    html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
+  });
+
+  it.each([
+    [false, 'token_required', 'inicia pixel-agents tú mismo en tu terminal'],
+    [true, 'managed_process', 'Esta oficina se inició desde un agente'],
+  ] as const)(
+    'SA-116 explains restricted access before the interview (%s, %s)',
+    async (privileged, reason, explanation) => {
+      setOfficeAccess({ type: 'officeAccess', privileged, reason });
+      // Even a writable snapshot cannot override the server's access restriction.
+      await render();
+      respond();
+      const html = await render();
+      expect(html).toContain(explanation);
+      expect(html).not.toContain('<textarea');
+      expect(html).not.toContain('Siguiente');
+      expect(html).not.toContain('Preparar proyecto');
+      expect(html).not.toContain('Reintentar');
+      expect(html).not.toContain('role="alert"');
+      expect(findAction(await tree(), 'Guardar idea')).toBeUndefined();
+      await click('Cerrar');
+      expect(lifecycle.close).toHaveBeenCalledOnce();
+    },
+  );
+
   it('preserves the edited project name across reads and reconnects until the Project changes', async () => {
     await render();
     const preparation = {
@@ -303,7 +361,10 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   it('explains read-only preparation and refuses unsupported adapters without a creation form', async () => {
     await render();
     respond({ projectId: null, canSubmit: false, errorCode: 'denied' });
-    expect(await render()).toContain('token del operador para preparar el proyecto');
+    expect(await render()).toContain('inicia pixel-agents tú mismo en tu terminal');
+    expect(await render()).not.toContain('<textarea');
+    expect(await render()).not.toContain('Reintentar lectura de ideas');
+    expect(await render()).not.toContain('role="alert"');
     expect(await render()).not.toContain('id="project-name"');
     respond({ projectId: null, canSubmit: false, errorCode: 'unsupported_adapter' });
     expect(await render()).toContain('VS Code');
@@ -466,20 +527,22 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(await render()).not.toContain('role="alertdialog"');
   });
 
-  it('keeps the interview disabled when privilege is revoked before saving', async () => {
+  it('hides the interview when privilege is revoked and still lets the user discard the draft', async () => {
     await render();
     respond();
     await render();
     await review();
     respond({ canSubmit: false, errorCode: 'denied' });
     expect(await render()).toContain('Solo lectura');
-    expect(findControl(await tree(), (props) => props.children === 'Guardar idea')?.disabled).toBe(
-      true,
-    );
-    findAction(await tree(), 'Guardar idea')!();
+    expect(findAction(await tree(), 'Guardar idea')).toBeUndefined();
+    expect(await render()).not.toContain('<textarea');
     expect(
       lifecycle.send.mock.calls.filter(([message]) => message.type === 'submitIdea'),
     ).toHaveLength(0);
+    await click('Cerrar');
+    expect(await render()).toContain('Descartar borrador');
+    await click('Descartar borrador');
+    expect(lifecycle.close).toHaveBeenCalledOnce();
   });
 
   it('requests preparation on mount and renders an accessible editable dialog after the reply', async () => {
@@ -505,7 +568,6 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   });
 
   it.each([
-    ['denied', 'Solo lectura'],
     ['missing_manifest', '.softwareagents/project.yaml'],
     ['invalid_manifest', 'no es válido'],
     ['no_project', 'no hay un Project'],

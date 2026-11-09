@@ -404,6 +404,47 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   // ── handleWebviewReady ordering ──────────────────────────────
 
   describe('handleWebviewReady ordering', () => {
+    it.each([
+      [false, 'token_required'],
+      [true, null],
+    ] as const)('SA-116 reports the existing connection privilege (%s)', (privileged, reason) => {
+      for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+        vi.stubEnv(key, undefined);
+      try {
+        handleClientMessage({ type: 'webviewReady' }, (message) => sent.push(message), {
+          ...ctx,
+          privileged,
+        });
+        expect(sent.find((message) => message.type === 'officeAccess')).toEqual({
+          type: 'officeAccess',
+          privileged,
+          reason,
+        });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it.each(['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])(
+      'SA-116 reports a content-free managed restriction even for an empty %s marker',
+      (key) => {
+        vi.stubEnv(key, '');
+        try {
+          handleClientMessage({ type: 'webviewReady' }, (message) => sent.push(message), {
+            ...ctx,
+            privileged: true,
+          });
+          expect(sent.find((message) => message.type === 'officeAccess')).toEqual({
+            type: 'officeAccess',
+            privileged: true,
+            reason: 'managed_process',
+          });
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      },
+    );
+
     it('emits settingsLoaded with showAreas before areaMappingsLoaded before existingAgents', () => {
       // Seed config so the assertion proves the values round-trip via the
       // dispatch rather than just relying on hard-coded defaults.

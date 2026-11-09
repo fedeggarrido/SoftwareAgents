@@ -75,8 +75,29 @@ components:
   schemas:
     # ── Top-level discriminated unions ────────────────────────────
 
+    OfficeAccess:
+      type: object
+      additionalProperties: false
+      required: [type, privileged, reason]
+      properties:
+        type:
+          const: officeAccess
+        privileged:
+          type: boolean
+          description: Existing per-connection privilege, never supplied by the client.
+        reason:
+          oneOf:
+            - $ref: '#/components/schemas/OfficeAccessReason'
+            - type: 'null'
+          description: Content-free restriction on preparing projects and saving ideas. Does not grant authority.
+
+    OfficeAccessReason:
+      type: string
+      enum: [token_required, managed_process]
+
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/OfficeAccess'
         - $ref: '#/components/schemas/FeaturePlanSnapshot'
         - $ref: '#/components/schemas/FeatureApprovalResult'
         - $ref: '#/components/schemas/IdeasSnapshot'

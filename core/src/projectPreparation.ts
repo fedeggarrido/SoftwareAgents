@@ -1,4 +1,5 @@
 import type { ProjectPreparationError } from './messages.js';
+import { OFFICE_ACCESS_INSTRUCTIONS } from './officeAccess.js';
 
 export const PROJECT_PREPARATION_EXPLANATION =
   'Para guardar ideas, prepara este repositorio con su nombre y su rama principal. Se creará un archivo de descripción del proyecto y una carpeta para sus documentos.';
@@ -8,7 +9,7 @@ export const PROJECT_PREPARATION_COMMIT_NOTICE =
 export function projectPreparationErrorText(code: ProjectPreparationError): string {
   switch (code) {
     case 'denied':
-      return 'No se puede preparar el proyecto desde aquí. Inicia pixel-agents tú mismo desde tu terminal, no desde un agente, y abre la URL con token que imprime.';
+      return OFFICE_ACCESS_INSTRUCTIONS;
     case 'unsupported_adapter':
       return 'La preparación del proyecto está disponible en la oficina standalone. Abre esa oficina o usa pixel-agents project init desde tu terminal.';
     case 'not_git':

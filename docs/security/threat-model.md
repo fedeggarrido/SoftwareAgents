@@ -306,6 +306,26 @@ ni seguridad semántica de sus resúmenes.
 
 ### 5. Token del servidor en la URL
 
+- **SA-116.** La SPA captura el token inicial y elimina todos los parámetros
+  `token` de la URL de la página mediante `history.replaceState`, antes de abrir
+  el WebSocket. La URL de conexión permanece solo en memoria para los handshakes
+  y reconexiones. No se persiste en cookies, localStorage ni sessionStorage, ni se
+  vuelve a leer de `location` para enlaces, copias o informes. Recargar pierde el
+  privilegio y el indicador explica que hay que volver a abrir la URL de la
+  terminal. VS Code conserva su autoridad por el canal integrado sin token en URL.
+  `officeAccess` comunica únicamente el privilegio existente y los motivos
+  cerrados de falta de token o proceso gestionado. Los guards del servidor siguen
+  siendo la autoridad. La UI muestra esos estados sin alertas de lectura denegada
+  de ideas ni formularios de entrevista o reintentos por permisos.
+- **Riesgo residual de SA-116.** `replaceState` sustituye la entrada actual del
+  historial. No garantiza eliminar copias previas o sincronizadas ni capturas
+  anteriores al arranque de JavaScript. La petición inicial ya transportó el
+  token y el handshake WS continúa llevándolo en query. La terminal, discovery,
+  memoria de página y herramientas de red del navegador siguen exponiendo la
+  capacidad a quien tenga acceso. La redacción de logs de SA-075 permanece. La
+  retirada de la barra no revoca el bearer ni resuelve el riesgo de mismo usuario
+  del SO. Revisar al cambiar el transporte o implementar SA-058.
+
 - **SA-111.** `approveFeaturePlan` usa exclusivamente el privilegio decidido por
   el handshake WS de esta sección. Antes de resolver el Project rechaza conexiones
   sin privilegio y servidores con marcadores gestionados. El servidor fija `human`

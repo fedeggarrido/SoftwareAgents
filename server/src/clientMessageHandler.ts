@@ -1,5 +1,10 @@
 import { EXECUTOR_IDS } from '../../core/src/executorCatalog.js';
-import type { AuditLogSnapshot, CompanyNotice, FeaturesSnapshot } from '../../core/src/messages.js';
+import type {
+  AuditLogSnapshot,
+  CompanyNotice,
+  FeaturesSnapshot,
+  OfficeAccess,
+} from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
@@ -40,6 +45,7 @@ import {
   toggleResult,
 } from './executorState.js';
 import { handleIdeaMessage } from './featureIdeas.js';
+import { featureIngressActor } from './featureIngress.js';
 import { handleFeaturePlanMessage } from './featurePlan.js';
 import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
@@ -160,6 +166,15 @@ export function handleClientMessage(
       break;
 
     case 'webviewReady':
+      send({
+        type: 'officeAccess',
+        privileged: ctx.privileged === true,
+        reason: !ctx.privileged
+          ? 'token_required'
+          : featureIngressActor() === 'agent'
+            ? 'managed_process'
+            : null,
+      } satisfies OfficeAccess);
       handleWebviewReady(send, ctx);
       // Capability-gated: legacy clients never receive executorState.
       if (clientWantsExecutorControls(msg)) {

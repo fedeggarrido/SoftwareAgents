@@ -15,6 +15,7 @@ import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
+import { OfficeNotices } from './components/OfficeNotices.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -466,30 +467,32 @@ function App() {
           message), NOT the hooksEnabled preference: hooksEnabled defaults true
           while first-run consent is still pending, and announcing "Instant
           Detection Active" before anything is installed would be a lie. */}
-      {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
-        <Tooltip
-          title="Instant Detection Active"
-          position="top-right"
-          onDismiss={() => {
-            setHooksTooltipDismissed(true);
-            transport.send({ type: 'setHooksInfoShown' });
-          }}
-        >
-          <span className="text-sm text-text leading-none">
-            Your agents now respond in real-time.{' '}
-            <span
-              className="text-accent cursor-pointer underline"
-              onClick={() => {
-                setIsHooksInfoOpen(true);
-                setHooksTooltipDismissed(true);
-                transport.send({ type: 'setHooksInfoShown' });
-              }}
-            >
-              View more
+      <OfficeNotices>
+        {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
+          <Tooltip
+            title="Instant Detection Active"
+            position="stack"
+            onDismiss={() => {
+              setHooksTooltipDismissed(true);
+              transport.send({ type: 'setHooksInfoShown' });
+            }}
+          >
+            <span className="text-sm text-text leading-none">
+              Your agents now respond in real-time.{' '}
+              <span
+                className="text-accent cursor-pointer underline"
+                onClick={() => {
+                  setIsHooksInfoOpen(true);
+                  setHooksTooltipDismissed(true);
+                  transport.send({ type: 'setHooksInfoShown' });
+                }}
+              >
+                View more
+              </span>
             </span>
-          </span>
-        </Tooltip>
-      )}
+          </Tooltip>
+        )}
+      </OfficeNotices>
 
       {/* Hooks info modal */}
       <Modal
@@ -577,6 +580,7 @@ function App() {
         />
       )}
       <MeetingPanel />
+
       <VersionIndicator
         currentVersion={extensionVersion}
         lastSeenVersion={lastSeenVersion}

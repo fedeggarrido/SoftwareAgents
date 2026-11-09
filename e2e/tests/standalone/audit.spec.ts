@@ -120,7 +120,7 @@ test.describe('Standalone / audit', () => {
     await expect(first.locator('details')).not.toHaveAttribute('open', '');
     await expect(first.getByText('reason-519 [REDACTED]', { exact: true })).not.toBeVisible();
     await expect(first.getByText('fixture-tier', { exact: true })).not.toBeVisible();
-    await first.getByText('Detalle', { exact: true }).click();
+    await first.locator('summary', { hasText: 'Detalle' }).click();
     await expect(first.locator('details')).toHaveAttribute('open', '');
     for (const value of [
       'reason-519 [REDACTED]',

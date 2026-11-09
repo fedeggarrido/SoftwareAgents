@@ -46,6 +46,7 @@ import {
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
 import { PathSet } from '../../server/src/pathKey.js';
+import { handlePrepareProjectMessage } from '../../server/src/projectPreparation.js';
 import type { ConsentEffects } from '../../server/src/providers/hook/consentExecutor.js';
 import { applyConsentChoice } from '../../server/src/providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from '../../server/src/providers/hook/consentGate.js';
@@ -446,6 +447,13 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           message,
           (reply) => void this.webview?.postMessage(reply),
           false,
+          false,
+        );
+      } else if (message.type === 'prepareProject') {
+        handlePrepareProjectMessage(
+          message,
+          (reply) => void this.webview?.postMessage(reply),
+          true,
           false,
         );
       } else if (message.type === 'requestIdeas' || message.type === 'submitIdea') {

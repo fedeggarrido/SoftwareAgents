@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react';
 
 import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../../core/src/ideaInterview.js';
 import type { IdeaAnswer, IdeaAnswerChoice } from '../../../core/src/messages.js';
+import {
+  PROJECT_PREPARATION_COMMIT_NOTICE,
+  PROJECT_PREPARATION_EXPLANATION,
+  projectPreparationErrorText,
+} from '../../../core/src/projectPreparation.js';
 import { IDEA_TEXTAREA_ROWS } from '../constants.js';
 import {
   getIdeasStore,
@@ -9,6 +14,7 @@ import {
   ideaErrorText,
   requestIdeas,
   sendIdea,
+  sendProjectPreparation,
   setIdeasStore,
 } from '../office/ideasStore.js';
 import { useIdeasConnection } from '../office/useIdeasConnection.js';
@@ -23,11 +29,20 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
     Record<string, { text: string; choice: IdeaAnswerChoice | null }>
   >({});
   const [confirmDiscard, setConfirmDiscard] = useState<'close' | 'consult' | null>(null);
+  const [projectDraft, setProjectDraft] = useState({ id: '', name: '' });
   useEffect(() => {
     // A new dialog can compose another idea, but never replay an uncertain submission.
     setIdeasStore({ ...getIdeasStore(), result: null });
   }, []);
   const { store, connection } = useIdeasConnection(true);
+  const preparation = store.snapshot?.preparation;
+  useEffect(() => {
+    if (preparation)
+      setProjectDraft((draft) =>
+        draft.id === preparation.id ? draft : { id: preparation.id, name: preparation.name },
+      );
+  }, [preparation]);
+  const projectName = projectDraft.name;
   const state = ideaDialogState(store, connection === 'connected');
   const finishClose = (consult = false) => {
     if (consult) {
@@ -37,7 +52,7 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
     onClose();
   };
   const close = (consult = false) => {
-    if (getIdeasStore().pending) return;
+    if (getIdeasStore().pending || getIdeasStore().preparationPending) return;
     if (
       state !== 'saved' &&
       (text.length || Object.values(answers).some((answer) => answer.text.length || answer.choice))
@@ -80,6 +95,52 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
         <p>
           Describe lo que necesitas. Guardar deja un borrador pendiente; no inicia ningún trabajo.
         </p>
+        {preparation && (
+          <section aria-label="Preparar proyecto" className="flex flex-col gap-8">
+            <p>{PROJECT_PREPARATION_EXPLANATION}</p>
+            <label htmlFor="project-name">Nombre del proyecto</label>
+            <input
+              id="project-name"
+              value={projectName}
+              onChange={(event) => setProjectDraft({ ...projectDraft, name: event.target.value })}
+              disabled={!!store.preparationPending || connection !== 'connected'}
+              className="bg-bg-dark text-text border-2 border-border p-8"
+            />
+            <p>
+              Rama principal detectada <strong>{preparation.defaultBranch}</strong>
+            </p>
+            <p>
+              Se creará <code>{preparation.configPath}</code> y la carpeta{' '}
+              <code>{preparation.brainPath}</code>.
+            </p>
+            <dl>
+              <dt>Identificador</dt>
+              <dd>{preparation.id}</dd>
+              <dt>Nombre</dt>
+              <dd>{projectName}</dd>
+              <dt>Remoto</dt>
+              <dd>{preparation.remote}</dd>
+            </dl>
+            <p>{PROJECT_PREPARATION_COMMIT_NOTICE}</p>
+            <Button
+              disabled={
+                !projectName.trim() || !!store.preparationPending || connection !== 'connected'
+              }
+              onClick={() => sendProjectPreparation(projectName, transport)}
+            >
+              {store.preparationPending ? 'Preparando…' : 'Preparar proyecto'}
+            </Button>
+          </section>
+        )}
+        {store.snapshot?.preparationError && (
+          <p role="alert">{projectPreparationErrorText(store.snapshot.preparationError)}</p>
+        )}
+        {store.preparationResult?.status === 'created' && (
+          <p role="status">Proyecto preparado. {PROJECT_PREPARATION_COMMIT_NOTICE}</p>
+        )}
+        {store.preparationResult?.errorCode && (
+          <p role="alert">{projectPreparationErrorText(store.preparationResult.errorCode)}</p>
+        )}
         {confirmDiscard ? (
           <div role="alertdialog" aria-label="Descartar borrador" className="flex flex-col gap-8">
             <p>El borrador tiene contenido sin guardar. ¿Quieres descartarlo?</p>
@@ -111,7 +172,10 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
                   rows={IDEA_TEXTAREA_ROWS}
                   value={text}
                   onChange={(event) => setText(event.target.value)}
-                  disabled={!writable}
+                  disabled={
+                    !writable &&
+                    (!preparation || !!store.preparationPending || connection !== 'connected')
+                  }
                   className="bg-bg-dark text-text border-2 border-border p-8 w-full"
                 />
               </>
@@ -178,7 +242,10 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
             )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
               {state === 'loading' && 'Comprobando el Project…'}
-              {state === 'disabled' && ideaErrorText(store.snapshot?.errorCode)}
+              {state === 'disabled' &&
+                !preparation &&
+                !store.snapshot?.preparationError &&
+                ideaErrorText(store.snapshot?.errorCode)}
               {state === 'error' && ideaErrorText(store.result?.errorCode)}
               {state === 'offline' && 'Sin conexión. Reconecta para guardar la idea.'}
               {state === 'saving' && 'Guardando…'}
@@ -207,7 +274,7 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
             )}
           </>
         )}
-        <Button disabled={state === 'saving'} onClick={() => close()}>
+        <Button disabled={state === 'saving' || !!store.preparationPending} onClick={() => close()}>
           Cerrar
         </Button>
       </div>

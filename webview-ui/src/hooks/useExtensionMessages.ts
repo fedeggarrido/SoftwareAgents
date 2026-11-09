@@ -32,6 +32,7 @@ import {
   applyIdeasSnapshot,
   getIdeasStore,
   invalidateIdeas,
+  receiveProjectPreparationResult,
   setIdeasStore,
 } from '../office/ideasStore.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
@@ -408,6 +409,8 @@ export function useExtensionMessages(
         setIdeasStore(applyIdeasSnapshot(getIdeasStore(), msg));
       } else if (msg.type === 'submitIdeaResult') {
         setIdeasStore(applyIdeaResult(getIdeasStore(), msg));
+      } else if (msg.type === 'prepareProjectResult') {
+        receiveProjectPreparationResult(msg, transport);
       } else if (msg.type === 'executorToggleResult') {
         const settled = applyToggleResult(getExecutorStore(), msg);
         setExecutorStore(settled.store);

@@ -1,10 +1,12 @@
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WebSocket } from 'ws';
 
+import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
 import { CliArgsError, parseArgs } from '../src/cli.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 import { operatorTokenServer } from './helpers/operatorToken.js';
@@ -300,13 +302,13 @@ describe('dist/cli.js entry-point guard', () => {
     tmpHome: string,
     body: (ctx: { output: () => string; port: number }) => Promise<void>,
     host = '127.0.0.1',
-    seedWorkspace?: (workspace: string) => void,
+    seedWorkspace?: (workspace: string) => string | void,
   ): Promise<void> {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-workspace-'));
-    seedWorkspace?.(workspaceDir);
+    const startupDir = seedWorkspace?.(workspaceDir) ?? workspaceDir;
     const port = await getFreePort();
     const child = spawn(process.execPath, [CLI_BUNDLE, '--port', port.toString(), '--host', host], {
-      cwd: workspaceDir,
+      cwd: startupDir,
       env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -351,6 +353,118 @@ describe('dist/cli.js entry-point guard', () => {
     const raw = fs.readFileSync(path.join(tmpHome, '.pixel-agents', 'server.json'), 'utf-8');
     return (JSON.parse(raw) as { token: string }).token;
   }
+
+  itBuilt(
+    'rebinds the running office and all connected snapshots after preparing from a subdirectory',
+    async () => {
+      for (const marker of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+        vi.stubEnv(marker, undefined);
+      const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-preparation-'));
+      await runCliServer(
+        tmpHome,
+        async ({ output, port }) => {
+          await waitForCondition(() => URL_LINE.test(output()));
+          const messages: ServerMessage[][] = [[], []];
+          const sockets: WebSocket[] = [];
+          try {
+            for (const received of messages) {
+              const socket = new WebSocket(
+                `ws://127.0.0.1:${port}/ws?token=${mintedToken(tmpHome)}`,
+              );
+              sockets.push(socket);
+              socket.on('message', (data) =>
+                received.push(JSON.parse(data.toString()) as ServerMessage),
+              );
+              await new Promise<void>((resolve, reject) => {
+                socket.once('open', resolve);
+                socket.once('error', reject);
+              });
+              socket.send(
+                JSON.stringify({ type: 'webviewReady', capabilities: ['executorControls'] }),
+              );
+              await waitForCondition(() =>
+                received.some((message) => message.type === 'existingAgents'),
+              );
+              expect(received.some((message) => message.type === 'executorState')).toBe(false);
+            }
+            sockets[0].send(
+              JSON.stringify({
+                type: 'prepareProject',
+                requestId: 'prepare',
+                name: 'Prepared project',
+              }),
+            );
+            await waitForCondition(() =>
+              messages[0].some((message) => message.type === 'prepareProjectResult'),
+            );
+            const result = messages[0].find((message) => message.type === 'prepareProjectResult');
+            expect(result).toMatchObject({ status: 'created', errorCode: null });
+            if (result?.type !== 'prepareProjectResult' || !result.projectId)
+              throw new Error('Project creation did not return an identity');
+            const projectId = result.projectId;
+            for (const received of messages) {
+              await waitForCondition(() =>
+                received.some((message) => message.type === 'executorState'),
+              );
+              expect(received.find((message) => message.type === 'executorState')).toMatchObject({
+                projectId,
+              });
+              expect(received.find((message) => message.type === 'workSnapshot')).toMatchObject({
+                projectId,
+                source: 'missing',
+              });
+              await waitForCondition(() =>
+                received.some(
+                  (message) => message.type === 'boardState' && message.projectId === projectId,
+                ),
+              );
+              expect(
+                received.filter((message) => message.type === 'boardState').at(-1),
+              ).toMatchObject({ projectId, mode: 'project', project: 'Prepared project' });
+            }
+            const requests: ClientMessage[] = [
+              { type: 'requestFeatures', requestId: 'features', projectId },
+              { type: 'requestAuditLog', requestId: 'audit', projectId },
+            ];
+            for (const request of requests) sockets[1].send(JSON.stringify(request));
+            // The refreshed PR monitor initializes the WorkStore asynchronously.
+            await waitForCondition(() => {
+              sockets[1].send(JSON.stringify(requests[0]));
+              return messages[1].some(
+                (message) => message.type === 'featuresSnapshot' && message.status === 'empty',
+              );
+            });
+            await waitForCondition(() =>
+              messages[1].some((message) => message.type === 'auditLog'),
+            );
+            expect(
+              messages[1].find(
+                (message) => message.type === 'featuresSnapshot' && message.status === 'empty',
+              ),
+            ).toMatchObject({ projectId, status: 'empty', reason: null });
+            expect(messages[1].find((message) => message.type === 'auditLog')).toMatchObject({
+              projectId,
+              status: 'ok',
+              totalValid: 2,
+            });
+          } finally {
+            for (const socket of sockets) socket.terminate();
+          }
+        },
+        '127.0.0.1',
+        (workspace) => {
+          execFileSync('git', ['init', '--quiet', '--initial-branch=main'], {
+            cwd: workspace,
+            windowsHide: true,
+            stdio: 'pipe',
+          });
+          const nested = path.join(workspace, 'nested');
+          fs.mkdirSync(nested);
+          return nested;
+        },
+      );
+    },
+  );
 
   // The printed URL is the ONLY channel by which a real browser obtains the
   // token, and the token is the whole privilege gate (httpServer.ts

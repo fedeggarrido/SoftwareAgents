@@ -4,6 +4,35 @@ El primer paso convierte una petición del operador en un FeatureSpec revisable.
 FEAT-001 es la **vista de auditoría en el Command Center**, por decisión del
 operador. No incluye diseño técnico ni implementación de esa vista.
 
+## Preparar el proyecto en el primer uso (SA-114)
+
+En un repositorio Git, abre «Nueva idea» en la oficina standalone con el token del
+operador. Si falta la descripción del proyecto, el diálogo propone el nombre de
+la carpeta, el identificador, la rama principal y el remoto saneado. Puedes editar
+el nombre, revisar las rutas y pulsar «Preparar proyecto». Al terminar, continúa
+la idea conservando el texto escrito. Una conexión de solo lectura muestra cómo
+abrir la oficina con el token del operador. VS Code remite a standalone o al CLI.
+
+Desde una terminal humana, ejecuta
+`pixel-agents project init [--name <nombre>] [--yes]`. El comando descubre la raíz
+Git incluso desde una subcarpeta, muestra la propuesta y pide confirmación.
+`--yes` confirma la creación. La autenticación usa el ingreso SA-107 con el token
+del servidor activo, mediante `PIXEL_AGENTS_OPERATOR_TOKEN` en el entorno del
+operador o una entrada oculta en TTY tras confirmar. Abre primero la oficina del
+proyecto para disponer de ese servidor. Sin TTY, usa `--yes` y la variable del
+token. `pixel-agents --help` y `pixel-agents project --help` listan la sintaxis.
+Tras crear el proyecto desde el CLI, si la oficina está abierta, reiníciala para
+cargar el proyecto. El comando muestra este aviso al terminar la creación.
+
+Se crea `.softwareagents/project.yaml` y la carpeta `.softwareagents/brain`.
+**Debes incluir el archivo en un commit tú mismo.** Los repositorios sin remoto
+usan el valor descriptivo `local`. La rama principal procede de `origin/HEAD`,
+una rama local `main` o `master`, o la rama actual. El identificador combina la
+carpeta con un hash de la raíz canónica. Se rechaza una identidad ya presente en
+Operator config, para mantener la preparación separada de concesiones anteriores.
+Un manifest existente, válido o inválido, exige revisión manual. Los permisos y
+Executors se configuran explícitamente mediante los controles del operador.
+
 ## Investigación después de construir (SA-113)
 
 `pixel-agents research review FEAT-001 --mode quick --confirm` compara el código citado

@@ -8,7 +8,13 @@ import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import { recordAudit } from './auditLog.js';
 import { readAuditView } from './auditView.js';
-import { answerDecision, companyWorkspaceRoot, setAutopilot } from './companyControl.js';
+import { loadBoardSelection } from './boardSources.js';
+import {
+  answerDecision,
+  companyWorkspaceRoot,
+  configureCompanyControl,
+  setAutopilot,
+} from './companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -40,6 +46,7 @@ import { answerProjectDecision } from './humanDecisions.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { handlePrepareProjectMessage } from './projectPreparation.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -84,6 +91,8 @@ export interface ClientMessageContext {
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** Reload assets after an external-asset-directory change. Needs the dist root, known only to cli.ts. */
   onReloadAssets?: ReloadAssetsSideEffect;
+  /** Restart standalone services against the newly prepared canonical repository. */
+  onProjectPrepared?: (root: string) => void;
   /**
    * Whether this client may send messages that reach OUTSIDE `~/.pixel-agents/`
    * — including hooks consent and company controls. Decided per-connection by the transport
@@ -118,6 +127,24 @@ export function handleClientMessage(
   const adapter = store.getAdapter();
 
   switch (msg.type) {
+    case 'prepareProject':
+      handlePrepareProjectMessage(
+        msg,
+        send,
+        ctx.privileged === true,
+        ctx.ideasSupported !== false,
+        (root) => {
+          const selection = loadBoardSelection(root);
+          configureCompanyControl(root, selection);
+          store.bindProjectWorkspace(root);
+          ctx.onProjectPrepared?.(root);
+          const snapshot = currentWorkSnapshot();
+          if (snapshot) store.broadcast({ ...snapshot });
+          if (selection.kind === 'project')
+            store.notifyExecutorStateChanged(selection.project.project.id);
+        },
+      );
+      break;
     case 'requestFeaturePlan':
     case 'approveFeaturePlan':
       void handleFeaturePlanMessage(

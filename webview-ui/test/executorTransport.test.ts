@@ -170,6 +170,28 @@ describe('executor transport regressions (DOM-free)', () => {
     expect(FakeSocket.instances[1].sent).toEqual([]);
   });
 
+  it('rejects project preparation while connecting or CLOSING and never replays it', () => {
+    const message: ClientMessage = {
+      type: 'prepareProject',
+      requestId: 'prepare',
+      name: 'Project',
+    };
+    expect(() => transport.send(message)).toThrow(/connected/);
+    const socket = FakeSocket.instances[0];
+    socket.open();
+    expect(socket.sent).toEqual([]);
+    socket.readyState = 2;
+    expect(transport.state).toBe('connected');
+    expect(() => transport.send(message)).toThrow(/connected/);
+    transport.send({ type: 'requestIdeas', requestId: 'refresh' });
+    socket.close();
+    vi.advanceTimersByTime(1000);
+    FakeSocket.instances[1].open();
+    expect(FakeSocket.instances[1].sent).toEqual([{ type: 'requestIdeas', requestId: 'refresh' }]);
+    transport.send(message);
+    expect(FakeSocket.instances[1].sent.at(-1)).toEqual(message);
+  });
+
   it('recovers when the socket closes just before send, while its state still says connected', () => {
     FakeSocket.instances[0].open();
     const message = startToggle('claude', false)!;

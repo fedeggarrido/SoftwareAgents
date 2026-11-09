@@ -32,10 +32,11 @@ import { CodexWatcher } from './codexWatcher.js';
 import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
 import { runLearningCommand } from './commands/learning.js';
+import { PROJECT_INIT_HELP, runProjectCommand } from './commands/project.js';
 import { runResearchCommand } from './commands/research.js';
 import { runReviewCommand } from './commands/review.js';
 import { runTaskCommand } from './commands/task.js';
-import { configureCompanyControl } from './companyControl.js';
+import { companyWorkspaceRoot, configureCompanyControl } from './companyControl.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -108,6 +109,7 @@ Options:
   --help                Show this help message
 
 Commands:
+  ${PROJECT_INIT_HELP.replace('pixel-agents ', '')}  Preparar el proyecto
   task bind-pr <KEY> <number|URL|branch>  Bind a task to a pinned PR
   token rotate [--port PORT]  Revoke the running server token and disconnect clients`);
       process.exit(0);
@@ -177,6 +179,8 @@ export async function dispatchCli(
     designCaptureHost();
   } else if (argv[0] === 'token') {
     await runTokenCommand(argv.slice(1));
+  } else if (argv[0] === 'project') {
+    await runProjectCommand(argv.slice(1));
   } else if (argv[0] === 'design') {
     await runDesignCommand(argv.slice(1));
   } else if (argv[0] === 'research') {
@@ -240,7 +244,7 @@ async function startServer(argv: string[]): Promise<void> {
   }
 
   const cwd = process.cwd();
-  const boardSelection = loadBoardSelection(cwd);
+  let boardSelection = loadBoardSelection(cwd);
 
   // dist/ contains both the CLI bundle and the assets/ + webview/ directories
   const distRoot = __dirname;
@@ -360,6 +364,47 @@ async function startServer(argv: string[]): Promise<void> {
       console.log('[Pixel Agents] Assets reloaded (external directory change)');
     };
 
+    let roleResolver: RoleResolver | undefined;
+    let boardWatcher: BoardWatcher | undefined;
+    let domainEventRelay: ReturnType<typeof createDomainEventRelay>;
+    const refreshProjectBinding = (root: string) => {
+      roleResolver?.dispose();
+      boardWatcher?.dispose();
+      domainEventRelay?.dispose();
+      void shutdownPullRequestMonitor(pullRequestMonitor);
+      boardSelection = loadBoardSelection(root);
+      configureCompanyControl(root, boardSelection);
+      store.bindProjectWorkspace(root);
+      let executionRegistry: ExecutionRegistry | undefined;
+      // Who each character is (Manager, Analista, DEV, QA...).
+      roleResolver = new RoleResolver(
+        store,
+        2000,
+        () => {
+          executionRegistry ??= new ExecutionRegistry(root);
+          return executionRegistry.sessionMap();
+        },
+        (project, task, session) => executionRegistry?.characterDetail(project, task, session),
+        (() => {
+          try {
+            return loadProjectConfig(root)?.project.id;
+          } catch {
+            return undefined; // An invalid project.yaml only loses the detail fallback.
+          }
+        })(),
+      );
+      roleResolver.start();
+
+      // The company's backlog (docs/backlog/board.json + claims + progress), if any.
+      boardWatcher = new BoardWatcher(store, root, Date.now, boardSelection);
+      boardWatcher.start();
+      // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).
+      domainEventRelay = createDomainEventRelay(store, root, boardSelection);
+      domainEventRelay?.start();
+      pullRequestMonitor = createPullRequestMonitor(boardSelection);
+      pullRequestMonitor?.start();
+    };
+
     const config = await server.start({
       store,
       runtime,
@@ -370,6 +415,7 @@ async function startServer(argv: string[]): Promise<void> {
       assetCache,
       onSetHooksEnabled,
       onReloadAssets,
+      onProjectPrepared: refreshProjectBinding,
     });
     currentConfig = config;
 
@@ -438,34 +484,7 @@ async function startServer(argv: string[]): Promise<void> {
     codexWatcher.start();
     console.log(`[Pixel Agents] Watching Codex sessions for: ${cwd}`);
 
-    // Who each character is (Manager, Analista, DEV, QA...).
-    let executionRegistry: ExecutionRegistry | undefined;
-    const roleResolver = new RoleResolver(
-      store,
-      2000,
-      () => {
-        executionRegistry ??= new ExecutionRegistry(cwd);
-        return executionRegistry.sessionMap();
-      },
-      (project, task, session) => executionRegistry?.characterDetail(project, task, session),
-      (() => {
-        try {
-          return loadProjectConfig(cwd)?.project.id;
-        } catch {
-          return undefined; // An invalid project.yaml only loses the detail fallback.
-        }
-      })(),
-    );
-    roleResolver.start();
-
-    // The company's backlog (docs/backlog/board.json + claims + progress), if any.
-    const boardWatcher = new BoardWatcher(store, cwd, Date.now, boardSelection);
-    boardWatcher.start();
-    // Work domain events of the bound Project: snapshot on connect + live notices (SA-029).
-    const domainEventRelay = createDomainEventRelay(store, cwd, boardSelection);
-    domainEventRelay?.start();
-    pullRequestMonitor = createPullRequestMonitor(boardSelection);
-    pullRequestMonitor?.start();
+    refreshProjectBinding(companyWorkspaceRoot() ?? cwd);
     // Technical availability of the bound Project's enabled Executors (SA-089).
     startExecutorMonitoring(store, executorProject);
 
@@ -503,8 +522,8 @@ async function startServer(argv: string[]): Promise<void> {
       shuttingDown = true;
       console.log('\nShutting down...');
       codexWatcher.dispose();
-      roleResolver.dispose();
-      boardWatcher.dispose();
+      roleResolver?.dispose();
+      boardWatcher?.dispose();
       domainEventRelay?.dispose();
       try {
         await shutdownPullRequestMonitor(pullRequestMonitor);

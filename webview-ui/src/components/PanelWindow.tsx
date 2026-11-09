@@ -177,7 +177,7 @@ export function PanelWindow({
           >
             {entry.label}
             {entry.id === 'meeting' && meetingUnread && (
-              <span className="ml-4 text-accent-bright" role="status" aria-label="Nueva actividad">
+              <span className="ml-4 text-text" role="status" aria-label="Nueva actividad">
                 ●
               </span>
             )}

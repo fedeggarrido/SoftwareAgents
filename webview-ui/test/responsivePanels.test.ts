@@ -69,6 +69,16 @@ async function expectControlsClear(page: Page) {
   expect(title.y + title.height).toBeLessThanOrEqual(viewport.height);
 }
 
+async function expectWindowOwnsHeading(page: Page, name: string) {
+  const panel = page.getByRole('tabpanel', { name, exact: true });
+  expect(await panel.count()).toBe(1);
+  const tab = page.getByRole('tab', { name, exact: true });
+  expect(await panel.getAttribute('aria-labelledby')).toBe(await tab.getAttribute('id'));
+  expect(await panel.locator('h2').count()).toBe(0);
+  expect(await panel.getByRole('button', { name: /cerrar|✕/i }).count()).toBe(0);
+  expect(await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).count()).toBe(1);
+}
+
 const board = {
   type: 'boardState',
   mode: 'project',
@@ -304,6 +314,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await windowPanel.count()).toBe(1);
         expect(await page.getByRole('tabpanel').count()).toBe(1);
         expect(await page.getByRole('tab', { selected: true }).textContent()).toBe(name);
+        await expectWindowOwnsHeading(page, name);
         const sections = windowPanel.locator('[data-testid$="-panel"]');
         // Empty meetings keep an informative message in their sole tab.
         expect(await sections.count()).toBe(name === 'Reuniones' ? 0 : 1);
@@ -340,6 +351,15 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       // A new meeting opens a closed window, without stealing another open tab.
       await sendMeeting('meeting-1');
       await page.getByRole('tab', { name: 'Reuniones', selected: true }).waitFor();
+      await expectWindowOwnsHeading(page, 'Reuniones');
+      const meetingDetails = page
+        .getByRole('tabpanel')
+        .getByRole('button', { name: /Ocultar detalles/ });
+      await meetingDetails.click();
+      expect(
+        await page.getByRole('button', { name: /Mostrar detalles/ }).getAttribute('aria-expanded'),
+      ).toBe('false');
+      await page.getByRole('button', { name: /Mostrar detalles/ }).click();
       await page.getByTestId('meeting-panel').waitFor();
       await page.keyboard.press('Escape');
       await backlog.click();
@@ -425,6 +445,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
       await page.getByRole('tab', { name: 'Personaje', selected: true }).waitFor();
       await page.getByTestId('character-detail-panel').waitFor();
+      await expectWindowOwnsHeading(page, 'Personaje');
       expect(await page.locator('[data-testid="panel-window"]:visible').count()).toBe(1);
       expect(await page.getByTestId('character-detail-panel').evaluate(fitsHorizontally)).toBe(
         true,

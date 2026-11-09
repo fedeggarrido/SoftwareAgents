@@ -4,12 +4,13 @@ import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 
 interface DecisionsPanelProps {
+  hosted?: boolean;
   isOpen: boolean;
   onClose: () => void;
 }
 
 /** Owner decisions the agents may recommend but never take. Structured answers restore blocked tasks; legacy answers use the inbox. */
-export function DecisionsPanel({ isOpen, onClose }: DecisionsPanelProps) {
+export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPanelProps) {
   const board = useBoard();
   if (!isOpen) return null;
   const decisions = board?.decisions ?? [];
@@ -20,12 +21,14 @@ export function DecisionsPanel({ isOpen, onClose }: DecisionsPanelProps) {
       role="region"
       aria-label="Decisiones"
     >
-      <div className="flex items-center gap-8">
-        <span className="text-lg flex-1">Decisiones del propietario</span>
-        <Button size="sm" variant="ghost" onClick={onClose} title="Cerrar">
-          ✕
-        </Button>
-      </div>
+      {!hosted && (
+        <div className="flex items-center gap-8">
+          <span className="text-lg flex-1">Decisiones del propietario</span>
+          <Button size="sm" variant="ghost" onClick={onClose} title="Cerrar">
+            ✕
+          </Button>
+        </div>
+      )}
       <div className="text-2xs text-text-muted">
         Los agentes recomiendan; solo tú decides. Las decisiones estructuradas restauran las tareas
         bloqueadas; las respuestas legacy las aplica el manager.

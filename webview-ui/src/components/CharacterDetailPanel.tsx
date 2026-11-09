@@ -10,13 +10,19 @@ import {
 } from '../constants.js';
 
 export interface CharacterDetailPanelProps {
+  hosted?: boolean;
   detail?: CharacterDetail;
   executorState?: ExecutorState | null;
   board?: BoardState | null;
 }
 
 /** Read-only: every fact is projected by the server, never parsed from labels. */
-export function CharacterDetailPanel({ detail, executorState, board }: CharacterDetailPanelProps) {
+export function CharacterDetailPanel({
+  detail,
+  executorState,
+  board,
+  hosted = false,
+}: CharacterDetailPanelProps) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), PR_DISPLAY_REFRESH_MS);
@@ -41,7 +47,11 @@ export function CharacterDetailPanel({ detail, executorState, board }: Character
       data-testid="character-detail-panel"
       className="character-detail-panel read-only-panel absolute top-60 right-8 z-40 pixel-panel p-10 text-xs overflow-y-auto"
     >
-      <h2 className="text-lg">Detalle del personaje</h2>
+      {hosted ? (
+        <div className="panel-toolbar ui-info text-text-muted">solo lectura</div>
+      ) : (
+        <h2 className="text-lg">Detalle del personaje</h2>
+      )}
       <dl>
         {CHARACTER_DETAIL_FIELDS.map(([key, label]) => (
           <div key={key}>

@@ -6,11 +6,21 @@ export function PanelHeading({
   title,
   onClose,
   children,
+  hosted = false,
 }: {
   title: string;
   onClose: () => void;
   children?: ReactNode;
+  hosted?: boolean;
 }) {
+  if (hosted) {
+    return (
+      <div className="panel-toolbar flex flex-wrap items-center justify-between gap-8">
+        <span className="ui-info text-text-muted">solo lectura</span>
+        {children && <div className="panel-actions">{children}</div>}
+      </div>
+    );
+  }
   return (
     <div className="panel-heading">
       <h2 className="text-lg">

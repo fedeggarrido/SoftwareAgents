@@ -42,7 +42,7 @@ const panelPath = '../src/components/FeaturesPanel.js';
 const close = vi.fn();
 async function tree(isOpen = true): Promise<ReactElement> {
   const { FeaturesPanel } = await import(panelPath);
-  return FeaturesPanel({ isOpen, onClose: close });
+  return FeaturesPanel({ isOpen, onClose: close, hosted: true });
 }
 const render = async () => renderToStaticMarkup(await tree());
 async function flush(isOpen = true) {
@@ -194,7 +194,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('panel-error');
     expect(html).toContain('Reintentar');
     expect(html).toContain('read-only-panel');
-    expect(html).toContain('panel-heading');
+    expect(html).toContain('panel-toolbar');
     expect(html).not.toContain('-translate-x-1/2');
     const node = await tree();
     function retry(node: unknown): (() => void) | undefined {
@@ -364,7 +364,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       expect(html).not.toContain('Actualizar');
     }
   });
-  it('AC-006/014 only refresh and close controls; refresh requests new data', async () => {
+  it('AC-006/014 hosted toolbar keeps refresh; the window owns close', async () => {
     // Inspect actual React button props to exercise the callbacks without a DOM.
     function buttons(node: unknown): Array<{ children: unknown; onClick: () => void }> {
       if (!node || typeof node !== 'object') return [];
@@ -381,7 +381,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       ];
     }
     const controls = buttons(await tree());
-    expect(controls.map((button) => button.children)).toEqual(['Actualizar', '✕']);
+    expect(controls.map((button) => button.children)).toEqual(['Actualizar']);
     controls[0].onClick();
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
     await flush();
@@ -401,8 +401,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('3/5');
     expect(html).toContain('FEAT-020-T03');
     expect(html).not.toContain('review');
-    controls[1].onClick();
-    expect(close).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
     expect(lifecycle.send.mock.calls.every(([message]) => message.type === 'requestFeatures')).toBe(
       true,
     );

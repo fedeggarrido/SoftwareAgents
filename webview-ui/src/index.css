@@ -201,7 +201,7 @@
 }
 .panel-window-tabs [aria-selected='true'] {
   background: var(--color-active-bg);
-  color: var(--color-accent-bright);
+  color: var(--color-text);
 }
 .panel-window-content {
   flex: 1;

@@ -32,7 +32,15 @@ function requestAudit(projectId: string) {
   transport.send({ type: 'requestAuditLog', projectId, requestId });
 }
 
-export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function AuditPanel({
+  isOpen,
+  onClose,
+  hosted = false,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  hosted?: boolean;
+}) {
   const store = useAuditStore();
   const executor = useExecutorStore();
   const connectionState = useSyncExternalStore(subscribeTransport, transportState, transportState);
@@ -60,7 +68,7 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       data-testid="audit-panel"
       className="read-only-panel p-10 flex flex-col gap-8"
     >
-      <PanelHeading title="Auditoría" onClose={onClose} />
+      <PanelHeading hosted={hosted} title="Auditoría" onClose={onClose} />
       {!store.projectId ? (
         <p>Sin Project seleccionado</p>
       ) : (

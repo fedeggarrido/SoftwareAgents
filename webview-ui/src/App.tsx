@@ -579,14 +579,16 @@ function App() {
         onReset={panel.reset}
         onClose={panel.close}
       >
-        <AuditPanel isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
+        <AuditPanel hosted isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
         <FeaturesPanel
+          hosted
           isOpen={panel.isOpen && panel.tab === 'features'}
           onClose={panel.close}
           checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
         />
 
         <BacklogPanel
+          hosted
           isOpen={panel.isOpen && panel.tab === 'backlog'}
           onClose={panel.close}
           officeState={officeState}
@@ -596,8 +598,12 @@ function App() {
             os.cameraFollowId = id;
           }}
         />
-        <DecisionsPanel isOpen={panel.isOpen && panel.tab === 'decisions'} onClose={panel.close} />
-        {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel />}
+        <DecisionsPanel
+          hosted
+          isOpen={panel.isOpen && panel.tab === 'decisions'}
+          onClose={panel.close}
+        />
+        {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
         <div ref={characterPanelRef} hidden={panel.tab !== 'character'}>
           {panel.tab === 'character' && selectedCharacterId === null && (
             <p className="p-8 text-xs text-text-muted">Selecciona un personaje en la oficina.</p>

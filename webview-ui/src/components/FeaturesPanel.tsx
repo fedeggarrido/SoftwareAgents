@@ -42,7 +42,9 @@ export function FeaturesPanel({
   isOpen,
   onClose,
   checkoutName,
+  hosted = false,
 }: {
+  hosted?: boolean;
   isOpen: boolean;
   onClose: () => void;
   checkoutName?: string;
@@ -76,7 +78,7 @@ export function FeaturesPanel({
       data-testid="features-panel"
       className="read-only-panel p-10 flex flex-col gap-8"
     >
-      <PanelHeading title="Features" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Features" onClose={onClose}>
         {state !== 'read_error' && (
           <Button
             size="sm"

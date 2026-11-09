@@ -184,6 +184,7 @@ export function ToolOverlay({
         officeState.characters.has(selectedId) &&
         createPortal(
           <CharacterDetailPanel
+            hosted
             detail={getAgentRole(selectedId)?.characterDetail}
             executorState={executorState}
             board={board}

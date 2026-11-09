@@ -143,6 +143,7 @@ function Card({
 }
 
 interface BacklogPanelProps {
+  hosted?: boolean;
   isOpen: boolean;
   onClose: () => void;
   onFocusAgent: (id: number) => void;
@@ -150,7 +151,13 @@ interface BacklogPanelProps {
 }
 
 /** The company's backlog next to the office: phases, owners and last reports. */
-export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: BacklogPanelProps) {
+export function BacklogPanel({
+  isOpen,
+  onClose,
+  onFocusAgent,
+  officeState,
+  hosted = false,
+}: BacklogPanelProps) {
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
@@ -179,7 +186,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
       role="region"
       aria-label="Backlog"
     >
-      <PanelHeading title="Backlog" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Backlog" onClose={onClose}>
         <Button
           size="sm"
           variant={showDone ? 'active' : 'default'}

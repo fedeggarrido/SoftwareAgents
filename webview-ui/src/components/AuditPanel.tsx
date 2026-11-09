@@ -1,8 +1,14 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 import {
+  AUDIT_DETAIL_FIELDS,
+  AUDIT_EMPTY_TEXT,
+  AUDIT_EXPLANATION,
+  PROJECT_EMPTY_TEXT,
+} from '../constants.js';
+import { auditSentence } from '../office/auditPresentation.js';
+import {
   auditNotices,
-  auditValue,
   beginAuditRequest,
   emptyAuditStore,
   filterValues,
@@ -13,8 +19,10 @@ import {
   viewState,
   visibleEntries,
 } from '../office/auditStore.js';
+import { knownText } from '../office/displayText.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
+import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -32,7 +40,15 @@ function requestAudit(projectId: string) {
   transport.send({ type: 'requestAuditLog', projectId, requestId });
 }
 
-export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function AuditPanel({
+  isOpen,
+  onClose,
+  hosted = false,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  hosted?: boolean;
+}) {
   const store = useAuditStore();
   const executor = useExecutorStore();
   const connectionState = useSyncExternalStore(subscribeTransport, transportState, transportState);
@@ -58,11 +74,14 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
       role="region"
       aria-label="Auditoría"
       data-testid="audit-panel"
-      className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
+      className="read-only-panel p-10 flex flex-col gap-8"
     >
-      <PanelHeading title="Auditoría" onClose={onClose} />
-      {!store.projectId ? (
-        <p>Sin Project seleccionado</p>
+      <PanelHeading hosted={hosted} title="Auditoría" onClose={onClose} />
+      <p>{AUDIT_EXPLANATION}</p>
+      {connectionState !== 'connected' ? (
+        <OfficeConnectionHelp />
+      ) : !projectId ? (
+        <p>{PROJECT_EMPTY_TEXT}</p>
       ) : (
         <>
           <div className="audit-filters flex flex-wrap gap-8">
@@ -123,11 +142,11 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
             </p>
           )}
           {notices.excludedCount > 0 && (
-            <p>{notices.excludedCount} entradas excluidas por no pertenecer al Project</p>
+            <p>{notices.excludedCount} entradas excluidas por no pertenecer al proyecto</p>
           )}
           <div role="status">
             {state === 'loading' && 'Cargando auditoría…'}
-            {state === 'empty' && 'No hay entradas de auditoría'}
+            {state === 'empty' && AUDIT_EMPTY_TEXT}
             {state === 'denied' && 'Acceso denegado a la auditoría'}
             {state === 'no_matches' &&
               'Ninguna entrada cumple los filtros. Usa Quitar filtros para ver todas.'}
@@ -148,46 +167,30 @@ export function AuditPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                 key={`${store.requestId}:${entry.line}`}
                 className="bg-bg-dark border-2 border-border p-8 text-xs break-words"
               >
-                <dl>
-                  <dt>Fecha</dt>
-                  <dd>
-                    <span title={date?.utc}>{date?.local ?? 'Fecha no válida'}</span>
-                  </dd>
-                  <dt>Actor</dt>
-                  <dd>
-                    {entry.actorType} / {auditValue(entry.actorId)}
-                  </dd>
-                  <dt>Acción</dt>
-                  <dd>{entry.action}</dd>
-                  <dt>Recurso</dt>
-                  <dd>
-                    {entry.resourceType} / {auditValue(entry.resourceId)}
-                  </dd>
-                  <dt>Decisión de política</dt>
-                  <dd>
-                    {auditValue(entry.policyDecision?.outcome)} /{' '}
-                    {auditValue(entry.policyDecision?.reason)}
-                  </dd>
-                  <dt>Resultado</dt>
-                  <dd>{entry.outcome.status}</dd>
-                  <dt>Motivo</dt>
-                  <dd>{auditValue(entry.outcome.reason)}</dd>
-                  <dt>Task</dt>
-                  <dd>{auditValue(entry.taskKey)}</dd>
-                  <dt>Execution</dt>
-                  <dd>{auditValue(entry.executionId)}</dd>
-                </dl>
+                <p title={date?.utc}>{auditSentence(entry)}</p>
                 <details>
                   <summary>Detalle</summary>
                   <dl>
-                    {(['detail', 'tier', 'executor', 'model', 'code'] as const).map((key) => (
+                    {knownText(entry.outcome.reason) && (
+                      <div>
+                        <dt>Motivo</dt>
+                        <dd>{knownText(entry.outcome.reason)}</dd>
+                      </div>
+                    )}
+                    {knownText(entry.policyDecision?.reason) && (
+                      <div>
+                        <dt>Regla de seguridad</dt>
+                        <dd>{knownText(entry.policyDecision?.reason)}</dd>
+                      </div>
+                    )}
+                    {AUDIT_DETAIL_FIELDS.map(([key, label]) => (
                       <div key={key}>
-                        <dt>{key}</dt>
-                        <dd>{auditValue(entry.outcome[key])}</dd>
+                        <dt>{label}</dt>
+                        <dd>{knownText(entry.outcome[key]) ?? 'sin valor'}</dd>
                       </div>
                     ))}
-                    <dt>riskLevel</dt>
-                    <dd>{auditValue(entry.riskLevel)}</dd>
+                    <dt>Nivel de riesgo</dt>
+                    <dd>{knownText(entry.riskLevel) ?? 'sin valor'}</dd>
                   </dl>
                 </details>
               </article>

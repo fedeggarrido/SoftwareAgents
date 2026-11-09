@@ -1,6 +1,7 @@
 import type { FeaturePlanSnapshot, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
 import { FEATURE_PLAN_TIMEOUT_MS } from '../constants.js';
+import { connectionCopy } from './connectionStatus.js';
 
 export interface PlanView {
   snapshot: FeaturePlanSnapshot | null;
@@ -79,7 +80,10 @@ export class FeaturePlanController {
         snapshot: null,
         pending: false,
         loading: false,
-        notice: 'Sin conexión. La aprobación requiere volver a leer el plan.',
+        notice:
+          state === 'connected'
+            ? 'Se ha recuperado la conexión con la oficina. Volviendo a leer el plan.'
+            : `${connectionCopy(state).explanation} La aprobación requiere volver a leer el plan.`,
       });
       if (state === 'connected') this.read(this.view.notice);
     });

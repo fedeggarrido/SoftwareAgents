@@ -52,9 +52,19 @@ describe('office without a board', () => {
         { id: 'expired', status: 'expired', question: 'Expired gate?', options: [] },
       ];
       expect(capacityHudView(state).minimal).toBe(!hasBoard);
-      expect(decisionsHudView(state)).toEqual({ visible: true, open: 1, label: 'Decisiones (1)' });
+      expect(decisionsHudView(state)).toEqual({
+        visible: true,
+        open: 1,
+        label: 'Decisiones · 1',
+        accessibleName: 'Decisiones, 1 pendientes',
+      });
       state.decisions[0].status = 'answered';
-      expect(decisionsHudView(state)).toEqual({ visible: true, open: 0, label: 'Decisiones (0)' });
+      expect(decisionsHudView(state)).toEqual({
+        visible: true,
+        open: 0,
+        label: 'Decisiones · 0',
+        accessibleName: 'Decisiones, 0 pendientes',
+      });
       state.decisions = [];
       expect(decisionsHudView(state).visible).toBe(false);
       expect(decisionsHudView({}).visible).toBe(false);

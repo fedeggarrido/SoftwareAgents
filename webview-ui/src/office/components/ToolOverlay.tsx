@@ -26,6 +26,8 @@ import {
   WORK_STATE_TEXT,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
+import type { AgentHistory } from '../agentHistory.js';
+import { agentTask } from '../agentHistory.js';
 import { useBoard } from '../boardStore.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { useExecutorStore } from '../executorStore.js';
@@ -81,6 +83,8 @@ interface ToolOverlayProps {
   panRef: React.RefObject<{ x: number; y: number }>;
   onCloseAgent: (id: number) => void;
   alwaysShowOverlay: boolean;
+  agentHistory: AgentHistory;
+  onOpenBacklog: (taskKey?: string) => void;
 }
 
 /** Derive a short human-readable activity string from tools/status */
@@ -133,6 +137,8 @@ export function ToolOverlay({
   panRef,
   onCloseAgent,
   alwaysShowOverlay,
+  agentHistory,
+  onOpenBacklog,
 }: ToolOverlayProps) {
   const board = useBoard();
   // A Project whose server announces executor state manages its launches (SA-091).
@@ -149,6 +155,8 @@ export function ToolOverlay({
     return () => cancelAnimationFrame(rafId);
   }, []);
 
+  const selectedId = officeState.selectedAgentId;
+
   const el = containerRef.current;
   if (!el) return null;
   const project = overlayProjection(
@@ -159,7 +167,6 @@ export function ToolOverlay({
     window.devicePixelRatio || 1,
   );
 
-  const selectedId = officeState.selectedAgentId;
   const hoveredId = officeState.hoveredAgentId;
 
   // All character IDs
@@ -167,13 +174,68 @@ export function ToolOverlay({
 
   return (
     <>
-      {selectedId !== null && officeState.characters.has(selectedId) && (
-        <CharacterDetailPanel
-          detail={getAgentRole(selectedId)?.characterDetail}
-          executorState={executorState}
-          board={board}
-        />
-      )}
+      {selectedId !== null &&
+        officeState.characters.has(selectedId) &&
+        (() => {
+          const ch = officeState.characters.get(selectedId)!;
+          const role = getAgentRole(selectedId);
+          const task = agentTask(
+            selectedId,
+            role,
+            officeState.agentProjects.get(selectedId),
+            board,
+          );
+          const state = officeState.workStates.get(selectedId) ?? WORK_STATE.AVAILABLE;
+          return (
+            <CharacterDetailPanel
+              key={selectedId}
+              name={ch.agentName ?? `Agente #${selectedId}`}
+              role={role?.label}
+              status={
+                ch.bubbleType === 'permission'
+                  ? 'Necesita aprobación'
+                  : state !== WORK_STATE.AVAILABLE
+                    ? WORK_STATE_TEXT[state]
+                    : ch.isActive
+                      ? 'En actividad'
+                      : ch.waitingAwaitingInput
+                        ? 'Esperando respuesta'
+                        : 'Disponible'
+              }
+              statusTone={
+                state === WORK_STATE.FAILED
+                  ? 'error'
+                  : ch.bubbleType === 'permission' ||
+                      state === WORK_STATE.BLOCKED ||
+                      state === WORK_STATE.WAITING_HUMAN ||
+                      state === WORK_STATE.WAITING_QUOTA ||
+                      state === WORK_STATE.WAITING_DEPENDENCY
+                    ? 'attention'
+                    : ch.isActive || state !== WORK_STATE.AVAILABLE
+                      ? 'active'
+                      : 'available'
+              }
+              detail={role?.characterDetail}
+              detailAt={agentHistory.detailAt(selectedId)}
+              executorState={executorState}
+              executor={getProviderLabel(selectedId)}
+              model={role?.model}
+              task={task}
+              history={agentHistory.events(selectedId)}
+              anchor={{ x: project.toScreenX(ch.x), y: project.toScreenY(ch.y) }}
+              onClose={() => {
+                officeState.selectedAgentId = null;
+                officeState.cameraFollowId = null;
+              }}
+              onCloseAgent={!ch.isSubagent ? () => onCloseAgent(selectedId) : undefined}
+              onOpenBacklog={() => {
+                officeState.selectedAgentId = null;
+                officeState.cameraFollowId = null;
+                onOpenBacklog(task.key);
+              }}
+            />
+          );
+        })()}
       {allIds.map((id) => {
         const ch = officeState.characters.get(id);
         if (!ch) return null;
@@ -330,7 +392,7 @@ export function ToolOverlay({
               top: screenY - (hasExtraLines ? 34 : 28),
               pointerEvents: isSelected ? 'auto' : 'none',
               opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
-              // Keep the selected character's actions above its detail card.
+              // Keep the selected character's actions above the office panel window.
               zIndex: isSelected ? SELECTED_AGENT_OVERLAY_Z_INDEX : 20,
             }}
             data-testid="agent-overlay"

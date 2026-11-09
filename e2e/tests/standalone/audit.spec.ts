@@ -93,8 +93,8 @@ test.describe('Standalone / audit', () => {
     const rows = panel.locator('article');
     await expect(rows).toHaveCount(500);
     // Assert the entire ordering, not merely the endpoints.
-    await expect(rows.locator('dd').filter({ hasText: /^task \/ resource-\d+$/ })).toHaveText(
-      Array.from({ length: 500 }, (_, index) => `task / resource-${519 - index}`),
+    await expect(rows.locator(':scope > p')).toHaveText(
+      Array.from({ length: 500 }, (_, index) => new RegExp(` en TASK-${519 - index}, hace `)),
     );
     const notices = async () => {
       await expect(
@@ -102,7 +102,7 @@ test.describe('Standalone / audit', () => {
       ).toBeVisible();
       await expect(panel.getByText('1 líneas corruptas (1)', { exact: true })).toBeVisible();
       await expect(
-        panel.getByText('1 entradas excluidas por no pertenecer al Project', { exact: true }),
+        panel.getByText('1 entradas excluidas por no pertenecer al proyecto', { exact: true }),
       ).toBeVisible();
     };
     await notices();
@@ -112,18 +112,19 @@ test.describe('Standalone / audit', () => {
       'review',
     ]);
     const first = rows.first();
-    await expect(first).toContainText('human / fixture-operator');
-    await expect(first).toContainText('allow / fixture policy');
-    await expect(first).toContainText('TASK-519');
-    await expect(first).toContainText('execution-519');
-    await expect(first).toContainText('reason-519 [REDACTED]');
-    const date = first.locator('[title="2026-10-16 10:08:44 UTC"]');
-    await expect(date).toHaveText('2026-10-16 12:08:44');
+    const date = first.getByTitle('2026-10-16 10:08:44 UTC', { exact: true });
+    await expect(date).toHaveText(
+      /^La persona operadora \(fixture-operator\) registró la acción «review» en TASK-519, hace \d+ (s|min|h|días); resultado: failure\.$/,
+    );
     await date.hover();
     await expect(first.locator('details')).not.toHaveAttribute('open', '');
+    await expect(first.getByText('reason-519 [REDACTED]', { exact: true })).not.toBeVisible();
     await expect(first.getByText('fixture-tier', { exact: true })).not.toBeVisible();
-    await first.getByText('Detalle', { exact: true }).click();
+    await first.locator('summary', { hasText: 'Detalle' }).click();
+    await expect(first.locator('details')).toHaveAttribute('open', '');
     for (const value of [
+      'reason-519 [REDACTED]',
+      'fixture policy',
       'detail-519 [REDACTED]',
       'fixture-tier',
       'fixture-executor',
@@ -151,8 +152,11 @@ test.describe('Standalone / audit', () => {
       (i) => i % 2 === 1 && i % 3 === 0,
     );
     await expect(rows).toHaveCount(matching.length);
-    await expect(rows.locator('dd').filter({ hasText: /^task \/ resource-\d+$/ })).toHaveText(
-      matching.map((i) => `task / resource-${i}`),
+    await expect(rows.locator(':scope > p')).toHaveText(
+      matching.map(
+        (i) =>
+          new RegExp(`registró la acción «review» en TASK-${i}, hace .*; resultado: failure\\.$`),
+      ),
     );
     await notices();
     await panel.getByRole('button', { name: 'Quitar filtros', exact: true }).click();
@@ -200,7 +204,7 @@ test.describe('Standalone / audit', () => {
       const file = path.join(standalone.tmpHome, '.pixel-agents', 'audit', 'audit-e2e.jsonl');
       expect(fs.existsSync(file)).toBe(false);
       const panel = await openAudit(page);
-      await expect(panel.getByRole('status')).toHaveText('No hay entradas de auditoría');
+      await expect(panel.getByRole('status')).toHaveText('Aún no hay nada registrado.');
       await expect(panel.locator('article')).toHaveCount(0);
       await expect(
         panel.getByText(/Error de lectura|Acceso denegado|líneas corruptas/),

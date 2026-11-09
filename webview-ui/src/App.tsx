@@ -16,6 +16,7 @@ import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
+import { PanelWindow } from './components/PanelWindow.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -25,6 +26,7 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
+import { usePanelWindow } from './hooks/usePanelWindow.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -76,6 +78,7 @@ function App() {
   );
 
   const {
+    agentHistory,
     agents,
     selectedAgent,
     agentTools,
@@ -113,10 +116,8 @@ function App() {
 
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isBacklogOpen, setIsBacklogOpen] = useState(false);
-  const [isDecisionsOpen, setIsDecisionsOpen] = useState(false);
-  const [isAuditOpen, setIsAuditOpen] = useState(false);
-  const [isFeaturesOpen, setIsFeaturesOpen] = useState(false);
+  const panel = usePanelWindow(layoutReady);
+  const [focusedTask, setFocusedTask] = useState<string | null>(null);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -449,6 +450,11 @@ function App() {
             panRef={editor.panRef}
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
+            agentHistory={agentHistory}
+            onOpenBacklog={(taskKey) => {
+              setFocusedTask(taskKey ?? null);
+              panel.select('backlog');
+            }}
           />
         </>
       ) : (
@@ -532,13 +538,16 @@ function App() {
         onToggleEditMode={editor.handleToggleEditMode}
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        isBacklogOpen={isBacklogOpen}
-        isAuditOpen={isAuditOpen}
-        isFeaturesOpen={isFeaturesOpen}
-        onToggleFeatures={() => setIsFeaturesOpen((v) => !v)}
+        isBacklogOpen={panel.isOpen && panel.tab === 'backlog'}
+        isDecisionsOpen={panel.isOpen && panel.tab === 'decisions'}
+        onToggleDecisions={() => panel.toggle('decisions')}
+        isAuditOpen={panel.isOpen && panel.tab === 'audit'}
+        isFeaturesOpen={panel.isOpen && panel.tab === 'features'}
+        onToggleFeatures={() => panel.toggle('features')}
         onNewIdea={() => setIsNewIdeaOpen(true)}
-        onToggleAudit={() => setIsAuditOpen((v) => !v)}
-        onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
+        onToggleAudit={() => panel.toggle('audit')}
+        onToggleBacklog={() => panel.toggle('backlog')}
+        onOpenBacklog={() => panel.select('backlog')}
         workspaceFolders={workspaceFolders}
       />
 
@@ -547,39 +556,59 @@ function App() {
           <CompanyHud
             agents={agents}
             officeState={officeState}
-            onOpenBacklog={() => setIsBacklogOpen(true)}
-            onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
+            onOpenDecisions={() => panel.select('decisions')}
+            onOpenMeeting={() => panel.select('meeting')}
+            meetingUnread={panel.meetingUnread}
           />
         </div>
-        <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
+      </div>
+      <PanelWindow
+        isOpen={panel.isOpen}
+        tab={panel.tab}
+        rect={panel.rect}
+        mobile={panel.mobile}
+        meetingUnread={panel.meetingUnread}
+        onSelect={panel.select}
+        onRectChange={panel.setRect}
+        onReset={panel.reset}
+        onClose={panel.close}
+      >
+        <AuditPanel hosted isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
         <FeaturesPanel
-          isOpen={isFeaturesOpen}
-          onClose={() => setIsFeaturesOpen(false)}
+          hosted
+          isOpen={panel.isOpen && panel.tab === 'features'}
+          onClose={panel.close}
           checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
         />
 
         <BacklogPanel
-          isOpen={isBacklogOpen}
-          onClose={() => setIsBacklogOpen(false)}
+          hosted
+          isOpen={panel.isOpen && panel.tab === 'backlog'}
+          onClose={panel.close}
           officeState={officeState}
+          focusedTask={focusedTask}
           onFocusAgent={(id) => {
             const os = getOfficeState();
             os.selectedAgentId = id;
             os.cameraFollowId = id;
           }}
         />
-      </div>
-      <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
+        <DecisionsPanel
+          hosted
+          isOpen={panel.isOpen && panel.tab === 'decisions'}
+          onClose={panel.close}
+        />
+        {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
+      </PanelWindow>
       {isNewIdeaOpen && (
         <NewIdeaDialog
           checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
           onClose={() => {
             setIsNewIdeaOpen(false);
-            setIsFeaturesOpen(true);
+            panel.select('features');
           }}
         />
       )}
-      <MeetingPanel />
 
       <VersionIndicator
         currentVersion={extensionVersion}
@@ -654,6 +683,8 @@ function App() {
           onClose={handleIntroClose}
           escapeSuppressed={
             isSettingsOpen ||
+            isNewIdeaOpen ||
+            panel.isOpen ||
             isChangelogOpen ||
             isHooksInfoOpen ||
             showMigrationNotice ||

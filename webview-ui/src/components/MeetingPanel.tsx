@@ -29,20 +29,30 @@ function colorOf(role: string): string {
 }
 
 /** What the agents are discussing in the meeting room, round by round. */
-export function MeetingPanel() {
+export function MeetingPanel({ hosted = false }: { hosted?: boolean }) {
   const board = useBoard();
   const [open, setOpen] = useState(true);
   const m = board?.meeting;
-  if (!m) return null;
+  if (!m) return <p className="p-8 text-xs text-text-muted">No hay reuniones en curso.</p>;
   const status = STATUS_LABELS[m.status] ?? m.status;
   return (
     <div
-      className="absolute top-80 left-10 z-20 pixel-panel p-8 flex flex-col gap-4 w-[min(360px,80vw)] max-h-[55vh] overflow-y-auto"
+      className="read-only-panel p-8 flex flex-col gap-4"
       data-testid="meeting-panel"
+      role="region"
+      aria-label="Reuniones"
     >
-      <button className="cursor-pointer text-left text-xs" onClick={() => setOpen((v) => !v)}>
-        {open ? '▾' : '▸'} Sala de reuniones · {status}
-      </button>
+      <div className="panel-toolbar flex flex-wrap items-center gap-8">
+        <button
+          aria-expanded={open}
+          className="cursor-pointer text-left text-xs"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? '▾' : '▸'}{' '}
+          {hosted ? (open ? 'Ocultar detalles' : 'Mostrar detalles') : 'Sala de reuniones'}
+        </button>
+        <span className="ui-info text-text-muted">{status}</span>
+      </div>
       {open && (
         <>
           <div className="text-2xs leading-tight">

@@ -17,6 +17,9 @@ interface BottomToolbarProps {
   onToggleSettings: () => void;
   isBacklogOpen: boolean;
   onToggleBacklog: () => void;
+  onOpenBacklog: () => void;
+  isDecisionsOpen: boolean;
+  onToggleDecisions: () => void;
   isAuditOpen: boolean;
   onToggleAudit: () => void;
   isFeaturesOpen: boolean;
@@ -33,6 +36,9 @@ export function BottomToolbar({
   onToggleSettings,
   isBacklogOpen,
   onToggleBacklog,
+  onOpenBacklog,
+  isDecisionsOpen,
+  onToggleDecisions,
   isAuditOpen,
   onToggleAudit,
   isFeaturesOpen,
@@ -159,10 +165,22 @@ export function BottomToolbar({
         Backlog
       </Button>
       {prs && (
-        <Button onClick={onToggleBacklog} title={prs.title} data-testid="dock-pr-status">
-          {prs.label}
+        <Button
+          onClick={onOpenBacklog}
+          title={prs.title}
+          aria-label={`Estado de PR: ${prs.label}. Abrir Backlog`}
+          data-testid="dock-pr-status"
+        >
+          Estado: {prs.label}
         </Button>
       )}
+      <Button
+        variant={isDecisionsOpen ? 'active' : 'default'}
+        onClick={onToggleDecisions}
+        title="Decisiones del propietario"
+      >
+        Decisiones
+      </Button>
       <Button
         variant={isAuditOpen ? 'active' : 'default'}
         onClick={onToggleAudit}

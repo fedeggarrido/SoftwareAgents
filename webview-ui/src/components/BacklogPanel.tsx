@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
 import { backlogView } from '../office/backlogView.js';
@@ -69,19 +69,31 @@ function Card({
   onFocusAgent,
   board,
   officeState,
+  focused,
 }: {
   item: BoardItem;
   now: number;
   onFocusAgent: (id: number) => void;
   board: ReturnType<typeof useBoard>;
   officeState: OfficeState;
+  focused: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: 'nearest' });
+    ref.current?.focus({ preventScroll: true });
+  }, [focused]);
   return (
     <div
       className="bg-bg-dark border-2 border-border p-6 flex flex-col gap-2 cursor-pointer"
       style={{ borderLeftColor: PRIORITY_COLORS[item.priority ?? ''] ?? undefined }}
       onClick={() => setOpen((v) => !v)}
+      ref={ref}
+      tabIndex={-1}
+      data-task-key={item.id}
       data-testid="backlog-card"
     >
       <div className="flex items-baseline gap-6">
@@ -143,6 +155,8 @@ function Card({
 }
 
 interface BacklogPanelProps {
+  focusedTask?: string | null;
+  hosted?: boolean;
   isOpen: boolean;
   onClose: () => void;
   onFocusAgent: (id: number) => void;
@@ -150,7 +164,14 @@ interface BacklogPanelProps {
 }
 
 /** The company's backlog next to the office: phases, owners and last reports. */
-export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: BacklogPanelProps) {
+export function BacklogPanel({
+  isOpen,
+  onClose,
+  onFocusAgent,
+  officeState,
+  hosted = false,
+  focusedTask,
+}: BacklogPanelProps) {
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
@@ -160,6 +181,17 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
     const t = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(t);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (
+      isOpen &&
+      focusedTask &&
+      board?.items.some(
+        (item) => item.id === focusedTask && ['DONE', 'VERIFIED'].includes(item.phase),
+      )
+    )
+      setShowDone(true);
+  }, [isOpen, focusedTask, board]);
 
   if (!isOpen) return null;
 
@@ -174,12 +206,12 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
 
   return (
     <div
-      className="read-only-panel z-40 pixel-panel p-8 flex flex-col gap-8"
+      className="read-only-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
       role="region"
       aria-label="Backlog"
     >
-      <PanelHeading title="Backlog" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Backlog" onClose={onClose}>
         <Button
           size="sm"
           variant={showDone ? 'active' : 'default'}
@@ -265,6 +297,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
                   <Card
                     key={item.id}
                     item={item}
+                    focused={item.id === focusedTask}
                     now={now}
                     onFocusAgent={onFocusAgent}
                     board={board}

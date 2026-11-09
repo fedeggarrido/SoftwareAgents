@@ -12,10 +12,10 @@ import type { CaptureInput, DesignEvidence } from './designCapture.js';
 import { waitForDesignCanvas } from './designCapture.js';
 import { contrastRatio } from './designer.js';
 
-const VIEW_TITLES = {
-  features: 'Features de solo lectura',
-  audit: 'Auditoría de solo lectura',
-  backlog: 'Backlog de la empresa de agentes',
+const VIEW_LABELS = {
+  features: 'Features',
+  audit: 'Auditoría',
+  backlog: 'Backlog',
 };
 const VIEWPORTS = [
   { width: 1440, height: 1000 },
@@ -202,14 +202,20 @@ export async function captureInHost(
             await page.goto(`http://127.0.0.1:${address.port}`, { timeout: CAPTURE_WAIT_MS });
             await waitForDesignCanvas(page);
             await page.getByTestId('company-hud').waitFor({ timeout: CAPTURE_WAIT_MS });
-            if (view in VIEW_TITLES) {
+            const openSection = async () => {
+              if (!(view in VIEW_LABELS)) return;
+              // All sections now live in one window. Open it through its dock entry,
+              // then navigate using the same tabs as the operator.
+              await page.getByRole('button', { name: 'Backlog', exact: true }).click();
+              const window = page.getByTestId('panel-window');
+              await window.waitFor({ timeout: CAPTURE_WAIT_MS });
               await page
-                .getByTitle(VIEW_TITLES[view as keyof typeof VIEW_TITLES], { exact: true })
+                .getByRole('tab', {
+                  name: VIEW_LABELS[view as keyof typeof VIEW_LABELS],
+                  exact: true,
+                })
                 .click();
-              const panel =
-                view === 'audit'
-                  ? page.getByRole('region', { name: 'Auditoría', exact: true })
-                  : page.getByTestId(`${view}-panel`);
+              const panel = window.getByTestId(`${view}-panel`);
               await panel.waitFor({ timeout: CAPTURE_WAIT_MS });
               if (fixture === 'populated')
                 await (
@@ -225,11 +231,12 @@ export async function captureInHost(
               if (view === 'audit')
                 await panel
                   .getByText(
-                    fixture === 'error' ? /No se|Error|error/ : 'No hay entradas de auditoría',
+                    fixture === 'error' ? /No se|Error|error/ : 'Aún no hay nada registrado.',
                   )
                   .first()
                   .waitFor({ timeout: CAPTURE_WAIT_MS });
-            }
+            };
+            await openSection();
             const id = `${view}-${viewport.width}-${fixture}`;
             const png = path.join(input.directory, `${id}.png`);
             await page.screenshot({ path: png, fullPage: true, animations: 'disabled' });
@@ -240,12 +247,21 @@ export async function captureInHost(
               result: 'pass',
               evidence: `${id}.png (demo fixture: ${fixture})`,
             });
-            const toolbarButton = page.getByTitle(VIEW_TITLES.features, { exact: true });
+            const toolbarButton = page.getByRole('button', {
+              name: VIEW_LABELS.features,
+              exact: true,
+            });
             const panelButton = page.locator('[role="region"] button:enabled').first();
+            // On mobile the window is a full-screen sheet. Exercise the real dock
+            // before reopening the section for panel interactions and contrast.
+            const restoreWindow = viewport.width === 390 && view in VIEW_LABELS;
+            if (restoreWindow)
+              await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).click();
             for (const [scope, button] of [
               ['toolbar', toolbarButton],
               ['panel', panelButton],
             ] as const) {
+              if (scope === 'panel' && restoreWindow) await openSection();
               if (!(await button.count()) || !(await button.isVisible())) {
                 validations.push({
                   kind: 'interaction',

@@ -8,6 +8,7 @@ import type {
 } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
+import { connectionCopy } from './connectionStatus.js';
 
 // ── Executor availability (server `executorState`, SA-087/088/089/091) ──────
 // The server is the only source of truth. A toggle never changes `state`
@@ -35,8 +36,7 @@ export function emptyExecutorStore(): ExecutorStore {
   return { state: null, pending: {}, errors: {}, needsSnapshot: false };
 }
 
-const TIMEOUT_ERROR = 'Sin respuesta del servidor; esperando estado actualizado.';
-const OFFLINE_ERROR = 'Sin conexión con el servidor; esperando estado actualizado.';
+const TIMEOUT_ERROR = 'Sin respuesta de la oficina (pixel-agents); esperando estado actualizado.';
 
 /** Snapshots arrive in order per connection; a reconnect restarts the sequence at 0. */
 export function applyExecutorState(store: ExecutorStore, next: ExecutorState): ExecutorStore {
@@ -54,7 +54,8 @@ export function applyExecutorState(store: ExecutorStore, next: ExecutorState): E
     if (p.awaitingSnapshot && (!p.revision || p.revision === next.revision)) delete pending[id];
   }
   for (const [id, error] of Object.entries(errors)) {
-    if (error === TIMEOUT_ERROR || error === OFFLINE_ERROR) delete errors[id];
+    if (error === TIMEOUT_ERROR || error === connectionCopy('disconnected').explanation)
+      delete errors[id];
   }
   return { ...store, state: next, pending, errors, needsSnapshot: false };
 }
@@ -248,7 +249,10 @@ export function sendExecutorCommand(message: ClientMessage, transport: MessageTr
     setExecutorStore({
       ...current,
       pending,
-      errors: { ...current.errors, [message.executorId]: OFFLINE_ERROR },
+      errors: {
+        ...current.errors,
+        [message.executorId]: connectionCopy('disconnected').explanation,
+      },
       needsSnapshot: true,
     });
     transport.send({ type: 'requestExecutorState', projectId: message.projectId });

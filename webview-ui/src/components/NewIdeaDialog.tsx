@@ -28,6 +28,7 @@ import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { IdeaCommand } from './IdeaCommand.js';
 import { IdeaNextSteps } from './IdeaNextSteps.js';
+import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -81,7 +82,8 @@ export function NewIdeaDialog({
       setConfirmDiscard(consult ? 'consult' : 'close');
     else finishClose(consult);
   };
-  const writable = !access.pending && (state === 'editing' || state === 'error');
+  const editable = state !== 'saving' && state !== 'saved';
+  const canSave = !access.pending && !access.blocked && (state === 'editing' || state === 'error');
   const question = IDEA_QUESTIONS[step - 1];
   const answer = question ? answers[question.id] : undefined;
   const reviewing = step === IDEA_QUESTIONS.length + 1;
@@ -97,7 +99,7 @@ export function NewIdeaDialog({
     if (question) setAnswers({ ...answers, [question.id]: { choice, text: value } });
   };
   const save = () => {
-    if (!writable || !text.trim() || !complete) return;
+    if (!canSave || !text.trim() || !complete) return;
     const submission: IdeaAnswer[] = IDEA_QUESTIONS.map((entry) => ({
       questionId: entry.id,
       choice: answers[entry.id].choice!,
@@ -108,12 +110,7 @@ export function NewIdeaDialog({
   if (permissionBlocked) {
     return (
       <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Nueva idea"
-          className="p-10 flex flex-col gap-8"
-        >
+        <div role="region" aria-label="Nueva idea" className="p-10 flex flex-col gap-8">
           <p role="status">
             {store.snapshot?.preparationError === 'denied'
               ? OFFICE_MANAGED_EXPLANATION
@@ -135,12 +132,7 @@ export function NewIdeaDialog({
   }
   return (
     <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Nueva idea"
-        className="p-10 flex flex-col gap-8"
-      >
+      <div role="region" aria-label="Nueva idea" className="p-10 flex flex-col gap-8">
         <p>
           Describe lo que necesitas. Guardar deja un borrador pendiente; no inicia ningún trabajo.
         </p>
@@ -227,16 +219,13 @@ export function NewIdeaDialog({
                   rows={IDEA_TEXTAREA_ROWS}
                   value={text}
                   onChange={(event) => setText(event.target.value)}
-                  disabled={
-                    !writable &&
-                    (!preparation || !!store.preparationPending || connection !== 'connected')
-                  }
+                  disabled={!editable}
                   className="bg-bg-dark text-text border-2 border-border p-8 w-full"
                 />
               </>
             )}
             {question && (
-              <fieldset disabled={!writable} className="min-w-0 flex flex-col gap-8">
+              <fieldset disabled={!editable} className="min-w-0 flex flex-col gap-8">
                 <legend>{question.label}</legend>
                 <p id="idea-question-helper">{question.helper}</p>
                 <label>
@@ -255,7 +244,7 @@ export function NewIdeaDialog({
                   rows={IDEA_TEXTAREA_ROWS}
                   aria-describedby="idea-question-helper"
                   value={answer?.text ?? ''}
-                  disabled={!writable || answer?.choice === 'decide'}
+                  disabled={!editable || answer?.choice === 'decide'}
                   onChange={(event) => updateAnswer('answer', event.target.value)}
                   className="bg-bg-dark text-text border-2 border-border p-8 w-full"
                 />
@@ -296,7 +285,7 @@ export function NewIdeaDialog({
               </section>
             )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
-              {access.pending && access.explanation}
+              {access.pending && connection === 'connected' && <p>{access.explanation}</p>}
               {!access.pending && state === 'loading' && 'Comprobando el Project…'}
               {!access.pending &&
                 state === 'disabled' &&
@@ -304,22 +293,22 @@ export function NewIdeaDialog({
                 !store.snapshot?.preparationError &&
                 ideaErrorText(store.snapshot?.errorCode)}
               {!access.pending && state === 'error' && ideaErrorText(store.result?.errorCode)}
-              {state === 'offline' && 'Sin conexión. Reconecta para guardar la idea.'}
+              {state === 'offline' && <OfficeConnectionHelp />}
               {state === 'saving' && 'Guardando…'}
               {state === 'uncertain' &&
                 'No se pudo confirmar el guardado. Consulta las ideas pendientes antes de enviar otra; el envío no se repetirá automáticamente.'}
             </div>
             {step > 0 && (
-              <Button disabled={!writable} onClick={() => setStep(step - 1)}>
+              <Button disabled={!editable} onClick={() => setStep(step - 1)}>
                 Anterior
               </Button>
             )}
             {reviewing ? (
-              <Button disabled={!writable || !text.trim() || !complete} onClick={save}>
+              <Button disabled={!canSave || !text.trim() || !complete} onClick={save}>
                 {state === 'saving' ? 'Guardando…' : 'Guardar idea'}
               </Button>
             ) : (
-              <Button disabled={!writable || !canContinue} onClick={() => setStep(step + 1)}>
+              <Button disabled={!editable || !canContinue} onClick={() => setStep(step + 1)}>
                 Siguiente
               </Button>
             )}

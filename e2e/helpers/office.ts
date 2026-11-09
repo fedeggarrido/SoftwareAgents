@@ -337,22 +337,16 @@ export async function closeAgentFromOverlay(
       : getOverlayByText(frame, options.text ?? '').first();
   await expect(overlay).toBeVisible({ timeout });
 
-  // Selecting an agent is what reveals its "Close agent" (×) button. The
-  // production path selects via a canvas hit-test on the sprite; driving that
-  // from a test means computing pixel offsets below the overlay, which is
-  // geometry-brittle and previously caused retry-flakes (e.g. the "close via
-  // X" lifecycle test). Instead, select deterministically through the test
-  // hook: it sets officeState.selectedAgentId (the same state a click sets),
-  // and ToolOverlay re-renders every rAF, so the × button surfaces and becomes
-  // clickable on the next frame. The overlay carries its agent id as
-  // data-agent-id, so the text-based lookup path resolves an id too.
+  // Select through the production selection state, then use its dedicated card.
   const agentId = options.agentId ?? Number(await overlay.getAttribute('data-agent-id'));
   await frame.evaluate((id) => {
     window.__pixelAgentsTestHooks?.selectAgent?.(id);
   }, agentId);
 
-  const closeButton = overlay.locator('button[title="Close agent"]');
+  const closeButton = frame
+    .getByTestId('character-detail-panel')
+    .getByRole('button', { name: 'Cerrar agente', exact: true });
   await expect(closeButton).toBeVisible({ timeout });
-  narrate.step('closing the agent via its "×" overlay button');
+  narrate.step('closing the agent from its card');
   await closeButton.click();
 }

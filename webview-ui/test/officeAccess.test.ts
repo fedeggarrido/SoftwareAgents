@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { officeAccessView, setOfficeAccess } from '../src/office/accessStore.js';
+import { setConnectionStatus } from '../src/office/connectionStatus.js';
 
 const runtime = vi.hoisted(() => ({ browser: true }));
 vi.mock('../src/runtime.js', () => ({
@@ -18,14 +19,34 @@ async function indicator() {
 }
 afterEach(() => {
   setOfficeAccess(null);
+  setConnectionStatus({ cause: 'unavailable', attempt: 0, retryAt: null });
   runtime.browser = true;
 });
 
 describe('SA-116 permanent office mode', () => {
+  it.each([
+    ['unavailable', 'reconnecting', 'terminal donde lo lanzaste'],
+    ['unauthorized', 'disconnected', 'La URL de acceso no es válida'],
+    ['origin', 'disconnected', 'ha rechazado el origen'],
+  ] as const)(
+    'names the office connection and explains %s in the badge',
+    async (cause, state, text) => {
+      setOfficeAccess(null);
+      setConnectionStatus({
+        cause,
+        state,
+        attempt: state === 'reconnecting' ? 1 : 0,
+        retryAt: null,
+      });
+      const html = await indicator();
+      expect(html).toContain('conexión con la oficina');
+      expect(html).toContain(text);
+    },
+  );
   it('shows neutral reconnecting help until the handshake confirms access', async () => {
     setOfficeAccess(null);
     const html = await indicator();
-    expect(html).toContain('Reconectando…');
+    expect(html).toContain('Conectando con la oficina…');
     expect(html).not.toContain('Solo lectura');
     expect(html).not.toContain('URL con token');
   });
@@ -34,7 +55,7 @@ describe('SA-116 permanent office mode', () => {
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     const html = await indicator();
     expect(html).toContain('Solo lectura');
-    expect(html).toContain('title="Para preparar el proyecto');
+    expect(html).toContain('La URL de acceso no es válida');
     expect(html).toContain('inicia pixel-agents tú mismo en tu terminal');
     expect(html).toContain('URL con token que imprime');
     expect(html).not.toContain('role="alert"');
@@ -47,7 +68,7 @@ describe('SA-116 permanent office mode', () => {
     expect(html).toContain('Recargar la página quita el modo operador');
     expect(html).toContain('vuelve a abrir la URL de la terminal');
     expect(officeAccessView(null, false)).toMatchObject({
-      label: 'Reconectando…',
+      label: 'Conectando con la oficina…',
       blocked: false,
       pending: true,
     });

@@ -942,6 +942,7 @@ export function OfficeCanvas({
     <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-bg">
       <canvas
         ref={canvasRef}
+        tabIndex={0}
         title={
           isEditMode ? undefined : 'Arrastra para mover la oficina · Ctrl + rueda para ampliar'
         }

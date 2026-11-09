@@ -181,7 +181,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('Ideas pendientes · sin FeatureSpec');
     expect(html).toContain('Copiar comando');
     expect(html).toContain('carpeta del repositorio vinculada a esta oficina');
-    expect(html).toContain('URL que pixel-agents mostró');
+    expect(html).toContain('Copiar token para CLI');
     expect(html).toContain('data-state="idea_pending"');
     expect(html).toContain('data-state="in_development"');
     project('Q');

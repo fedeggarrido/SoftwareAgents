@@ -182,6 +182,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
             build.onLoad({ filter: /[\\/]transport[\\/]index\.ts$/ }, () => ({
               loader: 'js',
               contents: `
+              export async function copyOperatorToken() {}
               export const transport = {
                 state: 'connected', ready: Promise.resolve(),
                 onStateChange: () => () => {}, dispose() {},

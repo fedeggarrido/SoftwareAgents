@@ -16,6 +16,7 @@ import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
+import { PanelWindow } from './components/PanelWindow.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -25,6 +26,7 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
+import { usePanelWindow } from './hooks/usePanelWindow.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -113,10 +115,17 @@ function App() {
 
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isBacklogOpen, setIsBacklogOpen] = useState(false);
-  const [isDecisionsOpen, setIsDecisionsOpen] = useState(false);
-  const [isAuditOpen, setIsAuditOpen] = useState(false);
-  const [isFeaturesOpen, setIsFeaturesOpen] = useState(false);
+  const panel = usePanelWindow(layoutReady);
+  const characterPanelRef = useRef<HTMLDivElement>(null);
+  const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null);
+  const selectPanel = panel.select;
+  const handleSelectCharacter = useCallback(
+    (id: number | null) => {
+      setSelectedCharacterId(id);
+      if (id !== null) selectPanel('character');
+    },
+    [selectPanel],
+  );
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -449,6 +458,9 @@ function App() {
             panRef={editor.panRef}
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
+            characterPanelRef={characterPanelRef}
+            showCharacterPanel={panel.isOpen && panel.tab === 'character'}
+            onSelectCharacter={handleSelectCharacter}
           />
         </>
       ) : (
@@ -532,13 +544,15 @@ function App() {
         onToggleEditMode={editor.handleToggleEditMode}
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        isBacklogOpen={isBacklogOpen}
-        isAuditOpen={isAuditOpen}
-        isFeaturesOpen={isFeaturesOpen}
-        onToggleFeatures={() => setIsFeaturesOpen((v) => !v)}
+        isBacklogOpen={panel.isOpen && panel.tab === 'backlog'}
+        isDecisionsOpen={panel.isOpen && panel.tab === 'decisions'}
+        onToggleDecisions={() => panel.toggle('decisions')}
+        isAuditOpen={panel.isOpen && panel.tab === 'audit'}
+        isFeaturesOpen={panel.isOpen && panel.tab === 'features'}
+        onToggleFeatures={() => panel.toggle('features')}
         onNewIdea={() => setIsNewIdeaOpen(true)}
-        onToggleAudit={() => setIsAuditOpen((v) => !v)}
-        onToggleBacklog={() => setIsBacklogOpen((v) => !v)}
+        onToggleAudit={() => panel.toggle('audit')}
+        onToggleBacklog={() => panel.toggle('backlog')}
         workspaceFolders={workspaceFolders}
       />
 
@@ -547,20 +561,31 @@ function App() {
           <CompanyHud
             agents={agents}
             officeState={officeState}
-            onOpenBacklog={() => setIsBacklogOpen(true)}
-            onOpenDecisions={() => setIsDecisionsOpen((v) => !v)}
+            onOpenDecisions={() => panel.toggle('decisions')}
+            onOpenMeeting={() => panel.toggle('meeting')}
           />
         </div>
-        <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
+      </div>
+      <PanelWindow
+        isOpen={panel.isOpen}
+        tab={panel.tab}
+        rect={panel.rect}
+        mobile={panel.mobile}
+        onSelect={panel.select}
+        onRectChange={panel.setRect}
+        onReset={panel.reset}
+        onClose={panel.close}
+      >
+        <AuditPanel isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
         <FeaturesPanel
-          isOpen={isFeaturesOpen}
-          onClose={() => setIsFeaturesOpen(false)}
+          isOpen={panel.isOpen && panel.tab === 'features'}
+          onClose={panel.close}
           checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
         />
 
         <BacklogPanel
-          isOpen={isBacklogOpen}
-          onClose={() => setIsBacklogOpen(false)}
+          isOpen={panel.isOpen && panel.tab === 'backlog'}
+          onClose={panel.close}
           officeState={officeState}
           onFocusAgent={(id) => {
             const os = getOfficeState();
@@ -568,18 +593,23 @@ function App() {
             os.cameraFollowId = id;
           }}
         />
-      </div>
-      <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
+        <DecisionsPanel isOpen={panel.isOpen && panel.tab === 'decisions'} onClose={panel.close} />
+        {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel />}
+        <div ref={characterPanelRef} hidden={panel.tab !== 'character'}>
+          {panel.tab === 'character' && selectedCharacterId === null && (
+            <p className="p-8 text-xs text-text-muted">Selecciona un personaje en la oficina.</p>
+          )}
+        </div>
+      </PanelWindow>
       {isNewIdeaOpen && (
         <NewIdeaDialog
           checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
           onClose={() => {
             setIsNewIdeaOpen(false);
-            setIsFeaturesOpen(true);
+            panel.select('features');
           }}
         />
       )}
-      <MeetingPanel />
 
       <VersionIndicator
         currentVersion={extensionVersion}
@@ -654,6 +684,8 @@ function App() {
           onClose={handleIntroClose}
           escapeSuppressed={
             isSettingsOpen ||
+            isNewIdeaOpen ||
+            panel.isOpen ||
             isChangelogOpen ||
             isHooksInfoOpen ||
             showMigrationNotice ||

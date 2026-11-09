@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { CharacterDetailPanel } from '../../components/CharacterDetailPanel.js';
 import { Button } from '../../components/ui/Button.js';
@@ -81,6 +82,9 @@ interface ToolOverlayProps {
   panRef: React.RefObject<{ x: number; y: number }>;
   onCloseAgent: (id: number) => void;
   alwaysShowOverlay: boolean;
+  characterPanelRef: React.RefObject<HTMLDivElement | null>;
+  showCharacterPanel: boolean;
+  onSelectCharacter: (id: number | null) => void;
 }
 
 /** Derive a short human-readable activity string from tools/status */
@@ -133,6 +137,9 @@ export function ToolOverlay({
   panRef,
   onCloseAgent,
   alwaysShowOverlay,
+  characterPanelRef,
+  showCharacterPanel,
+  onSelectCharacter,
 }: ToolOverlayProps) {
   const board = useBoard();
   // A Project whose server announces executor state manages its launches (SA-091).
@@ -149,6 +156,11 @@ export function ToolOverlay({
     return () => cancelAnimationFrame(rafId);
   }, []);
 
+  const selectedId = officeState.selectedAgentId;
+  useEffect(() => {
+    onSelectCharacter(selectedId);
+  }, [selectedId, onSelectCharacter]);
+
   const el = containerRef.current;
   if (!el) return null;
   const project = overlayProjection(
@@ -159,7 +171,6 @@ export function ToolOverlay({
     window.devicePixelRatio || 1,
   );
 
-  const selectedId = officeState.selectedAgentId;
   const hoveredId = officeState.hoveredAgentId;
 
   // All character IDs
@@ -167,13 +178,18 @@ export function ToolOverlay({
 
   return (
     <>
-      {selectedId !== null && officeState.characters.has(selectedId) && (
-        <CharacterDetailPanel
-          detail={getAgentRole(selectedId)?.characterDetail}
-          executorState={executorState}
-          board={board}
-        />
-      )}
+      {showCharacterPanel &&
+        characterPanelRef.current &&
+        selectedId !== null &&
+        officeState.characters.has(selectedId) &&
+        createPortal(
+          <CharacterDetailPanel
+            detail={getAgentRole(selectedId)?.characterDetail}
+            executorState={executorState}
+            board={board}
+          />,
+          characterPanelRef.current,
+        )}
       {allIds.map((id) => {
         const ch = officeState.characters.get(id);
         if (!ch) return null;

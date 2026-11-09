@@ -108,12 +108,7 @@ export function NewIdeaDialog({
   if (permissionBlocked) {
     return (
       <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Nueva idea"
-          className="p-10 flex flex-col gap-8"
-        >
+        <div role="region" aria-label="Nueva idea" className="p-10 flex flex-col gap-8">
           <p role="status">
             {store.snapshot?.preparationError === 'denied'
               ? OFFICE_MANAGED_EXPLANATION
@@ -135,12 +130,7 @@ export function NewIdeaDialog({
   }
   return (
     <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Nueva idea"
-        className="p-10 flex flex-col gap-8"
-      >
+      <div role="region" aria-label="Nueva idea" className="p-10 flex flex-col gap-8">
         <p>
           Describe lo que necesitas. Guardar deja un borrador pendiente; no inicia ningún trabajo.
         </p>

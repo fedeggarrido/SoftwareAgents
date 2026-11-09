@@ -74,7 +74,7 @@ const AUTOPILOT_TEXT: Record<string, string> = {
 
 interface CompanyHudProps {
   onOpenDecisions: () => void;
-  onOpenBacklog: () => void;
+  onOpenMeeting: () => void;
   officeState: OfficeState;
   agents: number[];
 }
@@ -82,7 +82,7 @@ interface CompanyHudProps {
 /** Project progress, autopilot, owner decisions and provider availability. */
 export function CompanyHud({
   onOpenDecisions,
-  onOpenBacklog,
+  onOpenMeeting,
   officeState,
   agents,
 }: CompanyHudProps) {
@@ -129,12 +129,14 @@ export function CompanyHud({
           >
             {open ? '▾' : '▸'} {board.project} {board.projectId ? `(${board.projectId})` : ''}
           </button>
-          <button className={actionClass} onClick={onOpenBacklog}>
-            Backlog
-          </button>
           {decisions.visible && (
             <button className={actionClass} onClick={onOpenDecisions}>
               {decisions.label}
+            </button>
+          )}
+          {board.meeting && (
+            <button className={actionClass} onClick={onOpenMeeting}>
+              Reuniones
             </button>
           )}
         </div>
@@ -223,9 +225,11 @@ export function CompanyHud({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-4">
-          <button className={actionClass} onClick={onOpenBacklog} title="Ver todas las tareas">
-            Tareas
-          </button>
+          {board.meeting && (
+            <button className={actionClass} onClick={onOpenMeeting}>
+              Reuniones
+            </button>
+          )}
           {decisions.visible && (
             <button className={actionClass} onClick={onOpenDecisions}>
               {decisions.label}

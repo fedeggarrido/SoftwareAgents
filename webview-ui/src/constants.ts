@@ -473,3 +473,29 @@ export const PR_DISPLAY_REFRESH_MS = 5000;
 export const IDEA_REQUEST_TIMEOUT_MS = 15_000;
 export const IDEA_TEXTAREA_ROWS = 6;
 export const FEATURE_PLAN_TIMEOUT_MS = 15_000;
+
+// Viewer-local office window geometry, in CSS pixels.
+export const PANEL_WINDOW_STORAGE_KEY = 'pixel-agents.panel-window.v1';
+export const PANEL_MOBILE_BREAKPOINT_PX = 480;
+export const PANEL_WINDOW_DEFAULT_WIDTH_PX = 720;
+export const PANEL_WINDOW_DEFAULT_HEIGHT_PX = 520;
+export const PANEL_WINDOW_MIN_WIDTH_PX = 320;
+export const PANEL_WINDOW_MIN_HEIGHT_PX = 240;
+export const PANEL_WINDOW_MARGIN_PX = 8;
+export const PANEL_WINDOW_DEFAULT_LEFT_PX = 64;
+export const PANEL_WINDOW_DEFAULT_TOP_PX = 104;
+export const PANEL_WINDOW_TITLE_HEIGHT_PX = 44;
+export const PANEL_WINDOW_MOVE_STEP_PX = 16;
+export const PANEL_WINDOW_RESIZE_STEP_PX = 16;
+export const PANEL_WINDOW_Z_INDEX = 44;
+export const MODAL_Z_INDEX = 50;
+export const OFFICE_HELP_Z_INDEX = 20;
+export const MIGRATION_NOTICE_Z_INDEX = 100;
+export const PANEL_TABS = [
+  { id: 'backlog', label: 'Backlog' },
+  { id: 'decisions', label: 'Decisiones' },
+  { id: 'audit', label: 'Auditoría' },
+  { id: 'features', label: 'Features' },
+  { id: 'meeting', label: 'Reuniones' },
+  { id: 'character', label: 'Personaje' },
+] as const;

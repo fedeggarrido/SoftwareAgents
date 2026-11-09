@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
+import { useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
+import { MODAL_Z_INDEX } from '../../constants.js';
+import { useDismissibleLayer } from '../../hooks/useDismissibleLayer.js';
 import { Button } from './Button.js';
 
 interface ModalProps {
@@ -7,7 +11,7 @@ interface ModalProps {
   onClose: () => void;
   title: ReactNode;
   children: ReactNode;
-  /** z-index for backdrop (modal gets +1). Default 49 */
+  /** z-index for backdrop (modal gets +1). Defaults to MODAL_Z_INDEX. */
   zIndex?: number;
   className?: string;
 }
@@ -17,21 +21,32 @@ export function Modal({
   onClose,
   title,
   children,
-  zIndex = 50,
+  zIndex = MODAL_Z_INDEX,
   className = '',
 }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDismissibleLayer(isOpen, onClose, zIndex, dialogRef, true);
   if (!isOpen) return null;
 
-  return (
+  const content = (
     <>
       <div className="fixed inset-0 bg-black/50" style={{ zIndex }} onClick={onClose} />
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={(event) => event.stopPropagation()}
         className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg border-2 border-border rounded-none shadow-pixel p-4 min-w-xs ${className}`}
         style={{ zIndex: zIndex + 1 }}
       >
         <div className="flex items-center justify-between py-4 px-10 border-b border-border mb-4">
-          <span className="text-accent-bright text-2xl">{title}</span>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+          <span id={titleId} className="text-accent-bright text-2xl">
+            {title}
+          </span>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar">
             x
           </Button>
         </div>
@@ -39,4 +54,6 @@ export function Modal({
       </div>
     </>
   );
+  // Plans originate inside the floating window. A portal keeps them in the modal layer.
+  return typeof document === 'undefined' ? content : createPortal(content, document.body);
 }

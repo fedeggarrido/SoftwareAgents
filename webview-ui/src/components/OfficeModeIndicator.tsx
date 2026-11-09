@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
+import { OFFICE_HELP_Z_INDEX } from '../constants.js';
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { Button } from './ui/Button.js';
@@ -7,22 +9,13 @@ import { Button } from './ui/Button.js';
 export function OfficeModeIndicator() {
   const view = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const [expanded, setExpanded] = useState(false);
-  const container = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!expanded) return;
-    const dismiss = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setExpanded(false);
-      container.current?.querySelector('button')?.focus();
-    };
-    // Capture before the editor's window bubble listener, even if focus has moved away.
-    window.addEventListener('keydown', dismiss, true);
-    return () => window.removeEventListener('keydown', dismiss, true);
-  }, [expanded]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  useDismissibleLayer(expanded, () => setExpanded(false), OFFICE_HELP_Z_INDEX, containerRef);
   return (
-    <div ref={container} className="office-mode-indicator flex flex-col items-end gap-4 max-w-full">
+    <div
+      ref={containerRef}
+      className="office-mode-indicator flex flex-col items-end gap-4 max-w-full"
+    >
       <Button
         size="sm"
         title={view.explanation}

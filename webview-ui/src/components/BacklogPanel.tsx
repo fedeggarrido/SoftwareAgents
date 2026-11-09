@@ -174,7 +174,7 @@ export function BacklogPanel({ isOpen, onClose, onFocusAgent, officeState }: Bac
 
   return (
     <div
-      className="read-only-panel z-40 pixel-panel p-8 flex flex-col gap-8"
+      className="read-only-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
       role="region"
       aria-label="Backlog"

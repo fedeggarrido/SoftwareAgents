@@ -1,3 +1,7 @@
+import { useRef } from 'react';
+
+import { MIGRATION_NOTICE_Z_INDEX } from '../constants.js';
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import { Button } from './ui/Button.js';
 
 interface MigrationNoticeProps {
@@ -5,10 +9,19 @@ interface MigrationNoticeProps {
 }
 
 export function MigrationNotice({ onDismiss }: MigrationNoticeProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDismissibleLayer(true, onDismiss, MIGRATION_NOTICE_Z_INDEX, dialogRef, true);
   return (
     <div
-      className="absolute inset-0 bg-black/70 flex items-center justify-center z-100"
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Actualización de la oficina"
+      tabIndex={-1}
+      style={{ zIndex: MIGRATION_NOTICE_Z_INDEX }}
+      className="absolute inset-0 bg-black/70 flex items-center justify-center"
       onClick={onDismiss}
+      onKeyDown={(event) => event.stopPropagation()}
     >
       <div
         className="pixel-panel py-24 px-32 max-w-xl text-center leading-[1.3]"

@@ -74,7 +74,7 @@ export function FeaturesPanel({
       role="region"
       aria-label="Features"
       data-testid="features-panel"
-      className="read-only-panel absolute top-60 z-40 pixel-panel p-10 flex flex-col gap-8 max-h-[70vh] overflow-y-auto"
+      className="read-only-panel p-10 flex flex-col gap-8"
     >
       <PanelHeading title="Features" onClose={onClose}>
         {state !== 'read_error' && (

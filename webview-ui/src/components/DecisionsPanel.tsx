@@ -15,8 +15,10 @@ export function DecisionsPanel({ isOpen, onClose }: DecisionsPanelProps) {
   const decisions = board?.decisions ?? [];
   return (
     <div
-      className="absolute top-60 left-1/2 -translate-x-1/2 z-40 pixel-panel p-10 flex flex-col gap-8 w-[min(640px,92vw)] max-h-[70vh] overflow-y-auto"
+      className="read-only-panel p-10 flex flex-col gap-8"
       data-testid="decisions-panel"
+      role="region"
+      aria-label="Decisiones"
     >
       <div className="flex items-center gap-8">
         <span className="text-lg flex-1">Decisiones del propietario</span>

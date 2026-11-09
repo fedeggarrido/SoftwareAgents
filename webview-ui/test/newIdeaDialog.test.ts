@@ -196,6 +196,75 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it('keeps text and answers bound to their project across reconnect, blocks saving, copies and discards', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    try {
+      await render();
+      respond();
+      await render();
+      await review();
+      const staleSave = findControl(
+        await tree(),
+        (props) => props.children === 'Guardar idea',
+      )!.onClick!;
+      lifecycle.state = 'reconnecting';
+      setOfficeAccess(null);
+      setIdeasStore(emptyIdeasStore());
+      await render();
+      lifecycle.state = 'connected';
+      setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
+      await render();
+      respond({ projectId: 'other-project' });
+      // A click captured before the snapshot changed must also fail closed.
+      staleSave();
+      const html = await render();
+      expect(html).toContain('Este borrador era para otro proyecto (P)');
+      expect(html).toContain('Una idea literal');
+      expect(html).toContain('Respuesta ' + IDEA_QUESTIONS[0].id);
+      const save = findControl(await tree(), (props) => props.children === 'Guardar idea')!;
+      expect(save.disabled).toBe(true);
+      save.onClick!();
+      expect(
+        lifecycle.send.mock.calls.filter(([message]) => message.type === 'submitIdea'),
+      ).toHaveLength(0);
+      await click('Copiar texto');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Una idea literal'));
+      expect(writeText).toHaveBeenCalledWith(
+        expect.stringContaining('Respuesta ' + IDEA_QUESTIONS[0].id),
+      );
+      await click('Descartar');
+      expect(await render()).not.toContain('Este borrador era para otro proyecto');
+      expect(findControl(await tree(), (props) => props.id === 'new-idea-text')!.value).toBe('');
+      await review();
+      await click('Guardar idea');
+      expect(lifecycle.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'submitIdea', projectId: 'other-project' }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps an unchanged project draft writable after resync', async () => {
+    await render();
+    respond();
+    await render();
+    await review();
+    setIdeasStore(emptyIdeasStore());
+    lifecycle.state = 'reconnecting';
+    await render();
+    lifecycle.state = 'connected';
+    await render();
+    respond();
+    await render();
+    expect(findControl(await tree(), (props) => props.children === 'Guardar idea')!.disabled).toBe(
+      false,
+    );
+    expect(await render()).not.toContain('Este borrador era para otro proyecto');
+  });
   it.each([
     ['offline', 'reconnecting', false],
     ['pending', 'connected', true],
@@ -759,7 +828,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
         'estimaciones, no cargos',
         'Copiar comando',
         'carpeta del repositorio vinculada a esta oficina',
-        'URL que pixel-agents mostró',
+        'Copiar token para CLI',
       ])
         expect(html).toContain(text);
       if (errorCode) expect(html).toContain('falta confirmar su auditoría');
@@ -777,7 +846,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       result.idea!.command,
       'Copiar comando',
       'carpeta del repositorio vinculada a esta oficina',
-      'URL que pixel-agents mostró',
+      'Copiar token para CLI',
     ])
       expect(html).toContain(text);
     expect(html).not.toMatch(/progressbar|feature-cost|<textarea/);

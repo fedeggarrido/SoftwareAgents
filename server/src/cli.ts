@@ -50,11 +50,11 @@ import { runEvalCommand } from './evalCommand.js';
 import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
-import { confirmHumanIngress, featureIngressActor } from './featureIngress.js';
+import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
-import { openOffice } from './openOffice.js';
+import { openOffice, shouldOpenOffice } from './openOffice.js';
 import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
@@ -72,6 +72,7 @@ export interface CliArgs {
   /** Unset reuses the user's saved standalone port, assigning one on first run. */
   port?: number;
   host: string;
+  noOpen?: boolean;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -100,12 +101,15 @@ export function parseArgs(argv: string[]): CliArgs {
     } else if (argv[i] === '--host' && argv[i + 1]) {
       args.host = argv[i + 1];
       i++;
+    } else if (argv[i] === '--no-open') {
+      args.noOpen = true;
     } else if (argv[i] === '--help') {
       console.log(`Uso: pixel-agents [opciones]
 
 Opciones:
   --port, -p <number>   Puerto de escucha (por defecto: el guardado para esta oficina)
   --host <string>      Dirección de escucha (por defecto: 127.0.0.1)
+  --no-open            No abrir el navegador automáticamente
   --help               Mostrar esta ayuda
 
 Comandos:
@@ -456,7 +460,7 @@ async function startServer(argv: string[]): Promise<void> {
       }
       if (!consent) {
         console.log(
-          '[Pixel Agents] Hooks not installed: modifying ~/.claude/settings.json needs one-time approval — open the URL below to review and approve it.',
+          '[Pixel Agents] Hooks pendientes de aprobación: abre Pixel Agents de forma interactiva y revisa Settings.',
         );
       } else if (copyHookScriptOrReport(packageRoot)) {
         try {
@@ -521,8 +525,13 @@ async function startServer(argv: string[]): Promise<void> {
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
     const officeUrl = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${config.port}/`;
     console.log(`\n  Pixel Agents server running at ${officeUrl}\n`);
-    if (process.stdout.isTTY && featureIngressActor() === 'human')
-      openOffice(`${officeUrl}?token=${encodeURIComponent(config.token)}`);
+    if (shouldOpenOffice(args.noOpen)) {
+      try {
+        openOffice(await server.officeOpenUrl());
+      } catch {
+        console.error('No se pudo abrir Pixel Agents en el navegador.');
+      }
+    }
 
     // ── Graceful shutdown ──
     let shuttingDown = false;

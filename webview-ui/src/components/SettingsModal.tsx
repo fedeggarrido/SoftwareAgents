@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { OFFICE_EPHEMERAL_WARNING } from '../../../core/src/officeAccess.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
 import { useOfficeRecovery } from '../office/recoveryActions.js';
 import { isBrowserRuntime } from '../runtime.js';
-import { transport } from '../transport/index.js';
+import { copyOperatorToken, transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 import { Checkbox } from './ui/Checkbox.js';
 import { MenuItem } from './ui/MenuItem.js';
@@ -67,7 +68,9 @@ export function SettingsModal({
   const [confirmRevocation, setConfirmRevocation] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [revocationFailed, setRevocationFailed] = useState(false);
-  const access = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
+  const officeAccess = useOfficeAccess();
+  const access = officeAccessView(officeAccess, !isBrowserRuntime);
+  const [copyFeedback, setCopyFeedback] = useState('');
   const connection = useConnectionStatus();
   const recovery = useOfficeRecovery();
   useEffect(
@@ -93,6 +96,34 @@ export function SettingsModal({
       <p className="p-10" role="status">
         {access.explanation}
       </p>
+      {isBrowserRuntime && officeAccess?.persistent === false && (
+        <p className="p-10" role="alert">
+          {OFFICE_EPHEMERAL_WARNING}
+        </p>
+      )}
+      {isBrowserRuntime && !access.blocked && !access.pending && (
+        <details className="p-10">
+          <summary>Detalles</summary>
+          <p>
+            Si un comando pide el token del operador, cópialo aquí y pégalo en la confirmación
+            oculta de tu terminal. No lo compartas.
+          </p>
+          <Button
+            onClick={() =>
+              void copyOperatorToken().then(
+                () => setCopyFeedback('Token copiado.'),
+                () =>
+                  setCopyFeedback(
+                    'No se pudo copiar el token. Comprueba el permiso del portapapeles.',
+                  ),
+              )
+            }
+          >
+            Copiar token para CLI
+          </Button>
+          <p role="status">{copyFeedback}</p>
+        </details>
+      )}
       {isBrowserRuntime && (
         <>
           <MenuItem

@@ -567,3 +567,4 @@ export const AUDIT_DETAIL_FIELDS = [
 /** Compact previews link to the complete readable sections below. */
 export const FEATURE_PLAN_PREVIEW_ITEMS = 3;
 export const FEATURE_PLAN_REVISION_CHARS = 8;
+export const OFFICE_BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000;

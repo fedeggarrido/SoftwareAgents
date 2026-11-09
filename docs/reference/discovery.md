@@ -9,9 +9,20 @@ repetidas) en HTTP y upgrades WS; las cabeceras Authorization se omiten del
 serializador de petición y se redactan si se registran explícitamente. No se
 registran mensajes WS controlados por el cliente. AuditLog ya redacta tokens y
 Authorization. Desde SA-144 el CLI imprime únicamente la dirección pública.
-El arranque interactivo humano abre el navegador con la capacidad directamente,
-sin escribirla en stdout. Los arranques gestionados o con stdout redirigido no
-abren el navegador.
+El arranque humano requiere stdin y stdout TTY para abrir el navegador. No abre
+con CI, VITEST, PLAYWRIGHT, NODE_ENV=test, PIXEL_AGENTS_NO_OPEN, los marcadores
+gestionados existentes ni `--no-open`.
+
+El lanzador recibe `/?open=<código aleatorio>`, nunca el token persistente.
+`POST /api/office/open` requiere Bearer, proceso humano y petición sin Origin;
+crea un código de 32 bytes que caduca en 60 segundos (constantes del servidor).
+La SPA retira `open` con `replaceState` antes de esperar la red y lo intercambia
+una vez por el token con `POST /api/office/exchange`. No reintenta el intercambio.
+Ambas rutas requieren peer y Host loopback, rechazan Origin ajeno y comparten
+un límite por proceso de 20 peticiones por minuto, incluidas las fallidas.
+Las respuestas usan no-store; los códigos solo existen en memoria, se invalidan
+con la rotación y se redactan en logs, también en queries repetidas o codificadas.
+Un fallo de intercambio deja el acceso habitual de lectura.
 
 SA-116 captura el token de la navegación inicial una sola vez, antes de conectar,
 y elimina todos los parámetros `token`, incluidos los repetidos o con la clave
@@ -24,7 +35,9 @@ terminal interactiva humana vuelve a abrir la oficina autenticada. Una pestaña
 que permanece abierta recupera la conexión tras reiniciar el programa.
 
 El handshake `webviewReady` recibe `officeAccess` con el privilegio de esa conexión
-y un motivo cerrado `token_required`, `managed_process` o null. No contiene
+y un motivo cerrado `token_required`, `managed_process` o null. En standalone
+incluye también `persistent`, una señal informativa para el aviso de Settings
+cuando la protección de credenciales obliga al acceso por ejecución. No contiene
 identidades, marcadores, rutas ni contenido. La barra muestra «Solo lectura» u
 «Operador», con una explicación accesible por clic y tooltip. Un servidor iniciado
 por un agente muestra «Operador · proceso gestionado» cuando el token es válido y
@@ -35,7 +48,8 @@ La señal de UI conserva los controles de autoridad existentes en el servidor.
 
 Riesgo residual de SA-116. La retirada de la barra sustituye la entrada actual del
 historial, pero no garantiza borrar copias previas, sincronizadas o capturadas
-antes de ejecutar JavaScript. La navegación inicial, discovery,
+antes de ejecutar JavaScript. Las navegaciones nuevas llevan solo el código;
+discovery,
 la memoria de la página y las peticiones WS visibles en herramientas del navegador
 siguen manejando el secreto. El token sigue siendo bearer y reutilizable. Evitar
 mostrarlo en la barra reduce la exposición en capturas posteriores, sin revocarlo.
@@ -48,13 +62,24 @@ SA-144 guarda la capacidad standalone por usuario en
 de discovery, con temporal exclusivo, fsync y publicación atómica. POSIX usa
 0600 y el directorio de usuario se crea 0700. En Windows se consulta el SID con
 `whoami` y se aplica `icacls /inheritance:r /grant:r *SID:(F)` antes de escribir
-el secreto. Si el host impide ejecutar la consulta de identidad, se conservan
-las ACL heredadas del perfil. No se reparan permisos explícitos ajenos ya
-existentes. Las copias de discovery siguen usando su política de permisos
-existente. El token nunca se imprime. La capacidad sobrevive a reinicios y el
+el secreto. Get-Acl verifica una DACL protegida con una sola regla explícita
+Allow FullControl para ese SID. Fallos de identidad, aplicación o verificación
+activan un token aleatorio por ejecución, sin publicar el secreto sin protección.
+Las copias standalone de discovery pasan por la misma protección antes de escribir;
+si falla, no se publican y el descubrimiento de hooks/CLI queda indisponible.
+Settings avisa en español de que el acceso no sobrevivirá a los reinicios.
+El token nunca se imprime. Con protección verificada, sobrevive a reinicios y el
 mismo archivo guarda el puerto predeterminado para que la pestaña alcance el
 servidor reiniciado. Un puerto guardado ocupado provoca un error de arranque.
 `--port` permite seleccionar otro puerto explícitamente.
+
+La continuación de ideas y los comandos del tour quedan dentro de «Detalles»
+cerrados. Para la confirmación CLI, Settings → Detalles → «Copiar token para CLI»
+copia la capacidad en memoria solo al pedirlo el operador; no la muestra ni
+la incorpora al comando. No se obtiene de la URL impresa.
+Los borradores conservan texto, respuestas y proyecto de origen al reconectar.
+Si llega un proyecto distinto, se bloquea guardar con «Este borrador era para
+otro proyecto (X)» y se ofrecen «Descartar» y «Copiar texto».
 
 `pixel-agents token --rotate` revoca la capacidad persistente incluso con el
 programa cerrado. Settings ofrece «Revocar acceso de esta pestaña» y confirma
@@ -103,7 +128,7 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 `/ws` is gated in **two tiers**, because `setHooksEnabled(true)` over this socket is a durable, machine-wide consent grant plus a hook install.
 
 1. **Connection** (`isAllowedWebSocketOrigin`): embedded requires the Bearer token; standalone requires a same-origin handshake. A missing Origin still connects (non-browser clients send none). This tier is weak by design — a DNS-rebound page sends `Origin` and `Host` as the same attacker-chosen name and IS accepted (`httpServerWs.test.ts` pins that).
-2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`) use an out-of-band secret, carried as Bearer in embedded and `/ws?token=` in standalone. Human interactive startup hands the privileged URL directly to the browser opener. The SPA captures it in memory and clears the page URL. Peer address, Host and Origin remain reproducible by a forwarder. The persistent bearer remains replayable until rotation. Fastify redacts credentials. Untokened clients keep their existing read surface.
+2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`) use an out-of-band secret, carried as Bearer in embedded and `/ws?token=` in standalone. Human interactive startup hands a single-use 60-second bootstrap code to the browser opener. The SPA clears the page URL, exchanges the code over loopback and retains the capability in memory. Peer address, Host and Origin remain reproducible by a forwarder; the code is still required. The persistent bearer remains replayable until rotation. Fastify redacts credentials and codes. Untokened clients keep their existing read surface.
 
 The **hooks preference is persisted only after the install/uninstall settled and the on-disk result agrees** — writing it first strands the user when an uninstall fails: entries still firing, but a persisted hooks-off makes the next startup skip the consent/install path entirely.
 

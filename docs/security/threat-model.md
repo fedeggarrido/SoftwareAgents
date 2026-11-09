@@ -312,7 +312,7 @@ ni seguridad semántica de sus resúmenes.
   y reconexiones. No se persiste en cookies, localStorage ni sessionStorage, ni se
   vuelve a leer de `location` para enlaces, copias o informes. Recargar pierde el
   privilegio. SA-144 permite volver a entrar abriendo Pixel Agents desde un
-  arranque humano interactivo que entrega la capacidad directamente al navegador.
+  arranque humano interactivo que entrega un código efímero al navegador.
   VS Code conserva su autoridad por el canal integrado sin token en URL.
   `officeAccess` comunica únicamente el privilegio existente y los motivos
   cerrados de falta de token o proceso gestionado. Los guards del servidor siguen
@@ -320,8 +320,8 @@ ni seguridad semántica de sus resúmenes.
   de ideas ni formularios de entrevista o reintentos por permisos.
 - **Riesgo residual de SA-116.** `replaceState` sustituye la entrada actual del
   historial. No garantiza eliminar copias previas o sincronizadas ni capturas
-  anteriores al arranque de JavaScript. La petición inicial ya transportó el
-  token y el handshake WS continúa llevándolo en query. Discovery,
+  anteriores al arranque de JavaScript. La navegación nueva transporta un código
+  efímero y el handshake WS continúa llevando el token en query. Discovery,
   memoria de página y herramientas de red del navegador siguen exponiendo la
   capacidad a quien tenga acceso. La redacción de logs de SA-075 permanece. La
   retirada de la barra no revoca el bearer ni resuelve el riesgo de mismo usuario
@@ -331,12 +331,23 @@ ni seguridad semántica de sus resúmenes.
   `~/.pixel-agents/office-access.json`, junto al puerto predeterminado para
   reconectar tras reiniciar. Creación y rotación usan el lock de discovery,
   temporales exclusivos, fsync y rename. El archivo usa 0600 en POSIX. Windows
-  intenta una ACL de acceso completo únicamente para el SID del usuario, sin
-  herencia, antes de escribir el secreto. Si la consulta de identidad está
-  prohibida por el host, conserva la ACL heredada del perfil. No corrige grants
-  explícitos ajenos preexistentes ni las ACL de las copias de discovery.
-  El CLI imprime únicamente la dirección pública. La navegación autenticada
-  sigue transportando la capacidad a través del lanzador del navegador.
+  aplica una ACL de acceso completo únicamente para el SID del usuario, sin
+  herencia, antes de escribir el secreto. Get-Acl verifica una única regla
+  explícita Allow FullControl para ese SID y DACL protegida. Cualquier fallo
+  de identidad, aplicación o verificación abandona la persistencia y genera
+  un token en memoria por ejecución; Settings avisa de que no sobrevivirá al
+  reinicio. Las copias standalone de discovery también exigen protección
+  verificada antes de escribir; si no se consigue, no se publican.
+  El CLI imprime únicamente la dirección pública. El lanzador recibe un código
+  aleatorio de 32 bytes, de un solo uso y con TTL de 60 segundos centralizado
+  en constantes. La SPA lo retira de la URL antes de intercambiarlo por el token.
+  Emisión exige Bearer y proceso humano sin Origin. Emisión e intercambio exigen
+  peer y Host loopback y rechazan Origin ajeno, con límite común de 20 intentos
+  por minuto por proceso, incluidos fallos. Respuestas no-store y redacción de
+  códigos en logs; solo memoria, sin reintentos de intercambio. Rotar invalida
+  códigos pendientes. Ni el token ni el código se imprimen.
+  Auto-open exige stdin y stdout TTY, sin marcadores gestionados, CI, VITEST,
+  PLAYWRIGHT, NODE_ENV=test, PIXEL_AGENTS_NO_OPEN ni `--no-open`.
 - **Riesgo residual aceptado de SA-144.** Reiniciar deja de revocar un token
   robado. Todas las instancias standalone del usuario comparten la capacidad
   hasta `pixel-agents token --rotate` o la revocación desde Settings. Se audita
@@ -345,13 +356,20 @@ ni seguridad semántica de sus resúmenes.
   gestionados. Cada instancia revalida antes de mensajes y peticiones, y cierra
   sockets inactivos al detectar el cambio mediante un sondeo de un segundo.
   Se mantienen los gates de conexión y el bind loopback predeterminado.
-  La capacidad puede leerse en el perfil, discovery, memoria, navegación inicial,
-  herramientas del navegador y argumentos del lanzador. Un proceso del mismo
+  La capacidad puede leerse en el perfil, discovery, memoria y herramientas del
+  navegador. El código efímero puede verse en argumentos del lanzador o capturas
+  de la navegación inicial: un proceso que lo robe y lo canjee dentro del plazo,
+  antes que la página, obtiene la capacidad. Un proceso del mismo
   usuario puede suplantar el listener del puerto guardado para recibir el
   token que una pestaña envía al reintentar. El handshake no autentica al servidor.
   La separación frente a ese adversario sigue dependiendo de SA-058.
   Los cambios no conceden privilegio
   a una pestaña que carece de capacidad ni permiten lanzar trabajo de agentes.
+  La copia explícita del token para la confirmación CLI vive solo en Settings →
+  Detalles; añade el portapapeles como canal elegido por el operador. No se muestra
+  ni se incluye en comandos, URLs de navegación nuevas ni logs. Un borrador de idea
+  conserva su proyecto de origen y bloquea guardar tras reconectar a otro proyecto,
+  manteniendo texto y respuestas para copiar o descartar.
 
 - **SA-111.** `approveFeaturePlan` usa exclusivamente el privilegio decidido por
   el handshake WS de esta sección. Antes de resolver el Project rechaza conexiones

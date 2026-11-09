@@ -30,6 +30,7 @@ import {
   WS_MAX_PAYLOAD_BYTES,
 } from './constants.js';
 import { featureIngressActor } from './featureIngress.js';
+import { registerOfficeBootstrap } from './officeBootstrap.js';
 import { serverProof } from './serverProof.js';
 import type { AgentState } from './types.js';
 
@@ -45,6 +46,7 @@ export interface HttpServerOptions {
   token: string;
   getToken?: () => string;
   onRotateToken?: () => string;
+  accessPersistent?: () => boolean;
   logStream?: Writable;
   /** AgentStateStore for WebSocket broadcast piping */
   store: AgentStateStore;
@@ -154,6 +156,10 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // ── Routes ──────────────────────────────────────────────────
 
   registerHealthRoute(app);
+  if (!options.embedded)
+    registerOfficeBootstrap(app, currentToken, (request) =>
+      timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${currentToken()}`),
+    );
   app.get<{ Querystring: { nonce?: string } }>(OPERATOR_PROOF_PATH, (request, reply) => {
     if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
     const nonce = request.query.nonce;
@@ -264,8 +270,8 @@ function registerWebSocketRoute(
 
     // Both modes prove privilege with the SAME out-of-band secret, differently
     // carried: embedded sends the Bearer token it was handed in-process;
-    // standalone sends the `?token=` the CLI printed in the local URL and the
-    // SPA forwarded on this handshake. Nothing about a network POSITION is
+    // standalone forwards the capability exchanged from the opener's one-use
+    // bootstrap code. Nothing about a network POSITION is
     // consulted, because every position is reproducible by a forwarder.
     const privileged = options.embedded || standaloneTokenValid(request.url, token);
     const connectionToken = token;
@@ -322,6 +328,7 @@ function registerWebSocketRoute(
       privileged,
       ideasSupported: !options.embedded,
       featurePlansSupported: !options.embedded,
+      accessPersistent: options.accessPersistent?.(),
     };
     const onExecutorStateChanged = () => refreshExecutorState(send, ctx);
     store.on('executorStateChanged', onExecutorStateChanged);
@@ -403,9 +410,10 @@ export function isAllowedWebSocketOrigin(
  * installs (or removes) a 12-event hook set.
  *
  * The handshake must carry the server token in its `?token=` query. That token
- * is persisted per user in standalone and passed directly to the browser opener
- * by an interactive human startup. The SPA captures it in memory and strips it
- * from the page URL (webview-ui/src/transport/index.ts).
+ * is persisted per user when OS protection succeeds. Interactive human startup
+ * passes only a short-lived, one-use bootstrap code to the browser opener; the
+ * SPA strips the code and exchanges it for the capability retained in memory
+ * (webview-ui/src/transport/index.ts). Legacy token URLs remain supported.
  *
  * Why a secret rather than a network position: EVERY position is reproducible.
  * The predecessor of this function required a loopback peer address AND a
@@ -453,7 +461,9 @@ function timingSafeStringEqual(actual: string, expected: string): boolean {
 export function redactRequestUrl(url: string): string {
   return url.replace(/([?&])([^=&#]+)=([^&#]*)/g, (match, separator: string, key: string) => {
     try {
-      return decodeURIComponent(key.replace(/\+/g, ' ')).toLowerCase() === 'token'
+      return ['token', 'open', 'code'].includes(
+        decodeURIComponent(key.replace(/\+/g, ' ')).toLowerCase(),
+      )
         ? `${separator}${key}=REDACTED`
         : match;
     } catch {

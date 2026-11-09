@@ -430,3 +430,7 @@ export const PROJECT_ID_SLUG_LENGTH = 48;
 export const PROJECT_LOCAL_REMOTE = 'local';
 export const PROJECT_FALLBACK_BRANCH = 'main';
 export const PROJECT_LEGACY_BRANCH = 'master';
+export const OFFICE_BOOTSTRAP_TTL_MS = 60_000;
+export const OFFICE_BOOTSTRAP_BYTES = 32;
+export const OFFICE_BOOTSTRAP_RATE_LIMIT = 20;
+export const OFFICE_BOOTSTRAP_RATE_WINDOW_MS = 60_000;

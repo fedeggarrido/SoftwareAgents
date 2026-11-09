@@ -47,11 +47,24 @@ export function NewIdeaDialog({
   >({});
   const [confirmDiscard, setConfirmDiscard] = useState<'close' | 'consult' | null>(null);
   const [projectDraft, setProjectDraft] = useState({ id: '', name: '' });
+  const [draftProjectId, setDraftProjectId] = useState<string | null>(() => {
+    const snapshot = getIdeasStore().snapshot;
+    return snapshot?.projectId ?? snapshot?.preparation?.id ?? null;
+  });
+  const [copyFeedback, setCopyFeedback] = useState('');
   useEffect(() => {
     // A new dialog can compose another idea, but never replay an uncertain submission.
     setIdeasStore({ ...getIdeasStore(), result: null });
   }, []);
   const { store, connection } = useIdeasConnection(true);
+  const currentProjectId = store.snapshot?.projectId ?? store.snapshot?.preparation?.id ?? null;
+  const hasDraft =
+    !!text.length || Object.values(answers).some((entry) => entry.text.length || entry.choice);
+  useEffect(() => {
+    if ((!draftProjectId || !hasDraft) && currentProjectId) setDraftProjectId(currentProjectId);
+  }, [draftProjectId, currentProjectId, hasDraft]);
+  const projectMismatch =
+    !!draftProjectId && !!currentProjectId && draftProjectId !== currentProjectId;
   const access = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const permissionBlocked =
     !access.pending &&
@@ -84,7 +97,12 @@ export function NewIdeaDialog({
     else finishClose(consult);
   };
   const editable = state !== 'saving' && state !== 'saved';
-  const canSave = !access.pending && !access.blocked && (state === 'editing' || state === 'error');
+  const canSave =
+    !projectMismatch &&
+    !!draftProjectId &&
+    !access.pending &&
+    !access.blocked &&
+    (state === 'editing' || state === 'error');
   const question = IDEA_QUESTIONS[step - 1];
   const answer = question ? answers[question.id] : undefined;
   const reviewing = step === IDEA_QUESTIONS.length + 1;
@@ -100,7 +118,13 @@ export function NewIdeaDialog({
     if (question) setAnswers({ ...answers, [question.id]: { choice, text: value } });
   };
   const save = () => {
-    if (!canSave || !text.trim() || !complete) return;
+    if (
+      !canSave ||
+      getIdeasStore().snapshot?.projectId !== draftProjectId ||
+      !text.trim() ||
+      !complete
+    )
+      return;
     const submission: IdeaAnswer[] = IDEA_QUESTIONS.map((entry) => ({
       questionId: entry.id,
       choice: answers[entry.id].choice!,
@@ -108,7 +132,7 @@ export function NewIdeaDialog({
     }));
     sendIdea(text, submission, transport);
   };
-  if (permissionBlocked) {
+  if (permissionBlocked && !projectMismatch) {
     return (
       <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
         <div role="region" aria-label="Nueva idea" className="p-10 flex flex-col gap-8">
@@ -138,6 +162,57 @@ export function NewIdeaDialog({
         <p>
           Describe lo que necesitas. Guardar deja un borrador pendiente; no inicia ningún trabajo.
         </p>
+        {projectMismatch && (
+          <section role="alert" className="flex flex-col gap-8">
+            <p>Este borrador era para otro proyecto ({draftProjectId})</p>
+            <p className="whitespace-pre-wrap">{text}</p>
+            {IDEA_QUESTIONS.map(
+              (entry) =>
+                answers[entry.id] && (
+                  <p key={entry.id}>
+                    {entry.label}:{' '}
+                    {answers[entry.id].choice === 'decide'
+                      ? IDEA_ASSUMPTION_TEXT
+                      : answers[entry.id].text}
+                  </p>
+                ),
+            )}
+            <Button
+              onClick={() => {
+                setText('');
+                setAnswers({});
+                setStep(0);
+                setDraftProjectId(currentProjectId);
+                setCopyFeedback('');
+              }}
+            >
+              Descartar
+            </Button>
+            <Button
+              onClick={() => {
+                const content = [
+                  text,
+                  ...IDEA_QUESTIONS.filter((entry) => answers[entry.id]).map(
+                    (entry) =>
+                      `${entry.label}: ${answers[entry.id].choice === 'decide' ? IDEA_ASSUMPTION_TEXT : answers[entry.id].text}`,
+                  ),
+                ].join('\n\n');
+                void Promise.resolve()
+                  .then(() => navigator.clipboard.writeText(content))
+                  .then(
+                    () => setCopyFeedback('Texto copiado.'),
+                    () =>
+                      setCopyFeedback(
+                        'No se pudo copiar. Selecciona el texto y cópialo manualmente.',
+                      ),
+                  );
+              }}
+            >
+              Copiar texto
+            </Button>
+            <p role="status">{copyFeedback}</p>
+          </section>
+        )}
         {preparation && (
           <section aria-label="Preparar proyecto" className="flex flex-col gap-8">
             <p>{PROJECT_PREPARATION_EXPLANATION}</p>
@@ -168,6 +243,7 @@ export function NewIdeaDialog({
             <Button
               disabled={
                 access.pending ||
+                projectMismatch ||
                 !projectName.trim() ||
                 !!store.preparationPending ||
                 connection !== 'connected'
@@ -289,7 +365,7 @@ export function NewIdeaDialog({
                 ))}
                 <p>
                   Las preguntas adaptativas llegarán mediante Requirements (openQuestions) al panel
-                  de Decisiones cuando inicies el flujo con el comando.
+                  de Decisiones cuando inicies el flujo.
                 </p>
               </section>
             )}

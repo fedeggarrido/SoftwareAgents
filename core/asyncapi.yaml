@@ -85,6 +85,9 @@ components:
         privileged:
           type: boolean
           description: Existing per-connection privilege, never supplied by the client.
+        persistent:
+          type: boolean
+          description: Whether standalone access survives a restart. Informational only.
         reason:
           oneOf:
             - $ref: '#/components/schemas/OfficeAccessReason'

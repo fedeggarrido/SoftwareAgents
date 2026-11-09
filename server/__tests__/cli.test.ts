@@ -16,6 +16,9 @@ const CLI_START_TIMEOUT_MS = 10_000;
 let proofServer: Awaited<ReturnType<typeof operatorTokenServer>> | undefined;
 
 describe('SA-115 top-level help', () => {
+  it('accepts the explicit --no-open switch', () => {
+    expect(parseArgs(['--no-open', '--port', '3100'])).toMatchObject({ noOpen: true, port: 3100 });
+  });
   it('documents every dispatched subcommand in the actual --help output', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exited = new Error('help exited');

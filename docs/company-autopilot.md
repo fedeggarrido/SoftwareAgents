@@ -1,6 +1,6 @@
 # SA-003: autorización manual del piloto de compañía
 
-El runtime solo ejecuta el argv autorizado por el operador en `~/.pixel-agents/config.json`, bajo `companyAutopilot[<ruta absoluta del workspace>]`. La oficina no puede crear ni modificar esta autorización. Al activar el piloto, si `board.json` conserva `autopilot.command`, debe coincidir exactamente (binario, argumentos, orden y longitud); cualquier diferencia produce un `companyNotice` y no escribe el estado ni arranca el supervisor. Si el board omite `command`, se usa directamente el autorizado. Pausar no requiere autorización del operador ni coincidencia del comando: solo escribe el estado contenido y nunca lanza procesos. La URL con token sigue siendo obligatoria para activar o pausar el piloto.
+El runtime solo ejecuta el argv autorizado por el operador en `~/.pixel-agents/config.json`, bajo `companyAutopilot[<ruta absoluta del workspace>]`. La oficina no puede crear ni modificar esta autorización. Al activar el piloto, si `board.json` conserva `autopilot.command`, debe coincidir exactamente (binario, argumentos, orden y longitud); cualquier diferencia produce un `companyNotice` y no escribe el estado ni arranca el supervisor. Si el board omite `command`, se usa directamente el autorizado. Pausar no requiere autorización del operador ni coincidencia del comando: solo escribe el estado contenido y nunca lanza procesos. El acceso de operador de la oficina sigue siendo obligatorio para activar o pausar el piloto.
 
 Para configurar la oficina, el operador debe realizar una sola vez estos pasos, sin modificar su repositorio:
 
@@ -20,7 +20,7 @@ Para configurar la oficina, el operador debe realizar una sola vez estos pasos, 
 
 3. La clave debe ser el workspace absoluto que usa la oficina, no un identificador escapado de Claude ni necesariamente el repositorio principal si la oficina abre un worktree. Cada workspace necesita autorización propia; en Windows las claves no distinguen mayúsculas, y en POSIX conservan su capitalización. Preferir rutas absolutas para el ejecutable y el supervisor: autorizar un argv no protege el contenido de un script editable por agentes ni la resolución de un binario desde `PATH`.
 4. `stateFile` es opcional: si se omite, se mantiene el del board; si se configura, prevalece sobre él. Es relativo al `git-common-dir`. `decisionsFile` sigue siendo relativo al workspace. Ninguna ruta puede ser absoluta ni contener segmentos `..` (se reconocen separadores Windows y POSIX). El directorio contenedor del estado debe existir, como antes.
-5. Abrir la oficina mediante su URL con token y activar el piloto. No hace falta reiniciar: la autorización se lee en cada operación. Para revocarla, eliminar la entrada; esto impide activar el piloto, pero permite pausarlo desde la oficina y no termina un supervisor ya lanzado.
+5. Abrir Pixel Agents desde una terminal interactiva humana y activar el piloto en la oficina autenticada que se abre automáticamente. No hace falta reiniciar: la autorización se lee en cada operación. Para revocarla, eliminar la entrada; esto impide activar el piloto, pero permite pausarlo desde la oficina y no termina un supervisor ya lanzado.
 
 ### Permisos de la configuración
 

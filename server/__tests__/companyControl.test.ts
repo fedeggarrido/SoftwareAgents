@@ -370,7 +370,7 @@ describe('companyControl authorization and containment', () => {
     });
     expect(send).toHaveBeenCalledWith({
       type: 'companyNotice',
-      text: expect.stringContaining('URL con token'),
+      text: expect.stringContaining('Revisa el acceso en Settings'),
     });
     expect(childProcess.spawn).not.toHaveBeenCalled();
     expect(fs.readdirSync(gitDir)).toEqual([]);

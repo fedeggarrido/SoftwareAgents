@@ -86,6 +86,7 @@ export interface AssetCache {
 }
 
 export interface ClientMessageContext {
+  accessPersistent?: boolean;
   /** Embedded VS Code has no Project selection contract for draft ingress. */
   ideasSupported?: boolean;
   /** Embedded adapters cannot authenticate human plan approval. */
@@ -169,6 +170,7 @@ export function handleClientMessage(
       send({
         type: 'officeAccess',
         privileged: ctx.privileged === true,
+        ...(ctx.accessPersistent === undefined ? {} : { persistent: ctx.accessPersistent }),
         reason: !ctx.privileged
           ? 'token_required'
           : featureIngressActor() === 'agent'
@@ -402,7 +404,7 @@ export function handleClientMessage(
         );
         send({
           type: 'companyNotice',
-          text: 'Abre la URL con token para controlar el piloto.',
+          text: 'Abre Pixel Agents en tu ordenador para controlar el piloto. Revisa el acceso en Settings.',
         } satisfies CompanyNotice);
         break;
       }
@@ -425,7 +427,7 @@ export function handleClientMessage(
         );
         send({
           type: 'companyNotice',
-          text: 'Abre la URL con token para responder decisiones.',
+          text: 'Abre Pixel Agents en tu ordenador para responder decisiones. Revisa el acceso en Settings.',
         } satisfies CompanyNotice);
         break;
       }
@@ -491,7 +493,7 @@ export function handleClientMessage(
         // Answer with the truth so the checkbox still shows reality instead of
         // silently appearing to have worked.
         console.warn(
-          '[Pixel Agents] Ignoring setHooksEnabled from an untokened client — installing hooks needs approval from this machine (open the tokened URL the CLI printed).',
+          '[Pixel Agents] Ignoring setHooksEnabled from an untokened client — open Pixel Agents interactively to approve hooks in Settings.',
         );
         void provider
           .areHooksInstalled()
@@ -515,7 +517,7 @@ export function handleClientMessage(
           { actorType: 'unknown', actorId: null },
         );
         console.warn(
-          '[Pixel Agents] Ignoring hooksConsentResponse from an untokened client — installing hooks needs approval from this machine (open the tokened URL the CLI printed).',
+          '[Pixel Agents] Ignoring hooksConsentResponse from an untokened client — open Pixel Agents interactively to approve hooks in Settings.',
         );
         break;
       }

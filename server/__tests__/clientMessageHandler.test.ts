@@ -192,7 +192,10 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
       );
       expect(answer).not.toHaveBeenCalled();
       expect(sent).toEqual([
-        { type: 'companyNotice', text: 'Abre la URL con token para responder decisiones.' },
+        {
+          type: 'companyNotice',
+          text: 'Abre Pixel Agents en tu ordenador para responder decisiones. Revisa el acceso en Settings.',
+        },
       ]);
     } finally {
       answer.mockRestore();

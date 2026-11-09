@@ -101,6 +101,7 @@ export interface OfficeTokenRotationFailed {
 export interface OfficeAccess {
   type: 'officeAccess';
   privileged: boolean;
+  persistent?: boolean;
   reason: OfficeAccessReason | null;
 }
 

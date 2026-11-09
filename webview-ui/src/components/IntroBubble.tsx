@@ -285,13 +285,14 @@ export function IntroBubble({
 
         {step === CLAUDE_CODE_STEP && (
           <>
-            <p className="text-sm m-0 mb-8">
-              La oficina muestra tus sesiones de Claude Code. Si todavía no lo tienes, puedes
-              instalarlo con este comando.
-            </p>
-            <div className="text-sm bg-btn-bg border-2 border-border py-4 px-8 mb-8 select-all">
-              {CLAUDE_CODE_INSTALL_COMMAND}
-            </div>
+            <p className="text-sm m-0 mb-8">La oficina muestra tus sesiones de Claude Code.</p>
+            <details>
+              <summary>Detalles</summary>
+              <p>Si todavía no tienes Claude Code, puedes instalarlo con este comando.</p>
+              <div className="text-sm bg-btn-bg border-2 border-border py-4 px-8 mb-8 select-all">
+                {CLAUDE_CODE_INSTALL_COMMAND}
+              </div>
+            </details>
             <p className="text-sm m-0 mb-8">
               Más información en{' '}
               <a

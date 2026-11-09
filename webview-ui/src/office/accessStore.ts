@@ -4,6 +4,7 @@ import type { OfficeAccess } from '../../../core/src/messages.js';
 import {
   OFFICE_ACCESS_INSTRUCTIONS,
   OFFICE_EMBEDDED_EXPLANATION,
+  OFFICE_EPHEMERAL_OPERATOR_EXPLANATION,
   OFFICE_MANAGED_EXPLANATION,
   OFFICE_MANAGED_LABEL,
   OFFICE_OPERATOR_EXPLANATION,
@@ -50,7 +51,9 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
       : embedded
         ? OFFICE_EMBEDDED_EXPLANATION
         : privileged
-          ? OFFICE_OPERATOR_EXPLANATION
+          ? access?.persistent === false
+            ? OFFICE_EPHEMERAL_OPERATOR_EXPLANATION
+            : OFFICE_OPERATOR_EXPLANATION
           : `${OFFICE_INVALID_ACCESS_TEXT} ${OFFICE_ACCESS_INSTRUCTIONS}`,
   };
 }

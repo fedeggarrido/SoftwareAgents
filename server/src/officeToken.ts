@@ -16,29 +16,36 @@ import { discoveryEntryPath, withDiscoveryLock, writeDiscoveryRecord } from './d
 interface OfficeCredential {
   token: string;
   port?: number;
+  persistent?: boolean;
+}
+
+export class OfficeCredentialProtectionError extends Error {
+  constructor() {
+    super('No se pudo proteger y verificar el acceso de la oficina');
+  }
 }
 
 /** Remove inherited grants before writing a secret into the exclusive temporary. */
-function protectCredential(file: string): void {
+export function protectCredential(file: string): void {
+  try {
+    applyCredentialProtection(file);
+  } catch {
+    throw new OfficeCredentialProtectionError();
+  }
+}
+
+function applyCredentialProtection(file: string): void {
   if (process.platform !== 'win32') {
     fs.chmodSync(file, PRIVATE_FILE_MODE);
     return;
   }
   const options = { windowsHide: true, timeout: PRIVATE_COMMAND_TIMEOUT_MS };
-  let identity: string;
   const systemDir = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
-  try {
-    identity = execFileSync(
-      path.join(systemDir, 'whoami.exe'),
-      ['/user', '/fo', 'csv', '/nh'],
-      options,
-    ).toString();
-  } catch (error) {
-    // Restricted hosts may prohibit launching OS ACL tools. Keep the profile's
-    // inherited ACL in that case, matching discovery. See the threat model.
-    if (['EPERM', 'ENOENT', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
-    throw error;
-  }
+  const identity = execFileSync(
+    path.join(systemDir, 'whoami.exe'),
+    ['/user', '/fo', 'csv', '/nh'],
+    options,
+  ).toString();
   const sid = identity.match(/S-1-\d+(?:-\d+)+/)?.[0];
   if (!sid) throw new Error('No se pudo proteger el acceso de la oficina');
   execFileSync(
@@ -46,6 +53,21 @@ function protectCredential(file: string): void {
     [file, '/inheritance:r', '/grant:r', `*${sid}:(F)`],
     options,
   );
+  // Verify the effective DACL independently. icacls can retain explicit grants.
+  const script = `$ErrorActionPreference = 'Stop'; $acl = Get-Acl -LiteralPath '${file.replace(/'/g, "''")}'; $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])); if (!$acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IsInherited -or $rules[0].IdentityReference.Value -ne '${sid}' -or $rules[0].AccessControlType -ne 'Allow' -or $rules[0].FileSystemRights -ne 'FullControl') { exit 1 }; 'verified'`;
+  const result = execFileSync(
+    path.join(systemDir, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ],
+    options,
+  )
+    .toString()
+    .trim();
+  if (result !== 'verified') throw new Error('No se pudo verificar el acceso de la oficina');
 }
 
 /** Atomic reads never return a partially written capability. Invalid files fail closed. */
@@ -69,17 +91,22 @@ export function readOfficeCredential(): OfficeCredential {
 }
 
 export function loadOfficeCredential(): OfficeCredential {
-  return withDiscoveryLock(() => {
-    const file = discoveryEntryPath(OFFICE_CREDENTIAL_FILE);
-    if (fs.existsSync(file)) {
-      const credential = readOfficeCredential();
-      protectCredential(file);
-      return credential;
-    }
-    const credential = { token: randomUUID() };
-    writeDiscoveryRecord(OFFICE_CREDENTIAL_FILE, credential, protectCredential);
-    return credential;
-  });
+  try {
+    return withDiscoveryLock(() => {
+      const file = discoveryEntryPath(OFFICE_CREDENTIAL_FILE);
+      if (fs.existsSync(file)) {
+        protectCredential(file);
+        return { ...readOfficeCredential(), persistent: true };
+      }
+      const credential = { token: randomUUID() };
+      writeDiscoveryRecord(OFFICE_CREDENTIAL_FILE, credential, protectCredential);
+      return { ...credential, persistent: true };
+    });
+  } catch (error) {
+    if (!(error instanceof OfficeCredentialProtectionError)) throw error;
+    // No secret has been written to a temporary until protection succeeds.
+    return { token: randomUUID(), persistent: false };
+  }
 }
 
 export function rememberOfficePort(port: number): void {

@@ -33,6 +33,28 @@ afterEach(() => {
 });
 
 describe('SA-116 permanent office mode', () => {
+  it('warns in Settings when persistence is unavailable', async () => {
+    setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null, persistent: false });
+    expect(
+      officeAccessView(
+        { type: 'officeAccess', privileged: true, reason: null, persistent: false },
+        false,
+      ).explanation,
+    ).toContain('dura mientras Pixel Agents siga abierto');
+    const settingsPath = '../src/components/SettingsModal.js';
+    const { SettingsModal } = await import(settingsPath);
+    const html = renderToStaticMarkup(
+      createElement(SettingsModal, {
+        isOpen: true,
+        onClose: () => {},
+        externalAssetDirectories: [],
+      }),
+    );
+    expect(html).toContain('no sobrevivirá a los reinicios');
+    expect(html).toContain('role="alert"');
+    expect(html).toMatch(/<details[^>]*><summary>Detalles<\/summary>/);
+    expect(html).toContain('Copiar token para CLI');
+  });
   it.each([
     ['unavailable', 'reconnecting', 'La oficina está cerrada en tu ordenador'],
     ['unauthorized', 'disconnected', 'El acceso de esta pestaña ha caducado'],

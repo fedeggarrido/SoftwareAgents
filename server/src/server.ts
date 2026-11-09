@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
 
+import { OFFICE_OPEN_PATH, OFFICE_OPEN_QUERY } from '../../core/src/constants.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { AuditLog } from './auditLog.js';
@@ -17,6 +18,7 @@ import {
   SERVER_JSON_NAME,
   SERVER_REGISTRY_PROTOCOL_VERSION,
   SERVERS_DIR,
+  TOKEN_ROTATE_REQUEST_TIMEOUT_MS,
 } from './constants.js';
 import {
   discoveryEntryPath,
@@ -32,6 +34,8 @@ export { probeServer } from './serverProbe.js';
 import { createHttpServer } from './httpServer.js';
 import {
   loadOfficeCredential,
+  OfficeCredentialProtectionError,
+  protectCredential,
   readOfficeCredential,
   rememberOfficePort,
   rotateOfficeToken,
@@ -71,6 +75,24 @@ export class PixelAgentsServer {
   private app: FastifyInstance | null = null;
   private config: ServerConfig | null = null;
   private ownsServer = false;
+  private accessPersistent = false;
+  private standalone = false;
+
+  /** Works for both the owning process and a reused standalone listener. */
+  async officeOpenUrl(): Promise<string> {
+    if (!this.config) throw new Error('Office unavailable');
+    const host = this.config.host ?? '127.0.0.1';
+    const origin = `http://${host.includes(':') ? `[${host}]` : host}:${this.config.port}`;
+    const response = await fetch(`${origin}${OFFICE_OPEN_PATH}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.config.token}` },
+      redirect: 'error',
+      signal: AbortSignal.timeout(TOKEN_ROTATE_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error('Office unavailable');
+    const { code } = (await response.json()) as { code: string };
+    return `${origin}/?${OFFICE_OPEN_QUERY}=${encodeURIComponent(code)}`;
+  }
   private publicationTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingRegistry = false;
   private pendingLegacy = false;
@@ -99,6 +121,7 @@ export class PixelAgentsServer {
     onProjectPrepared?: ClientMessageContext['onProjectPrepared'];
   }): Promise<ServerConfig> {
     const embedded = options?.embedded ?? true;
+    this.standalone = !embedded;
     const wantsSpa = !embedded;
 
     // Capability-based reuse: an embedded (VS Code) caller only reuses another
@@ -119,7 +142,10 @@ export class PixelAgentsServer {
     }
 
     // Start our own server
-    const credential = embedded ? { token: crypto.randomUUID() } : loadOfficeCredential();
+    const credential = embedded
+      ? { token: crypto.randomUUID(), persistent: false }
+      : loadOfficeCredential();
+    this.accessPersistent = credential.persistent === true;
     const token = credential.token;
     const store = options?.store;
 
@@ -131,11 +157,13 @@ export class PixelAgentsServer {
       getToken: embedded
         ? undefined
         : () => {
+            if (!this.accessPersistent) return this.config?.token ?? token;
             const current = readOfficeCredential().token;
             if (this.config && this.config.token !== current) this.updateToken(current);
             return current;
           },
       onRotateToken: () => this.rotateToken(embedded),
+      accessPersistent: embedded ? undefined : () => this.accessPersistent,
       store: store!,
       runtime: options?.runtime,
       staticDir: options?.staticDir,
@@ -163,10 +191,14 @@ export class PixelAgentsServer {
     };
     this.ownsServer = true;
     try {
-      if (!embedded && options?.port === undefined) rememberOfficePort(port);
+      if (this.accessPersistent && options?.port === undefined) rememberOfficePort(port);
     } catch (error) {
-      this.stop();
-      throw error;
+      if (!(error instanceof OfficeCredentialProtectionError)) {
+        this.stop();
+        throw error;
+      }
+      this.accessPersistent = false;
+      this.config.token = crypto.randomUUID();
     }
     this.pendingRegistry = this.pendingLegacy = true;
     this.publicationDelay = SERVER_DISCOVERY_RETRY_MIN_MS;
@@ -179,9 +211,9 @@ export class PixelAgentsServer {
   /** Revoke the capability and republish it through the existing restricted writer. */
   private rotateToken(embedded: boolean): string {
     if (!this.config || !this.ownsServer) throw new Error('Server is not owned');
-    const token = embedded ? crypto.randomUUID() : rotateOfficeToken();
+    const token = embedded || !this.accessPersistent ? crypto.randomUUID() : rotateOfficeToken();
     // Audit before changing the capability; never include either secret.
-    if (embedded)
+    if (embedded || !this.accessPersistent)
       new AuditLog().append({
         projectId: null,
         actorType: 'human',
@@ -283,7 +315,7 @@ export class PixelAgentsServer {
 
   /** Called under the discovery lock, after listen has completed. */
   private writeServerJson(config: ServerConfig): void {
-    writeDiscoveryRecord(SERVER_JSON_NAME, config);
+    writeDiscoveryRecord(SERVER_JSON_NAME, config, this.standalone ? protectCredential : undefined);
   }
 
   /** Cleanup only our exact generation; old scripts still see a single pointer. */
@@ -416,7 +448,11 @@ export class PixelAgentsServer {
 
   /** Called under the discovery lock. */
   private writeRegistryEntry(config: ServerConfig): void {
-    writeDiscoveryRecord(`${SERVERS_DIR}/${config.pid}-${config.port}.json`, config);
+    writeDiscoveryRecord(
+      `${SERVERS_DIR}/${config.pid}-${config.port}.json`,
+      config,
+      this.standalone ? protectCredential : undefined,
+    );
   }
 
   /** Stop cleanup uses the same generation check as stale probe cleanup. */

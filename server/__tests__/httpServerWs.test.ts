@@ -404,7 +404,7 @@ describe('/ws privileged-message gate', () => {
         expect(result.accepted).toBe(true);
         const access = waitForMessage(result.socket, 'officeAccess');
         result.socket.send(JSON.stringify({ type: 'webviewReady' }));
-        expect(await access).toEqual({
+        expect(await access).toMatchObject({
           type: 'officeAccess',
           privileged,
           reason: privileged ? null : 'token_required',

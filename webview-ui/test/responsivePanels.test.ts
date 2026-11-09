@@ -290,14 +290,14 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
 
         // Existing geometry must follow both expanding controls and viewport changes.
         await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();
-        await page.locator('.office-mode-indicator button').click();
+        await page.locator('.office-mode-indicator button[aria-controls]').click();
         await page.locator('#office-mode-explanation').waitFor();
         await expectControlsClear(page);
         await page.setViewportSize({ width: width === 1024 ? 1440 : 1024, height: 844 });
         await expectControlsClear(page);
         await page.setViewportSize({ width, height: 844 });
         await expectControlsClear(page);
-        await page.locator('.office-mode-indicator button').click();
+        await page.locator('.office-mode-indicator button[aria-controls]').click();
         await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();
         await page.getByRole('button', { name: 'Restablecer posición', exact: true }).click();
       }
@@ -484,8 +484,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       }
 
       // Escape cannot reach the editor while either overlay is present.
-      await page.getByRole('button', { name: 'Layout', exact: true }).click();
+      // Open the window first because Layout hides the dock's panel shortcuts.
       await backlog.click();
+      await page.getByRole('button', { name: 'Layout', exact: true }).click();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor();
       await page.keyboard.press('Escape');
@@ -498,7 +499,12 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       ).toBe(true);
       await page.keyboard.press('Escape');
       expect(await windowPanel.count()).toBe(0);
-      expect(await backlog.evaluate(isFocusedElement)).toBe(true);
+      // Layout removed the Backlog opener. Focus stays on the connected Settings control.
+      expect(
+        await page
+          .getByRole('button', { name: 'Settings', exact: true })
+          .evaluate(isFocusedElement),
+      ).toBe(true);
       expect(
         await page.getByRole('button', { name: 'Layout', exact: true }).getAttribute('class'),
       ).toContain('bg-active-bg');

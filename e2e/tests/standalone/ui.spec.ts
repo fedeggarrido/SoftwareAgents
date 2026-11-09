@@ -194,10 +194,10 @@ test.describe('Standalone / UI', () => {
       timeout: CONNECTION_STATE_TIMEOUT_MS,
     });
     await expect(indicator.getByRole('status')).toContainText(
-      'Sin conexión con la oficina: el programa pixel-agents que se ejecuta en tu ordenador.',
+      'La oficina está cerrada en tu ordenador.',
     );
     await expect(
-      indicator.getByRole('button', { name: 'Reconectar con la oficina', exact: true }),
+      indicator.getByRole('button', { name: 'Reintentar ahora', exact: true }),
     ).toBeVisible();
 
     await standalone.startHost();

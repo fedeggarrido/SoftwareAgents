@@ -1,0 +1,17 @@
+[
+  {"key":"SA-139","sev":"Alto","pri":2,"title":"Ventanas que se puedan mover, redimensionar y recordar","shots":["03-paneles-apilados","26-reunion"],
+   "seen":"Comentario de Fede: las ventanas deberían poder moverse. Hoy los paneles tienen posición fija: se apilan, tapan la oficina y se solapan con otros controles, sin que el usuario pueda apartarlos.",
+   "why":"En una pantalla de supervisión cada persona quiere ver a la vez la oficina y lo que está consultando. Sin poder mover nada, abrir información significa perder de vista a los agentes.",
+   "todo":"Paneles arrastrables por su título y redimensionables, que recuerden posición y tamaño por usuario, con límites para no salir de la pantalla y opción de restablecer. Alternativa por teclado. En móvil, panel a pantalla completa. Debe decidirse junto con SA-119, porque cambia el sistema de paneles.",
+   "done":"Se puede colocar un panel junto a la oficina, recargar y encontrarlo igual, y nunca queda inaccesible fuera de la pantalla."},
+  {"key":"SA-140","sev":"Alto","pri":2,"title":"Saber dónde estoy y cómo moverme por la app","shots":["01-inicio","04-error-sin-token"],
+   "seen":"Comentario de Fede: no se intuye cómo manejarse. La barra inferior da seis botones con nombres internos y sin explicación. No se indica qué hace cada sección ni el orden para usarlas. Los botones activan paneles que se acumulan, en lugar de llevar a un sitio. En su captura, Auditoría dice «Sin Project seleccionado» bajo un panel con SoftwareAgents cargado, sin ninguna forma de seleccionar un proyecto.",
+   "why":"Sin un mapa mental, el usuario prueba botones al azar y encuentra mensajes que no sabe resolver.",
+   "todo":"Navegación con destinos claros y sección activa evidente. Descripción breve de cada sección y ayuda contextual. Estados vacíos que indiquen el siguiente paso. Corregir «Sin Project seleccionado» cuando sí hay proyecto cargado. Complementa SA-117 y SA-132.",
+   "done":"Una persona nueva explica qué hay en cada sección antes de abrirla y nunca ve un mensaje que no pueda resolver."},
+  {"key":"SA-141","sev":"Alto","pri":2,"title":"Agentes sin trabajo fuera del ordenador","shots":["19-oficina-viva"],
+   "seen":"Comentario de Fede: si un agente no hace nada, no debería estar en el ordenador. En el código (`webview-ui/src/office/engine/characters.ts`), un agente inactivo pasea unos movimientos, vuelve a su asiento y descansa ahí entre 120 y 240 segundos (`SEAT_REST_MIN_SEC`, `SEAT_REST_MAX_SEC`). Visualmente, durante minutos parece trabajando sin estarlo. Falta comprobar si la animación de ese descanso es exactamente la de teclear.",
+   "why":"En la oficina, la posición es la información. Si sentarse al ordenador no significa «trabajando», la metáfora engaña y la supervisión de un vistazo deja de ser fiable.",
+   "todo":"Regla visual estricta: en el ordenador solo quien trabaja de verdad. Los inactivos van a la zona de descanso (sofás, café) o se quedan de pie. Pose o señal distinta para «esperándote» y para «sesión parada». Asiento reservado sin ocupar. Revisar el impacto en distribuciones sin zona de descanso.",
+   "done":"Durante una prueba con agentes activos e inactivos, ningún agente sin trabajo aparece sentado al ordenador."}
+]

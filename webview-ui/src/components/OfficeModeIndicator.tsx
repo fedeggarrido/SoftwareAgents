@@ -8,7 +8,7 @@ export function OfficeModeIndicator() {
   const view = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="relative">
+    <div className="office-mode-indicator absolute top-10 right-10 z-20">
       <Button
         size="sm"
         title={view.explanation}
@@ -22,7 +22,7 @@ export function OfficeModeIndicator() {
         <p
           id="office-mode-explanation"
           role="status"
-          className="absolute bottom-full left-0 pixel-panel p-10 w-256 max-w-[80vw] text-sm"
+          className="absolute top-full right-0 mt-4 pixel-panel p-10 w-256 max-w-[80vw] text-sm"
         >
           {view.explanation}
         </p>

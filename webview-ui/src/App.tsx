@@ -15,6 +15,7 @@ import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
+import { OfficeModeIndicator } from './components/OfficeModeIndicator.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -577,6 +578,8 @@ function App() {
         />
       )}
       <MeetingPanel />
+      <OfficeModeIndicator />
+
       <VersionIndicator
         currentVersion={extensionVersion}
         lastSeenVersion={lastSeenVersion}

@@ -131,10 +131,10 @@ it('contains panels and all six navigation targets at 390px, with keyboard and t
           `(() => { const el = document.querySelector('[role="region"]'); return el.scrollWidth <= el.clientWidth; })()`,
         ),
       ).toBe(true);
-      const buttons = page.locator('.bottom-toolbar button');
-      expect(await buttons.count()).toBe(7);
+      const buttons = page.locator('.bottom-toolbar > button');
+      expect(await buttons.count()).toBe(6);
       const widths: number[] = [];
-      for (let index = 0; index < 7; index++) {
+      for (let index = 0; index < 6; index++) {
         const button = buttons.nth(index);
         const box = (await button.boundingBox())!;
         widths.push(box.width);

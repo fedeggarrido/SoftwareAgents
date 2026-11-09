@@ -7,13 +7,44 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
 import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
-import { CliArgsError, parseArgs } from '../src/cli.js';
+import { CliArgsError, dispatchCli, parseArgs } from '../src/cli.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 import { operatorTokenServer } from './helpers/operatorToken.js';
 
 const CLI_BUNDLE = path.join(__dirname, '../../dist/cli.js');
 const CLI_START_TIMEOUT_MS = 10_000;
 let proofServer: Awaited<ReturnType<typeof operatorTokenServer>> | undefined;
+
+describe('SA-115 top-level help', () => {
+  it('documents every dispatched subcommand in the actual --help output', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exited = new Error('help exited');
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw exited;
+    });
+    try {
+      expect(() => parseArgs(['--help'])).toThrow(exited);
+      expect(exit).toHaveBeenCalledWith(0);
+      const help = log.mock.calls.map(([line]) => String(line)).join('\n');
+      // Read the real dispatcher, so adding another branch without help fails this test.
+      // The IPC-only --design-capture-host flag is not a public subcommand.
+      const commands = [
+        ...dispatchCli.toString().matchAll(/argv\[0\]\s*===\s*['"]([a-z][a-z0-9-]*)['"]/g),
+      ].map((match) => match[1]);
+      expect(commands).toContain('feature');
+      expect(commands).toContain('project');
+      const documented = [...help.matchAll(/^  ([a-z][a-z0-9-]*)\s+\S[^\n]+$/gm)].map(
+        (match) => match[1],
+      );
+      expect(documented.sort()).toEqual(commands.sort());
+      expect(help).toContain('project init');
+      expect(help).toContain('Preparar el proyecto');
+    } finally {
+      log.mockRestore();
+      exit.mockRestore();
+    }
+  });
+});
 
 afterEach(async () => {
   await proofServer?.close();
@@ -194,7 +225,7 @@ describe('dist/cli.js entry-point guard', () => {
   itBuilt('runs main() when executed directly: --help prints usage and exits 0', async () => {
     const { code, stdout } = await runCli(['--help']);
     expect(code).toBe(0);
-    expect(stdout).toContain('Usage: pixel-agents');
+    expect(stdout).toContain('Uso: pixel-agents');
   });
 
   // 12. Direct execution still runs main()'s port validation (rejects before listen())

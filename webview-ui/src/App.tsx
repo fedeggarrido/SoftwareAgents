@@ -549,7 +549,11 @@ function App() {
           />
         </div>
         <AuditPanel isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} />
-        <FeaturesPanel isOpen={isFeaturesOpen} onClose={() => setIsFeaturesOpen(false)} />
+        <FeaturesPanel
+          isOpen={isFeaturesOpen}
+          onClose={() => setIsFeaturesOpen(false)}
+          checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
+        />
 
         <BacklogPanel
           isOpen={isBacklogOpen}
@@ -565,6 +569,7 @@ function App() {
       <DecisionsPanel isOpen={isDecisionsOpen} onClose={() => setIsDecisionsOpen(false)} />
       {isNewIdeaOpen && (
         <NewIdeaDialog
+          checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
           onClose={() => {
             setIsNewIdeaOpen(false);
             setIsFeaturesOpen(true);

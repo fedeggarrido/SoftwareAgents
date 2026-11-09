@@ -28,6 +28,7 @@
   --hud-width: 460px;
   --control-target: 24px;
   --ui-info-size: 24px;
+  --idea-command-size: 16px;
   --panel-gap: 8px;
   --office-top: 10px;
   --office-bottom: 60px;
@@ -183,6 +184,13 @@
   font-size: var(--ui-info-size);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+.idea-command-text {
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: var(--idea-command-size);
+  white-space: pre;
+  overflow-x: auto;
 }
 .audit-filters select {
   border: 2px solid var(--color-text-muted);

@@ -10,7 +10,15 @@ export function OfficeModeIndicator() {
   const view = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const [expanded, setExpanded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  useDismissibleLayer(expanded, () => setExpanded(false), OFFICE_HELP_Z_INDEX, containerRef);
+  useDismissibleLayer(
+    expanded,
+    () => {
+      setExpanded(false);
+      containerRef.current?.querySelector('button')?.focus();
+    },
+    OFFICE_HELP_Z_INDEX,
+    containerRef,
+  );
   return (
     <div
       ref={containerRef}

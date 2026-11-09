@@ -13,6 +13,14 @@ import {
   PANEL_WINDOW_STORAGE_KEY,
 } from '../src/constants.js';
 import viteConfig from '../vite.config.ts';
+type MatchableElement = { matches(selector: string): boolean };
+type MeasurableElement = { scrollWidth: number; clientWidth: number };
+const isOutsidePanelWindow = (element: unknown) =>
+  (element as { closest(selector: string): unknown }).closest('[data-testid="panel-window"]') ===
+  null;
+const isFocusedElement = (element: unknown) => (element as MatchableElement).matches(':focus');
+const fitsHorizontally = (element: unknown) =>
+  (element as MeasurableElement).scrollWidth <= (element as MeasurableElement).clientWidth;
 
 const board = {
   type: 'boardState',
@@ -167,9 +175,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await page.keyboard.press('Shift+ArrowDown');
         expect(await windowPanel.boundingBox()).toEqual(panelBox);
         await page.keyboard.press('Escape');
-        expect(await backlog.evaluate('(element) => element === document.activeElement')).toBe(
-          true,
-        );
+        expect(await backlog.evaluate(isFocusedElement)).toBe(true);
         const buttons = page.locator('.bottom-toolbar > button');
         await buttons.first().focus();
         for (const button of await buttons.all()) {
@@ -177,9 +183,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           expect(box.x).toBeGreaterThanOrEqual(0);
           expect(box.x + box.width).toBeLessThanOrEqual(width);
           expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
-          expect(await button.evaluate('(element) => element === document.activeElement')).toBe(
-            true,
-          );
+          expect(await button.evaluate(isFocusedElement)).toBe(true);
           await page.keyboard.press('Tab');
         }
         await backlog.tap();
@@ -236,7 +240,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       }
       await page.keyboard.press('Escape');
       expect(await windowPanel.count()).toBe(0);
-      expect(await backlog.evaluate('(element) => element === document.activeElement')).toBe(true);
+      expect(await backlog.evaluate(isFocusedElement)).toBe(true);
       // Character details use the same window, including long legacy field values.
       await page.evaluate(`
         window.postMessage({ type: 'agentCreated', id: 1 }, '*');
@@ -250,11 +254,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.getByRole('tab', { name: 'Personaje', selected: true }).waitFor();
       await page.getByTestId('character-detail-panel').waitFor();
       expect(await page.locator('[data-testid="panel-window"]:visible').count()).toBe(1);
-      expect(
-        await page
-          .getByTestId('character-detail-panel')
-          .evaluate('(element) => element.scrollWidth <= element.clientWidth'),
-      ).toBe(true);
+      expect(await page.getByTestId('character-detail-panel').evaluate(fitsHorizontally)).toBe(
+        true,
+      );
       await page.getByRole('tab', { name: 'Backlog', exact: true }).click();
       expect(await page.getByTestId('character-detail-panel').count()).toBe(0);
       await page.keyboard.press('Escape');
@@ -286,11 +288,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(
         await page
           .getByRole('button', { name: 'Settings', exact: true })
-          .evaluate('(element) => element === document.activeElement'),
+          .evaluate(isFocusedElement),
       ).toBe(true);
       await page.keyboard.press('Escape');
       expect(await windowPanel.count()).toBe(0);
-      expect(await backlog.evaluate('(element) => element === document.activeElement')).toBe(true);
+      expect(await backlog.evaluate(isFocusedElement)).toBe(true);
       expect(
         await page.getByRole('button', { name: 'Layout', exact: true }).getAttribute('class'),
       ).toContain('bg-active-bg');
@@ -300,18 +302,14 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.getByRole('button', { name: 'Ver plan', exact: true }).click();
       const plan = page.getByRole('dialog', { name: 'Plan de feature', exact: true });
       await plan.waitFor();
-      expect(
-        await plan.evaluate(
-          '(element) => element.closest(\'[data-testid="panel-window"]\') === null',
-        ),
-      ).toBe(true);
+      expect(await plan.evaluate(isOutsidePanelWindow)).toBe(true);
       await page.keyboard.press('Escape');
       expect(await plan.count()).toBe(0);
       expect(await windowPanel.count()).toBe(1);
       expect(
         await page
           .getByRole('button', { name: 'Ver plan', exact: true })
-          .evaluate('(element) => element === document.activeElement'),
+          .evaluate(isFocusedElement),
       ).toBe(true);
       await page.getByRole('button', { name: 'Nueva idea', exact: true }).click();
       await page.getByRole('dialog', { name: 'Nueva idea', exact: true }).waitFor();

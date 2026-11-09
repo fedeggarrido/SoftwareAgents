@@ -52,9 +52,21 @@ export function useDismissibleLayer(
   useLayoutEffect(() => {
     close.current = onClose;
   });
+  // Capture the opener once per open session, so re-subscribing (deps change, another
+  // layer stealing focus) never replaces it with whatever happens to be focused later.
   useLayoutEffect(() => {
     if (!isOpen) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      // Layout cleanups run inside React's commit, which then restores the focus it saw
+      // before committing. Restore after the commit so that does not undo ours.
+      queueMicrotask(() => {
+        if (opener?.isConnected) opener.focus();
+      });
+    };
+  }, [isOpen]);
+  useLayoutEffect(() => {
+    if (!isOpen) return;
     const layer: Layer = { priority, close: () => close.current(), element, modal };
     if (layers.length === 0) window.addEventListener('keydown', handleKeyDown, true);
     layers.push(layer);
@@ -62,7 +74,6 @@ export function useDismissibleLayer(
     return () => {
       layers.splice(layers.indexOf(layer), 1);
       if (layers.length === 0) window.removeEventListener('keydown', handleKeyDown, true);
-      if (opener?.isConnected) opener.focus();
     };
   }, [isOpen, priority, element, modal]);
 }

@@ -109,7 +109,9 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
       await page.keyboard.press('Escape');
       expect(await badge.getAttribute('aria-expanded')).toBe('false');
       expect(await page.locator('#office-mode-explanation').count()).toBe(0);
-      expect(await badge.evaluate((button) => button === document.activeElement)).toBe(true);
+      expect(await page.evaluate("document.activeElement?.getAttribute('aria-controls')")).toBe(
+        'office-mode-explanation',
+      );
       expect(await page.locator('body').getAttribute('data-editor-escapes')).toBeNull();
       await page.keyboard.press('Escape');
       expect(await page.locator('body').getAttribute('data-editor-escapes')).toBe('1');

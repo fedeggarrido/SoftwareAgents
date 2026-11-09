@@ -6,6 +6,7 @@ import type {
 } from '../../core/src/messages.js';
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { readConfig } from './configPersistence.js';
+import { featureMerged } from './featureCompletion.js';
 import { type FlowEvent, flowMetrics, type FlowTask, wipSnapshot } from './flow.js';
 import { flowLabel } from './flowCommand.js';
 import { aggregateUsage, type UsageEntry } from './usageLedger.js';
@@ -125,12 +126,7 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
       if (run) {
         for (const field of ['status', 'branch', 'head', 'message']) optional(run[field]);
       }
-      const merged =
-        dag.length > 0 &&
-        dag.every((task) => task.status === 'DONE') &&
-        run?.branch === `sa/${key}-integration` &&
-        typeof run.head === 'string' &&
-        source.mainAncestors?.has(run.head) === true;
+      const merged = featureMerged(key, dag, run, source.mainAncestors);
       const belongs = (value: unknown) =>
         typeof value === 'string' &&
         (value === key || value === `${key}-DESIGN` || taskKeys.has(value));

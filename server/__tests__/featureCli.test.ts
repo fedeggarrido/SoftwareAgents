@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stringify } from 'yaml';
 
 import { architectPaths } from '../src/architect.js';
 import { AuditLog } from '../src/auditLog.js';
@@ -43,8 +44,40 @@ function registerPlanDesign() {
   const paths = architectPaths('.softwareagents/brain', 'FEAT-001');
   const specSha = git(tree(), 'rev-parse', 'HEAD');
   fs.mkdirSync(path.dirname(path.join(tree(), paths.doc)), { recursive: true });
-  fs.writeFileSync(path.join(tree(), paths.doc), '## Seguridad\nReview the new design.\n');
-  fs.writeFileSync(path.join(tree(), paths.dag), 'feature: FEAT-001\ntasks: []\n');
+  fs.writeFileSync(
+    path.join(tree(), paths.doc),
+    `---\n${stringify({
+      apiVersion: 'softwareagents.io/v1alpha1',
+      kind: 'TechnicalDesign',
+      feature: 'FEAT-001',
+      version: '1.0.0',
+      status: 'proposed',
+      components: ['Audit view'],
+      risks: [],
+      adrs: [],
+    })}---\n## Seguridad\nReview the new design.\n`,
+  );
+  const spec = readRequirements(tree(), doc, 'FEAT-001');
+  fs.writeFileSync(
+    path.join(tree(), paths.dag),
+    stringify({
+      apiVersion: spec.apiVersion,
+      kind: 'TaskDAG',
+      feature: spec.key,
+      tasks: [
+        {
+          key: 'FEAT-001-T01',
+          type: 'code',
+          title: 'Build audit view',
+          description: 'Show events',
+          acceptanceRefs: spec.acceptance.map((criterion) => criterion.id),
+          dependsOn: [],
+          agentRole: 'developer',
+          size: 'S',
+        },
+      ],
+    }),
+  );
   git(tree(), 'add', paths.doc, paths.dag);
   git(tree(), 'commit', '-m', 'fixture plan design');
   const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
@@ -171,6 +204,15 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
         .content,
     ).toContain('Audit view');
     expect(append).not.toHaveBeenCalled();
+    vi.stubEnv('SA_MANAGED_EXECUTION', '');
+    await handleFeaturePlanMessage(request, send, true);
+    expect(send.mock.calls.at(-1)![0]).toMatchObject({
+      plan: snapshot.plan,
+      canApprove: false,
+      approvalBlock: 'managed_process',
+      errorCode: null,
+    });
+    vi.stubEnv('SA_MANAGED_EXECUTION', undefined);
     const approval = { ...request, type: 'approveFeaturePlan', revision: snapshot.plan.revision };
     await handleFeaturePlanMessage({ ...approval, revision: '0'.repeat(64) }, send, true);
     expect(send.mock.calls.at(-1)![0].errorCode).toBe('stale_revision');

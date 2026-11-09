@@ -4,36 +4,14 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { FEATURE_PLAN_SECTIONS } from '../../core/src/featurePlan.js';
-import type { ClientMessage, FeaturePlanSnapshot, ServerMessage } from '../../core/src/messages.js';
+import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
 import type { MessageTransport, TransportState } from '../../core/src/transport.js';
 import { FEATURE_PLAN_TIMEOUT_MS } from '../src/constants.js';
 import { FeaturePlanController } from '../src/office/featurePlanController.js';
+import { planDecisionText } from '../src/office/featurePlanPresentation.js';
+import { planSnapshot as snapshot } from './fixtures/featurePlan.js';
 
 vi.mock('../src/transport/index.js', () => ({ transport: {} }));
-const snapshot = (requestId: string, canApprove = true): FeaturePlanSnapshot => ({
-  type: 'featurePlanSnapshot',
-  projectId: 'P',
-  key: 'FEAT-001',
-  requestId,
-  canApprove,
-  errorCode: null,
-  plan: {
-    key: 'FEAT-001',
-    title: '<script>alert(1)</script>',
-    revision: 'a'.repeat(64),
-    specSha: 'b'.repeat(40),
-    specApproved: false,
-    approved: false,
-    sections: FEATURE_PLAN_SECTIONS.map((section) => ({
-      ...section,
-      content:
-        section.id === 'requirements'
-          ? '<img src=x onerror=alert(1)>\n[enlace](javascript:alert(1))'
-          : null,
-    })),
-  },
-});
 
 function harness() {
   let receive: (message: ServerMessage) => void = () => {};
@@ -149,14 +127,25 @@ describe('SA-111 plan approval', () => {
     );
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('&lt;img');
-    expect(html).not.toMatch(/<(script|img|a)\b/);
-    expect(html.match(/Sección ausente/g)).toHaveLength(6);
-    expect(html).not.toContain('Aprobar plan');
+    expect(html).not.toMatch(/<(script|img)\b|href="javascript:/);
+    expect(html).not.toContain('Sección ausente');
+    const footer = html.slice(html.indexOf('<footer'));
+    expect(footer).toContain('Este plan no incluye pruebas');
+    expect(footer).toContain('Aprobar sin ellas es tu decisión');
+    expect(footer).toContain('disabled=""');
     expect(html).toContain('Solo lectura');
+    expect(html).toContain('Crear resumen');
+    expect(html).toContain('Depende de Crear resumen');
+    const disclosures = html.match(/<details>.*?<\/details>/gs) ?? [];
+    expect(disclosures).toHaveLength(1);
+    expect(disclosures[0]).toContain('apiVersion:');
+    expect(html.replace(/<details>.*?<\/details>/gs, '')).not.toContain('apiVersion:');
+    expect(html).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(footer).toContain('Revisión aaaaaaaa');
+    expect(footer).toContain(`title="${'a'.repeat(64)}"`);
     const css = fs.readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-    expect(css).toMatch(
-      /\.feature-plan-dialog\s*\{[^}]*width: min\(760px, calc\(100vw - 32px\)\);[^}]*min-width: 0;/,
-    );
+    expect(css).toMatch(/\.feature-plan-dialog\s*\{[^}]*min-width: 0;/);
+    expect(css).toMatch(/\.feature-plan-decision\s*\{[^}]*position: sticky;/);
   });
   it('shows the read-only message and no plan after a denied read', async () => {
     const h = harness();
@@ -184,6 +173,7 @@ describe('SA-111 plan approval', () => {
   it('distinguishes FeatureSpec approval from the displayed plan and enables a new human approval', async () => {
     const response = snapshot('r');
     response.plan!.specApproved = true;
+    response.plan!.approvalState = 'changed';
     const componentPath = '../src/components/FeaturePlanDialog.js';
     const { FeaturePlanView } = await import(componentPath);
     const html = renderToStaticMarkup(
@@ -195,10 +185,58 @@ describe('SA-111 plan approval', () => {
         onRefresh() {},
       }),
     );
-    expect(html).toContain('FeatureSpec aprobada; este plan ha cambiado y no está aprobado');
+    expect(html).toContain('El plan cambió después de la aprobación');
     expect(html).toContain('Aprobar plan');
     expect(html).not.toContain('Plan aprobado');
   });
+});
+
+describe('SA-128 real approval causes', () => {
+  it.each([
+    ['approved', 'Esta revisión del plan ya está aprobada'],
+    ['changed', 'El plan cambió después de la aprobación'],
+    ['unbound', 'todavía no tiene aprobación registrada'],
+    ['finished', 'Feature finalizada. No necesita aprobación'],
+    ['merged', 'Feature integrada. No necesita aprobación'],
+  ] as const)('describes %s from operational state', (state, copy) => {
+    const response = snapshot('r');
+    response.plan!.approvalState = state;
+    expect(planDecisionText(response)).toContain(copy);
+  });
+  it.each([
+    ['read_only', 'La conexión no tiene privilegios'],
+    ['managed_process', 'servidor se ejecuta como proceso gestionado'],
+    ['unsupported_adapter', 'Este adapter no admite'],
+    ['stale_revision', 'revisión mostrada está desactualizada'],
+  ] as const)('describes %s without guessing token state', (block, copy) => {
+    const response = snapshot('r', false);
+    response.approvalBlock = block;
+    expect(planDecisionText(response)).toContain(copy);
+  });
+  it.each(['finished', 'merged'] as const)(
+    'hides approval requests and decision warnings on %s work',
+    async (state) => {
+      const response = snapshot('r', false);
+      response.plan!.approvalState = state;
+      response.plan!.specApproved = true;
+      response.approvalBlock = 'managed_process';
+      const componentPath = '../src/components/FeaturePlanDialog.js';
+      const { FeaturePlanView } = await import(componentPath);
+      const html = renderToStaticMarkup(
+        createElement(FeaturePlanView, {
+          featureKey: 'FEAT-001',
+          view: { snapshot: response, pending: false, loading: false, notice: '' },
+          onClose() {},
+          onApprove() {},
+          onRefresh() {},
+        }),
+      );
+      expect(html).toContain('No necesita aprobación');
+      expect(html).not.toMatch(
+        /no está aprobado|Aprobar plan|es tu decisión|privilegios|proceso gestionado/,
+      );
+    },
+  );
 });
 
 describe('SA-111 plan notices', () => {

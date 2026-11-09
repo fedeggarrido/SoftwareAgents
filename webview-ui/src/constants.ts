@@ -565,3 +565,6 @@ export const AUDIT_DETAIL_FIELDS = [
   ['model', 'Modelo'],
   ['code', 'Código'],
 ] as const;
+/** Compact previews link to the complete readable sections below. */
+export const FEATURE_PLAN_PREVIEW_ITEMS = 3;
+export const FEATURE_PLAN_REVISION_CHARS = 8;

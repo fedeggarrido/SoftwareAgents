@@ -339,6 +339,16 @@ ni seguridad semántica de sus resúmenes.
   navegación, herramientas ni ejecución. El contenido del plan nunca se registra
   en logs o auditoría.
 
+  SA-128 añade una proyección legible del mismo contenido permitido. Reutiliza
+  los validadores de esquema y el análisis del DAG en el servidor, proyecta campos
+  explícitos y resuelve dependencias por título. Estos validadores comprueban la
+  estructura. Los textos conservan su carácter de datos no confiables y se
+  renderizan escapados, incluidos resumen, títulos, riesgos y documentos plegados.
+  El pie separa estado operativo y causa de bloqueo de ingreso. Un proceso
+  gestionado sigue sin poder aprobar aunque la conexión tenga privilegios.
+  El estado final usa WorkStore y la evidencia Git existente. La vista conserva
+  el documento original, incluido su estado declarativo histórico.
+
 - **SA-095 (telemetría):** OTLP/HTTP está desactivado por defecto y solo lo habilita
   Operator config. Activado, salen al collector elegido IDs de traza/Execution/Task,
   proveedor/modelos, rol/nivel/esfuerzo, nombres de herramienta, contadores, tiempos

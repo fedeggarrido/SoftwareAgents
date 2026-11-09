@@ -79,10 +79,19 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
   a read-only WorkStore transaction and the existing artifact path and Git guards.
 - `featurePlanSnapshot` echoes those identifiers and carries `plan`, `canApprove`
   and `errorCode`. A failed read has a null plan and disabled approval. The plan
-  contains its key, title, spec SHA, revision, `specApproved`, `approved` and seven fixed
-  sections. Requirements, architecture and tasks show literal FeatureSpec,
-  TechnicalDesign and DAG sources. Tests, CI, security and documentation project
-  explicit matching Markdown headings from the design. Null content means missing.
+  contains its key, title, spec SHA, revision, `specApproved`, `approved`, `approvalState`,
+  `summary` and seven fixed sections. SA-128 adds readable section `items` alongside
+  literal `content`. The server validates TechnicalDesign front matter and TaskDAG
+  using the existing schema validators and DAG analysis. FeatureSpec arrives through
+  the existing validated artifact reader. The summary projects goal, user value,
+  explicit exclusion rules, declared risks, acceptance criteria and task titles,
+  sizes and dependencies resolved to titles. The current schemas contain no cost
+  estimate field. No estimate is synthesized from task size or actual ledger cost.
+  Tests, CI, security and documentation project explicit matching design headings.
+  QA and documentation tasks also contribute to their respective readable sections.
+  An empty `items` list means missing readable coverage. Empty headings and fenced
+  code alone contribute no coverage. Literal documents remain in closed technical
+  disclosures and every free-text field is rendered as escaped text.
   This explicit plan-content payload is separate from the sanitized FeatureRow
   summary. No arbitrary filesystem paths, reports or prompts are read for it.
 - `approveFeaturePlan` carries the same identifiers plus the displayed `revision`.
@@ -101,10 +110,20 @@ Both unions use `oneOf` with `discriminator: type`. Every concrete message sets 
   errors become fixed codes, without exception text or artifact content.
 - `specApproved` reflects Feature status `approved` or `ready_to_merge`. `approved`
   additionally requires `approved_plan_revision` to match the displayed revision.
-  Legacy null bindings and changed sources show “FeatureSpec aprobada; este plan ha
-  cambiado y no está aprobado” and allow a human to approve the new revision. This
-  only updates the binding for an already approved FeatureSpec. The Developer gate
+  SA-128 distinguishes `pending`, `approved`, `changed` and legacy `unbound`
+  bindings in `approvalState`. `finished` means every registered DAG task is DONE
+  or the operational feature is `ready_to_merge`. `merged` uses the feature list's
+  shared completion predicate, including the persisted integration branch/head and
+  local main ancestry evidence. Finished work needs no further approval in this view,
+  even when its immutable YAML still says `draft` or an old binding differs.
+  A fresh approval only updates the binding for an already approved FeatureSpec. The Developer gate
   still depends on Feature status alone and the pipeline retains its existing gates.
+- Snapshot `approvalBlock` reports `read_only`, `managed_process`,
+  `unsupported_adapter`, `stale_revision` or `unavailable`, otherwise null.
+  It explains connection/ingress availability separately from revision state.
+  A privileged plan read on a managed server can succeed while approval remains
+  blocked by the existing ingress guard. Managed approval rejection now reports
+  `managed_process`, with identical authorization checks and ordering.
 - Repeated messages revalidate and return success for the same approved revision,
   including after `ready_to_merge`, without another mutation or audit entry. CLI and
   office share one ordered `pending`/`approved` audit pair per new binding. A failed

@@ -6,7 +6,12 @@ import { featureIngressActor } from './featureIngress.js';
 import { type PlanStore, projectFeaturePlan, StaleFeaturePlan } from './featurePlanProjection.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { openReadOnlyWorkStore } from './workstore/readOnlyWorkStore.js';
-import type { DesignRecord, FeatureRecord, TaskRecord } from './workstore/WorkStore.js';
+import type {
+  DesignRecord,
+  FeatureRecord,
+  FeatureRunRecord,
+  TaskRecord,
+} from './workstore/WorkStore.js';
 import { FeatureRevisionChangedError } from './workstore/WorkStore.js';
 
 export function readFeaturePlan(config: ProjectConfig, key: string): FeaturePlan {
@@ -22,6 +27,14 @@ export function readFeaturePlan(config: ProjectConfig, key: string): FeaturePlan
       getTask: (key) => get('tasks', 'key', key) as unknown as TaskRecord | undefined,
       getDesign: (key) =>
         get('technical_designs', 'feature_key', key) as unknown as DesignRecord | undefined,
+      getFeatureRun: (key) => {
+        const row = get('feature_runs', 'feature_key', key) as { state: string } | undefined;
+        return row
+          ? {
+              state: JSON.parse(row.state) as FeatureRunRecord['state'],
+            }
+          : undefined;
+      },
     };
     return projectFeaturePlan(store, config, key);
   } finally {
@@ -62,13 +75,29 @@ export async function handleFeaturePlanMessage(
         type: 'featurePlanSnapshot',
         plan,
         canApprove:
-          !errorCode && privileged && featureIngressActor() === 'human' && !plan?.approved,
+          !errorCode &&
+          privileged &&
+          featureIngressActor() === 'human' &&
+          !plan?.approved &&
+          plan?.approvalState !== 'finished' &&
+          plan?.approvalState !== 'merged',
+        approvalBlock: !privileged
+          ? 'read_only'
+          : !supported
+            ? 'unsupported_adapter'
+            : featureIngressActor() !== 'human'
+              ? 'managed_process'
+              : errorCode === 'stale_revision'
+                ? 'stale_revision'
+                : errorCode
+                  ? 'unavailable'
+                  : null,
         errorCode,
       });
   };
   if (!privileged) return reply('denied');
   if (!supported) return reply('unsupported_adapter');
-  if (approving && featureIngressActor() !== 'human') return reply('denied');
+  if (approving && featureIngressActor() !== 'human') return reply('managed_process');
   const allowed = ['type', 'projectId', 'requestId', 'key', ...(approving ? ['revision'] : [])];
   if (
     Object.keys(msg).some((key) => !allowed.includes(key)) ||

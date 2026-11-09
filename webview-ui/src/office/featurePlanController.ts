@@ -16,6 +16,8 @@ export const planErrorText = (code: FeaturePlanSnapshot['errorCode']): string =>
       return 'Solo lectura. La aprobación requiere una conexión privilegiada del operador.';
     case 'unsupported_adapter':
       return 'Abre la oficina standalone para revisar y aprobar el plan.';
+    case 'managed_process':
+      return 'La aprobación está bloqueada porque el servidor se ejecuta como proceso gestionado, incluso con token del operador.';
     case 'stale_revision':
       return 'El plan ha cambiado. Se ha solicitado la revisión actual. Léela antes de aprobar.';
     case 'unknown_project':

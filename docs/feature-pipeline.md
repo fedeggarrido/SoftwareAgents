@@ -395,6 +395,52 @@ prueba que la operación no sucediera. Un YAML previo sin registro no se sobresc
 Los worktrees sucios y leases pendientes siguen la recuperación/manual review
 existentes. Este comando no integra, hace push ni retira worktrees.
 
+## Lectura y decisión del plan en la oficina (SA-128)
+
+«Ver plan» empieza con un resumen en español del objetivo, valor, exclusiones
+explícitas, riesgos declarados, tareas y criterios de aceptación. Los campos se
+proyectan en el servidor desde FeatureSpec validado, front matter TechnicalDesign
+validado y TaskDAG validado y analizado. Las dependencias muestran los títulos de
+las tareas. El resumen ofrece hasta tres elementos por bloque y enlaces al
+contenido completo legible. Los documentos literales se conservan en «Ver detalle
+técnico», plegado de inicio en cada sección con documento. Todo se presenta como
+texto escapado. El contenido nunca se interpreta como HTML ni Markdown.
+
+Los esquemas actuales carecen de campos de coste estimado y alcance excluido.
+El coste se muestra sin datos. El alcance excluido recoge únicamente reglas que
+empiezan con una negación o una declaración explícita de exclusión en español o
+inglés, conservando sus palabras. Si faltan, la vista indica que no hay exclusiones
+explícitas. El tamaño de las tareas y el gasto histórico no se convierten en coste
+estimado. La vista conserva todas las reglas en el detalle legible.
+
+La navegación permanece junto al área de contenido. El pie de decisión queda
+visible mientras se desplaza o se abre el detalle técnico. Incluye los avisos de
+secciones sin cobertura legible y el estado real del plan. Los encabezados vacíos
+y los bloques de código por sí solos no cuentan como pruebas, CI, seguridad ni
+documentación. Las tareas de tipo `qa` y `doc` aportan cobertura explícita a sus
+secciones. Los criterios de aceptación siguen disponibles aunque falten pruebas.
+
+El estado procede del WorkStore y de la revisión aprobada. Distingue aprobación
+vigente, revisión cambiada y aprobación antigua sin vínculo a una revisión del
+plan. Todas las tareas del DAG terminadas o `ready_to_merge` indican feature
+finalizada. Para mostrar integrada exige además la misma evidencia Git que el
+listado de features. En trabajo terminado desaparece la petición de aprobación.
+El `draft` del documento inmutable sigue visible dentro del detalle técnico.
+
+El bloqueo de ingreso informa de conexión sin privilegios, proceso gestionado,
+adapter incompatible o revisión desactualizada según la causa del servidor.
+Un token activo permite leer en un servidor gestionado, cuyo guard de ingreso
+humano sigue bloqueando aprobar. La revisión visible usa los ocho primeros
+caracteres del hash del plan y ofrece el valor completo en el tooltip.
+
+La autorización y el servicio de aprobación conservan sus comprobaciones.
+La decisión pendiente sobre el gate del Developer corresponde al propietario.
+
+Las regresiones están en `server/__tests__/featurePlan.test.ts`,
+`server/__tests__/featureCli.test.ts`, `webview-ui/test/featurePlan.test.ts` y
+`webview-ui/test/featurePlanLayout.test.ts`. La última prepara una comprobación de
+navegador con viewport de 761 px de alto y un documento técnico largo.
+
 ## Architect: FeatureSpec aprobado → TechnicalDesign + TaskDAG (SA-042)
 
 Después de aprobar el FeatureSpec, Claude ejecuta desde el checkout principal,

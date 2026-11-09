@@ -414,6 +414,9 @@ export const FEATURE_PLAN_HEADINGS = {
   documentation: /^(?:documentation|documentación|docs)$/i,
 } as const;
 export const FEATURE_PLAN_REVISION_PATTERN = /^[a-f0-9]{64}$/;
+/** Explicit negative rules only. No semantic inference of undeclared scope. */
+export const FEATURE_PLAN_EXCLUSION_RULE =
+  /^(?:no\b|nunca\b|sin\b|fuera de alcance\b|out of scope\b|not\b|never\b|must not\b|do not\b)/i;
 // Project preparation writes only these repository-owned paths.
 export const PROJECT_MANIFEST_PATH = '.softwareagents/project.yaml';
 export const PROJECT_BRAIN_PATH = '.softwareagents/brain';

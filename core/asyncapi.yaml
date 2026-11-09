@@ -245,6 +245,7 @@ components:
           unavailable,
           stale_revision,
           approval_blocked,
+          managed_process,
         ]
 
     FeaturePlanSectionId:
@@ -258,7 +259,7 @@ components:
     FeaturePlanSection:
       type: object
       additionalProperties: false
-      required: [id, title, content]
+      required: [id, title, content, items]
       properties:
         id:
           $ref: '#/components/schemas/FeaturePlanSectionId'
@@ -266,12 +267,74 @@ components:
           type: string
         content:
           type: [string, 'null']
+        items:
+          description: Readable literal text projected from validated fields or explicit design sections.
+          type: array
+          items:
+            type: string
 
-    FeaturePlan:
-      description: Literal existing FeatureSpec, TechnicalDesign and DAG projection. Null section means missing. Never interpret content as HTML or Markdown. No content in logs or audit.
+    FeaturePlanTask:
       type: object
       additionalProperties: false
-      required: [key, title, revision, specSha, specApproved, approved, sections]
+      required: [key, title, size, dependencies]
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+        size:
+          $ref: '#/components/schemas/FeaturePlanTaskSize'
+        dependencies:
+          description: Dependency titles resolved against the validated DAG.
+          type: array
+          items:
+            type: string
+
+    FeaturePlanTaskSize:
+      type: string
+      enum: [S, M, L]
+
+    FeaturePlanSummary:
+      type: object
+      additionalProperties: false
+      required: [goal, userValue, outOfScope, risks, acceptance, tasks]
+      properties:
+        goal:
+          type: string
+        userValue:
+          type: string
+        outOfScope:
+          description: Explicit exclusion rules only. Empty means unspecified.
+          type: array
+          items:
+            type: string
+        risks:
+          type: array
+          items:
+            type: string
+        acceptance:
+          type: array
+          items:
+            type: string
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturePlanTask'
+
+    FeaturePlanApprovalState:
+      type: string
+      enum: [pending, approved, changed, unbound, finished, merged]
+
+    FeaturePlanApprovalBlock:
+      type: string
+      enum: [read_only, managed_process, unsupported_adapter, stale_revision, unavailable]
+
+    FeaturePlan:
+      description: Validated structured summary and literal existing FeatureSpec, TechnicalDesign and DAG documents. Empty section items mean missing readable coverage. Never interpret text as HTML or Markdown. No content in logs or audit.
+      type: object
+      additionalProperties: false
+      required:
+        [key, title, revision, specSha, specApproved, approved, approvalState, summary, sections]
       properties:
         key:
           type: string
@@ -287,6 +350,11 @@ components:
         approved:
           description: This exact plan revision has a persisted human approval binding.
           type: boolean
+        approvalState:
+          description: Operational state from WorkStore and persisted approval binding, never document draft metadata.
+          $ref: '#/components/schemas/FeaturePlanApprovalState'
+        summary:
+          $ref: '#/components/schemas/FeaturePlanSummary'
         sections:
           type: array
           items:
@@ -295,7 +363,7 @@ components:
     FeaturePlanSnapshot:
       type: object
       additionalProperties: false
-      required: [type, projectId, requestId, key, canApprove, errorCode, plan]
+      required: [type, projectId, requestId, key, canApprove, approvalBlock, errorCode, plan]
       properties:
         type:
           const: featurePlanSnapshot
@@ -307,6 +375,10 @@ components:
           type: string
         canApprove:
           type: boolean
+        approvalBlock:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturePlanApprovalBlock'
+            - type: 'null'
         errorCode:
           oneOf:
             - $ref: '#/components/schemas/FeaturePlanError'

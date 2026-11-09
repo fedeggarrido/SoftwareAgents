@@ -106,9 +106,13 @@ export interface FeaturePlanSnapshot {
   requestId: string;
   key: string;
   canApprove: boolean;
+  approvalBlock: FeaturePlanApprovalBlock | null;
   errorCode: FeaturePlanError | null;
   plan: FeaturePlan | null;
 }
+
+export type FeaturePlanApprovalBlock =
+  'read_only' | 'managed_process' | 'unsupported_adapter' | 'stale_revision' | 'unavailable';
 
 export type FeaturePlanError =
   | 'denied'
@@ -117,7 +121,8 @@ export type FeaturePlanError =
   | 'unknown_project'
   | 'unavailable'
   | 'stale_revision'
-  | 'approval_blocked';
+  | 'approval_blocked'
+  | 'managed_process';
 
 export interface FeaturePlan {
   key: string;
@@ -126,13 +131,37 @@ export interface FeaturePlan {
   specSha: string;
   specApproved: boolean;
   approved: boolean;
+  approvalState: FeaturePlanApprovalState;
+  summary: FeaturePlanSummary;
   sections: FeaturePlanSection[];
 }
+
+export type FeaturePlanApprovalState =
+  'pending' | 'approved' | 'changed' | 'unbound' | 'finished' | 'merged';
+
+export interface FeaturePlanSummary {
+  goal: string;
+  userValue: string;
+  outOfScope: string[];
+  risks: string[];
+  acceptance: string[];
+  tasks: FeaturePlanTask[];
+}
+
+export interface FeaturePlanTask {
+  key: string;
+  title: string;
+  size: FeaturePlanTaskSize;
+  dependencies: string[];
+}
+
+export type FeaturePlanTaskSize = 'S' | 'M' | 'L';
 
 export interface FeaturePlanSection {
   id: FeaturePlanSectionId;
   title: string;
   content: string | null;
+  items: string[];
 }
 
 export type FeaturePlanSectionId =

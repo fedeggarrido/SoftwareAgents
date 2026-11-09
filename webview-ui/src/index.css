@@ -69,6 +69,14 @@
   --feature-ready-to-merge: var(--color-status-permission);
   --feature-merged: var(--color-status-success);
   --feature-unknown: var(--color-text-muted);
+  --plan-font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --plan-font-size: 14px;
+  --plan-heading-size: 18px;
+  --plan-line-height: 1.45;
+  --plan-width: 960px;
+  --plan-summary-columns: 3;
+  --plan-preview-lines: 1;
+  --plan-goal-lines: 2;
 }
 
 @theme inline {
@@ -627,16 +635,135 @@
 }
 
 .feature-plan-dialog {
-  width: min(760px, calc(100vw - 32px));
+  width: min(var(--plan-width), calc(100vw - 2 * var(--panel-edge)));
   min-width: 0;
-  max-height: 85vh;
-  overflow-y: auto;
+  height: calc(100dvh - 2 * var(--panel-edge));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  font-family: var(--plan-font);
+  font-size: var(--plan-font-size);
+  line-height: var(--plan-line-height);
 }
-.feature-plan-dialog pre {
+.feature-plan-dialog > div:first-child {
+  flex-shrink: 0;
+  margin: 0;
+}
+.feature-plan-dialog > div:first-child span,
+.feature-plan-dialog button {
+  font: inherit;
+}
+.feature-plan-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.feature-plan-nav,
+.feature-plan-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--panel-gap);
+}
+.feature-plan-nav {
+  padding: var(--panel-gap);
+  flex-shrink: 0;
+  border-bottom: var(--window-border) solid var(--color-border);
+}
+.feature-plan-dialog a {
+  color: var(--color-accent-bright);
+  text-decoration: underline;
+}
+.feature-plan-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--panel-gap);
+  scrollbar-gutter: stable;
+}
+.feature-plan-scroll section {
+  padding-bottom: var(--panel-edge);
+  scroll-margin-top: var(--panel-gap);
+}
+.feature-plan-dialog h2 {
+  font-size: var(--plan-heading-size);
+  font-weight: bold;
+}
+.feature-plan-dialog h3,
+.feature-plan-dialog h4 {
+  font-weight: bold;
+}
+.feature-plan-dialog ul,
+.feature-plan-dialog ol {
+  padding-left: var(--panel-edge);
+  list-style: disc;
+}
+.feature-plan-dialog li {
+  margin-block: var(--window-border);
+}
+.feature-plan-summary {
+  display: grid;
+  grid-template-columns: repeat(var(--plan-summary-columns), minmax(0, 1fr));
+  gap: var(--panel-gap);
+  margin-top: var(--panel-gap);
+}
+.feature-plan-summary > div {
+  background: var(--color-bg-dark);
+  padding: var(--panel-gap);
+}
+.feature-plan-summary a {
+  display: block;
+}
+.feature-plan-summary li,
+.feature-plan-value,
+.feature-plan-goal {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--plan-preview-lines);
+  overflow: hidden;
+}
+.feature-plan-goal {
+  -webkit-line-clamp: var(--plan-goal-lines);
+}
+.feature-plan-dialog details {
+  margin-top: var(--panel-gap);
+}
+.feature-plan-dialog summary {
+  cursor: pointer;
+  color: var(--color-accent-bright);
+}
+.feature-plan-dialog pre,
+.feature-plan-dialog code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
+}
+.feature-plan-tasks li {
+  margin-block: var(--panel-gap);
+}
+.feature-plan-decision {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  background: var(--color-bg);
+  border-top: var(--window-border) solid var(--color-border);
+  padding: var(--panel-gap);
+}
+.feature-plan-warnings {
+  color: var(--color-warning);
+}
+.feature-plan-actions {
+  margin-top: var(--panel-gap);
+}
+.feature-plan-actions > span {
+  margin-right: auto;
+}
+@media (max-width: 640px) {
+  .feature-plan-summary {
+    --plan-summary-columns: 1;
+  }
 }
 
 .connection-indicator {

@@ -37,6 +37,7 @@ vi.mock('os', async (original) => ({
   homedir: () => process.env.HOME!,
 }));
 
+const managedMarkers = ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'];
 const interviewAnswers = (): IdeaAnswer[] =>
   IDEA_QUESTIONS.map((question) => ({
     questionId: question.id,
@@ -83,6 +84,7 @@ describe('SA-109/110 draft ingress', () => {
     return bundle;
   };
   beforeEach(async () => {
+    for (const marker of managedMarkers) vi.stubEnv(marker, undefined);
     const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
     vi.mocked(fs.fsyncSync).mockReset().mockImplementation(actual.fsyncSync);
     vi.mocked(fs.writeFileSync).mockReset().mockImplementation(actual.writeFileSync);
@@ -137,6 +139,54 @@ describe('SA-109/110 draft ingress', () => {
     expect(fs.existsSync(path.join(root, FEATURE_IDEAS_DIRECTORY))).toBe(false);
     expect(fs.existsSync(home)).toBe(false);
   });
+
+  it.each(managedMarkers.flatMap((marker) => ['', '1'].map((value) => [marker, value])))(
+    'denies human draft ingress for %s=%j without probes or writes',
+    (marker, value) => {
+      const contents = (directory: string): unknown =>
+        fs
+          .readdirSync(directory)
+          .sort()
+          .map((name): unknown => {
+            const entry = path.join(directory, name);
+            return [
+              name,
+              fs.statSync(entry).isDirectory() ? contents(entry) : fs.readFileSync(entry),
+            ];
+          });
+      const before = contents(root);
+      vi.stubEnv(marker, value);
+      const probes = [
+        vi.spyOn(fs, 'existsSync'),
+        vi.spyOn(fs, 'lstatSync'),
+        vi.spyOn(fs, 'readFileSync'),
+        vi.spyOn(childProcess, 'execFileSync'),
+      ];
+      for (const probe of probes) probe.mockClear();
+      for (const write of [fs.writeFileSync, fs.linkSync, fs.fsyncSync])
+        vi.mocked(write).mockClear();
+      for (const repository of [root, path.join(root, 'absent')]) {
+        expect(submitIdea(request(), true, repository)).toEqual({
+          type: 'submitIdeaResult',
+          requestId: 'submit-1',
+          projectId: 'ideas-project',
+          status: 'rejected',
+          errorCode: 'denied',
+          idea: null,
+        });
+      }
+      const send = vi.fn();
+      handleIdeaMessage({ type: 'submitIdea', ...request() }, send, true);
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'rejected', errorCode: 'denied', idea: null }),
+      );
+      for (const probe of probes) expect(probe).not.toHaveBeenCalled();
+      for (const write of [fs.writeFileSync, fs.linkSync, fs.fsyncSync])
+        expect(write).not.toHaveBeenCalled();
+      expect(contents(root)).toEqual(before);
+      expect(fs.existsSync(home)).toBe(false);
+    },
+  );
 
   it('dispatches privileged drafts without starting work, changing tracked files or the index, or logging text', () => {
     const spawn = vi.mocked(childProcess.spawn);

@@ -4,6 +4,7 @@ import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import type { ClientMessage, ExecutorState } from '../../core/src/messages.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../src/constants.js';
 import { bindExtensionTransportLifecycle } from '../src/hooks/extensionTransportLifecycle.js';
+import { getOfficeAccess, officeAccessView, setOfficeAccess } from '../src/office/accessStore.js';
 import { type PendingAgent, reconcileExistingAgents } from '../src/office/engine/existingAgents.js';
 import { OfficeState } from '../src/office/engine/officeState.js';
 import {
@@ -85,6 +86,7 @@ describe('executor transport regressions (DOM-free)', () => {
     stop = undefined;
     transport.dispose();
     setExecutorStore(emptyExecutorStore());
+    setOfficeAccess(null);
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -205,6 +207,38 @@ describe('executor transport regressions (DOM-free)', () => {
     expect(FakeSocket.instances[1].sent).toEqual([
       { type: 'requestExecutorState', projectId: state.projectId },
     ]);
+  });
+
+  it('keeps access unconfirmed from disconnect until the next officeAccess answer', () => {
+    stop = bindExtensionTransportLifecycle(transport);
+    const unsubscribe = transport.onMessage((message) => {
+      if (message.type === 'officeAccess') setOfficeAccess(message);
+    });
+    const socket = FakeSocket.instances[0];
+    socket.open();
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'officeAccess', privileged: true, reason: null }),
+    });
+    expect(officeAccessView(getOfficeAccess(), false).label).toBe('Operador');
+    socket.close();
+    expect(officeAccessView(getOfficeAccess(), false)).toMatchObject({
+      label: 'Reconectando…',
+      pending: true,
+      blocked: false,
+    });
+    vi.advanceTimersByTime(1000);
+    const next = FakeSocket.instances[1];
+    next.open();
+    expect(officeAccessView(getOfficeAccess(), false).pending).toBe(true);
+    next.onmessage?.({
+      data: JSON.stringify({ type: 'officeAccess', privileged: false, reason: 'token_required' }),
+    });
+    expect(officeAccessView(getOfficeAccess(), false)).toMatchObject({
+      label: 'Solo lectura',
+      pending: false,
+      blocked: true,
+    });
+    unsubscribe();
   });
 
   it('repeats capability handshakes on every reconnect, without doubling the initial handshake', () => {

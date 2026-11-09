@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 interface TooltipProps {
   title: string;
   onDismiss: () => void;
-  position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+  position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'stack';
   children: ReactNode;
 }
 
@@ -17,7 +17,7 @@ const positionStyles: Record<string, React.CSSProperties> = {
 export function Tooltip({ title, onDismiss, position = 'top-right', children }: TooltipProps) {
   return (
     <div
-      className="absolute z-20 pixel-panel whitespace-nowrap p-0"
+      className={`${position === 'stack' ? 'relative max-w-full' : 'absolute z-20 whitespace-nowrap'} pixel-panel p-0`}
       style={positionStyles[position]}
     >
       <div className="flex items-center justify-between py-4 px-8 border-b border-border">

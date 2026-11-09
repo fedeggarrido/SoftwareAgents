@@ -5,6 +5,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
+import { OFFICE_ACCESS_INSTRUCTIONS } from '../../core/src/officeAccess.js';
 import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli, parseArgs } from '../src/cli.js';
 import type { ClientMessageContext } from '../src/clientMessageHandler.js';
@@ -213,7 +214,7 @@ describe('SA-114 project preparation', () => {
       true,
     );
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'denied' }));
-    await expect(runProjectCommand(['init', '--yes'])).rejects.toThrow('no desde un agente');
+    await expect(runProjectCommand(['init', '--yes'])).rejects.toThrow(OFFICE_ACCESS_INSTRUCTIONS);
     expect(fs.existsSync(path.join(root, '.softwareagents'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.pixel-agents'))).toBe(false);
   });

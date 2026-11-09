@@ -364,7 +364,8 @@ export function submitIdea(
     errorCode: null,
     idea: null,
   };
-  if (!privileged) return { ...base, errorCode: 'denied' };
+  // Drafts are human ingress; reject managed processes before any Project or storage probe.
+  if (!privileged || featureIngressActor() !== 'human') return { ...base, errorCode: 'denied' };
   if (typeof request.text !== 'string') return { ...base, errorCode: 'invalid_request' };
   if (Buffer.byteLength(request.text, 'utf8') > TASK_CLI_INPUT_BYTES)
     return { ...base, errorCode: 'too_large' };

@@ -52,9 +52,10 @@ export function NewIdeaDialog({
   const { store, connection } = useIdeasConnection(true);
   const access = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const permissionBlocked =
-    access.blocked ||
-    store.snapshot?.errorCode === 'denied' ||
-    store.snapshot?.preparationError === 'denied';
+    !access.pending &&
+    (access.blocked ||
+      store.snapshot?.errorCode === 'denied' ||
+      store.snapshot?.preparationError === 'denied');
   const preparation = store.snapshot?.preparation;
   useEffect(() => {
     if (preparation)
@@ -80,7 +81,7 @@ export function NewIdeaDialog({
       setConfirmDiscard(consult ? 'consult' : 'close');
     else finishClose(consult);
   };
-  const writable = state === 'editing' || state === 'error';
+  const writable = !access.pending && (state === 'editing' || state === 'error');
   const question = IDEA_QUESTIONS[step - 1];
   const answer = question ? answers[question.id] : undefined;
   const reviewing = step === IDEA_QUESTIONS.length + 1;
@@ -151,7 +152,7 @@ export function NewIdeaDialog({
               id="project-name"
               value={projectName}
               onChange={(event) => setProjectDraft({ ...projectDraft, name: event.target.value })}
-              disabled={!!store.preparationPending || connection !== 'connected'}
+              disabled={access.pending || !!store.preparationPending || connection !== 'connected'}
               className="bg-bg-dark text-text border-2 border-border p-8"
             />
             <p>
@@ -172,7 +173,10 @@ export function NewIdeaDialog({
             <p>{PROJECT_PREPARATION_COMMIT_NOTICE}</p>
             <Button
               disabled={
-                !projectName.trim() || !!store.preparationPending || connection !== 'connected'
+                access.pending ||
+                !projectName.trim() ||
+                !!store.preparationPending ||
+                connection !== 'connected'
               }
               onClick={() => sendProjectPreparation(projectName, transport)}
             >
@@ -180,13 +184,13 @@ export function NewIdeaDialog({
             </Button>
           </section>
         )}
-        {store.snapshot?.preparationError && (
+        {!access.pending && store.snapshot?.preparationError && (
           <p role="alert">{projectPreparationErrorText(store.snapshot.preparationError)}</p>
         )}
         {store.preparationResult?.status === 'created' && (
           <p role="status">Proyecto preparado. {PROJECT_PREPARATION_COMMIT_NOTICE}</p>
         )}
-        {store.preparationResult?.errorCode && (
+        {!access.pending && store.preparationResult?.errorCode && (
           <p role="alert">{projectPreparationErrorText(store.preparationResult.errorCode)}</p>
         )}
         {confirmDiscard ? (
@@ -292,12 +296,14 @@ export function NewIdeaDialog({
               </section>
             )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
-              {state === 'loading' && 'Comprobando el Project…'}
-              {state === 'disabled' &&
+              {access.pending && access.explanation}
+              {!access.pending && state === 'loading' && 'Comprobando el Project…'}
+              {!access.pending &&
+                state === 'disabled' &&
                 !preparation &&
                 !store.snapshot?.preparationError &&
                 ideaErrorText(store.snapshot?.errorCode)}
-              {state === 'error' && ideaErrorText(store.result?.errorCode)}
+              {!access.pending && state === 'error' && ideaErrorText(store.result?.errorCode)}
               {state === 'offline' && 'Sin conexión. Reconecta para guardar la idea.'}
               {state === 'saving' && 'Guardando…'}
               {state === 'uncertain' &&

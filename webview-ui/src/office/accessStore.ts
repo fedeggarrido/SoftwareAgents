@@ -9,6 +9,8 @@ import {
   OFFICE_OPERATOR_EXPLANATION,
   OFFICE_OPERATOR_LABEL,
   OFFICE_READ_ONLY_LABEL,
+  OFFICE_RECONNECTING_EXPLANATION,
+  OFFICE_RECONNECTING_LABEL,
 } from '../../../core/src/officeAccess.js';
 
 let current: OfficeAccess | null = null;
@@ -26,6 +28,14 @@ export const useOfficeAccess = () =>
   useSyncExternalStore(subscribe, getOfficeAccess, getOfficeAccess);
 
 export function officeAccessView(access: OfficeAccess | null, embedded: boolean) {
+  // A missing handshake says nothing about the next connection's permissions.
+  if (!embedded && access === null)
+    return {
+      label: OFFICE_RECONNECTING_LABEL,
+      explanation: OFFICE_RECONNECTING_EXPLANATION,
+      blocked: false,
+      pending: true,
+    };
   const privileged = embedded || access?.privileged === true;
   const managed = access?.reason === 'managed_process';
   return {
@@ -35,6 +45,7 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
         ? OFFICE_MANAGED_LABEL
         : OFFICE_OPERATOR_LABEL,
     blocked: !privileged || managed,
+    pending: false,
     explanation: managed
       ? OFFICE_MANAGED_EXPLANATION
       : embedded

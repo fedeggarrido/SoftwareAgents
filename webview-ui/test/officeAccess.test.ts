@@ -22,6 +22,14 @@ afterEach(() => {
 });
 
 describe('SA-116 permanent office mode', () => {
+  it('shows neutral reconnecting help until the handshake confirms access', async () => {
+    setOfficeAccess(null);
+    const html = await indicator();
+    expect(html).toContain('Reconectando…');
+    expect(html).not.toContain('Solo lectura');
+    expect(html).not.toContain('URL con token');
+  });
+
   it('shows read-only mode and actionable Spanish instructions in its tooltip', async () => {
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     const html = await indicator();
@@ -38,7 +46,11 @@ describe('SA-116 permanent office mode', () => {
     expect(html).toContain('Operador');
     expect(html).toContain('Recargar la página quita el modo operador');
     expect(html).toContain('vuelve a abrir la URL de la terminal');
-    expect(officeAccessView(null, false).blocked).toBe(true);
+    expect(officeAccessView(null, false)).toMatchObject({
+      label: 'Reconectando…',
+      blocked: false,
+      pending: true,
+    });
   });
 
   it('distinguishes an authenticated connection running under an agent', async () => {

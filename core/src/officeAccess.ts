@@ -2,6 +2,9 @@
 export const OFFICE_READ_ONLY_LABEL = 'Solo lectura';
 export const OFFICE_OPERATOR_LABEL = 'Operador';
 export const OFFICE_MANAGED_LABEL = 'Operador · proceso gestionado';
+export const OFFICE_RECONNECTING_LABEL = 'Reconectando…';
+export const OFFICE_RECONNECTING_EXPLANATION =
+  'Esperando a que la oficina confirme el modo de acceso.';
 export const OFFICE_ACCESS_INSTRUCTIONS =
   'Para preparar el proyecto y guardar ideas, inicia pixel-agents tú mismo en tu terminal y abre la URL con token que imprime.';
 export const OFFICE_MANAGED_EXPLANATION =

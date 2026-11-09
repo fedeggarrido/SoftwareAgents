@@ -196,6 +196,39 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it('retains the interview and answers through disconnect until a new access handshake', async () => {
+    await render();
+    respond();
+    await render();
+    await change('new-idea-text', 'Borrador que debe sobrevivir');
+    await click('Siguiente');
+    await change('idea-answer', 'Respuesta que debe sobrevivir');
+    lifecycle.state = 'reconnecting';
+    setOfficeAccess(null);
+    let html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(html).toContain('<textarea');
+    expect(html).not.toContain('URL con token');
+    expect(html).not.toContain('Solo lectura');
+    expect(findAction(await tree(), 'Siguiente')).toBeDefined();
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    lifecycle.state = 'connected';
+    await render();
+    respond();
+    html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(html).not.toContain('URL con token');
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
+    html = await render();
+    expect(html).toContain('URL con token');
+    expect(html).not.toContain('<textarea');
+    setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
+    html = await render();
+    expect(html).toContain('Respuesta que debe sobrevivir');
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
+  });
+
   it.each([
     [false, 'token_required', 'inicia pixel-agents tú mismo en tu terminal'],
     [true, 'managed_process', 'Esta oficina se inició desde un agente'],

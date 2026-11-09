@@ -26,7 +26,6 @@ const panelPaths = {
   audit: ['../src/components/AuditPanel.js', 'AuditPanel'],
   features: ['../src/components/FeaturesPanel.js', 'FeaturesPanel'],
   meeting: ['../src/components/MeetingPanel.js', 'MeetingPanel'],
-  character: ['../src/components/CharacterDetailPanel.js', 'CharacterDetailPanel'],
 };
 
 it.each(PANEL_TABS)(
@@ -109,7 +108,7 @@ it.each(PANEL_TABS)(
       expect(content).toContain('en curso');
       expect(content).toContain('aria-expanded="true"');
     }
-    if (['backlog', 'features', 'audit', 'character'].includes(id)) {
+    if (['backlog', 'features', 'audit'].includes(id)) {
       expect(content).toContain('solo lectura');
       expect(content).toContain('panel-toolbar');
     }

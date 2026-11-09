@@ -78,6 +78,7 @@ function App() {
   );
 
   const {
+    agentHistory,
     agents,
     selectedAgent,
     agentTools,
@@ -116,16 +117,7 @@ function App() {
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const panel = usePanelWindow(layoutReady);
-  const characterPanelRef = useRef<HTMLDivElement>(null);
-  const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null);
-  const selectPanel = panel.select;
-  const handleSelectCharacter = useCallback(
-    (id: number | null) => {
-      setSelectedCharacterId(id);
-      if (id !== null) selectPanel('character');
-    },
-    [selectPanel],
-  );
+  const [focusedTask, setFocusedTask] = useState<string | null>(null);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -458,9 +450,11 @@ function App() {
             panRef={editor.panRef}
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
-            characterPanelRef={characterPanelRef}
-            showCharacterPanel={panel.isOpen && panel.tab === 'character'}
-            onSelectCharacter={handleSelectCharacter}
+            agentHistory={agentHistory}
+            onOpenBacklog={(taskKey) => {
+              setFocusedTask(taskKey ?? null);
+              panel.select('backlog');
+            }}
           />
         </>
       ) : (
@@ -592,6 +586,7 @@ function App() {
           isOpen={panel.isOpen && panel.tab === 'backlog'}
           onClose={panel.close}
           officeState={officeState}
+          focusedTask={focusedTask}
           onFocusAgent={(id) => {
             const os = getOfficeState();
             os.selectedAgentId = id;
@@ -604,11 +599,6 @@ function App() {
           onClose={panel.close}
         />
         {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
-        <div ref={characterPanelRef} hidden={panel.tab !== 'character'}>
-          {panel.tab === 'character' && selectedCharacterId === null && (
-            <p className="p-8 text-xs text-text-muted">Selecciona un personaje en la oficina.</p>
-          )}
-        </div>
       </PanelWindow>
       {isNewIdeaOpen && (
         <NewIdeaDialog

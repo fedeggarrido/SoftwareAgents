@@ -9,7 +9,6 @@
 }
 
 :root {
-  --character-detail-width: 380px;
   /* Core palette */
   --color-bg: #1e1e2e;
   --color-bg-dark: #181828;
@@ -207,13 +206,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-.panel-window-content .character-detail-panel {
-  position: static;
-  width: 100%;
-  max-height: none;
-  border: 0;
-  box-shadow: none;
 }
 .panel-window-resize {
   position: absolute;
@@ -590,24 +582,38 @@
     opacity: 0.3;
   }
 }
-.character-detail-panel {
-  /* A side card, not a full-width panel: the selected character must stay visible. */
-  width: min(var(--character-detail-width), calc(100% - 2 * var(--panel-edge)));
-  max-height: 70%;
+.agent-card {
+  position: fixed;
+  background: var(--color-bg);
+  color: var(--color-text);
   min-width: 0;
+  overflow: auto;
   overflow-wrap: anywhere;
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
 }
-.character-detail-panel dl > div {
+.agent-card-mobile {
+  left: var(--panel-gap);
+  right: var(--panel-gap);
+  bottom: var(--panel-gap);
+  width: auto;
+}
+.agent-card dl > div {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  gap: 8px;
-  margin-block: 3px;
+  gap: var(--panel-gap);
   min-width: 0;
 }
-.character-detail-panel dd {
+.agent-card dd {
   margin: 0;
-  white-space: normal;
+}
+.agent-card li + li {
+  margin-top: var(--panel-gap);
+}
+.agent-card h3 {
+  color: var(--color-text);
 }
 .idea-dialog {
   width: min(560px, calc(100vw - 32px));
@@ -631,4 +637,15 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
+}
+
+.connection-indicator {
+  position: absolute;
+  left: var(--panel-gap);
+  top: var(--panel-gap);
+  z-index: 20;
+  width: min(460px, calc(100% - 2 * var(--panel-gap)));
+  max-height: calc(100% - 2 * var(--panel-gap));
+  overflow: auto;
+  overflow-wrap: anywhere;
 }

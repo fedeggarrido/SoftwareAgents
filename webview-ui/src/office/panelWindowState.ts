@@ -113,8 +113,10 @@ export function readPanelPreferences(storage: Pick<ViewerStorage, 'getItem'>): P
     const raw: unknown = JSON.parse(storage.getItem(PANEL_WINDOW_STORAGE_KEY) ?? 'null');
     if (!raw || typeof raw !== 'object') return fallback;
     const candidate = raw as Record<string, unknown>;
-    if (!PANEL_TABS.some((tab) => tab.id === candidate.lastTab)) return fallback;
-    if (candidate.rect === null) return { rect: null, lastTab: candidate.lastTab as PanelTab };
+    // The old character tab has moved to a separate card; retain the viewer's geometry.
+    const lastTab = candidate.lastTab === 'character' ? 'backlog' : candidate.lastTab;
+    if (!PANEL_TABS.some((tab) => tab.id === lastTab)) return fallback;
+    if (candidate.rect === null) return { rect: null, lastTab: lastTab as PanelTab };
     const rect = candidate.rect as PanelRect | null;
     if (
       !rect ||
@@ -123,7 +125,7 @@ export function readPanelPreferences(storage: Pick<ViewerStorage, 'getItem'>): P
       rect.height <= 0
     )
       return fallback;
-    return { rect, lastTab: candidate.lastTab as PanelTab };
+    return { rect, lastTab: lastTab as PanelTab };
   } catch {
     return fallback;
   }

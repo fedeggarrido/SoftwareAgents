@@ -19,6 +19,12 @@ import {
 } from '../src/office/panelWindowState.js';
 
 describe('viewer-local panel preferences', () => {
+  it('migrates the removed character tab to Backlog while retaining geometry', () => {
+    const rect = { x: 64, y: 150, width: 720, height: 500 };
+    expect(
+      readPanelPreferences({ getItem: () => JSON.stringify({ rect, lastTab: 'character' }) }),
+    ).toEqual({ rect, lastTab: 'backlog' });
+  });
   it('keeps selected character actions above the window and below modals', () => {
     expect(SELECTED_AGENT_OVERLAY_Z_INDEX).toBeGreaterThan(PANEL_WINDOW_Z_INDEX);
     expect(SELECTED_AGENT_OVERLAY_Z_INDEX).toBeLessThan(MODAL_Z_INDEX);

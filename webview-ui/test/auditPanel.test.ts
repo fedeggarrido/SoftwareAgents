@@ -79,7 +79,10 @@ beforeEach(() => {
   lifecycle.effects = [];
   lifecycle.state = 'connected';
   lifecycle.send.mockClear();
-  setExecutorStore(emptyExecutorStore());
+  setExecutorStore({
+    ...emptyExecutorStore(),
+    state: { projectId: 'P' } as NonNullable<ReturnType<typeof emptyExecutorStore>['state']>,
+  });
   setAuditStore({ ...emptyAuditStore(), projectId: 'P', snapshot: snapshot() });
 });
 
@@ -189,11 +192,11 @@ describe('FEAT-001-T04 audit panel acceptance', () => {
     expect(html).toContain('51 líneas corruptas');
     expect(html).toContain('49, 50…');
     expect(html).toContain('2 entradas excluidas');
-    expect(html).not.toContain('No hay entradas de auditoría');
+    expect(html).not.toContain('Aún no hay nada registrado.');
   });
 
   it.each([
-    ['empty', 'No hay entradas de auditoría'],
+    ['empty', 'Aún no hay nada registrado.'],
     ['read_error', 'No se pudo consultar el registro de auditoría.'],
     ['denied', 'Acceso denegado'],
   ] as const)('AC-007/008: distinguishes %s', async (status, text) => {
@@ -213,8 +216,8 @@ describe('FEAT-001-T04 audit panel acceptance', () => {
     });
     const html = await render();
     for (const text of [
-      'Fecha no válida',
-      'human',
+      'fecha no válida',
+      'La persona operadora',
       '&lt;script&gt;',
       'because',
       'sin valor',
@@ -245,4 +248,35 @@ describe('FEAT-001-T04 audit panel acceptance', () => {
     expect(html).toContain('Quitar filtros');
     expect(html).toContain('mostrando las 500 más recientes de 520');
   });
+});
+
+it('explains the log and why no project is linked, using actionable Spanish copy', async () => {
+  setExecutorStore(emptyExecutorStore());
+  setAuditStore(emptyAuditStore());
+  const html = await render();
+  expect(html).toContain('Registro de acciones de personas y agentes');
+  expect(html).toContain('No se puede editar');
+  expect(html).toContain('Esta oficina no tiene un proyecto preparado vinculado');
+  expect(html).toContain('Abre la oficina desde la carpeta de un proyecto preparado');
+  expect(html).not.toContain('Project');
+});
+it('renders actor, action, short task and relative time without UUIDs', async () => {
+  setAuditStore({
+    ...getAuditStore(),
+    snapshot: snapshot({
+      entries: [
+        entry({
+          actorType: 'agent',
+          actorId: '95dab749-8868-486c-b372-8805d140b7ca',
+          action: 'launch_execution',
+          taskKey: 'SA-119',
+          executionId: '95dab749-8868-486c-b372-8805d140b7ca',
+          occurredAt: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      ],
+    }),
+  });
+  const html = await render();
+  expect(html).toContain('El agente solicitó una ejecución en SA-119, hace 1 min');
+  expect(html).not.toContain('95dab749');
 });

@@ -445,29 +445,6 @@ export const FEATURE_PROGRESS_PERCENT_MAX = 100;
  * table: an API-price equivalent, not a charge (subscriptions consume quota instead). */
 export const FEATURE_COST_ESTIMATE_HINT =
   'Estimación a precio de API: tokens informados por los CLIs × tabla de precios por modelo. No es un cargo real; con suscripción se consume cuota.';
-export const CHARACTER_DETAIL_UNKNOWN = 'desconocido';
-export const CHARACTER_DETAIL_SECOND_MS = 1000;
-export const CHARACTER_DETAIL_FIELDS = [
-  ['spec', 'AgentSpec id@versión'],
-  ['role', 'Rol'],
-  ['taskKey', 'Tarea'],
-  ['taskTitle', 'Título'],
-  ['taskStatus', 'Estado'],
-  ['executor', 'Executor'],
-  ['model', 'Modelo'],
-  ['tier', 'Tier'],
-  ['effort', 'Esfuerzo'],
-  ['elapsed', 'Tiempo transcurrido'],
-  ['worktree', 'Worktree'],
-  ['branch', 'Rama'],
-  ['pr', 'PR'],
-  ['prState', 'Estado PR'],
-  ['ciState', 'CI'],
-  ['selectionReason', 'Razón de selección'],
-  ['permissions', 'Perfil de permisos'],
-  ['log', 'Log de ejecución'],
-] as const;
-
 export const PR_DISPLAY_REFRESH_MS = 5000;
 // A lost draft response must be reconciled from the list, never replayed automatically.
 export const IDEA_REQUEST_TIMEOUT_MS = 15_000;
@@ -497,5 +474,94 @@ export const PANEL_TABS = [
   { id: 'audit', label: 'Auditoría' },
   { id: 'features', label: 'Features' },
   { id: 'meeting', label: 'Reuniones' },
-  { id: 'character', label: 'Personaje' },
+] as const;
+
+export const AGENT_HISTORY_LIMIT = 10;
+export const AGENT_CARD_WIDTH_PX = 380;
+export const AGENT_CARD_MAX_HEIGHT_PX = 520;
+export const AGENT_CARD_GAP_PX = 16;
+export const AGENT_CARD_Z_INDEX = 48;
+export const AGENT_CARD_STATUS_CLASSES = {
+  active: 'bg-status-active',
+  attention: 'bg-status-permission',
+  error: 'bg-status-error',
+  available: 'bg-status-success',
+} as const;
+export const RELATIVE_SECOND_MS = 1000;
+export const RELATIVE_MINUTE_MS = 60_000;
+export const RELATIVE_HOUR_MS = 3_600_000;
+export const RELATIVE_DAY_MS = 86_400_000;
+export const PROJECT_EMPTY_TEXT =
+  'Esta oficina no tiene un proyecto preparado vinculado. Abre la oficina desde la carpeta de un proyecto preparado.';
+export const AUDIT_EXPLANATION =
+  'Registro de acciones de personas y agentes en este proyecto: ejecuciones, aprobaciones, decisiones y resultados de las reglas de seguridad. No se puede editar.';
+export const AUDIT_EMPTY_TEXT = 'Aún no hay nada registrado.';
+export const OFFICE_OFFLINE_TEXT =
+  'Sin conexión con la oficina: el programa pixel-agents que se ejecuta en tu ordenador.';
+export const OFFICE_OFFLINE_HELP =
+  '¿Sigue abierta la terminal donde lo lanzaste? Si la cerraste, vuelve a ejecutar npx pixel-agents y abre la URL que imprime.';
+export const OFFICE_INVALID_ACCESS_TEXT =
+  'La URL de acceso no es válida o le falta el acceso de operador; usa la que imprime la terminal.';
+export const OFFICE_ORIGIN_TEXT =
+  'La oficina ha rechazado el origen de esta página. Abre la URL que imprime la terminal de pixel-agents.';
+export const OFFICE_HANDSHAKE_TEXT =
+  'Conectando con la oficina: el programa pixel-agents que se ejecuta en tu ordenador. Esperando a que confirme el modo de acceso.';
+export const OFFICE_RETRY_BASE_MS = 1000;
+export const OFFICE_RETRY_MAX_MS = 30_000;
+export const OFFICE_CLOSE_UNAUTHORIZED = 4001;
+export const OFFICE_CLOSE_FORBIDDEN_ORIGIN = 4003;
+export const AUDIT_ACTION_TEXT: Readonly<Record<string, string>> = {
+  launch_execution: 'solicitó una ejecución',
+  worker_run: 'ejecutó trabajo',
+  worker_publication: 'publicó el resultado del trabajo',
+  answer_decision: 'respondió a una decisión',
+  prepare_project: 'preparó el proyecto',
+  save_feature_idea: 'guardó una idea',
+  feature_run: 'inició el desarrollo de una funcionalidad',
+  feature_rebase: 'actualizó la rama de una funcionalidad',
+  'server.token.rotate': 'renovó el acceso a la oficina',
+  usage_backfill: 'actualizó los datos de uso',
+  approve_featurespec: 'revisó la aprobación de una especificación',
+  design_review: 'revisó el diseño',
+  research_run: 'realizó una investigación',
+  agent_containment: 'comprobó los límites de acceso de un agente',
+  touch_protected_path: 'solicitó cambiar un archivo protegido',
+};
+export const AUDIT_ACTOR_TEXT: Readonly<Record<string, string>> = {
+  human: 'La persona operadora',
+  agent: 'El agente',
+  system: 'El sistema',
+  unknown: 'Un actor sin identificar',
+};
+export const AUDIT_OUTCOME_TEXT: Readonly<Record<string, string>> = {
+  success: 'completado',
+  ok: 'completado',
+  succeeded: 'completado',
+  completed: 'completado',
+  denied: 'denegado',
+  blocked: 'bloqueado',
+  failed: 'fallido',
+  error: 'fallido',
+  pending: 'pendiente',
+  approved: 'aprobado',
+  rejected: 'rechazado',
+  saved: 'guardado',
+  authorized: 'autorizado',
+  reconciled: 'reconciliado',
+  model_selected: 'modelo seleccionado',
+  persisted: 'registrado',
+  availability_blocked: 'bloqueado por disponibilidad',
+  started: 'iniciado',
+  launched: 'iniciado',
+  skipped: 'omitido',
+  cancelled: 'cancelado',
+  timeout: 'tiempo de espera agotado',
+};
+
+export const AUDIT_DETAIL_FIELDS = [
+  ['detail', 'Detalle'],
+  ['tier', 'Nivel de modelo'],
+  ['executor', 'Ejecutor'],
+  ['model', 'Modelo'],
+  ['code', 'Código'],
 ] as const;

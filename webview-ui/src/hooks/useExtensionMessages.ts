@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import { setOfficeAccess } from '../office/accessStore.js';
+import { AgentHistory } from '../office/agentHistory.js';
 import {
   applyAuditLog,
   emptyAuditStore,
@@ -104,6 +105,7 @@ export interface WorkspaceFolder {
 }
 
 interface ExtensionMessageState {
+  agentHistory: AgentHistory;
   agents: number[];
   selectedAgent: number | null;
   agentTools: Record<number, ToolActivity[]>;
@@ -163,6 +165,7 @@ export function useExtensionMessages(
   onLayoutLoaded?: (layout: OfficeLayout) => void,
   isEditDirty?: () => boolean,
 ): ExtensionMessageState {
+  const agentHistory = useRef(new AgentHistory()).current;
   const [agents, setAgents] = useState<number[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<number | null>(null);
   const [agentTools, setAgentTools] = useState<Record<number, ToolActivity[]>>({});
@@ -284,6 +287,7 @@ export function useExtensionMessages(
       },
     ) => {
       const os = getOfficeState();
+      agentHistory.receive(msg);
       // CI / e2e diagnostic: record every received transport message on the
       // window-side log. The fixture reads window.__pixelAgentsTestHooks.
       // messageLog and attaches as JSON so CI failures can see the exact
@@ -936,6 +940,7 @@ export function useExtensionMessages(
   }, [subagentTools, subagentCharacters, getOfficeState]);
 
   return {
+    agentHistory,
     agents,
     selectedAgent,
     agentTools,

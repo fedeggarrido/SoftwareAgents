@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
 import { backlogView } from '../office/backlogView.js';
@@ -69,19 +69,31 @@ function Card({
   onFocusAgent,
   board,
   officeState,
+  focused,
 }: {
   item: BoardItem;
   now: number;
   onFocusAgent: (id: number) => void;
   board: ReturnType<typeof useBoard>;
   officeState: OfficeState;
+  focused: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: 'nearest' });
+    ref.current?.focus({ preventScroll: true });
+  }, [focused]);
   return (
     <div
       className="bg-bg-dark border-2 border-border p-6 flex flex-col gap-2 cursor-pointer"
       style={{ borderLeftColor: PRIORITY_COLORS[item.priority ?? ''] ?? undefined }}
       onClick={() => setOpen((v) => !v)}
+      ref={ref}
+      tabIndex={-1}
+      data-task-key={item.id}
       data-testid="backlog-card"
     >
       <div className="flex items-baseline gap-6">
@@ -143,6 +155,7 @@ function Card({
 }
 
 interface BacklogPanelProps {
+  focusedTask?: string | null;
   hosted?: boolean;
   isOpen: boolean;
   onClose: () => void;
@@ -157,6 +170,7 @@ export function BacklogPanel({
   onFocusAgent,
   officeState,
   hosted = false,
+  focusedTask,
 }: BacklogPanelProps) {
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
@@ -167,6 +181,17 @@ export function BacklogPanel({
     const t = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(t);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (
+      isOpen &&
+      focusedTask &&
+      board?.items.some(
+        (item) => item.id === focusedTask && ['DONE', 'VERIFIED'].includes(item.phase),
+      )
+    )
+      setShowDone(true);
+  }, [isOpen, focusedTask, board]);
 
   if (!isOpen) return null;
 
@@ -272,6 +297,7 @@ export function BacklogPanel({
                   <Card
                     key={item.id}
                     item={item}
+                    focused={item.id === focusedTask}
                     now={now}
                     onFocusAgent={onFocusAgent}
                     board={board}

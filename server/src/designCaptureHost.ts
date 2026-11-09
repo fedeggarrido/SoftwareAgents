@@ -231,7 +231,7 @@ export async function captureInHost(
               if (view === 'audit')
                 await panel
                   .getByText(
-                    fixture === 'error' ? /No se|Error|error/ : 'No hay entradas de auditoría',
+                    fixture === 'error' ? /No se|Error|error/ : 'Aún no hay nada registrado.',
                   )
                   .first()
                   .waitFor({ timeout: CAPTURE_WAIT_MS });

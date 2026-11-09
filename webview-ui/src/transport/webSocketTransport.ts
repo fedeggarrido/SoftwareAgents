@@ -5,6 +5,13 @@ import {
   TRANSPORT_STATE_RECONNECTING,
 } from '../../../core/src/constants.js';
 import type { ClientMessage, ServerMessage } from '../../../core/src/messages.js';
+import {
+  OFFICE_CLOSE_FORBIDDEN_ORIGIN,
+  OFFICE_CLOSE_UNAUTHORIZED,
+  OFFICE_RETRY_BASE_MS,
+  OFFICE_RETRY_MAX_MS,
+} from '../constants.js';
+import { getConnectionStatus, setConnectionStatus } from '../office/connectionStatus.js';
 import type { MessageTransport, TransportState } from './types.js';
 
 // Structural socket contract keeps transport regressions runnable without DOM types.
@@ -14,7 +21,7 @@ interface TransportSocket {
   close(): void;
   onopen: (() => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((event?: { code: number }) => void) | null;
   onerror: (() => void) | null;
 }
 const SOCKET_OPEN = 1;
@@ -53,6 +60,7 @@ export class WebSocketTransport implements MessageTransport {
   }
 
   private setState(next: TransportState): void {
+    setConnectionStatus({ ...getConnectionStatus(), state: next });
     if (this._state === next) return;
     this._state = next;
     for (const handler of this.stateHandlers) handler(next);
@@ -72,6 +80,7 @@ export class WebSocketTransport implements MessageTransport {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      setConnectionStatus({ cause: 'unavailable', attempt: 0, retryAt: null });
       console.log('[Transport] WebSocket connected');
       this.setState(TRANSPORT_STATE_CONNECTED);
       this.resolveReady();
@@ -91,16 +100,42 @@ export class WebSocketTransport implements MessageTransport {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       if (!this.disposed) {
-        this.setState(TRANSPORT_STATE_RECONNECTING);
+        const cause =
+          event?.code === OFFICE_CLOSE_UNAUTHORIZED
+            ? 'unauthorized'
+            : event?.code === OFFICE_CLOSE_FORBIDDEN_ORIGIN
+              ? 'origin'
+              : 'unavailable';
+        if (cause !== 'unavailable') {
+          setConnectionStatus({ cause, attempt: 0, retryAt: null });
+          this.setState(TRANSPORT_STATE_DISCONNECTED);
+          return;
+        }
         this.scheduleReconnect();
+        this.setState(TRANSPORT_STATE_RECONNECTING);
       }
     };
 
     this.ws.onerror = () => {
       // onclose will fire after onerror, triggering reconnect
     };
+  }
+
+  reconnect(): void {
+    if (this.disposed) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.close();
+    }
+    this.reconnectAttempts++;
+    setConnectionStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
+    this.connect();
   }
 
   send(message: ClientMessage): void {
@@ -159,13 +194,19 @@ export class WebSocketTransport implements MessageTransport {
 
   private scheduleReconnect(): void {
     // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
+    const delay = Math.min(OFFICE_RETRY_BASE_MS * 2 ** this.reconnectAttempts, OFFICE_RETRY_MAX_MS);
     this.reconnectAttempts++;
+    setConnectionStatus({
+      cause: 'unavailable',
+      attempt: this.reconnectAttempts,
+      retryAt: Date.now() + delay,
+    });
     console.log(
       `[Transport] WebSocket reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
     );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      setConnectionStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
       this.connect();
     }, delay);
   }

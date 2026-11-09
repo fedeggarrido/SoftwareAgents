@@ -433,28 +433,37 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       }
       await page.evaluate(`window.postMessage(${JSON.stringify(board)}, '*')`);
       await page.keyboard.press('Escape');
-      // Character details use the same window, including long legacy field values.
+      // Selecting a character opens a separate accessible card at every viewport size.
+      await canvas.focus();
       await page.evaluate(`
-        window.postMessage({ type: 'agentCreated', id: 1 }, '*');
+        window.postMessage({ type: 'agentCreated', id: 1, projectId: 'demo' }, '*');
         window.postMessage({ type: 'agentRole', id: 1, label: 'Developer', department: 'Ingeniería',
-          characterDetail: { taskTitle: 'long'.repeat(200), worktree: 'path/'.repeat(100) } }, '*');
+          characterDetail: { projectId: 'demo', taskKey: 'SA-119', taskTitle: 'long'.repeat(200), worktree: 'path/'.repeat(100) } }, '*');
       `);
       await page.waitForFunction(
         'window.__pixelAgentsTestHooks.getCharacters().some(character => character.id === 1)',
       );
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
-      await page.getByRole('tab', { name: 'Personaje', selected: true }).waitFor();
-      await page.getByTestId('character-detail-panel').waitFor();
-      await expectWindowOwnsHeading(page, 'Personaje');
-      expect(await page.locator('[data-testid="panel-window"]:visible').count()).toBe(1);
-      expect(await page.getByTestId('character-detail-panel').evaluate(fitsHorizontally)).toBe(
-        true,
-      );
-      // Selection opens the window, but the character's dismiss action must
-      // still receive pointer clicks, including beneath the mobile window.
-      await page.locator('[data-agent-id="1"] button[title="Close agent"]').click({ trial: true });
-      await page.getByRole('tab', { name: 'Backlog', exact: true }).click();
-      expect(await page.getByTestId('character-detail-panel').count()).toBe(0);
+      const card = page.getByTestId('character-detail-panel');
+      await card.waitFor();
+      expect(await page.getByRole('tab', { name: 'Personaje' }).count()).toBe(0);
+      expect(await windowPanel.count()).toBe(0);
+      expect(await card.getAttribute('role')).toBe('dialog');
+      expect(await card.evaluate(fitsHorizontally)).toBe(true);
+      const cardBox = (await card.boundingBox())!;
+      expect(cardBox.x).toBeGreaterThanOrEqual(0);
+      expect(cardBox.y).toBeGreaterThanOrEqual(0);
+      expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width);
+      expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(844);
+      await card.getByRole('button', { name: 'Cerrar agente', exact: true }).click({ trial: true });
+      await page.keyboard.press('Escape');
+      await card.waitFor({ state: 'detached' });
+      expect(await canvas.evaluate(isFocusedElement)).toBe(true);
+      await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
+      await card.waitFor();
+      await card.getByRole('button', { name: 'Ver en Backlog', exact: true }).click();
+      await page.getByRole('tab', { name: 'Backlog', selected: true }).waitFor();
+      expect(await card.count()).toBe(0);
       await page.keyboard.press('Escape');
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(null)');
       // Let the real projection report deselection before remount/persistence assertions.

@@ -222,7 +222,7 @@ describe('executor transport regressions (DOM-free)', () => {
     expect(officeAccessView(getOfficeAccess(), false).label).toBe('Operador');
     socket.close();
     expect(officeAccessView(getOfficeAccess(), false)).toMatchObject({
-      label: 'Reconectando…',
+      label: 'Conectando con la oficina…',
       pending: true,
       blocked: false,
     });

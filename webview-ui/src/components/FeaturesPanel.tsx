@@ -4,6 +4,7 @@ import {
   OFFICE_ACCESS_INSTRUCTIONS,
   OFFICE_MANAGED_EXPLANATION,
 } from '../../../core/src/officeAccess.js';
+import { PROJECT_EMPTY_TEXT } from '../constants.js';
 import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import {
@@ -27,6 +28,7 @@ import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
 import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
+import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -91,7 +93,7 @@ export function FeaturesPanel({
       </PanelHeading>
       <div aria-label="Ideas pendientes">
         {connectionState !== 'connected' ? (
-          <p role="status">Sin conexión para leer ideas pendientes.</p>
+          <OfficeConnectionHelp />
         ) : !ideas.snapshot ? (
           <p role="status">Cargando ideas pendientes…</p>
         ) : ideas.snapshot.errorCode === 'denied' ||
@@ -113,7 +115,7 @@ export function FeaturesPanel({
         )}
       </div>
       {!projectId ? (
-        <p>Sin Project seleccionado</p>
+        <div>{connectionState === 'connected' ? <p>{PROJECT_EMPTY_TEXT}</p> : null}</div>
       ) : (
         <>
           <div role="status">

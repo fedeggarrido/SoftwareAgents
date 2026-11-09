@@ -209,8 +209,9 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       const html = await render();
       expect(html).not.toMatch(/<textarea[^>]*disabled/);
       if (connection === 'reconnecting' && pending) {
-        expect(html).toContain('modo de acceso.</p><p>Sin conexión.');
-        expect(html).not.toContain('modo de acceso.Sin conexión.');
+        expect(html).toContain('Sin conexión con la oficina: el programa pixel-agents');
+        expect(html).toContain('Reintentando conexión con la oficina');
+        expect(html).not.toContain('Esperando a que confirme');
       }
       await review();
       const save = findControl(await tree(), (props) => props.children === 'Guardar idea')!;

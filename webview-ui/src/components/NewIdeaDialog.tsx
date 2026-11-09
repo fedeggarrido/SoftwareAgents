@@ -28,6 +28,7 @@ import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { IdeaCommand } from './IdeaCommand.js';
 import { IdeaNextSteps } from './IdeaNextSteps.js';
+import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -284,7 +285,7 @@ export function NewIdeaDialog({
               </section>
             )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
-              {access.pending && <p>{access.explanation}</p>}
+              {access.pending && connection === 'connected' && <p>{access.explanation}</p>}
               {!access.pending && state === 'loading' && 'Comprobando el Project…'}
               {!access.pending &&
                 state === 'disabled' &&
@@ -292,7 +293,7 @@ export function NewIdeaDialog({
                 !store.snapshot?.preparationError &&
                 ideaErrorText(store.snapshot?.errorCode)}
               {!access.pending && state === 'error' && ideaErrorText(store.result?.errorCode)}
-              {state === 'offline' && <p>Sin conexión. Reconecta para guardar la idea.</p>}
+              {state === 'offline' && <OfficeConnectionHelp />}
               {state === 'saving' && 'Guardando…'}
               {state === 'uncertain' &&
                 'No se pudo confirmar el guardado. Consulta las ideas pendientes antes de enviar otra; el envío no se repetirá automáticamente.'}

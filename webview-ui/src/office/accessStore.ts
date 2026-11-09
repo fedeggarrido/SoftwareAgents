@@ -9,9 +9,8 @@ import {
   OFFICE_OPERATOR_EXPLANATION,
   OFFICE_OPERATOR_LABEL,
   OFFICE_READ_ONLY_LABEL,
-  OFFICE_RECONNECTING_EXPLANATION,
-  OFFICE_RECONNECTING_LABEL,
 } from '../../../core/src/officeAccess.js';
+import { OFFICE_HANDSHAKE_TEXT, OFFICE_INVALID_ACCESS_TEXT } from '../constants.js';
 
 let current: OfficeAccess | null = null;
 const listeners = new Set<() => void>();
@@ -31,8 +30,8 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
   // A missing handshake says nothing about the next connection's permissions.
   if (!embedded && access === null)
     return {
-      label: OFFICE_RECONNECTING_LABEL,
-      explanation: OFFICE_RECONNECTING_EXPLANATION,
+      label: 'Conectando con la oficina…',
+      explanation: OFFICE_HANDSHAKE_TEXT,
       blocked: false,
       pending: true,
     };
@@ -52,6 +51,6 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
         ? OFFICE_EMBEDDED_EXPLANATION
         : privileged
           ? OFFICE_OPERATOR_EXPLANATION
-          : OFFICE_ACCESS_INSTRUCTIONS,
+          : `${OFFICE_INVALID_ACCESS_TEXT} ${OFFICE_ACCESS_INSTRUCTIONS}`,
   };
 }

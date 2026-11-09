@@ -157,7 +157,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     );
     expect(await render()).toContain('Cargando ideas pendientes');
     lifecycle.state = 'reconnecting';
-    expect(await render()).toContain('Sin conexión para leer ideas pendientes');
+    expect(await render()).toContain('Sin conexión con la oficina');
   });
   it('SA-109 shows pending ideas separately in the FeaturesPanel', async () => {
     setIdeasStore({
@@ -429,4 +429,13 @@ describe('FEAT-002-T06 panel acceptance', () => {
     await flush();
     expect(lifecycle.send).toHaveBeenCalledTimes(4);
   });
+});
+
+it('uses the same actionable project empty state as Auditoría', async () => {
+  setExecutorStore(emptyExecutorStore());
+  setFeaturesStore(emptyFeaturesStore());
+  const html = await render();
+  expect(html).toContain('Esta oficina no tiene un proyecto preparado vinculado');
+  expect(html).toContain('Abre la oficina desde la carpeta de un proyecto preparado');
+  expect(html).not.toContain('Sin Project');
 });

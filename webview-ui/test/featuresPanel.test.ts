@@ -108,6 +108,25 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('FEAT-002-T06 panel acceptance', () => {
+  it('SA-116 treats a denied ideas read as normal access information without an alert or retry', async () => {
+    setIdeasStore({
+      ...emptyIdeasStore(),
+      snapshot: {
+        type: 'ideasSnapshot',
+        requestId: 'ideas',
+        projectId: null,
+        canSubmit: false,
+        errorCode: 'denied',
+        ideas: [],
+      },
+    });
+    const html = await render();
+    expect(html).toContain('inicia pixel-agents tú mismo en tu terminal');
+    expect(html).not.toContain('No se pudieron leer las ideas');
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain('Reintentar');
+  });
+
   it('SA-109 shows ideas-specific loading, storage errors and a working retry', async () => {
     expect(await render()).toContain('Cargando ideas pendientes');
     setIdeasStore({

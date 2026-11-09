@@ -6,6 +6,7 @@ import { useBoard } from '../office/boardStore.js';
 import { pullRequestDockSummary } from '../office/prStatusView.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
+import { OfficeModeIndicator } from './OfficeModeIndicator.js';
 import { Button } from './ui/Button.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
@@ -107,6 +108,7 @@ export function BottomToolbar({
 
   return (
     <div className="bottom-toolbar absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4">
+      <OfficeModeIndicator />
       {/* Hide + Agent in standalone browser mode (no terminal to interact with) */}
       {!isBrowserRuntime && (
         <div

@@ -1,10 +1,12 @@
 import type { MessageTransport } from '../../../core/src/transport.js';
+import { setOfficeAccess } from '../office/accessStore.js';
 import { expirePending, getExecutorStore, setExecutorStore } from '../office/executorStore.js';
 
 /** Office-level lifetime: handshake and pending recovery also run with the HUD closed. */
 export function bindExtensionTransportLifecycle(transport: MessageTransport): () => void {
   let connectedOnce = transport.state === 'connected';
   const invalidate = () => {
+    setOfficeAccess(null);
     setExecutorStore({ ...getExecutorStore(), needsSnapshot: true });
   };
   if (!connectedOnce) invalidate();

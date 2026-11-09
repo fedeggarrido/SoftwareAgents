@@ -6,6 +6,8 @@
  * Provider-specific constants stay in their provider directory.
  */
 
+export const OFFICE_TOKEN_QUERY = 'token';
+
 // ── Hook API ─────────────────────────────────────────────────
 
 export const HOOK_API_PREFIX = '/api/hooks';

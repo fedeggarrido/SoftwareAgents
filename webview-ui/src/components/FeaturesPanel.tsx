@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
 
+import {
+  OFFICE_ACCESS_INSTRUCTIONS,
+  OFFICE_MANAGED_EXPLANATION,
+} from '../../../core/src/officeAccess.js';
 import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import {
@@ -88,6 +92,13 @@ export function FeaturesPanel({
           <p role="status">Sin conexión para leer ideas pendientes.</p>
         ) : !ideas.snapshot ? (
           <p role="status">Cargando ideas pendientes…</p>
+        ) : ideas.snapshot.errorCode === 'denied' ||
+          ideas.snapshot.preparationError === 'denied' ? (
+          <p role="status">
+            {ideas.snapshot.preparationError === 'denied'
+              ? OFFICE_MANAGED_EXPLANATION
+              : OFFICE_ACCESS_INSTRUCTIONS}
+          </p>
         ) : ideas.snapshot.errorCode ? (
           <PanelError
             cause={`No se pudieron leer las ideas. ${ideaErrorText(ideas.snapshot.errorCode)}`}

@@ -8,6 +8,7 @@ import type {
   SubmitIdea,
   SubmitIdeaResult,
 } from '../../../core/src/messages.js';
+import { OFFICE_ACCESS_INSTRUCTIONS } from '../../../core/src/officeAccess.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
 
 export interface IdeasStore {
@@ -125,7 +126,7 @@ export function sendProjectPreparation(name: string, transport: MessageTransport
 export function ideaErrorText(code: IdeaErrorCode | null | undefined): string {
   switch (code) {
     case 'denied':
-      return 'Solo lectura. Abre la URL de la oficina con el token del operador para preparar el proyecto y guardar ideas.';
+      return OFFICE_ACCESS_INSTRUCTIONS;
     case 'unsupported_adapter':
       return 'Nueva idea no está disponible en VS Code: este control aún no tiene selección de Project. Abre la oficina standalone del Project.';
     case 'no_project':

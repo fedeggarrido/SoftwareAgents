@@ -10,6 +10,36 @@ serializador de petición y se redactan si se registran explícitamente. No se
 registran mensajes WS controlados por el cliente. AuditLog ya redacta tokens y
 Authorization. La URL impresa por el CLI sigue siendo un secreto intencional.
 
+SA-116 captura el token de la navegación inicial una sola vez, antes de conectar,
+y elimina todos los parámetros `token`, incluidos los repetidos o con la clave
+codificada, con `history.replaceState`. Conserva el resto de la ruta, query,
+fragmento y estado del historial. Solo la URL del transporte en memoria conserva
+la capacidad para el handshake WS y sus reconexiones. El cliente no persiste el
+token en almacenamiento del navegador ni vuelve a obtenerlo de `location`.
+Recargar la página pierde esa capacidad. Para recuperar el modo operador, hay
+que volver a abrir la URL con token que imprime `pixel-agents`, iniciado por el
+operador en su terminal.
+
+El handshake `webviewReady` recibe `officeAccess` con el privilegio de esa conexión
+y un motivo cerrado `token_required`, `managed_process` o null. No contiene
+identidades, marcadores, rutas ni contenido. La barra muestra «Solo lectura» u
+«Operador», con una explicación accesible por clic y tooltip. Un servidor iniciado
+por un agente muestra «Operador · proceso gestionado» cuando el token es válido y
+explica el bloqueo de preparación y guardado. La UI trata la lectura denegada de
+ideas como información de acceso y abre esa explicación antes de la entrevista.
+VS Code obtiene el modo operador de su canal integrado, sin token en la URL.
+La señal de UI conserva los controles de autoridad existentes en el servidor.
+
+Riesgo residual de SA-116. La retirada de la barra sustituye la entrada actual del
+historial, pero no garantiza borrar copias previas, sincronizadas o capturadas
+antes de ejecutar JavaScript. La navegación inicial, la terminal, discovery,
+la memoria de la página y las peticiones WS visibles en herramientas del navegador
+siguen manejando el secreto. El token sigue siendo bearer y reutilizable. Evitar
+mostrarlo en la barra reduce la exposición en capturas posteriores, sin revocarlo.
+Los logs de Fastify mantienen la redacción de SA-075. Un proceso del mismo usuario
+del SO conserva el riesgo de acceso a memoria y discovery descrito en el modelo
+de amenazas.
+
 `pixel-agents token rotate [--port PORT]` rota la instancia señalada por
 server.json, o la entrada de registro del puerto explícito. Requiere el Bearer
 vigente, comprueba salud/PID, rechaza Origin de navegador y audita la autorización
@@ -36,7 +66,7 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 `/ws` is gated in **two tiers**, because `setHooksEnabled(true)` over this socket is a durable, machine-wide consent grant plus a hook install.
 
 1. **Connection** (`isAllowedWebSocketOrigin`): embedded requires the Bearer token; standalone requires a same-origin handshake. A missing Origin still connects (non-browser clients send none). This tier is weak by design — a DNS-rebound page sends `Origin` and `Host` as the same attacker-chosen name and IS accepted (`httpServerWs.test.ts` pins that).
-2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`): proved by an out-of-band secret — embedded via its Bearer token, standalone via the server token in the `/ws` `?token=` query, which the CLI prints in the local URL and the SPA forwards (`webview-ui/src/transport/index.ts`). **Never a network position**: peer address, `Host` and `Origin` all ride the channel a proxy speaks, so a LAN-bound forwarder piping bytes to 127.0.0.1 satisfies all three. The token is a replayable bearer capability, not evidence of locality — it still reaches browser history and the operator's terminal, so the printed URL is a secret. Fastify request logs redact it from SA-075 onward. An untokened client still watches the office; it just cannot change `~/.claude/settings.json`.
+2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`): proved by an out-of-band secret — embedded via its Bearer token, standalone via the server token in the `/ws` `?token=` query, which the CLI prints in the local URL and the SPA captures in memory before clearing the page URL (`webview-ui/src/transport/index.ts`). **Never a network position**: peer address, `Host` and `Origin` all ride the channel a proxy speaks, so a LAN-bound forwarder piping bytes to 127.0.0.1 satisfies all three. The token is a replayable bearer capability. Initial navigation and the operator's terminal still handle it, so the printed URL is a secret. Fastify request logs redact it from SA-075 onward. An untokened client still watches the office; it just cannot change `~/.claude/settings.json`.
 
 The **hooks preference is persisted only after the install/uninstall settled and the on-disk result agrees** — writing it first strands the user when an uninstall fails: entries still firing, but a persisted hooks-off makes the next startup skip the consent/install path entirely.
 

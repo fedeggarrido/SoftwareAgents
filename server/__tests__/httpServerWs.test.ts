@@ -389,6 +389,33 @@ describe('/ws privileged-message gate', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
+  it.each([false, true])(
+    'SA-116 reports handshake privilege over the real socket (%s)',
+    async (privileged) => {
+      for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+        vi.stubEnv(key, undefined);
+      try {
+        const { port, token } = await startStandalone();
+        const query = privileged ? `?token=${encodeURIComponent(token)}` : '';
+        const result = await connectTo(`ws://127.0.0.1:${port}/ws${query}`, {
+          Origin: `http://127.0.0.1:${port}`,
+        });
+        sockets.push(result.socket);
+        expect(result.accepted).toBe(true);
+        const access = waitForMessage(result.socket, 'officeAccess');
+        result.socket.send(JSON.stringify({ type: 'webviewReady' }));
+        expect(await access).toEqual({
+          type: 'officeAccess',
+          privileged,
+          reason: privileged ? null : 'token_required',
+        });
+        expect(sideEffects).toEqual([]);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
   // KNOWN-BAD FIXTURE 1 — DNS rebinding, on the DEFAULT loopback bind.
   // `evil.com` re-resolved to 127.0.0.1: the browser sends Origin AND Host as
   // `evil.com:PORT`, both attacker-controlled, so the CONNECTION gate's equality

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
+import { setOfficeAccess } from '../office/accessStore.js';
 import {
   applyAuditLog,
   emptyAuditStore,
@@ -405,6 +406,8 @@ export function useExtensionMessages(
         setAuditStore(applyAuditLog(getAuditStore(), msg));
       } else if (msg.type === 'featuresSnapshot') {
         setFeaturesStore(applyFeaturesSnapshot(getFeaturesStore(), msg));
+      } else if (msg.type === 'officeAccess') {
+        setOfficeAccess(msg);
       } else if (msg.type === 'ideasSnapshot') {
         setIdeasStore(applyIdeasSnapshot(getIdeasStore(), msg));
       } else if (msg.type === 'submitIdeaResult') {

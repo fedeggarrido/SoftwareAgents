@@ -8,6 +8,7 @@
  */
 
 export type ServerMessage =
+  | OfficeAccess
   | FeaturePlanSnapshot
   | FeatureApprovalResult
   | IdeasSnapshot
@@ -90,6 +91,14 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface OfficeAccess {
+  type: 'officeAccess';
+  privileged: boolean;
+  reason: OfficeAccessReason | null;
+}
+
+export type OfficeAccessReason = 'token_required' | 'managed_process';
 
 export interface FeaturePlanSnapshot {
   type: 'featurePlanSnapshot';

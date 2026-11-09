@@ -3,11 +3,17 @@ import { useEffect, useState } from 'react';
 import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../../core/src/ideaInterview.js';
 import type { IdeaAnswer, IdeaAnswerChoice } from '../../../core/src/messages.js';
 import {
+  OFFICE_ACCESS_INSTRUCTIONS,
+  OFFICE_MANAGED_EXPLANATION,
+  OFFICE_READ_ONLY_LABEL,
+} from '../../../core/src/officeAccess.js';
+import {
   PROJECT_PREPARATION_COMMIT_NOTICE,
   PROJECT_PREPARATION_EXPLANATION,
   projectPreparationErrorText,
 } from '../../../core/src/projectPreparation.js';
 import { IDEA_TEXTAREA_ROWS } from '../constants.js';
+import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import {
   getIdeasStore,
   ideaDialogState,
@@ -18,6 +24,7 @@ import {
   setIdeasStore,
 } from '../office/ideasStore.js';
 import { useIdeasConnection } from '../office/useIdeasConnection.js';
+import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { IdeaCommand } from './IdeaCommand.js';
 import { IdeaNextSteps } from './IdeaNextSteps.js';
@@ -43,6 +50,11 @@ export function NewIdeaDialog({
     setIdeasStore({ ...getIdeasStore(), result: null });
   }, []);
   const { store, connection } = useIdeasConnection(true);
+  const access = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
+  const permissionBlocked =
+    access.blocked ||
+    store.snapshot?.errorCode === 'denied' ||
+    store.snapshot?.preparationError === 'denied';
   const preparation = store.snapshot?.preparation;
   useEffect(() => {
     if (preparation)
@@ -92,6 +104,34 @@ export function NewIdeaDialog({
     }));
     sendIdea(text, submission, transport);
   };
+  if (permissionBlocked) {
+    return (
+      <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Nueva idea"
+          className="p-10 flex flex-col gap-8"
+        >
+          <p role="status">
+            {store.snapshot?.preparationError === 'denied'
+              ? OFFICE_MANAGED_EXPLANATION
+              : store.snapshot?.errorCode === 'denied'
+                ? `${OFFICE_READ_ONLY_LABEL}. ${OFFICE_ACCESS_INSTRUCTIONS}`
+                : access.explanation}
+          </p>
+          {confirmDiscard && (
+            <div role="alertdialog" aria-label="Descartar borrador" className="flex flex-col gap-8">
+              <p>El borrador tiene contenido sin guardar. ¿Quieres descartarlo?</p>
+              <Button onClick={() => setConfirmDiscard(null)}>Conservar borrador</Button>
+              <Button onClick={() => finishClose()}>Descartar borrador</Button>
+            </div>
+          )}
+          <Button onClick={() => close()}>Cerrar</Button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal isOpen onClose={() => close()} title="Nueva idea" className="idea-dialog">
       <div

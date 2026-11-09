@@ -99,8 +99,16 @@ function preparedProject(root: string | undefined) {
     if (!config) return fail('missing_manifest');
     return config;
   } catch (error) {
-    if (error instanceof IdeaFailure) throw error;
-    return fail('invalid_manifest');
+    const code = error instanceof IdeaFailure ? error.code : 'invalid_manifest';
+    if (featureIngressActor() !== 'human') return fail(code);
+    let repositoryRoot: string;
+    try {
+      repositoryRoot = projectRepositoryRoot(root);
+    } catch {
+      return fail(code);
+    }
+    if (repositoryRoot !== fs.realpathSync.native(root)) return preparedProject(repositoryRoot);
+    return fail(code);
   }
 }
 
@@ -329,8 +337,6 @@ export function readIdeas(
       try {
         if (!root) return { ...base, errorCode: failureCode(error), preparationError: 'not_git' };
         const repositoryRoot = projectRepositoryRoot(root);
-        if (repositoryRoot !== fs.realpathSync.native(root))
-          return readIdeas(requestId, privileged, repositoryRoot);
         const { proposal } = inspectProjectPreparation(repositoryRoot);
         return { ...base, errorCode: 'missing_manifest', preparation: proposal };
       } catch (preparationFailure) {

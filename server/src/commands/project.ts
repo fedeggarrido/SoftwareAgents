@@ -68,5 +68,6 @@ export async function runProjectCommand(argv: string[]): Promise<void> {
   if (result.status !== 'created')
     throw new CliUsageError(projectPreparationErrorText(result.errorCode ?? 'unavailable'));
   console.log(`Proyecto preparado. ${PROJECT_PREPARATION_COMMIT_NOTICE}`);
+  console.log('Si la oficina está abierta, reiníciala para cargar el proyecto.');
   if (result.errorCode) console.warn(projectPreparationErrorText(result.errorCode));
 }

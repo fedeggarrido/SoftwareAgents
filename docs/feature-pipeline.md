@@ -21,6 +21,8 @@ del servidor activo, mediante `PIXEL_AGENTS_OPERATOR_TOKEN` en el entorno del
 operador o una entrada oculta en TTY tras confirmar. Abre primero la oficina del
 proyecto para disponer de ese servidor. Sin TTY, usa `--yes` y la variable del
 token. `pixel-agents --help` y `pixel-agents project --help` listan la sintaxis.
+Tras crear el proyecto desde el CLI, si la oficina está abierta, reiníciala para
+cargar el proyecto. El comando muestra este aviso al terminar la creación.
 
 Se crea `.softwareagents/project.yaml` y la carpeta `.softwareagents/brain`.
 **Debes incluir el archivo en un commit tú mismo.** Los repositorios sin remoto

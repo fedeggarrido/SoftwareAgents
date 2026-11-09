@@ -4,14 +4,19 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import { AuditLog } from '../src/auditLog.js';
 import { dispatchCli, parseArgs } from '../src/cli.js';
 import type { ClientMessageContext } from '../src/clientMessageHandler.js';
 import { handleClientMessage } from '../src/clientMessageHandler.js';
 import { runProjectCommand } from '../src/commands/project.js';
 import * as company from '../src/companyControl.js';
-import { PROJECT_BRAIN_PATH, PROJECT_MANIFEST_PATH } from '../src/constants.js';
-import { readIdeas } from '../src/featureIdeas.js';
+import {
+  FEATURE_IDEAS_DIRECTORY,
+  PROJECT_BRAIN_PATH,
+  PROJECT_MANIFEST_PATH,
+} from '../src/constants.js';
+import { readIdeas, submitIdea } from '../src/featureIdeas.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import {
   handlePrepareProjectMessage,
@@ -300,17 +305,62 @@ describe('SA-114 project preparation', () => {
     expect(fs.existsSync(manifestFile())).toBe(false);
   });
 
-  it('returns an actionable proposal for an unprepared office', () => {
-    expect(readIdeas('r', true, root)).toMatchObject({
-      canSubmit: false,
-      errorCode: 'missing_manifest',
-      preparation: {
-        name: 'Mi proyecto',
-        defaultBranch: 'main',
-        configPath: PROJECT_MANIFEST_PATH,
-      },
+  it('reads and saves ideas at the repository root when the office starts in a subdirectory', () => {
+    const child = path.join(root, 'nested');
+    fs.mkdirSync(child);
+    vi.mocked(company.companyWorkspaceRoot).mockReturnValue(child);
+    const prepared = prepareProject(root, 'Prepared', true);
+    expect(prepared.status).toBe('created');
+    const snapshot = readIdeas('r', true);
+    expect(snapshot).toMatchObject({
+      canSubmit: true,
+      projectId: prepared.projectId,
+      errorCode: null,
     });
+    const saved = submitIdea(
+      {
+        requestId: 's',
+        projectId: snapshot.projectId!,
+        text: 'Una idea desde la subcarpeta',
+        answers: IDEA_QUESTIONS.map((question) => ({
+          questionId: question.id,
+          choice: 'decide',
+          text: '',
+        })),
+      },
+      true,
+    );
+    expect(saved).toMatchObject({ status: 'saved', errorCode: null });
+    const relative = path.join(
+      FEATURE_IDEAS_DIRECTORY,
+      snapshot.projectId!,
+      `${saved.idea!.key}.md`,
+    );
+    expect(fs.readFileSync(path.join(root, relative), 'utf8')).toContain(
+      'Una idea desde la subcarpeta',
+    );
+    expect(fs.existsSync(path.join(child, '.softwareagents'))).toBe(false);
+    expect(readIdeas('after', true).ideas).toEqual([saved.idea]);
   });
+
+  it.each(['.', 'nested'])(
+    'offers repository-root preparation for an unprepared office at %s',
+    (folder) => {
+      const officeRoot = path.join(root, folder);
+      fs.mkdirSync(officeRoot, { recursive: true });
+      vi.mocked(company.companyWorkspaceRoot).mockReturnValue(officeRoot);
+      expect(readIdeas('r', true)).toMatchObject({
+        canSubmit: false,
+        errorCode: 'missing_manifest',
+        preparation: {
+          id: inspectProjectPreparation(root).proposal.id,
+          name: 'Mi proyecto',
+          defaultBranch: 'main',
+          configPath: PROJECT_MANIFEST_PATH,
+        },
+      });
+    },
+  );
 
   it('handles the normal message entry point and refuses client-selected paths and the VS Code adapter', () => {
     const send = vi.fn();
@@ -368,6 +418,9 @@ describe('SA-114 project preparation', () => {
     await dispatchCli(['project', 'init', '--name', 'Desde CLI', '--yes']);
     expect(loadProjectConfig(root)?.project.name).toBe('Desde CLI');
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('commit tú mismo'));
+    expect(console.log).toHaveBeenCalledWith(
+      'Si la oficina está abierta, reiníciala para cargar el proyecto.',
+    );
   });
 
   it('CLI --yes still refuses creation without the operator capability', async () => {
@@ -379,6 +432,9 @@ describe('SA-114 project preparation', () => {
       );
       expect(fs.existsSync(path.join(root, '.softwareagents'))).toBe(false);
       expect(fs.readdirSync(home)).toEqual([]);
+      expect(console.log).not.toHaveBeenCalledWith(
+        'Si la oficina está abierta, reiníciala para cargar el proyecto.',
+      );
     } finally {
       if (previous) Object.defineProperty(process.stdin, 'isTTY', previous);
       else Reflect.deleteProperty(process.stdin, 'isTTY');

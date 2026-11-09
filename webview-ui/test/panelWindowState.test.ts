@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MODAL_Z_INDEX,
   PANEL_WINDOW_MIN_HEIGHT_PX,
   PANEL_WINDOW_MIN_WIDTH_PX,
   PANEL_WINDOW_STORAGE_KEY,
   PANEL_WINDOW_TITLE_HEIGHT_PX,
+  PANEL_WINDOW_Z_INDEX,
+  SELECTED_AGENT_OVERLAY_Z_INDEX,
 } from '../src/constants.js';
 import {
   clampPanelRect,
@@ -16,6 +19,10 @@ import {
 } from '../src/office/panelWindowState.js';
 
 describe('viewer-local panel preferences', () => {
+  it('keeps selected character actions above the window and below modals', () => {
+    expect(SELECTED_AGENT_OVERLAY_Z_INDEX).toBeGreaterThan(PANEL_WINDOW_Z_INDEX);
+    expect(SELECTED_AGENT_OVERLAY_Z_INDEX).toBeLessThan(MODAL_Z_INDEX);
+  });
   it.each([
     null,
     '{broken',

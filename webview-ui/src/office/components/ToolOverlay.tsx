@@ -347,7 +347,7 @@ export function ToolOverlay({
               top: screenY - (hasExtraLines ? 34 : 28),
               pointerEvents: isSelected ? 'auto' : 'none',
               opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
-              // Keep the selected character's actions above its detail card.
+              // Keep the selected character's actions above the office panel window.
               zIndex: isSelected ? SELECTED_AGENT_OVERLAY_Z_INDEX : 20,
             }}
             data-testid="agent-overlay"

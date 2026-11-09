@@ -450,6 +450,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await page.getByTestId('character-detail-panel').evaluate(fitsHorizontally)).toBe(
         true,
       );
+      // Selection opens the window, but the character's dismiss action must
+      // still receive pointer clicks, including beneath the mobile window.
+      await page.locator('[data-agent-id="1"] button[title="Close agent"]').click({ trial: true });
       await page.getByRole('tab', { name: 'Backlog', exact: true }).click();
       expect(await page.getByTestId('character-detail-panel').count()).toBe(0);
       await page.keyboard.press('Escape');

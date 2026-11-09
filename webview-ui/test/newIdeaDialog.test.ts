@@ -196,6 +196,48 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it.each([
+    ['offline', 'reconnecting', false],
+    ['pending', 'connected', true],
+    ['loading', 'connected', false],
+    ['offline and pending', 'reconnecting', true],
+  ] as const)(
+    'allows drafting and navigation while %s, gating only submission',
+    async (_, connection, pending) => {
+      lifecycle.state = connection;
+      if (pending) setOfficeAccess(null);
+      const html = await render();
+      expect(html).not.toMatch(/<textarea[^>]*disabled/);
+      if (connection === 'reconnecting' && pending) {
+        expect(html).toContain('modo de acceso.</p><p>Sin conexión.');
+        expect(html).not.toContain('modo de acceso.Sin conexión.');
+      }
+      await review();
+      const save = findControl(await tree(), (props) => props.children === 'Guardar idea')!;
+      expect(save.disabled).toBe(true);
+      save.onClick!();
+      expect(
+        lifecycle.send.mock.calls.filter(([message]) => message.type === 'submitIdea'),
+      ).toHaveLength(0);
+      await click('Anterior');
+      expect(await render()).toContain('Respuesta ' + IDEA_QUESTIONS.at(-1)!.id);
+      await click('Siguiente');
+      lifecycle.state = 'connected';
+      await render();
+      respond();
+      await render();
+      expect(
+        findControl(await tree(), (props) => props.children === 'Guardar idea')!.disabled,
+      ).toBe(pending);
+      setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
+      await render();
+      expect(
+        findControl(await tree(), (props) => props.children === 'Guardar idea')!.disabled,
+      ).toBe(false);
+      expect(await render()).toContain('Una idea literal');
+    },
+  );
+
   it('retains the interview and answers through disconnect until a new access handshake', async () => {
     await render();
     respond();
@@ -211,14 +253,14 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(html).not.toContain('URL con token');
     expect(html).not.toContain('Solo lectura');
     expect(findAction(await tree(), 'Siguiente')).toBeDefined();
-    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
     lifecycle.state = 'connected';
     await render();
     respond();
     html = await render();
     expect(html).toContain('Respuesta que debe sobrevivir');
     expect(html).not.toContain('URL con token');
-    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(true);
+    expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     html = await render();
     expect(html).toContain('URL con token');
@@ -578,7 +620,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     respond({ canSubmit: false, errorCode });
     const html = await render();
     expect(html).toContain(text);
-    expect(html).toMatch(/<textarea[^>]*disabled/);
+    expect(html).not.toMatch(/<textarea[^>]*disabled/);
     findAction(await tree(), 'Reintentar lectura de ideas')!();
     expect(lifecycle.send).toHaveBeenCalledTimes(2);
     expect(await render()).toContain('Comprobando');

@@ -8,6 +8,8 @@ import { build } from 'vite';
 import { expect, it } from 'vitest';
 
 import {
+  PANEL_WINDOW_MIN_HEIGHT_PX,
+  PANEL_WINDOW_MIN_WIDTH_PX,
   PANEL_WINDOW_MOVE_STEP_PX,
   PANEL_WINDOW_RESIZE_STEP_PX,
   PANEL_WINDOW_STORAGE_KEY,
@@ -21,6 +23,51 @@ const isOutsidePanelWindow = (element: unknown) =>
 const isFocusedElement = (element: unknown) => (element as MatchableElement).matches(':focus');
 const fitsHorizontally = (element: unknown) =>
   (element as MeasurableElement).scrollWidth <= (element as MeasurableElement).clientWidth;
+
+async function expectModalFocus(page: Page, name: string) {
+  // Wait a frame so deferred cleanup restores have had an opportunity to run.
+  expect(
+    await page.evaluate(`new Promise(resolve => requestAnimationFrame(() => {
+    const dialog = [...document.querySelectorAll('[role="dialog"]')].find(el =>
+      el.textContent.includes(${JSON.stringify(name)}));
+    resolve(!!dialog?.contains(document.activeElement));
+  }))`),
+  ).toBe(true);
+  for (const key of ['Tab', 'Shift+Tab', 'Tab']) {
+    await page.keyboard.press(key);
+    expect(await page.evaluate('!!document.activeElement?.closest(\'[role="dialog"]\')')).toBe(
+      true,
+    );
+  }
+}
+
+async function expectControlsClear(page: Page) {
+  await expect
+    .poll(async () => {
+      const panel = (await page.getByTestId('panel-window').boundingBox())!;
+      const controls = await Promise.all(
+        [
+          page.getByTestId('company-hud'),
+          page.locator('.office-notices'),
+          page.getByTestId('zoom-controls'),
+          page.locator('.bottom-toolbar'),
+        ].map((control) => control.boundingBox()),
+      );
+      return controls.every(
+        (control) =>
+          !control ||
+          panel.x + panel.width <= control.x ||
+          control.x + control.width <= panel.x ||
+          panel.y + panel.height <= control.y ||
+          control.y + control.height <= panel.y,
+      );
+    })
+    .toBe(true);
+  const title = (await page.locator('.panel-window-title').boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(title.y).toBeGreaterThanOrEqual(0);
+  expect(title.y + title.height).toBeLessThanOrEqual(viewport.height);
+}
 
 const board = {
   type: 'boardState',
@@ -88,16 +135,33 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         resolveDir: path.resolve('src'),
         loader: 'tsx',
         contents: `
+          import { StrictMode } from 'react';
+          import { flushSync } from 'react-dom';
           import { createRoot } from 'react-dom/client';
           import App from './App';
+          import { NewIdeaDialog } from './components/NewIdeaDialog';
+          import { FeaturePlanDialog } from './components/FeaturePlanDialog';
           let root;
           window.mountOffice = () => {
             root?.unmount();
             window.officeSubscribed = false;
             root = createRoot(document.getElementById('root'));
-            root.render(<App />);
+            root.render(<StrictMode><App /></StrictMode>);
           };
           window.mountOffice();
+          window.showFocusProbe = kind => flushSync(() => root.render(<StrictMode>{
+            kind === 'idea' ? <NewIdeaDialog onClose={() => {}} /> :
+            <FeaturePlanDialog projectId="demo" featureKey="FEAT-001" onClose={() => {}} />
+          }</StrictMode>));
+          const renderStack = idea => root.render(<StrictMode>
+            <FeaturePlanDialog projectId="demo" featureKey="FEAT-001" onClose={() => {}} />
+            {idea && <NewIdeaDialog onClose={() => {}} />}
+          </StrictMode>);
+          window.showStackedFocusProbe = () => flushSync(() => renderStack(true));
+          window.closeStackedFocusProbe = () => {
+            flushSync(() => renderStack(false));
+            document.querySelector('[role="dialog"] button').focus();
+          };
         `,
       },
       define: { 'import.meta.env.DEV': 'false' },
@@ -213,6 +277,19 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await page.getByRole('button', { name: 'Auditoría', exact: true }).click();
         expect(await windowPanel.count()).toBe(0);
         await backlog.click();
+
+        // Existing geometry must follow both expanding controls and viewport changes.
+        await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();
+        await page.locator('.office-mode-indicator button').click();
+        await page.locator('#office-mode-explanation').waitFor();
+        await expectControlsClear(page);
+        await page.setViewportSize({ width: width === 1024 ? 1440 : 1024, height: 844 });
+        await expectControlsClear(page);
+        await page.setViewportSize({ width, height: 844 });
+        await expectControlsClear(page);
+        await page.locator('.office-mode-indicator button').click();
+        await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();
+        await page.getByRole('button', { name: 'Restablecer posición', exact: true }).click();
       }
       expect(await page.getByTestId('company-hud').locator('.ui-counter').textContent()).toBe(
         '12 de 123 hechas',
@@ -241,6 +318,101 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.keyboard.press('Escape');
       expect(await windowPanel.count()).toBe(0);
       expect(await backlog.evaluate(isFocusedElement)).toBe(true);
+      const meeting = {
+        id: 'meeting-1',
+        format: 'delphi',
+        topic: 'Meeting activity',
+        question: 'What next?',
+        participants: [],
+        status: 'running',
+        round: 'borrador',
+        lines: [],
+      };
+      const sendMeeting = async (id: string) => {
+        await page.evaluate(
+          `window.postMessage(${JSON.stringify({ ...board, meeting: { ...meeting, id } })}, '*')`,
+        );
+        await page
+          .getByTestId('company-hud')
+          .getByRole('button', { name: /Reuniones/ })
+          .waitFor();
+      };
+      // A new meeting opens a closed window, without stealing another open tab.
+      await sendMeeting('meeting-1');
+      await page.getByRole('tab', { name: 'Reuniones', selected: true }).waitFor();
+      await page.getByTestId('meeting-panel').waitFor();
+      await page.keyboard.press('Escape');
+      await backlog.click();
+      await sendMeeting('meeting-2');
+      const meetingTab = page.getByRole('tab', { name: 'Reuniones', exact: true });
+      const meetingHud = page.getByTestId('company-hud').getByRole('button', { name: /Reuniones/ });
+      await meetingTab.getByRole('status', { name: 'Nueva actividad' }).waitFor();
+      expect(await page.getByRole('tab', { name: 'Backlog', selected: true }).count()).toBe(1);
+      expect(await meetingHud.getByRole('status', { name: 'Nueva actividad' }).isVisible()).toBe(
+        true,
+      );
+      await sendMeeting('meeting-2');
+      expect(await meetingTab.getByRole('status').count()).toBe(1);
+      // The mobile sheet covers the HUD and dock until dismissed.
+      if (width === 390) await page.keyboard.press('Escape');
+      await meetingHud.click();
+      await page.getByRole('tab', { name: 'Reuniones', selected: true }).waitFor();
+      expect(await meetingTab.getByRole('status').count()).toBe(0);
+      expect(await meetingHud.getByRole('status').count()).toBe(0);
+      if (width !== 390) {
+        await meetingHud.click();
+        expect(await windowPanel.count()).toBe(1);
+      }
+      await page.getByRole('tab', { name: 'Backlog', exact: true }).click();
+      await sendMeeting('meeting-3');
+      await meetingTab.getByRole('status').waitFor();
+      await meetingTab.click();
+      expect(await meetingHud.getByRole('status').count()).toBe(0);
+      // Both HUD counts remain stable shortcuts to the same named section.
+      const decisions = [
+        { id: 'd1', status: 'open', question: 'One?', options: [] },
+        { id: 'd2', status: 'open', question: 'Two?', options: [] },
+      ];
+      await page.evaluate(
+        `window.postMessage(${JSON.stringify({
+          ...board,
+          decisions,
+          items: [
+            {
+              id: 'task-pr',
+              title: 'Task PR',
+              phase: 'REVIEW',
+              agentIds: [],
+              prRef: 'demo/repo#1',
+            },
+          ],
+        })}, '*')`,
+      );
+      const decisionHud = page.getByRole('button', {
+        name: 'Decisiones, 2 pendientes',
+        exact: true,
+      });
+      if (width === 390) await page.keyboard.press('Escape');
+      await decisionHud.click();
+      expect(await decisionHud.textContent()).toContain('Decisiones');
+      expect(await decisionHud.locator('.ui-counter').textContent()).toBe('· 2');
+      await page.getByRole('tab', { name: 'Decisiones', selected: true }).waitFor();
+      if (width !== 390) {
+        await decisionHud.click();
+        expect(await windowPanel.count()).toBe(1);
+      }
+      const prStatus = page.getByTestId('dock-pr-status');
+      expect(await prStatus.textContent()).toContain('Estado: PR');
+      expect(await prStatus.getAttribute('aria-label')).toContain('Estado de PR:');
+      if (width === 390) await page.keyboard.press('Escape');
+      await prStatus.click();
+      await page.getByRole('tab', { name: 'Backlog', selected: true }).waitFor();
+      if (width !== 390) {
+        await prStatus.click();
+        expect(await windowPanel.count()).toBe(1);
+      }
+      await page.evaluate(`window.postMessage(${JSON.stringify(board)}, '*')`);
+      await page.keyboard.press('Escape');
       // Character details use the same window, including long legacy field values.
       await page.evaluate(`
         window.postMessage({ type: 'agentCreated', id: 1 }, '*');
@@ -268,6 +440,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await page.getByRole('tab', { name: 'Features', exact: true }).tap();
         await page.getByRole('button', { name: 'Ver plan', exact: true }).tap();
         await page.getByRole('dialog', { name: 'Plan de feature', exact: true }).waitFor();
+        await expectModalFocus(page, 'Plan de feature');
         await page.keyboard.press('Escape');
         expect(await page.getByRole('dialog').count()).toBe(0);
         expect(await windowPanel.count()).toBe(1);
@@ -302,6 +475,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.getByRole('button', { name: 'Ver plan', exact: true }).click();
       const plan = page.getByRole('dialog', { name: 'Plan de feature', exact: true });
       await plan.waitFor();
+      await expectModalFocus(page, 'Plan de feature');
       expect(await plan.evaluate(isOutsidePanelWindow)).toBe(true);
       await page.keyboard.press('Escape');
       expect(await plan.count()).toBe(0);
@@ -313,6 +487,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       ).toBe(true);
       await page.getByRole('button', { name: 'Nueva idea', exact: true }).click();
       await page.getByRole('dialog', { name: 'Nueva idea', exact: true }).waitFor();
+      await expectModalFocus(page, 'Nueva idea');
       await page.keyboard.press('Escape');
       expect(await page.getByRole('dialog').count()).toBe(0);
       expect(await windowPanel.count()).toBe(1);
@@ -366,6 +541,10 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.getByRole('button', { name: 'Features', exact: true }).click();
       expect(await windowPanel.boundingBox()).toEqual(resized);
       await page.setViewportSize({ width: 600, height: 400 });
+      // The clamp follows a ResizeObserver callback, so wait for it instead of racing it.
+      await page.waitForFunction(
+        "(document.querySelector('.panel-window-title')?.getBoundingClientRect().right ?? Infinity) <= 600",
+      );
       const shrunkTitle = (await title.boundingBox())!;
       expect(shrunkTitle.x).toBeGreaterThanOrEqual(0);
       expect(shrunkTitle.x + shrunkTitle.width).toBeLessThanOrEqual(600);
@@ -376,6 +555,55 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       const reset = (await windowPanel.boundingBox())!;
       expect(reset.x).toBe(panelBox.x);
       expect(reset.width).toBe(panelBox.width);
+
+      // Synthetic pointer events isolate competing pointer IDs in the actual handlers.
+      // Pointer capture requires a hardware down, so stub only that browser primitive.
+      await title.evaluate((element) => {
+        (element as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+      });
+      const pointer = (pointerId: number, clientX: number, clientY: number) => ({
+        pointerId,
+        clientX,
+        clientY,
+        button: 0,
+        bubbles: true,
+      });
+      await title.dispatchEvent('pointerdown', pointer(11, reset.x + 20, reset.y + 20));
+      await title.dispatchEvent('pointerdown', pointer(22, reset.x + 30, reset.y + 30));
+      await title.dispatchEvent('pointermove', pointer(22, reset.x + 90, reset.y + 90));
+      expect(await windowPanel.boundingBox()).toEqual(reset);
+      for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        await title.dispatchEvent(event, pointer(22, 0, 0));
+      }
+      await title.dispatchEvent('pointermove', pointer(11, reset.x + 36, reset.y + 36));
+      const moved = (await windowPanel.boundingBox())!;
+      expect(moved.x).toBe(reset.x + 16);
+      expect(moved.y).toBe(reset.y + 16);
+      await title.dispatchEvent('pointerup', pointer(11, 0, 0));
+      await title.dispatchEvent('pointermove', pointer(11, reset.x + 80, reset.y + 80));
+      expect(await windowPanel.boundingBox()).toEqual(moved);
+      await title.dispatchEvent('pointerdown', pointer(33, moved.x + 20, moved.y + 20));
+      await title.dispatchEvent('pointercancel', pointer(33, 0, 0));
+      await title.dispatchEvent('pointermove', pointer(33, moved.x + 80, moved.y + 80));
+      expect(await windowPanel.boundingBox()).toEqual(moved);
+
+      for (const edge of ['w', 'n']) {
+        await page.getByRole('button', { name: 'Restablecer posición', exact: true }).click();
+        const beforeResize = (await windowPanel.boundingBox())!;
+        const handle = page.locator(`.panel-window-resize-${edge}`);
+        await handle.evaluate((element) => {
+          (element as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+        });
+        await handle.dispatchEvent('pointerdown', pointer(44, 100, 100));
+        await handle.dispatchEvent('pointermove', pointer(44, 2100, 2100));
+        await handle.dispatchEvent('pointerup', pointer(44, 2100, 2100));
+        const afterResize = (await windowPanel.boundingBox())!;
+        expect(afterResize.x + afterResize.width).toBe(beforeResize.x + beforeResize.width);
+        expect(afterResize.y + afterResize.height).toBe(beforeResize.y + beforeResize.height);
+        expect(edge === 'w' ? afterResize.width : afterResize.height).toBe(
+          edge === 'w' ? PANEL_WINDOW_MIN_WIDTH_PX : PANEL_WINDOW_MIN_HEIGHT_PX,
+        );
+      }
       await page.close();
     }
     for (const storage of ['corrupt', 'unavailable']) {
@@ -406,7 +634,41 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await page.locator('[data-testid="panel-window"]:visible').count()).toBe(0);
       await page.close();
     }
+
+    const focusPage = await browser.newPage();
+    await focusPage.route('**/*', (route) =>
+      route.request().isNavigationRequest()
+        ? route.fulfill({
+            contentType: 'text/html',
+            body: html + '<button id="probe-opener">Open</button>',
+          })
+        : route.abort(),
+    );
+    await focusPage.goto('http://office-window.test/');
+    await focusPage.addScriptTag({ content: script });
+    await boot(focusPage);
+    await focusPage.locator('#probe-opener').focus();
+    await focusPage.evaluate("window.showFocusProbe('idea')");
+    await expectModalFocus(focusPage, 'Nueva idea');
+    // Close one modal and open another in a single commit. Its connected opener
+    // must not steal focus back after the new modal's layout effect focuses it.
+    await focusPage.evaluate("window.showFocusProbe('plan')");
+    await expectModalFocus(focusPage, 'Plan de feature');
+    await focusPage.getByRole('dialog', { name: 'Plan de feature', exact: true }).focus();
+    await focusPage.evaluate('window.showStackedFocusProbe()');
+    await expectModalFocus(focusPage, 'Nueva idea');
+    await focusPage.evaluate('window.closeStackedFocusProbe()');
+    await focusPage.evaluate('new Promise(resolve => requestAnimationFrame(resolve))');
+    // The queued restore from Nueva idea must preserve deliberate focus inside
+    // the surviving plan, rather than returning to that dialog's root.
+    expect(
+      await focusPage
+        .getByRole('button', { name: 'Cerrar', exact: true })
+        .evaluate(isFocusedElement),
+    ).toBe(true);
+    await expectModalFocus(focusPage, 'Plan de feature');
+    await focusPage.close();
   } finally {
     await browser.close();
   }
-}, 60_000);
+}, 120_000);

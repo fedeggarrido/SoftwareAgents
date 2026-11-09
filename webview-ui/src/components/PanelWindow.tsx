@@ -10,6 +10,7 @@ import {
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import type { PanelRect, PanelTab } from '../office/panelWindowState.js';
+import { resizePanelRect } from '../office/panelWindowState.js';
 import { Button } from './ui/Button.js';
 
 interface PanelWindowProps {
@@ -17,6 +18,7 @@ interface PanelWindowProps {
   tab: PanelTab;
   rect: PanelRect | null;
   mobile: boolean;
+  meetingUnread?: boolean;
   onSelect: (tab: PanelTab) => void;
   onRectChange: (rect: PanelRect) => void;
   onReset: () => void;
@@ -29,6 +31,7 @@ export function PanelWindow({
   tab,
   rect,
   mobile,
+  meetingUnread = false,
   onSelect,
   onRectChange,
   onReset,
@@ -36,6 +39,7 @@ export function PanelWindow({
   children,
 }: PanelWindowProps) {
   const titleRef = useRef<HTMLDivElement>(null);
+  const windowRef = useRef<HTMLElement>(null);
   const gesture = useRef<{
     pointerId: number;
     x: number;
@@ -43,10 +47,10 @@ export function PanelWindow({
     rect: PanelRect;
     edge: string;
   } | null>(null);
-  useDismissibleLayer(isOpen, onClose, PANEL_WINDOW_Z_INDEX, titleRef);
+  useDismissibleLayer(isOpen, onClose, PANEL_WINDOW_Z_INDEX, titleRef, false, windowRef);
 
   const start = (event: PointerEvent<HTMLElement>, edge = '') => {
-    if (mobile || !rect || event.button !== 0) return;
+    if (gesture.current || mobile || !rect || event.button !== 0) return;
     if (!edge && (event.target as HTMLElement).closest('button')) return;
     event.preventDefault();
     event.currentTarget.focus();
@@ -68,19 +72,11 @@ export function PanelWindow({
     if (!active.edge) {
       next.x += dx;
       next.y += dy;
-    } else {
-      if (active.edge.includes('e')) next.width += dx;
-      if (active.edge.includes('s')) next.height += dy;
-      if (active.edge.includes('w')) {
-        next.x += dx;
-        next.width -= dx;
-      }
-      if (active.edge.includes('n')) {
-        next.y += dy;
-        next.height -= dy;
-      }
     }
-    onRectChange(next);
+    onRectChange(active.edge ? resizePanelRect(active.rect, active.edge, dx, dy) : next);
+  };
+  const end = (event: PointerEvent<HTMLElement>) => {
+    if (gesture.current?.pointerId === event.pointerId) gesture.current = null;
   };
   const keyboard = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || mobile || !rect) return;
@@ -118,6 +114,7 @@ export function PanelWindow({
   } as CSSProperties;
   return (
     <section
+      ref={windowRef}
       className={`panel-window pixel-panel ${mobile ? 'panel-window-mobile' : ''}`}
       style={style}
       role="region"
@@ -139,15 +136,9 @@ export function PanelWindow({
         }
         onPointerDown={(event) => start(event)}
         onPointerMove={move}
-        onPointerUp={() => {
-          gesture.current = null;
-        }}
-        onPointerCancel={() => {
-          gesture.current = null;
-        }}
-        onLostPointerCapture={() => {
-          gesture.current = null;
-        }}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onLostPointerCapture={end}
       >
         <span className="min-w-0 flex-1">
           {PANEL_TABS.find((entry) => entry.id === tab)?.label}
@@ -165,6 +156,7 @@ export function PanelWindow({
             key={entry.id}
             id={`office-tab-${entry.id}`}
             role="tab"
+            aria-label={entry.label}
             type="button"
             aria-selected={tab === entry.id}
             aria-controls="office-panel-content"
@@ -184,6 +176,11 @@ export function PanelWindow({
             }}
           >
             {entry.label}
+            {entry.id === 'meeting' && meetingUnread && (
+              <span className="ml-4 text-accent-bright" role="status" aria-label="Nueva actividad">
+                ●
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -204,15 +201,9 @@ export function PanelWindow({
             aria-hidden="true"
             onPointerDown={(event) => start(event, edge)}
             onPointerMove={move}
-            onPointerUp={() => {
-              gesture.current = null;
-            }}
-            onPointerCancel={() => {
-              gesture.current = null;
-            }}
-            onLostPointerCapture={() => {
-              gesture.current = null;
-            }}
+            onPointerUp={end}
+            onPointerCancel={end}
+            onLostPointerCapture={end}
           />
         ))}
     </section>

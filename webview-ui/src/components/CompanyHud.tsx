@@ -75,6 +75,7 @@ const AUTOPILOT_TEXT: Record<string, string> = {
 interface CompanyHudProps {
   onOpenDecisions: () => void;
   onOpenMeeting: () => void;
+  meetingUnread?: boolean;
   officeState: OfficeState;
   agents: number[];
 }
@@ -83,6 +84,7 @@ interface CompanyHudProps {
 export function CompanyHud({
   onOpenDecisions,
   onOpenMeeting,
+  meetingUnread = false,
   officeState,
   agents,
 }: CompanyHudProps) {
@@ -116,6 +118,21 @@ export function CompanyHud({
 
   const capacity = capacityHudView(board);
   const decisions = decisionsHudView(board);
+  const decisionsControl = decisions.visible && (
+    <button className={actionClass} onClick={onOpenDecisions} aria-label={decisions.accessibleName}>
+      Decisiones <span className="ui-counter">· {decisions.open}</span>
+    </button>
+  );
+  const meetingControl = (board.meeting || meetingUnread) && (
+    <button className={actionClass} onClick={onOpenMeeting}>
+      Reuniones
+      {meetingUnread && (
+        <span className="ml-4 text-accent-bright" role="status" aria-label="Nueva actividad">
+          ●
+        </span>
+      )}
+    </button>
+  );
   const counts = visibleProviderCounts(agents);
   if (capacity.minimal) {
     return (
@@ -129,16 +146,8 @@ export function CompanyHud({
           >
             {open ? '▾' : '▸'} {board.project} {board.projectId ? `(${board.projectId})` : ''}
           </button>
-          {decisions.visible && (
-            <button className={actionClass} onClick={onOpenDecisions}>
-              {decisions.label}
-            </button>
-          )}
-          {board.meeting && (
-            <button className={actionClass} onClick={onOpenMeeting}>
-              Reuniones
-            </button>
-          )}
+          {decisionsControl}
+          {meetingControl}
         </div>
         <div className="text-2xs text-text-muted">
           Claude {counts.claude} · Codex {counts.codex} · {capacity.title}
@@ -225,16 +234,8 @@ export function CompanyHud({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-4">
-          {board.meeting && (
-            <button className={actionClass} onClick={onOpenMeeting}>
-              Reuniones
-            </button>
-          )}
-          {decisions.visible && (
-            <button className={actionClass} onClick={onOpenDecisions}>
-              {decisions.label}
-            </button>
-          )}
+          {meetingControl}
+          {decisionsControl}
           {ap && (
             <button
               className={`${actionClass} ${ap.enabled ? 'border-accent bg-active-bg' : ''}`}

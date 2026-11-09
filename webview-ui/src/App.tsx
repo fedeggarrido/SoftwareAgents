@@ -553,6 +553,7 @@ function App() {
         onNewIdea={() => setIsNewIdeaOpen(true)}
         onToggleAudit={() => panel.toggle('audit')}
         onToggleBacklog={() => panel.toggle('backlog')}
+        onOpenBacklog={() => panel.select('backlog')}
         workspaceFolders={workspaceFolders}
       />
 
@@ -561,8 +562,9 @@ function App() {
           <CompanyHud
             agents={agents}
             officeState={officeState}
-            onOpenDecisions={() => panel.toggle('decisions')}
-            onOpenMeeting={() => panel.toggle('meeting')}
+            onOpenDecisions={() => panel.select('decisions')}
+            onOpenMeeting={() => panel.select('meeting')}
+            meetingUnread={panel.meetingUnread}
           />
         </div>
       </div>
@@ -571,6 +573,7 @@ function App() {
         tab={panel.tab}
         rect={panel.rect}
         mobile={panel.mobile}
+        meetingUnread={panel.meetingUnread}
         onSelect={panel.select}
         onRectChange={panel.setRect}
         onReset={panel.reset}

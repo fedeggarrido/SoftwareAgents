@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { PANEL_WINDOW_STORAGE_KEY, PANEL_WINDOW_TITLE_HEIGHT_PX } from '../src/constants.js';
+import {
+  PANEL_WINDOW_MIN_HEIGHT_PX,
+  PANEL_WINDOW_MIN_WIDTH_PX,
+  PANEL_WINDOW_STORAGE_KEY,
+  PANEL_WINDOW_TITLE_HEIGHT_PX,
+} from '../src/constants.js';
 import {
   clampPanelRect,
   defaultPanelRect,
+  fitPanelRect,
   readPanelPreferences,
+  resizePanelRect,
   savePanelPreferences,
 } from '../src/office/panelWindowState.js';
 
@@ -83,5 +90,27 @@ describe('viewer-local panel preferences', () => {
     expect(rect.y + rect.height).toBeLessThanOrEqual(730);
     expect(rect.x).toBeGreaterThan(48);
     expect(rect.x + rect.width).toBeLessThanOrEqual(1024);
+  });
+  it.each([1024, 1440])('reclamps existing geometry below expanded controls at %i', (width) => {
+    const rect = fitPanelRect(
+      { x: 64, y: 100, width: 720, height: 520 },
+      { width, height: 844 },
+      460,
+      780,
+    );
+    expect(rect.y).toBeGreaterThanOrEqual(460);
+    expect(rect.y + rect.height).toBeLessThanOrEqual(780);
+    const crowded = fitPanelRect(rect, { width, height: 300 }, 500, 260);
+    expect(crowded.y).toBeGreaterThanOrEqual(0);
+    expect(crowded.y + PANEL_WINDOW_TITLE_HEIGHT_PX).toBeLessThanOrEqual(300);
+  });
+  it.each(['w', 'n'])('keeps the opposite edge fixed when resizing %s past minimum', (edge) => {
+    const rect = { x: 64, y: 100, width: 720, height: 520 };
+    const resized = resizePanelRect(rect, edge, 1000, 1000);
+    expect(resized.x + resized.width).toBe(rect.x + rect.width);
+    expect(resized.y + resized.height).toBe(rect.y + rect.height);
+    expect(edge === 'w' ? resized.width : resized.height).toBe(
+      edge === 'w' ? PANEL_WINDOW_MIN_WIDTH_PX : PANEL_WINDOW_MIN_HEIGHT_PX,
+    );
   });
 });

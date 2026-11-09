@@ -56,7 +56,7 @@ export function defaultPanelRect(
   top = PANEL_WINDOW_DEFAULT_TOP_PX,
   bottom = viewport.height - PANEL_WINDOW_MARGIN_PX,
 ): PanelRect {
-  const rect = clampPanelRect(
+  return fitPanelRect(
     {
       x: PANEL_WINDOW_DEFAULT_LEFT_PX,
       y: top,
@@ -64,11 +64,47 @@ export function defaultPanelRect(
       height: Math.min(PANEL_WINDOW_DEFAULT_HEIGHT_PX, Math.max(0, bottom - top)),
     },
     viewport,
+    top,
+    bottom,
   );
+}
+
+/** Keep the window between changing office controls; title reachability takes precedence
+ * if the controls leave less than a title's worth of space. */
+export function fitPanelRect(
+  proposed: PanelRect,
+  viewport: PanelViewport,
+  top: number,
+  bottom: number,
+): PanelRect {
+  const rect = clampPanelRect(proposed, viewport);
+  const end = Math.max(
+    PANEL_WINDOW_MARGIN_PX + PANEL_WINDOW_TITLE_HEIGHT_PX,
+    Math.min(bottom, viewport.height - PANEL_WINDOW_MARGIN_PX),
+  );
+  const start = Math.max(PANEL_WINDOW_MARGIN_PX, Math.min(top, end - PANEL_WINDOW_TITLE_HEIGHT_PX));
+  const height = Math.min(rect.height, end - start);
   return {
     ...rect,
-    height: Math.min(rect.height, Math.max(PANEL_WINDOW_TITLE_HEIGHT_PX, bottom - rect.y)),
+    y: Math.max(start, Math.min(rect.y, end - height)),
+    height,
   };
+}
+
+/** Resize from the opposite, fixed edge before applying viewport constraints. */
+export function resizePanelRect(rect: PanelRect, edge: string, dx: number, dy: number): PanelRect {
+  const next = { ...rect };
+  if (edge.includes('e')) next.width = Math.max(PANEL_WINDOW_MIN_WIDTH_PX, rect.width + dx);
+  if (edge.includes('s')) next.height = Math.max(PANEL_WINDOW_MIN_HEIGHT_PX, rect.height + dy);
+  if (edge.includes('w')) {
+    next.width = Math.max(PANEL_WINDOW_MIN_WIDTH_PX, rect.width - dx);
+    next.x = rect.x + rect.width - next.width;
+  }
+  if (edge.includes('n')) {
+    next.height = Math.max(PANEL_WINDOW_MIN_HEIGHT_PX, rect.height - dy);
+    next.y = rect.y + rect.height - next.height;
+  }
+  return next;
 }
 
 export function readPanelPreferences(storage: Pick<ViewerStorage, 'getItem'>): PanelPreferences {

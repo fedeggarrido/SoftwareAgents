@@ -9,6 +9,7 @@ interface Layer {
 }
 
 const layers: Layer[] = [];
+let subscriptionGeneration = 0;
 const focusableSelector =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]';
 
@@ -47,33 +48,39 @@ export function useDismissibleLayer(
   priority: number,
   element: RefObject<HTMLElement | null>,
   modal = false,
+  scope: RefObject<HTMLElement | null> = element,
 ) {
   const close = useRef(onClose);
+  const focusSession = useRef({ opener: null as HTMLElement | null, token: 0 });
   useLayoutEffect(() => {
     close.current = onClose;
   });
-  // Capture the opener once per open session, so re-subscribing (deps change, another
-  // layer stealing focus) never replaces it with whatever happens to be focused later.
   useLayoutEffect(() => {
     if (!isOpen) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    return () => {
-      // Layout cleanups run inside React's commit, which then restores the focus it saw
-      // before committing. Restore after the commit so that does not undo ours.
-      queueMicrotask(() => {
-        if (opener?.isConnected) opener.focus();
-      });
-    };
-  }, [isOpen]);
-  useLayoutEffect(() => {
-    if (!isOpen) return;
-    const layer: Layer = { priority, close: () => close.current(), element, modal };
+    // Re-subscribing the same layer (including StrictMode) cancels its queued restore
+    // while preserving the original opener for the eventual real close.
+    const session = focusSession.current;
+    const token = ++session.token;
+    session.opener ??=
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    subscriptionGeneration++;
+    const layer: Layer = { priority, close: () => close.current(), element: scope, modal };
     if (layers.length === 0) window.addEventListener('keydown', handleKeyDown, true);
     layers.push(layer);
     element.current?.focus();
     return () => {
       layers.splice(layers.indexOf(layer), 1);
       if (layers.length === 0) window.removeEventListener('keydown', handleKeyDown, true);
+      const generation = subscriptionGeneration;
+      // React restores pre-commit focus; defer ours until its commit has finished.
+      queueMicrotask(() => {
+        if (token !== session.token) return;
+        const target = session.opener;
+        session.opener = null;
+        if (generation !== subscriptionGeneration) return;
+        if (layers.some((open) => open.element.current?.contains(document.activeElement))) return;
+        if (target?.isConnected) target.focus();
+      });
     };
-  }, [isOpen, priority, element, modal]);
+  }, [isOpen, priority, element, modal, scope]);
 }

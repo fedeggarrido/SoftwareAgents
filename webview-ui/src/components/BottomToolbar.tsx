@@ -157,46 +157,50 @@ export function BottomToolbar({
       >
         Layout
       </Button>
-      <Button
-        variant={isBacklogOpen ? 'active' : 'default'}
-        onClick={onToggleBacklog}
-        title="Backlog de la empresa de agentes"
-      >
-        Backlog
-      </Button>
-      {prs && (
-        <Button
-          onClick={onOpenBacklog}
-          title={prs.title}
-          aria-label={`Estado de PR: ${prs.label}. Abrir Backlog`}
-          data-testid="dock-pr-status"
-        >
-          Estado: {prs.label}
-        </Button>
+      {/* Panel and idea buttons hide while editing: a wider toolbar wraps and covers the editor toolbar above it. */}
+      {!isEditMode && (
+        <>
+          <Button
+            variant={isBacklogOpen ? 'active' : 'default'}
+            onClick={onToggleBacklog}
+            title="Backlog de la empresa de agentes"
+          >
+            Backlog
+          </Button>
+          {prs && (
+            <Button
+              onClick={onOpenBacklog}
+              title={prs.title}
+              aria-label={`Estado de PR: ${prs.label}. Abrir Backlog`}
+              data-testid="dock-pr-status"
+            >
+              Estado: {prs.label}
+            </Button>
+          )}
+          <Button
+            variant={isDecisionsOpen ? 'active' : 'default'}
+            onClick={onToggleDecisions}
+            title="Decisiones del propietario"
+          >
+            Decisiones
+          </Button>
+          <Button
+            variant={isAuditOpen ? 'active' : 'default'}
+            onClick={onToggleAudit}
+            title="Auditoría de solo lectura"
+          >
+            Auditoría
+          </Button>
+          <Button
+            variant={isFeaturesOpen ? 'active' : 'default'}
+            onClick={onToggleFeatures}
+            title="Features de solo lectura"
+          >
+            Features
+          </Button>
+          <Button onClick={onNewIdea}>Nueva idea</Button>
+        </>
       )}
-      <Button
-        variant={isDecisionsOpen ? 'active' : 'default'}
-        onClick={onToggleDecisions}
-        title="Decisiones del propietario"
-      >
-        Decisiones
-      </Button>
-      <Button
-        variant={isAuditOpen ? 'active' : 'default'}
-        onClick={onToggleAudit}
-        title="Auditoría de solo lectura"
-      >
-        Auditoría
-      </Button>
-      <Button
-        variant={isFeaturesOpen ? 'active' : 'default'}
-        onClick={onToggleFeatures}
-        title="Features de solo lectura"
-      >
-        Features
-      </Button>
-      {/* Hidden while editing: a wider toolbar would cover the editor toolbar above it. */}
-      {!isEditMode && <Button onClick={onNewIdea}>Nueva idea</Button>}
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
         onClick={onToggleSettings}

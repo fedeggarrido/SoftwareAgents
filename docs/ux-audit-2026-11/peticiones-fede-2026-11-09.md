@@ -111,3 +111,22 @@ Este documento ordena lo que Fede pidió mientras probaba la oficina. Cada punto
 6. SA-147 (al final, cuando las pantallas estén estables).
 7. SA-146.
 8. El resto de la auditoría (SA-120…SA-140).
+
+## Chequeo visual integrado (2026-11-09, tarde)
+
+Recorrido completo en una oficina con datos reales: escritorio a 1440×900 y móvil a 375×812. Las mejoras van a **SA-149, Pulido visual y lenguaje**, salvo las que ya tienen item propio.
+
+1. **Texto demasiado pequeño:** la letra pixel de los paneles queda en unos 8 px y cuesta leerla. Hay que subir la escala base del texto de los paneles (no del canvas) y permitir elegirla en Ajustes.
+2. **Backlog:**
+   - el título repite el id («SA-083 SA-083») cuando falta título;
+   - aparecen estados crudos («WAITING_HUMAN → REVIEW») y UUIDs;
+   - el grupo sin FEAT sale como «—: 0/5 hechas»;
+   - «solo lectura» aparece dos veces.
+   - Estos puntos se resuelven con SA-124 y SA-143.
+3. **Decisiones:** el texto usa jerga («decisiones estructuradas…», «respuestas legacy», «manager»). Hay que reescribirlo así: «Aquí aparecen las preguntas que los agentes no pueden decidir solos. Tú eliges; ellos continúan.»
+4. **Reuniones:** el estado vacío no explica qué es una reunión ni cuándo aparece.
+5. **Ajustes:** todo está en inglés (Export/Import Layout, Sound Notifications, Watch All Sessions, Instant Detection, Debug View), igual que los botones «Layout» y «Settings» de la barra. Hay que traducirlos y añadir una línea de ayuda por opción.
+6. **Barra inferior en móvil:** las etiquetas se parten a mitad de palabra («Decision/es», «Auditori/a», «Feature/s»). Usar iconos con etiqueta corta o un menú «Más».
+7. **Ventana por defecto:** tapa el centro de la oficina. Abrirla en el lado con más espacio libre.
+8. **Tour:** está en inglés y reaparece al recargar. Se arregla en SA-144, en curso.
+9. **Ficha del agente:** el nombre genérico «Agente #2» y la etiqueta vieja del personaje junto a la ficha. Va a SA-130.

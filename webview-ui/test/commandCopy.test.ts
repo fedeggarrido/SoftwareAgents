@@ -52,7 +52,7 @@ describe('SA-115 command copy control', () => {
     expect(html).toContain('Comando copiado.');
     expect(html).toContain('role="status"');
     expect(html).toContain('mi-repositorio');
-    expect(html).toContain('readonly=""');
+    expect(html).toMatch(/readonly=""/i);
   });
 
   it.each(['missing', 'denied', 'throws'])(

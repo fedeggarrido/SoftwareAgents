@@ -254,8 +254,8 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 ### `@area:standalone` (14 tests)
 
 - `e2e/standalone/audit.spec.ts:85` — reads, filters and expands the latest 500 without writing (Standalone / audit)
-- `e2e/standalone/audit.spec.ts:169` — untokened URL denies access without entries or counts (Standalone / audit)
-- `e2e/standalone/audit.spec.ts:196` — shows the empty state without creating a log (Standalone / audit › missing log)
+- `e2e/standalone/audit.spec.ts:173` — untokened URL denies access without entries or counts (Standalone / audit)
+- `e2e/standalone/audit.spec.ts:200` — shows the empty state without creating a log (Standalone / audit › missing log)
 - `e2e/standalone/hooks.spec.ts:17` — propagates hook-driven lifecycle into the browser UI (Standalone / hooks)
 - `e2e/standalone/hooks.spec.ts:134` — the tokened page shows the Intro and Install writes the hooks (Standalone / hooks consent)
 - `e2e/standalone/hooks.spec.ts:161` — an untokened spectator page never sees the consent dialog (Standalone / hooks consent)

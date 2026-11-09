@@ -532,7 +532,7 @@ export function handleClientMessage(
     }
 
     case 'setHooksInfoShown':
-      adapter?.setSetting(KEY_HOOKS_INFO_SHOWN, true);
+      if (ctx.privileged === true) adapter?.setSetting(KEY_HOOKS_INFO_SHOWN, true);
       break;
 
     case 'addExternalAssetDirectory': {
@@ -847,13 +847,14 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
         // 4a-bis. First-run consent, asked in the app: this connect is the moment the user can be asked, so the ask
         // rides the handshake and consentGate owns every condition (VS Code calls the same function). The record is
         // re-read here rather than taken from startup — another tab may have answered while this one loaded.
-        // Dismissing sends nothing, so the ask returns on the next connect: fail-closed, never nagging in-session.
+        // Closing the tour persists dismissal separately from hook consent.
         const request = hooksConsentRequest(
           {
             installed,
             hooksEnabled: getHooksEnabled(provider.id),
             consentAnswered: getHooksConsent(provider.id) !== 'unanswered',
             privileged: ctx.privileged === true,
+            introDismissed: adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,
           },
           provider,
         );

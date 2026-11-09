@@ -29,6 +29,7 @@ import { transport } from '../transport/index.js';
 import { IdeaCommand } from './IdeaCommand.js';
 import { IdeaNextSteps } from './IdeaNextSteps.js';
 import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -118,6 +119,7 @@ export function NewIdeaDialog({
                 ? `${OFFICE_READ_ONLY_LABEL}. ${OFFICE_ACCESS_INSTRUCTIONS}`
                 : access.explanation}
           </p>
+          <OfficeRecoveryActions />
           {confirmDiscard && (
             <div role="alertdialog" aria-label="Descartar borrador" className="flex flex-col gap-8">
               <p>El borrador tiene contenido sin guardar. ¿Quieres descartarlo?</p>
@@ -177,13 +179,20 @@ export function NewIdeaDialog({
           </section>
         )}
         {!access.pending && store.snapshot?.preparationError && (
-          <p role="alert">{projectPreparationErrorText(store.snapshot.preparationError)}</p>
+          <div role="alert">
+            <p>{projectPreparationErrorText(store.snapshot.preparationError)}</p>
+            <OfficeRecoveryActions />
+          </div>
         )}
         {store.preparationResult?.status === 'created' && (
           <p role="status">Proyecto preparado. {PROJECT_PREPARATION_COMMIT_NOTICE}</p>
         )}
         {!access.pending && store.preparationResult?.errorCode && (
-          <p role="alert">{projectPreparationErrorText(store.preparationResult.errorCode)}</p>
+          <div role="alert">
+            <p>{projectPreparationErrorText(store.preparationResult.errorCode)}</p>
+            <Button onClick={() => requestIdeas(transport)}>Reintentar</Button>
+            <OfficeRecoveryActions />
+          </div>
         )}
         {confirmDiscard ? (
           <div role="alertdialog" aria-label="Descartar borrador" className="flex flex-col gap-8">

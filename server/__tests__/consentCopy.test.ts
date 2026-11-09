@@ -25,12 +25,12 @@ describe('consent copy', () => {
   it('carries all five disclosure facts', () => {
     const full = `${CONSENT_INSTALL_HEADLINE}\n\n${CONSENT_DISCLOSURE}`;
     expect(full).toContain('~/.claude/settings.json');
-    expect(full).toContain(`${CLAUDE_HOOK_EVENTS.length.toString()} Claude Code events`);
-    expect(full).toContain('your existing settings are kept');
+    expect(full).toContain(`${CLAUDE_HOOK_EVENTS.length.toString()} eventos de Claude Code`);
+    expect(full).toContain('Se conserva tu configuración existente');
     expect(full).toContain(`settings.json${SETTINGS_BACKUP_SUFFIX}`);
-    expect(full).toContain('tool names and tool inputs');
+    expect(full).toContain('nombres y las entradas de las herramientas');
     expect(full).toContain('127.0.0.1');
-    expect(full).toContain('Settings → Instant Detection (Hooks)');
+    expect(full).toContain('Settings → Detección instantánea (hooks)');
   });
 
   // Every fact must be in the DISCLOSURE block, not the headline: the headline
@@ -41,20 +41,20 @@ describe('consent copy', () => {
   it('keeps every disclosure fact in the shared block, not the headline', () => {
     expect(CONSENT_DISCLOSURE).toContain('~/.claude/settings.json');
     expect(CONSENT_DISCLOSURE).toContain(
-      `${CLAUDE_HOOK_EVENTS.length.toString()} Claude Code events`,
+      `${CLAUDE_HOOK_EVENTS.length.toString()} eventos de Claude Code`,
     );
     expect(CONSENT_DISCLOSURE).toContain(`settings.json${SETTINGS_BACKUP_SUFFIX}`);
-    expect(CONSENT_DISCLOSURE).toContain('tool names and tool inputs');
+    expect(CONSENT_DISCLOSURE).toContain('nombres y las entradas de las herramientas');
     expect(CONSENT_DISCLOSURE).toContain('127.0.0.1');
-    expect(CONSENT_DISCLOSURE).toContain('Settings → Instant Detection (Hooks)');
+    expect(CONSENT_DISCLOSURE).toContain('Settings → Detección instantánea (hooks)');
   });
 
   // The ask is about a FIRST install and nothing else. A user who already has
   // our hooks is migrated silently, so any "already installed" wording here
   // would be copy for a surface that no longer exists. The disclosure asks in
-  // install terms ("adds hooks"), and the headline is a pure welcome.
+  // install terms ("añade hooks"), and the headline is a pure welcome.
   it('asks about a first install, the only case that prompts', () => {
-    expect(CONSENT_DISCLOSURE).toContain('adds hooks');
+    expect(CONSENT_DISCLOSURE).toContain('añade hooks');
     expect(CONSENT_INSTALL_HEADLINE).not.toContain('already installed');
     expect(CONSENT_DISCLOSURE).not.toContain('already installed');
   });

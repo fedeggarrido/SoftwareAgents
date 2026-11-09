@@ -121,7 +121,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       },
     });
     const html = await render();
-    expect(html).toContain('inicia pixel-agents tú mismo en tu terminal');
+    expect(html).toContain('Abre Pixel Agents en tu ordenador');
     expect(html).not.toContain('No se pudieron leer las ideas');
     expect(html).not.toContain('role="alert"');
     expect(html).not.toContain('Reintentar');
@@ -157,7 +157,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     );
     expect(await render()).toContain('Cargando ideas pendientes');
     lifecycle.state = 'reconnecting';
-    expect(await render()).toContain('Sin conexión con la oficina');
+    expect(await render()).toContain('La oficina está cerrada en tu ordenador');
   });
   it('SA-109 shows pending ideas separately in the FeaturesPanel', async () => {
     setIdeasStore({

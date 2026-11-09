@@ -59,14 +59,20 @@ export function withDiscoveryLock<T>(action: () => T): T {
   );
 }
 /** Under the discovery lock. Exclusive temporary + lexical rename. */
-export function writeDiscoveryRecord(relative: string, config: ServerTarget): void {
+export function writeDiscoveryRecord(
+  relative: string,
+  config: unknown,
+  protect?: (file: string) => void,
+): void {
   const temp = `${relative}.${crypto.randomUUID()}.tmp`;
   let created = false;
   try {
     const fd = fs.openSync(discoveryEntryPath(temp), 'wx', 0o600);
     created = true;
     try {
+      protect?.(discoveryEntryPath(temp));
       fs.writeFileSync(fd, JSON.stringify(config, null, 2));
+      fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }

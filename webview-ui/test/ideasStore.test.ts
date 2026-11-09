@@ -76,7 +76,7 @@ describe('SA-109 dialog state without DOM', () => {
       expect(ideaErrorText(code)).toBeTruthy();
     }
     expect(ideaErrorText('missing_manifest')).toContain('.softwareagents/project.yaml');
-    expect(ideaErrorText('denied')).toContain('token');
+    expect(ideaErrorText('denied')).toContain('Settings');
     expect(ideaErrorText('unsupported_adapter')).toContain('standalone');
   });
 

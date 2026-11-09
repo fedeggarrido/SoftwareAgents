@@ -209,8 +209,8 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       const html = await render();
       expect(html).not.toMatch(/<textarea[^>]*disabled/);
       if (connection === 'reconnecting' && pending) {
-        expect(html).toContain('Sin conexión con la oficina: el programa pixel-agents');
-        expect(html).toContain('Reintentando conexión con la oficina');
+        expect(html).toContain('La oficina está cerrada en tu ordenador');
+        expect(html).toContain('Reintentando…');
         expect(html).not.toContain('Esperando a que confirme');
       }
       await review();
@@ -264,7 +264,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     html = await render();
-    expect(html).toContain('URL con token');
+    expect(html).toContain('Abrir Settings');
     expect(html).not.toContain('<textarea');
     setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
     html = await render();
@@ -273,7 +273,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   });
 
   it.each([
-    [false, 'token_required', 'inicia pixel-agents tú mismo en tu terminal'],
+    [false, 'token_required', 'Abre Pixel Agents en tu ordenador'],
     [true, 'managed_process', 'Esta oficina se inició desde un agente'],
   ] as const)(
     'SA-116 explains restricted access before the interview (%s, %s)',
@@ -404,7 +404,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   it('explains read-only preparation and refuses unsupported adapters without a creation form', async () => {
     await render();
     respond({ projectId: null, canSubmit: false, errorCode: 'denied' });
-    expect(await render()).toContain('inicia pixel-agents tú mismo en tu terminal');
+    expect(await render()).toContain('Abre Pixel Agents en tu ordenador');
     expect(await render()).not.toContain('<textarea');
     expect(await render()).not.toContain('Reintentar lectura de ideas');
     expect(await render()).not.toContain('role="alert"');
@@ -722,7 +722,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
 
   it('requests again after reconnecting from an offline mount', async () => {
     lifecycle.state = 'reconnecting';
-    expect(await render()).toContain('Sin conexión');
+    expect(await render()).toContain('La oficina está cerrada');
     expect(lifecycle.send).not.toHaveBeenCalled();
     lifecycle.state = 'connected';
     expect(await render()).toContain('Comprobando');

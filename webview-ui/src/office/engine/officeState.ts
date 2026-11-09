@@ -718,6 +718,18 @@ export class OfficeState {
     ch.bubbleType = null;
   }
 
+  /** A new server connection owns a fresh roster, including reused numeric IDs. */
+  resetConnectionAgents(): void {
+    this.characters.clear();
+    this.subagentIdMap.clear();
+    this.subagentMeta.clear();
+    this.agentProjects.clear();
+    this.selectedAgentId = null;
+    this.cameraFollowId = null;
+    this.hoveredAgentId = null;
+    for (const seat of this.seats.values()) seat.assigned = false;
+  }
+
   /** Find seat uid at a given tile position, or null */
   getSeatAtTile(col: number, row: number): string | null {
     for (const [uid, seat] of this.seats) {

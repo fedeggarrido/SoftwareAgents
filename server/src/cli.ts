@@ -50,10 +50,11 @@ import { runEvalCommand } from './evalCommand.js';
 import { runExecutorsCommand } from './executorAvailability.js';
 import { startExecutorMonitoring } from './executorProbes.js';
 import { ExecutionRegistry } from './executors/executionRegistry.js';
-import { confirmHumanIngress } from './featureIngress.js';
+import { confirmHumanIngress, featureIngressActor } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
+import { openOffice } from './openOffice.js';
 import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
@@ -68,8 +69,7 @@ import { runZonesCommand } from './zonesCheck.js';
 // ── Argument parsing ──────────────────────────────────────────
 
 export interface CliArgs {
-  /** Unset -> ephemeral (OS-assigned) port, so multiple standalone instances
-   *  can run at once without a collision. --port picks a fixed one. */
+  /** Unset reuses the user's saved standalone port, assigning one on first run. */
   port?: number;
   host: string;
 }
@@ -104,7 +104,7 @@ export function parseArgs(argv: string[]): CliArgs {
       console.log(`Uso: pixel-agents [opciones]
 
 Opciones:
-  --port, -p <number>   Puerto de escucha (por defecto: uno libre asignado por el sistema)
+  --port, -p <number>   Puerto de escucha (por defecto: el guardado para esta oficina)
   --host <string>      Dirección de escucha (por defecto: 127.0.0.1)
   --help               Mostrar esta ayuda
 
@@ -124,7 +124,7 @@ Comandos:
   review <acción>       Aceptar o rechazar hallazgos y consultar precisión de revisión
   learning <acción>     Listar, aprobar o rechazar aprendizajes propuestos
   eval <acción>         Listar, validar y ejecutar evaluaciones o consultar sus informes
-  token rotate [--port PORT]  Renovar el token del servidor y desconectar sus clientes`);
+  token --rotate        Revocar el acceso de todas las pestañas de la oficina`);
       process.exit(0);
     }
   }
@@ -515,18 +515,14 @@ async function startServer(argv: string[]): Promise<void> {
     );
     machineCapacity.start();
 
-    // The URL the operator opens has to be REACHABLE (a wildcard bind address
-    // is a bind target, not an address you can browse to — `--host 0.0.0.0`
-    // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,
-    // which is what makes the session it loads privileged enough to approve a
-    // hook install (see standaloneTokenValid in httpServer.ts). Under `--host
-    // 0.0.0.0` the office stays readable from the LAN at this machine's own
-    // address; only the consent-bearing toggle needs the token.
+    // Logs carry only the public address. Interactive human startup opens the
+    // capability directly in the browser. Managed processes never launch a browser.
     const displayHost =
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
-    console.log(
-      `\n  Pixel Agents server running at http://${displayHost}:${config.port}/?token=${config.token}\n`,
-    );
+    const officeUrl = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${config.port}/`;
+    console.log(`\n  Pixel Agents server running at ${officeUrl}\n`);
+    if (process.stdout.isTTY && featureIngressActor() === 'human')
+      openOffice(`${officeUrl}?token=${encodeURIComponent(config.token)}`);
 
     // ── Graceful shutdown ──
     let shuttingDown = false;

@@ -8,7 +8,10 @@ SA-075: Fastify redacta los valores query `token` (también claves codificadas y
 repetidas) en HTTP y upgrades WS; las cabeceras Authorization se omiten del
 serializador de petición y se redactan si se registran explícitamente. No se
 registran mensajes WS controlados por el cliente. AuditLog ya redacta tokens y
-Authorization. La URL impresa por el CLI sigue siendo un secreto intencional.
+Authorization. Desde SA-144 el CLI imprime únicamente la dirección pública.
+El arranque interactivo humano abre el navegador con la capacidad directamente,
+sin escribirla en stdout. Los arranques gestionados o con stdout redirigido no
+abren el navegador.
 
 SA-116 captura el token de la navegación inicial una sola vez, antes de conectar,
 y elimina todos los parámetros `token`, incluidos los repetidos o con la clave
@@ -16,9 +19,9 @@ codificada, con `history.replaceState`. Conserva el resto de la ruta, query,
 fragmento y estado del historial. Solo la URL del transporte en memoria conserva
 la capacidad para el handshake WS y sus reconexiones. El cliente no persiste el
 token en almacenamiento del navegador ni vuelve a obtenerlo de `location`.
-Recargar la página pierde esa capacidad. Para recuperar el modo operador, hay
-que volver a abrir la URL con token que imprime `pixel-agents`, iniciado por el
-operador en su terminal.
+Recargar la página pierde esa capacidad. Abrir Pixel Agents de nuevo desde una
+terminal interactiva humana vuelve a abrir la oficina autenticada. Una pestaña
+que permanece abierta recupera la conexión tras reiniciar el programa.
 
 El handshake `webviewReady` recibe `officeAccess` con el privilegio de esa conexión
 y un motivo cerrado `token_required`, `managed_process` o null. No contiene
@@ -32,7 +35,7 @@ La señal de UI conserva los controles de autoridad existentes en el servidor.
 
 Riesgo residual de SA-116. La retirada de la barra sustituye la entrada actual del
 historial, pero no garantiza borrar copias previas, sincronizadas o capturadas
-antes de ejecutar JavaScript. La navegación inicial, la terminal, discovery,
+antes de ejecutar JavaScript. La navegación inicial, discovery,
 la memoria de la página y las peticiones WS visibles en herramientas del navegador
 siguen manejando el secreto. El token sigue siendo bearer y reutilizable. Evitar
 mostrarlo en la barra reduce la exposición en capturas posteriores, sin revocarlo.
@@ -40,19 +43,53 @@ Los logs de Fastify mantienen la redacción de SA-075. Un proceso del mismo usua
 del SO conserva el riesgo de acceso a memoria y discovery descrito en el modelo
 de amenazas.
 
-`pixel-agents token rotate [--port PORT]` rota la instancia señalada por
-server.json, o la entrada de registro del puerto explícito. Requiere el Bearer
-vigente, comprueba salud/PID, rechaza Origin de navegador y audita la autorización
-en el audit de máquina sin secretos. Genera un UUID nuevo, invalida Bearer/query
-anteriores y desconecta todos los WS (incluidos los de VS Code); reconectar exige
-leer discovery de nuevo para recuperar privilegios. Los clientes standalone sin
-token conservan acceso de lectura. Los hooks que leen discovery usan el nuevo
-token en la siguiente entrega; consumidores que lo cacheen deben releerlo.
-Ambos records se republicarán usando escrituras 0600 y el lock existente;
-fallos de publicación se registran y reintentan con el mecanismo habitual.
-En Windows se conservan las ACL heredadas del perfil. Cada arranque de una
-instancia nueva genera otro UUID; reutilizar una instancia no es un arranque.
-La decisión de conservar temporalmente query está en [ADR-0005](../adr/0005-server-token-transport.md).
+SA-144 guarda la capacidad standalone por usuario en
+`~/.pixel-agents/office-access.json`, fuera del workspace. Se crea bajo el lock
+de discovery, con temporal exclusivo, fsync y publicación atómica. POSIX usa
+0600 y el directorio de usuario se crea 0700. En Windows se consulta el SID con
+`whoami` y se aplica `icacls /inheritance:r /grant:r *SID:(F)` antes de escribir
+el secreto. Si el host impide ejecutar la consulta de identidad, se conservan
+las ACL heredadas del perfil. No se reparan permisos explícitos ajenos ya
+existentes. Las copias de discovery siguen usando su política de permisos
+existente. El token nunca se imprime. La capacidad sobrevive a reinicios y el
+mismo archivo guarda el puerto predeterminado para que la pestaña alcance el
+servidor reiniciado. Un puerto guardado ocupado provoca un error de arranque.
+`--port` permite seleccionar otro puerto explícitamente.
+
+`pixel-agents token --rotate` revoca la capacidad persistente incluso con el
+programa cerrado. Settings ofrece «Revocar acceso de esta pestaña» y confirma
+que afecta a todas las pestañas. El mensaje WS `rotateOfficeToken` exige el
+privilegio de la conexión y un proceso humano sin marcadores gestionados.
+Ninguna respuesta contiene el secreto nuevo. Cada instancia standalone relee
+la capacidad antes de autorizar peticiones o mensajes, y un sondeo cada segundo
+desconecta sockets antiguos incluso inactivos. Discovery se republica mediante
+el escritor restringido y sus reintentos. Los hooks que leen discovery reciben
+el token nuevo en la siguiente entrega. Consumidores que lo cachean deben
+releerlo. Los clientes sin token conservan sus lecturas existentes.
+
+El alias anterior `token rotate [--port PORT]` conserva la selección por
+server.json o puerto, Bearer, comprobación salud/PID, rechazo de Origin y audit
+sin secretos. Ahora también rechaza procesos gestionados. VS Code mantiene
+tokens efímeros por instancia y su revocación específica mediante ese alias.
+La decisión de conservar query está en [ADR-0005](../adr/0005-server-token-transport.md).
+
+Riesgo residual aceptado de SA-144. Una copia robada de la capacidad standalone
+sigue siendo válida después de reiniciar, hasta una revocación explícita. Todas
+las oficinas standalone del usuario comparten esa capacidad. Se mantienen bind
+loopback predeterminado, opciones explícitas de host y los gates de Origin,
+Bearer y privilegio. El secreto sigue visible en memoria, navegación inicial,
+herramientas de red, discovery y argumentos del lanzador del navegador. Un
+proceso del mismo usuario conserva acceso potencial. La ACL del archivo nuevo
+no endurece otras copias de discovery ni reemplaza la separación de SO de SA-058.
+Un listener local que suplante el puerto guardado puede recibir el token de una
+pestaña que reintenta. El handshake WS no autentica al servidor.
+No se recupera privilegio de una pestaña sin capacidad por un endpoint público.
+
+La UI muestra el backoff y permite «Reintentar ahora». Cada nueva conexión
+repite `webviewReady`, invalida snapshots y reconstruye el roster sin recargar.
+Los errores ofrecen Settings y el formulario SA-114 cuando procede. Si el
+programa está cerrado, la página pide abrir Pixel Agents y deja un único
+`npx pixel-agents` en «Detalles» plegados. La página no puede iniciar el proceso.
 
 Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fastify/static`:
 
@@ -66,7 +103,7 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 `/ws` is gated in **two tiers**, because `setHooksEnabled(true)` over this socket is a durable, machine-wide consent grant plus a hook install.
 
 1. **Connection** (`isAllowedWebSocketOrigin`): embedded requires the Bearer token; standalone requires a same-origin handshake. A missing Origin still connects (non-browser clients send none). This tier is weak by design — a DNS-rebound page sends `Origin` and `Host` as the same attacker-chosen name and IS accepted (`httpServerWs.test.ts` pins that).
-2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`): proved by an out-of-band secret — embedded via its Bearer token, standalone via the server token in the `/ws` `?token=` query, which the CLI prints in the local URL and the SPA captures in memory before clearing the page URL (`webview-ui/src/transport/index.ts`). **Never a network position**: peer address, `Host` and `Origin` all ride the channel a proxy speaks, so a LAN-bound forwarder piping bytes to 127.0.0.1 satisfies all three. The token is a replayable bearer capability. Initial navigation and the operator's terminal still handle it, so the printed URL is a secret. Fastify request logs redact it from SA-075 onward. An untokened client still watches the office; it just cannot change `~/.claude/settings.json`.
+2. **Privileged messages** (`standaloneTokenValid`, `ClientMessageContext.privileged`) use an out-of-band secret, carried as Bearer in embedded and `/ws?token=` in standalone. Human interactive startup hands the privileged URL directly to the browser opener. The SPA captures it in memory and clears the page URL. Peer address, Host and Origin remain reproducible by a forwarder. The persistent bearer remains replayable until rotation. Fastify redacts credentials. Untokened clients keep their existing read surface.
 
 The **hooks preference is persisted only after the install/uninstall settled and the on-disk result agrees** — writing it first strands the user when an uninstall fails: entries still firing, but a persisted hooks-off makes the next startup skip the consent/install path entirely.
 
@@ -132,8 +169,8 @@ El servidor es compartido entre Projects: discovery no publica
 un token distinto por Project. Si hay varias oficinas, compruebe cuál señala ese
 puntero; el token de otra instancia no confirma el comando.
 
-Ejemplo: `pixel-agents feature approve FEAT-001 --confirm`. Pegue solo el token
-de la URL privilegiada de esa oficina cuando aparezca el prompt oculto. `--confirm`
+Ejemplo: `pixel-agents feature approve FEAT-001 --confirm`. El token pertenece al
+estado privado del usuario y a discovery. Introdúzcalo en el prompt oculto. `--confirm`
 va al final, no recibe un valor y requiere stdin y stderr TTY. Ctrl+C, Ctrl+D o
 fin de entrada cancelan; no se admite un pipe. No pegue el token en argv ni en
 archivos del Project. También puede proporcionar `PIXEL_AGENTS_OPERATOR_TOKEN`

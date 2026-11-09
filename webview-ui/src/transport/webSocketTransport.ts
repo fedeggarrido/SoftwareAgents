@@ -147,7 +147,8 @@ export class WebSocketTransport implements MessageTransport {
         message.type === 'setExecutorEnabled' ||
         message.type === 'setExecutorLevels' ||
         message.type === 'submitIdea' ||
-        message.type === 'prepareProject'
+        message.type === 'prepareProject' ||
+        message.type === 'rotateOfficeToken'
       )
         throw new Error('Office mutations require a connected transport');
       // Queue messages while connecting (flushed in onopen)

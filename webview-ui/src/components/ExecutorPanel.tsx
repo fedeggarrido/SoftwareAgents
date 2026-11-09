@@ -9,6 +9,9 @@ import {
   useExecutorStore,
 } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
+import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { Button } from './ui/Button.js';
 
 /**
  * «Executors para nuevas tareas» (SA-091). The switch is the Operator's choice and
@@ -53,6 +56,7 @@ export function ExecutorPanel() {
       {view.banner && (
         <div className="text-2xs border border-border bg-bg-dark px-5 py-3" role="status">
           {view.banner}
+          <OfficeRecoveryActions />
         </div>
       )}
       {view.rows.map((row) => (
@@ -111,6 +115,21 @@ export function ExecutorPanel() {
             {row.error && (
               <span className="block mt-2" role="alert">
                 {row.error}
+                {connection === 'connected' ? (
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        transport.send({ type: 'requestExecutorState', projectId: view.projectId })
+                      }
+                    >
+                      Reintentar
+                    </Button>
+                    <OfficeRecoveryActions />
+                  </>
+                ) : (
+                  <OfficeConnectionHelp />
+                )}
               </span>
             )}
           </span>
@@ -120,6 +139,7 @@ export function ExecutorPanel() {
         {view.readOnlyNotice ??
           'Tú eliges qué executors y niveles pueden usarse. El programa decide quién hace cada tarea. Desactivar deja terminar las ejecuciones en curso.'}
       </div>
+      {view.readOnlyNotice && <OfficeRecoveryActions />}
       <div className="sr-only" aria-live="polite">
         {view.live}
       </div>

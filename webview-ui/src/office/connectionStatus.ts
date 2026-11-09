@@ -48,14 +48,11 @@ export function connectionCopy(state: TransportState, status = current, now = Da
   const retry =
     status.retryAt === null
       ? status.attempt
-        ? ` Intento ${status.attempt} en curso.`
+        ? ' (conectando)'
         : ''
-      : ` Próximo intento ${status.attempt} en ${Math.max(0, Math.ceil((status.retryAt - now) / RELATIVE_SECOND_MS))} s.`;
+      : ` (próximo intento en ${Math.max(0, Math.ceil((status.retryAt - now) / RELATIVE_SECOND_MS))}s)`;
   return {
-    label:
-      state === 'reconnecting'
-        ? `Reintentando conexión con la oficina…${retry}`
-        : 'Sin conexión con la oficina',
+    label: state === 'reconnecting' ? `Reintentando…${retry}` : 'Sin conexión con la oficina',
     explanation,
   };
 }

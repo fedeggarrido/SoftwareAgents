@@ -11,7 +11,7 @@ export function projectPreparationErrorText(code: ProjectPreparationError): stri
     case 'denied':
       return OFFICE_ACCESS_INSTRUCTIONS;
     case 'unsupported_adapter':
-      return 'La preparación del proyecto está disponible en la oficina standalone. Abre esa oficina o usa pixel-agents project init desde tu terminal.';
+      return 'La preparación del proyecto está disponible en la oficina standalone. Abre Pixel Agents en tu ordenador.';
     case 'not_git':
       return 'Esta carpeta está fuera de un repositorio Git. Abre la oficina desde un repositorio Git existente.';
     case 'already_exists':

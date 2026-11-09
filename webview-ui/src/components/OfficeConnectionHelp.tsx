@@ -1,8 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
-import { RELATIVE_SECOND_MS } from '../constants.js';
+import { OFFICE_START_COMMAND, RELATIVE_SECOND_MS } from '../constants.js';
 import { connectionCopy, useConnectionStatus } from '../office/connectionStatus.js';
 import { transport } from '../transport/index.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 
 const subscribe = (listener: () => void) => transport.onStateChange(listener);
@@ -30,8 +31,16 @@ export function OfficeConnectionHelp() {
           retryable.reconnect?.();
         }}
       >
-        Reconectar con la oficina
+        Reintentar ahora
       </Button>
+      {status.cause === 'unavailable' ? (
+        <details>
+          <summary>Detalles</summary>
+          <code className="select-all">{OFFICE_START_COMMAND}</code>
+        </details>
+      ) : (
+        <OfficeRecoveryActions />
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { OfficeRecoveryActions } from '../OfficeRecoveryActions.js';
 import { Button } from './Button.js';
 
 export function PanelError({
@@ -16,6 +17,7 @@ export function PanelError({
       <Button size="sm" onClick={onRetry} disabled={disabled}>
         Reintentar
       </Button>
+      <OfficeRecoveryActions />
     </div>
   );
 }

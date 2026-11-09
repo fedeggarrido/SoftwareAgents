@@ -44,6 +44,7 @@ describe('hooksConsentRequest — when to ask', () => {
     ['the ask was already answered', { consentAnswered: true }],
     ['the user turned hooks off', { hooksEnabled: false }],
     ['the client could not act on an answer', { privileged: false }],
+    ['the user closed or finished the intro', { introDismissed: true }],
   ])('does not ask when %s', (_why, override) => {
     expect(hooksConsentRequest({ ...askable, ...override }, claudeProvider)).toBeNull();
   });

@@ -30,6 +30,12 @@ import { probeServer } from './serverProbe.js';
 export type { ServerProbe } from './serverProbe.js';
 export { probeServer } from './serverProbe.js';
 import { createHttpServer } from './httpServer.js';
+import {
+  loadOfficeCredential,
+  readOfficeCredential,
+  rememberOfficePort,
+  rotateOfficeToken,
+} from './officeToken.js';
 import type { ServerConfig, ServerTarget } from './serverConfig.js';
 import {
   isServerConfig,
@@ -113,15 +119,23 @@ export class PixelAgentsServer {
     }
 
     // Start our own server
-    const token = crypto.randomUUID();
+    const credential = embedded ? { token: crypto.randomUUID() } : loadOfficeCredential();
+    const token = credential.token;
     const store = options?.store;
 
     const { app, port, host } = await createHttpServer({
       embedded,
       host: options?.host,
-      port: options?.port,
+      port: options?.port ?? credential.port,
       token,
-      onRotateToken: () => this.rotateToken(),
+      getToken: embedded
+        ? undefined
+        : () => {
+            const current = readOfficeCredential().token;
+            if (this.config && this.config.token !== current) this.updateToken(current);
+            return current;
+          },
+      onRotateToken: () => this.rotateToken(embedded),
       store: store!,
       runtime: options?.runtime,
       staticDir: options?.staticDir,
@@ -148,6 +162,12 @@ export class PixelAgentsServer {
         : {}),
     };
     this.ownsServer = true;
+    try {
+      if (!embedded && options?.port === undefined) rememberOfficePort(port);
+    } catch (error) {
+      this.stop();
+      throw error;
+    }
     this.pendingRegistry = this.pendingLegacy = true;
     this.publicationDelay = SERVER_DISCOVERY_RETRY_MIN_MS;
     this.publishDiscovery();
@@ -157,29 +177,35 @@ export class PixelAgentsServer {
   }
 
   /** Revoke the capability and republish it through the existing restricted writer. */
-  private rotateToken(): string {
+  private rotateToken(embedded: boolean): string {
     if (!this.config || !this.ownsServer) throw new Error('Server is not owned');
-    const token = crypto.randomUUID();
+    const token = embedded ? crypto.randomUUID() : rotateOfficeToken();
     // Audit before changing the capability; never include either secret.
-    new AuditLog().append({
-      projectId: null,
-      actorType: 'human',
-      actorId: null,
-      action: 'server.token.rotate',
-      resourceType: 'server',
-      resourceId: `${this.config.pid}:${this.config.port}`,
-      policyDecision: null,
-      riskLevel: 'medium',
-      outcome: { status: 'authorized' },
-      taskKey: null,
-      executionId: null,
-    });
+    if (embedded)
+      new AuditLog().append({
+        projectId: null,
+        actorType: 'human',
+        actorId: null,
+        action: 'server.token.rotate',
+        resourceType: 'server',
+        resourceId: `${this.config.pid}:${this.config.port}`,
+        policyDecision: null,
+        riskLevel: 'medium',
+        outcome: { status: 'authorized' },
+        taskKey: null,
+        executionId: null,
+      });
+    this.updateToken(token);
+    return token;
+  }
+
+  private updateToken(token: string): void {
+    if (!this.config) return;
     this.config.token = token;
     clearTimeout(this.publicationTimer);
     this.publicationTimer = undefined;
     this.pendingRegistry = this.pendingLegacy = true;
     this.publishDiscovery();
-    return token;
   }
 
   /** Stop the server and clean up its discovery records (only if we own them). */

@@ -497,19 +497,16 @@ describe('dist/cli.js entry-point guard', () => {
     },
   );
 
-  // The printed URL is the ONLY channel by which a real browser obtains the
-  // token, and the token is the whole privilege gate (httpServer.ts
-  // standaloneTokenValid). A bare URL, or one carrying the wrong token, ships a
-  // silently read-only session: the office renders, and the hooks toggle is
-  // refused with no way for the operator to find out why. Nothing else in this
-  // repo reads the CLI's stdout, so nothing else can catch that.
-  itBuilt('prints a URL carrying the token the server actually minted', async () => {
+  // Interactive startup passes the capability directly to the browser opener.
+  // The printed address must be public and safe to retain in logs.
+  itBuilt('prints only a public URL without logging the persistent token', async () => {
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-url-'));
     await runCliServer(tmpHome, async ({ output, port }) => {
       await waitForCondition(() => URL_LINE.test(output()));
       const url = printedUrl(output());
 
-      expect(url.searchParams.get('token')).toBe(mintedToken(tmpHome));
+      expect(url.searchParams.has('token')).toBe(false);
+      expect(output()).not.toContain(mintedToken(tmpHome));
       expect(url.port).toBe(port.toString());
       // And it is browsable as printed — the SPA, not a 404 or a dead host.
       const response = await fetch(url);
@@ -535,8 +532,9 @@ describe('dist/cli.js entry-point guard', () => {
 
         expect(url.hostname).not.toBe('0.0.0.0');
         expect(['127.0.0.1', 'localhost', '[::1]', '::1']).toContain(url.hostname);
-        // The wildcard bind must not cost the operator the token either.
-        expect(url.searchParams.get('token')).toBe(mintedToken(tmpHome));
+        // Public wildcard output must also keep the capability out of logs.
+        expect(url.searchParams.has('token')).toBe(false);
+        expect(output()).not.toContain(mintedToken(tmpHome));
         expect((await fetch(url)).status).toBe(200);
       },
       '0.0.0.0',

@@ -6,8 +6,8 @@ import type { PanelPreferences, PanelRect, PanelTab } from '../office/panelWindo
 import {
   clampPanelRect,
   defaultPanelRect,
-  fitPanelRect,
   readPanelPreferences,
+  restorePanelRect,
   savePanelPreferences,
 } from '../office/panelWindowState.js';
 
@@ -67,7 +67,7 @@ export function usePanelWindow(ready: boolean) {
         const { top, bottom } = occupiedBounds();
         setPreferences((current) => {
           const rect = current.rect
-            ? fitPanelRect(current.rect, viewport(), top, bottom)
+            ? restorePanelRect(current.rect, viewport(), top, bottom)
             : isOpen
               ? defaultRect()
               : null;

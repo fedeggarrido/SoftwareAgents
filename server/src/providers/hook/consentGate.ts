@@ -24,6 +24,7 @@ export interface ConsentGateState {
    *  server token. Showing the dialog to a client whose answer would be
    *  ignored is a lie, so it gates the ASK and not just the response. */
   privileged: boolean;
+  introDismissed?: boolean;
 }
 
 /**
@@ -36,7 +37,13 @@ export function hooksConsentRequest(
   state: ConsentGateState,
   provider: Pick<HookProvider, 'id' | 'consentDisclosure'>,
 ): HooksConsentRequest | null {
-  if (state.installed || state.consentAnswered || !state.hooksEnabled || !state.privileged) {
+  if (
+    state.introDismissed ||
+    state.installed ||
+    state.consentAnswered ||
+    !state.hooksEnabled ||
+    !state.privileged
+  ) {
     return null;
   }
   const { headline, disclosure } = provider.consentDisclosure();

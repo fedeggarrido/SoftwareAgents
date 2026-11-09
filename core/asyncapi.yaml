@@ -97,6 +97,7 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/OfficeTokenRotationFailed'
         - $ref: '#/components/schemas/OfficeAccess'
         - $ref: '#/components/schemas/FeaturePlanSnapshot'
         - $ref: '#/components/schemas/FeatureApprovalResult'
@@ -181,6 +182,7 @@ components:
         - $ref: '#/components/schemas/SetHooksEnabled'
         - $ref: '#/components/schemas/HooksConsentResponse'
         - $ref: '#/components/schemas/SetHooksInfoShown'
+        - $ref: '#/components/schemas/RotateOfficeToken'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
@@ -1775,6 +1777,24 @@ components:
         undoes what that answer left behind.)
       type: string
       enum: [install, notNow, never]
+
+    OfficeTokenRotationFailed:
+      type: object
+      additionalProperties: false
+      description: Content-free failure. The previous capability remains in use and Settings can retry.
+      required: [type]
+      properties:
+        type:
+          const: officeTokenRotationFailed
+
+    RotateOfficeToken:
+      type: object
+      additionalProperties: false
+      description: Revokes every standalone tab. Requires the privileged connection and a human-operated server. No secret is returned.
+      required: [type]
+      properties:
+        type:
+          const: rotateOfficeToken
 
     SetHooksInfoShown:
       type: object

@@ -9,10 +9,15 @@ export function IdeaNextSteps() {
           usa su informe si existe.
         </li>
         <li>
-          Requisitos: se prepara la especificación y las preguntas aparecen en Decisiones para que
-          respondas y apruebes.
+          Requisitos: se prepara la especificación. Si tiene dudas, las ves en el panel de
+          Decisiones, pero las respondes en un archivo Markdown con «feature spec &lt;id&gt;
+          --answers &lt;archivo&gt;». Después apruebas la especificación con «feature approve
+          &lt;id&gt;»; sin esa aprobación el flujo no avanza.
         </li>
-        <li>Plan técnico: puedes revisarlo en Features y aprobarlo tú con «Aprobar plan».</li>
+        <li>
+          Plan técnico: se genera el diseño y las tareas. Puedes revisarlo en Features y marcarlo
+          con «Aprobar plan», pero hoy el desarrollo no espera a esa aprobación.
+        </li>
         <li>Desarrollo: se implementan las tareas del plan.</li>
         <li>
           Revisión y QA: se revisa el trabajo y se comprueban los criterios; la integración final

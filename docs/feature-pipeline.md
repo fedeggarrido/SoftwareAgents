@@ -184,8 +184,10 @@ pixel-agents feature run FEAT-001 --request .softwareagents/ideas/softwareagents
 ```
 
 Tras guardar, «Qué pasa ahora» explica el recorrido real (SA-115): investigación
-previa opcional y explícita, requisitos con preguntas en Decisiones, plan técnico
-revisable en Features con «Aprobar plan», desarrollo, revisión y QA, integración
+previa opcional y explícita, requisitos (dudas visibles en Decisiones, respuestas con
+`feature spec <id> --answers <archivo>` y aprobación con `feature approve <id>`),
+plan técnico revisable en Features con «Aprobar plan» (hoy el desarrollo no espera a
+esa aprobación), desarrollo, revisión y QA, integración
 humana e investigación posterior explícita. `feature run` coordina requisitos,
 diseño, desarrollo, revisión y QA; **no lanza las investigaciones**. La previa se
 pide por separado con `research run --idea FEAT-NNN --question "Pregunta pública"`;

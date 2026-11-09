@@ -178,23 +178,30 @@ test.describe('Standalone / UI', () => {
   }) => {
     await standalone.drainMessages();
 
+    const indicator = page.locator('.connection-indicator');
     // Settle wait before the negative assertion (office.ts wait-strategy
     // convention): give the runtime a chance to render the indicator wrongly
     // before checking absence.
     await page.waitForTimeout(500);
-    await expect(page.getByText(/Reconnecting|Disconnected/)).toHaveCount(0);
+    await expect(indicator).toHaveCount(0);
 
     // Fallback for assumption A1: `page.context().setOffline(true)` does not
     // reliably close an already-open WebSocket on this Chromium build (verified
     // empirically — the indicator never appeared). Stopping the real host
     // process closes the socket from the server side instead.
     await standalone.stopHost();
-    await expect(page.getByText(/Reconnecting|Disconnected/)).toBeVisible({
+    await expect(indicator.getByRole('status')).toBeVisible({
       timeout: CONNECTION_STATE_TIMEOUT_MS,
     });
+    await expect(indicator.getByRole('status')).toContainText(
+      'Sin conexión con la oficina: el programa pixel-agents que se ejecuta en tu ordenador.',
+    );
+    await expect(
+      indicator.getByRole('button', { name: 'Reconectar con la oficina', exact: true }),
+    ).toBeVisible();
 
     await standalone.startHost();
-    await expect(page.getByText(/Reconnecting|Disconnected/)).toHaveCount(0, {
+    await expect(indicator).toHaveCount(0, {
       timeout: CONNECTION_STATE_TIMEOUT_MS,
     });
   });

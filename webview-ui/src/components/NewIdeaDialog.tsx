@@ -19,10 +19,18 @@ import {
 } from '../office/ideasStore.js';
 import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
+import { IdeaCommand } from './IdeaCommand.js';
+import { IdeaNextSteps } from './IdeaNextSteps.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
-export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
+export function NewIdeaDialog({
+  onClose,
+  checkoutName,
+}: {
+  onClose: () => void;
+  checkoutName?: string;
+}) {
   const [text, setText] = useState('');
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<
@@ -150,13 +158,16 @@ export function NewIdeaDialog({ onClose }: { onClose: () => void }) {
             </Button>
           </div>
         ) : state === 'saved' && store.result?.idea ? (
-          <div role="status">
-            <p>
+          <div className="flex flex-col gap-8">
+            <p role="status">
               Idea guardada: <strong>{store.result.idea.key}</strong> · pendiente
             </p>
-            <p>Para continuar, ejecuta desde este checkout:</p>
-            <code className="feature-command block">{store.result.idea.command}</code>
-            <p>El comando pedirá el token del operador de la oficina.</p>
+            <IdeaNextSteps />
+            <IdeaCommand
+              key={store.result.idea.command}
+              command={store.result.idea.command}
+              checkoutName={checkoutName}
+            />
             {store.result.errorCode && <p role="alert">{ideaErrorText(store.result.errorCode)}</p>}
           </div>
         ) : (

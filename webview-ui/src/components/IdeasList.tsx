@@ -1,6 +1,13 @@
 import type { IdeaSummary } from '../../../core/src/messages.js';
+import { IdeaCommand } from './IdeaCommand.js';
 
-export function IdeasList({ ideas }: { ideas: IdeaSummary[] }) {
+export function IdeasList({
+  ideas,
+  checkoutName,
+}: {
+  ideas: IdeaSummary[];
+  checkoutName?: string;
+}) {
   if (!ideas.length) return null;
   return (
     <section aria-label="Ideas pendientes" className="flex flex-col gap-8">
@@ -13,8 +20,8 @@ export function IdeasList({ ideas }: { ideas: IdeaSummary[] }) {
         >
           <h4 className="text-accent-bright">{idea.key}</h4>
           <span className="feature-state-chip">Idea · pendiente</span>
-          <p>Sin iniciar. Para continuar desde este checkout:</p>
-          <code className="feature-command block">{idea.command}</code>
+          <p>Sin iniciar. Guardar no inicia ningún trabajo.</p>
+          <IdeaCommand key={idea.command} command={idea.command} checkoutName={checkoutName} />
         </article>
       ))}
     </section>

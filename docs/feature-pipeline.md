@@ -183,11 +183,38 @@ El diálogo confirma id y comando exacto, por ejemplo:
 pixel-agents feature run FEAT-001 --request .softwareagents/ideas/softwareagents/FEAT-001.md --confirm
 ```
 
-Ejecutarlo desde el checkout indicado sigue requiriendo la confirmación humana
-SA-107. Guardar no crea FeatureSpec, Task, Execution ni commit y no concede
-autoridad. Features muestra una sección separada «Ideas pendientes · sin
-FeatureSpec» con ids y comandos, sin copiar el texto; una idea ya registrada como
-Feature deja de aparecer en esa sección. La auditoría solo conserva id y hash
+Tras guardar, «Qué pasa ahora» explica el recorrido real (SA-115): investigación
+previa opcional y explícita, requisitos con preguntas en Decisiones, plan técnico
+revisable en Features con «Aprobar plan», desarrollo, revisión y QA, integración
+humana e investigación posterior explícita. `feature run` coordina requisitos,
+diseño, desarrollo, revisión y QA; **no lanza las investigaciones**. La previa se
+pide por separado con `research run --idea FEAT-NNN --question "Pregunta pública"`;
+si hay un informe válido junto al borrador, Requirements lo incorpora. La posterior
+se pide con `research review FEAT-NNN` cuando hay una run `ready_to_merge` y rama
+construida. Ambas requieren ingreso humano y confirmación de los importes calculados.
+Cada etapa que necesita una decisión humana espera al operador; tras resolverla,
+se relanza el comando para continuar. Ejecutar consume cuota de los modelos; los
+costes son estimaciones, no cargos. El panel no inventa una cifra de coste.
+
+El comando se muestra en una sola línea desplazable, con fuente monoespaciada de
+16 px y botón «Copiar comando». La Clipboard API recibe el comando exacto, sin
+añadir rutas ni credenciales. El control confirma «Comando copiado.»; si la API no
+existe o rechaza el acceso, enfoca y selecciona el texto e indica cómo copiarlo
+manualmente. Features usa el mismo control y explicaciones en «Ideas pendientes ·
+sin FeatureSpec». «Este checkout» significa la carpeta del repositorio vinculada
+a la oficina; se muestra su nombre si el cliente ya dispone de una única carpeta
+de workspace, sin añadir rutas al protocolo ni deducirlo de sesiones ajenas. Cuando
+no hay un nombre inequívoco disponible, se mantiene la explicación general.
+El token del operador es el valor de `token` en la URL que `pixel-agents` mostró
+al iniciarse en la terminal del usuario; no se muestra ni se copia en el comando.
+
+Ejecutarlo desde esa carpeta sigue requiriendo la confirmación humana SA-107.
+Guardar no crea FeatureSpec, Task, Execution ni commit y no concede autoridad.
+Una idea ya registrada como Feature deja de aparecer en la sección de pendientes.
+La ayuda `pixel-agents --help` enumera todos los subcomandos públicos del dispatch,
+incluidos `feature`, `research` y `project init`, con descripciones en español.
+El modo interno IPC `--design-capture-host` no es un subcomando público.
+La auditoría solo conserva id y hash
 SHA-256, nunca texto, y los errores usan códigos fijos sin excepciones ni contenido.
 
 Usa el WS existente y `ClientMessageContext.privileged` (token de la oficina),
@@ -215,8 +242,8 @@ caben en ese límite. Los demás mensajes llevan controles escalares o cadenas.
 El contrato admite strings y colecciones sin máximo, por lo que mensajes
 artificiales o importaciones mayores de 32 MiB quedan sujetos a este nuevo límite.
 
-SA-111 añadirá planificación y
-aprobación; ambas pueden consumir estos borradores sin confundirlos con Features.
+La planificación y aprobación de SA-111 consumen estos borradores sin
+confundirlos con Features; el guardado y la copia del comando siguen sin lanzar trabajo.
 Las guardas de rutas comparten el límite de `taskPath`: no aíslan a un proceso
 hostil del mismo usuario que sustituya directorios entre validación y apertura.
 

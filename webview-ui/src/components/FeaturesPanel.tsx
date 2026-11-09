@@ -34,7 +34,15 @@ function requestFeatures(projectId: string) {
   transport.send({ type: 'requestFeatures', projectId, requestId });
 }
 
-export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function FeaturesPanel({
+  isOpen,
+  onClose,
+  checkoutName,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  checkoutName?: string;
+}) {
   const store = useFeaturesStore();
   const executor = useExecutorStore();
   const projectId = executor.needsSnapshot ? null : (executor.state?.projectId ?? null);
@@ -86,7 +94,7 @@ export function FeaturesPanel({ isOpen, onClose }: { isOpen: boolean; onClose: (
             onRetry={() => requestIdeas(transport)}
           />
         ) : !projectId || ideas.snapshot.projectId === projectId ? (
-          <IdeasList ideas={ideas.snapshot.ideas} />
+          <IdeasList ideas={ideas.snapshot.ideas} checkoutName={checkoutName} />
         ) : (
           <p role="status">Cargando ideas pendientes…</p>
         )}

@@ -101,17 +101,30 @@ export function parseArgs(argv: string[]): CliArgs {
       args.host = argv[i + 1];
       i++;
     } else if (argv[i] === '--help') {
-      console.log(`Usage: pixel-agents [options]
+      console.log(`Uso: pixel-agents [opciones]
 
-Options:
-  --port, -p <number>   Port to listen on (default: OS-assigned ephemeral port)
-  --host <string>       Host to bind to (default: 127.0.0.1)
-  --help                Show this help message
+Opciones:
+  --port, -p <number>   Puerto de escucha (por defecto: uno libre asignado por el sistema)
+  --host <string>      Dirección de escucha (por defecto: 127.0.0.1)
+  --help               Mostrar esta ayuda
 
-Commands:
+Comandos:
   ${PROJECT_INIT_HELP.replace('pixel-agents ', '')}  Preparar el proyecto
-  task bind-pr <KEY> <number|URL|branch>  Bind a task to a pinned PR
-  token rotate [--port PORT]  Revoke the running server token and disconnect clients`);
+  feature <acción>      Preparar requisitos y diseño, aprobar y ejecutar el flujo de una feature
+  research <acción>     Investigar una pregunta o contrastar una feature construida con su plan
+  design <acción>       Revisar el diseño visual y proponer o aplicar una dirección de producto
+  task <acción>         Consultar y gestionar tareas, dependencias, reintentos y vínculos a PR
+  worker run            Ejecutar una tarea mediante un Executor autorizado
+  executors recover     Recuperar un cambio interrumpido de disponibilidad de Executors
+  quota check           Comprobar cuota y admisión para un Executor o una selección
+  zones check           Detectar solapes entre ramas locales y zonas de cambio
+  telemetry summary     Consultar un resumen JSON de métricas de ejecuciones
+  usage                 Consultar uso de modelos, costes estimados y caché
+  flow                  Consultar métricas de flujo y límites de trabajo en curso
+  review <acción>       Aceptar o rechazar hallazgos y consultar precisión de revisión
+  learning <acción>     Listar, aprobar o rechazar aprendizajes propuestos
+  eval <acción>         Listar, validar y ejecutar evaluaciones o consultar sus informes
+  token rotate [--port PORT]  Renovar el token del servidor y desconectar sus clientes`);
       process.exit(0);
     }
   }

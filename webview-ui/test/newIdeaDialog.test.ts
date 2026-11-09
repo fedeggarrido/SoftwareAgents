@@ -624,23 +624,43 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(lifecycle.send).toHaveBeenCalledOnce();
   });
 
-  it('confirms the assigned id and exact command only after the correlated reply', async () => {
-    await render();
-    respond();
-    await submit();
-    setIdeasStore(
-      applyIdeaResult(getIdeasStore(), {
-        ...result,
-        ...getIdeasStore().pending!,
-        errorCode: 'audit_failed',
-      }),
-    );
-    const html = await render();
-    expect(html).toContain('Idea guardada: <strong>FEAT-001</strong>');
-    expect(html).toContain(result.idea!.command);
-    expect(html).toContain('falta confirmar su auditoría');
-    expect(html).not.toContain('<textarea');
-  });
+  it.each([null, 'audit_failed'] as const)(
+    'shows next steps after the correlated saved reply (%s)',
+    async (errorCode) => {
+      await render();
+      respond();
+      await submit();
+      setIdeasStore(
+        applyIdeaResult(getIdeasStore(), {
+          ...result,
+          ...getIdeasStore().pending!,
+          errorCode,
+        }),
+      );
+      const html = await render();
+      expect(html).toContain('Idea guardada: <strong>FEAT-001</strong>');
+      expect(html).toContain(result.idea!.command);
+      for (const text of [
+        'Qué pasa ahora',
+        'Investigación previa opcional',
+        'Requisitos:',
+        'Decisiones',
+        'Plan técnico:',
+        'Desarrollo:',
+        'Revisión y QA:',
+        'Investigación posterior:',
+        'espera por ti',
+        'consume cuota',
+        'estimaciones, no cargos',
+        'Copiar comando',
+        'carpeta del repositorio vinculada a esta oficina',
+        'URL que pixel-agents mostró',
+      ])
+        expect(html).toContain(text);
+      if (errorCode) expect(html).toContain('falta confirmar su auditoría');
+      expect(html).not.toContain('<textarea');
+    },
+  );
 
   it('lists drafts separately from FeatureSpecs', async () => {
     const { IdeasList } = await import(listPath);
@@ -650,8 +670,11 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       'Idea · pendiente',
       'data-state="idea_pending"',
       result.idea!.command,
+      'Copiar comando',
+      'carpeta del repositorio vinculada a esta oficina',
+      'URL que pixel-agents mostró',
     ])
       expect(html).toContain(text);
-    expect(html).not.toMatch(/progressbar|feature-cost|<button|<textarea/);
+    expect(html).not.toMatch(/progressbar|feature-cost|<textarea/);
   });
 });

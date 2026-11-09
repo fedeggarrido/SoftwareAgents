@@ -208,7 +208,7 @@ describe('SA-114 project preparation', () => {
       true,
     );
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'denied' }));
-    await expect(runProjectCommand(['init', '--yes'])).rejects.toThrow('gestionados');
+    await expect(runProjectCommand(['init', '--yes'])).rejects.toThrow('no desde un agente');
     expect(fs.existsSync(path.join(root, '.softwareagents'))).toBe(false);
     expect(fs.existsSync(path.join(home, '.pixel-agents'))).toBe(false);
   });

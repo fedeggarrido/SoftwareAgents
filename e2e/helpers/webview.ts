@@ -153,7 +153,12 @@ export async function closeBottomPanel(window: Page): Promise<void> {
         for (const frame of window.frames()) {
           if (!frame.url().startsWith('vscode-webview://')) continue;
           try {
-            if ((await frame.locator('button', { hasText: '+ Agent' }).count()) > 0) return true;
+            if (
+              (await frame
+                .getByRole('navigation', { name: 'Controles de la oficina', includeHidden: true })
+                .count()) > 0
+            )
+              return true;
           } catch {
             // Frame detached mid-check — treat as gone.
           }
@@ -202,7 +207,9 @@ async function findPixelAgentsFrameOnce(window: Page): Promise<Frame | null> {
     try {
       // count() resolves immediately (no waiting); a non-zero count means
       // this is the Pixel Agents frame.
-      const buttonCount = await frame.locator('button', { hasText: '+ Agent' }).count();
+      const buttonCount = await frame
+        .getByRole('navigation', { name: 'Controles de la oficina', includeHidden: true })
+        .count();
       if (buttonCount === 0) continue;
       const frameElement = await frame.frameElement();
       const box = await frameElement.boundingBox();
@@ -419,9 +426,7 @@ export async function getPixelAgentsFrame(window: Page): Promise<Frame> {
  * Click "+ Agent" in the webview and wait for the call to be dispatched.
  */
 export async function clickAddAgent(frame: Frame): Promise<void> {
-  const btn = frame.locator('button', { hasText: '+ Agent' });
-  await expect(btn).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
-  await btn.click();
+  await openDockAction(frame, 'Abrir agente');
 }
 
 async function setCheckbox(modal: Locator, label: string, checked: boolean): Promise<void> {
@@ -468,11 +473,18 @@ async function ensureSettingsModalFits(surface: WebviewSurface): Promise<void> {
   await arrangeReviewLayout(surface.page());
 }
 
+/** Secondary dock controls live in Más on narrow webviews. */
+export async function openDockAction(surface: WebviewSurface, name: string): Promise<void> {
+  const control = surface.getByRole('button', { name, exact: true });
+  if (!(await control.isVisible())) {
+    await surface.getByRole('button', { name: 'Más', exact: true }).click();
+  }
+  await control.click();
+}
+
 export async function openSettingsModal(frame: WebviewSurface): Promise<Locator> {
   await ensureSettingsModalFits(frame);
-  const settingsButton = frame.locator('button', { hasText: 'Settings' });
-  await expect(settingsButton).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
-  await settingsButton.click();
+  await openDockAction(frame, 'Ajustes');
 
   const settingsModal = frame
     .locator('div.fixed')

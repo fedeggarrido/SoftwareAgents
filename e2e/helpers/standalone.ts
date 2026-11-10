@@ -205,7 +205,9 @@ async function waitForPrintedUrl(readOutput: () => string): Promise<string> {
 /** Open the SPA with the capability normally passed directly to the browser opener. */
 async function openStandalonePage(page: Page, printedUrl: string): Promise<void> {
   await page.goto(printedUrl);
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: 'Nueva idea', exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 export async function launchStandalone(

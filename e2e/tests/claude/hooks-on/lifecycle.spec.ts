@@ -65,6 +65,7 @@ import {
   closeBottomPanel,
   getPixelAgentsFrame,
   getSettingChecked,
+  openDockAction,
   openPixelAgentsPanel,
   setSettings,
 } from '../../../helpers/webview';
@@ -1655,9 +1656,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Enter edit mode.
     narrator.step('entering Layout mode');
-    const layoutButton = frame.locator('button', { hasText: 'Layout' });
-    await expect(layoutButton).toBeVisible({ timeout: 15_000 });
-    await layoutButton.click();
+    await openDockAction(frame, 'Editar oficina');
 
     // Editor toolbar should reveal at least one tool button. Paint floor is
     // always present in the floor section of the toolbar.
@@ -1697,7 +1696,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Exit edit mode and confirm the editor button disappears.
     narrator.step('exiting Layout mode');
-    await layoutButton.click();
+    await openDockAction(frame, 'Salir de edición');
     await expect(paintFloorBtn).toBeHidden({ timeout: 5_000 });
     narrator.check('exiting Layout mode hides the editor toolbar');
   });

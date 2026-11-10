@@ -169,7 +169,7 @@ test.describe('Standalone / hooks consent', () => {
     const spectator = await page.context().newPage();
     try {
       await spectator.goto(bareUrl.toString());
-      await expect(spectator.getByRole('button', { name: 'Settings' })).toBeVisible({
+      await expect(spectator.getByRole('button', { name: 'Nueva idea', exact: true })).toBeVisible({
         timeout: 30_000,
       });
       // Settle before the negative assertion: the dialog, were it coming,

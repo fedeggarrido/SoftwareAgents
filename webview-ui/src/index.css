@@ -38,6 +38,15 @@
   --window-resize-corner: 12px;
   --window-focus-offset: -4px;
   --window-title-size: 20px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --dock-control-height: 32px;
+  --dock-touch-target: 44px;
+  --dock-mobile-height: 64px;
+  --dock-font-size: 20px;
+  --dock-label-size: 16px;
+  --dock-bottom: max(var(--space-2), env(safe-area-inset-bottom));
 
   /* Buttons */
   --color-btn-bg: rgb(53, 52, 69);
@@ -290,8 +299,169 @@
   touch-action: auto;
 }
 .bottom-toolbar {
-  max-width: calc(100vw - 2 * var(--office-top));
-  flex-wrap: wrap;
+  position: absolute;
+  bottom: var(--dock-bottom);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  max-width: calc(100vw - 2 * var(--space-2));
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.dock-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: var(--dock-control-height);
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  border: var(--window-border) solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--dock-font-size);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dock-button svg {
+  flex-shrink: 0;
+}
+.dock-button:hover {
+  background: var(--color-btn-hover);
+  color: var(--color-text);
+}
+.dock-button[aria-pressed='true'] {
+  background: var(--color-btn-bg);
+  border-color: var(--color-text-muted);
+  color: var(--color-text);
+}
+.dock-primary {
+  background: var(--color-accent);
+  color: var(--color-text);
+}
+.dock-primary:hover {
+  background: var(--color-accent-bright);
+  color: var(--color-bg-dark);
+}
+.dock-panels,
+.dock-secondary {
+  display: flex;
+  align-items: center;
+}
+.dock-panels {
+  border: var(--window-border) solid var(--color-border);
+}
+.dock-segment + .dock-segment {
+  border-left-color: var(--color-border);
+}
+.dock-secondary {
+  gap: var(--space-1);
+  border-left: var(--window-border) solid var(--color-border);
+  padding-left: var(--space-1);
+}
+.dock-icon-button {
+  min-width: var(--dock-control-height);
+  padding-inline: var(--space-1);
+}
+.dock-symbol {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.dock-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-warning);
+  font-size: var(--dock-label-size);
+  font-variant-numeric: tabular-nums;
+}
+.dock-mobile {
+  width: calc(100% - 2 * var(--space-2));
+  height: var(--dock-mobile-height);
+  gap: 0;
+}
+.dock-mobile .dock-panels {
+  display: contents;
+}
+.dock-mobile button {
+  min-width: var(--dock-touch-target);
+  min-height: var(--dock-touch-target);
+}
+.dock-mobile > .dock-button,
+.dock-mobile > .dock-panels > .dock-button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--dock-touch-target);
+  height: 100%;
+  padding: var(--space-1) 0;
+  flex-direction: column;
+  font-size: var(--dock-label-size);
+  border: var(--window-border) solid transparent;
+}
+.dock-mobile .dock-badge {
+  position: absolute;
+  left: 100%;
+  background: var(--color-bg);
+}
+.dock-mobile.dock-editing {
+  width: auto;
+  height: auto;
+  gap: var(--space-2);
+}
+.dock-mobile.dock-editing > .dock-button {
+  flex-direction: row;
+  min-width: var(--dock-touch-target);
+  height: var(--dock-touch-target);
+  padding-inline: var(--space-2);
+}
+.dock-sheet {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1);
+  min-width: 200px;
+  max-height: calc(100dvh - var(--dock-mobile-height) - 4 * var(--space-2));
+  overflow-y: auto;
+}
+.dock-sheet .dock-button {
+  justify-content: flex-start;
+  min-height: var(--dock-touch-target);
+  border: var(--window-border) solid transparent;
+}
+.dock-sheet .dock-sheet-close {
+  justify-content: flex-end;
+}
+.dock-sheet .dock-agent > div {
+  position: static;
+  padding: 0;
+}
+.dock-sheet .dock-agent > button {
+  width: 100%;
+}
+.dock-mobile .dock-sheet .dock-badge {
+  position: static;
+}
+.editor-toolbar {
+  bottom: max(
+    76px,
+    calc(
+      var(--dock-bottom) + var(--dock-touch-target) + 2 * var(--space-2) + 2 * var(--window-border)
+    )
+  );
+}
+@media (max-width: 767px) {
+  .panel-window-mobile {
+    height: calc(100dvh - var(--dock-mobile-height) - var(--dock-bottom) - var(--space-2));
+  }
 }
 .ui-info {
   font-size: var(--ui-info-size);

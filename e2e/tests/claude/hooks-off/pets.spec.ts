@@ -3,7 +3,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { expect, test } from '../../../fixtures/pixel-agents';
-import { closeBottomPanel, getPixelAgentsFrame, reopenBottomPanel } from '../../../helpers/webview';
+import {
+  closeBottomPanel,
+  getPixelAgentsFrame,
+  openDockAction,
+  reopenBottomPanel,
+} from '../../../helpers/webview';
 
 /**
  * e2e coverage for the animated pet system.
@@ -64,7 +69,7 @@ async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 /** Enter edit mode and open the Pets tab; returns the carousel locator. */
 async function openPetsTab(frame: Frame): Promise<Locator> {
   await dismissFirstRunTooltips(frame);
-  await frame.locator('button[title="Edit office layout"]').click();
+  await openDockAction(frame, 'Editar oficina');
   await frame.locator('button[title="Place pets"]').click();
   const carousel = frame.locator(PETS_CAROUSEL);
   await expect(carousel).toBeVisible({ timeout: 15_000 });

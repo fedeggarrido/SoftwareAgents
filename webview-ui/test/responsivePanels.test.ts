@@ -135,7 +135,7 @@ async function boot(page: Page) {
   await page.evaluate(
     `for (const message of ${JSON.stringify(messages)}) window.postMessage(message, '*');`,
   );
-  await page.getByRole('button', { name: 'Backlog', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Trabajo', exact: true }).waitFor();
   await page.evaluate('document.fonts.ready');
 }
 
@@ -253,11 +253,71 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.goto('http://office-window.test/');
       await page.addScriptTag({ content: script });
       await boot(page);
+      const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
+      expect(await dock.locator('.dock-primary').count()).toBe(1);
+      expect(await dock.evaluate(fitsHorizontally)).toBe(true);
+      if (width === 390) {
+        expect(await dock.getByRole('button').allTextContents()).toEqual([
+          'Idea',
+          'Trabajo',
+          'Decisiones',
+          'Más',
+        ]);
+        const more = dock.getByRole('button', { name: 'Más', exact: true });
+        await more.click();
+        const sheet = page.getByRole('dialog', { name: 'Más opciones', exact: true });
+        await sheet.waitFor();
+        for (const name of ['Features', 'Auditoría', 'Editar oficina', 'Ajustes']) {
+          const action = sheet.getByRole('button', { name, exact: true });
+          const box = (await action.boundingBox())!;
+          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press('Escape');
+        expect(await sheet.count()).toBe(0);
+        expect(await more.evaluate(isFocusedElement)).toBe(true);
+        await more.click();
+        await sheet.getByRole('button', { name: 'Features', exact: true }).click();
+        await page.getByRole('tab', { name: 'Features', selected: true }).waitFor();
+        expect(await sheet.count()).toBe(0);
+        await more.click();
+        await sheet.getByRole('button', { name: 'Auditoría', exact: true }).click();
+        await page.getByRole('tab', { name: 'Auditoría', selected: true }).waitFor();
+        await page.keyboard.press('Escape');
+        await more.click();
+        await sheet.getByRole('button', { name: 'Editar oficina', exact: true }).click();
+        expect(await dock.getByRole('button').count()).toBe(2);
+        const editor = (await page.locator('.editor-toolbar').boundingBox())!;
+        expect(editor.y + editor.height).toBeLessThan((await dock.boundingBox())!.y);
+        await dock.getByRole('button', { name: 'Ajustes', exact: true }).click();
+        await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        await dock.getByRole('button', { name: 'Salir de edición', exact: true }).click();
+        await more.click();
+        await page
+          .locator('canvas')
+          .first()
+          .click({ position: { x: 1, y: 1 } });
+        expect(await sheet.count()).toBe(0);
+        await more.click();
+        await page.setViewportSize({ width: 768, height: 844 });
+        expect(await sheet.count()).toBe(0);
+        expect(await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').count()).toBe(
+          4,
+        );
+        await page.setViewportSize({ width, height: 844 });
+      } else {
+        expect(
+          await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').allTextContents(),
+        ).toEqual(['Trabajo', 'Decisiones', 'Features', 'Auditoría']);
+        for (const button of await dock.getByRole('button').all()) {
+          expect((await button.boundingBox())!.height).toBe(32);
+        }
+      }
       await page.locator('.office-mode-indicator button[aria-controls]').click();
       await expectAccessHelpClear(page);
       await page.keyboard.press('Escape');
       const windowPanel = page.locator('[data-testid="panel-window"]:visible');
-      const backlog = page.getByRole('button', { name: 'Backlog', exact: true });
+      const backlog = page.getByRole('button', { name: 'Trabajo', exact: true });
       const canvas = page.locator('canvas').first();
       const officeBox = await canvas.boundingBox();
       expect(await backlog.count()).toBe(1);
@@ -268,7 +328,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Backlog');
       expect(await page.getByTestId('backlog-panel').count()).toBe(1);
       if (width === 390) {
-        expect(panelBox).toEqual({ x: 0, y: 0, width: 390, height: 844 });
+        expect(panelBox.x).toBe(0);
+        expect(panelBox.width).toBe(390);
+        expect(panelBox.height).toBeLessThan(
+          (await page.locator('.bottom-toolbar').boundingBox())!.y,
+        );
         expect(await page.locator('.panel-window-resize').count()).toBe(0);
         await page.locator('.panel-window-title').focus();
         await page.keyboard.press('ArrowRight');
@@ -276,13 +340,13 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await windowPanel.boundingBox()).toEqual(panelBox);
         await page.keyboard.press('Escape');
         expect(await backlog.evaluate(isFocusedElement)).toBe(true);
-        const buttons = page.locator('.bottom-toolbar > button');
+        const buttons = page.locator('.bottom-toolbar button');
         await buttons.first().focus();
         for (const button of await buttons.all()) {
           const box = (await button.boundingBox())!;
           expect(box.x).toBeGreaterThanOrEqual(0);
           expect(box.x + box.width).toBeLessThanOrEqual(width);
-          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
+          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
           expect(await button.evaluate(isFocusedElement)).toBe(true);
           await page.keyboard.press('Tab');
         }
@@ -343,6 +407,20 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await windowPanel.count()).toBe(1);
         expect(await page.getByRole('tabpanel').count()).toBe(1);
         expect(await page.getByRole('tab', { selected: true }).textContent()).toBe(name);
+        const labels: Record<string, string> = {
+          Backlog: 'Trabajo',
+          Decisiones: 'Decisiones',
+          Features: 'Features',
+          Auditoría: 'Auditoría',
+        };
+        const pressed = dock.locator('.dock-segment[aria-pressed="true"]');
+        expect(await pressed.count()).toBe(
+          name === 'Reuniones' || (width === 390 && ['Features', 'Auditoría'].includes(name))
+            ? 0
+            : 1,
+        );
+        if (await pressed.count())
+          expect(await pressed.getAttribute('aria-label')).toBe(labels[name]);
         await expectWindowOwnsHeading(page, name);
         const sections = windowPanel.locator('[data-testid$="-panel"]');
         // Empty meetings keep an informative message in their sole tab.
@@ -446,22 +524,23 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await decisionHud.textContent()).toContain('Decisiones');
       expect(await decisionHud.locator('.ui-counter').textContent()).toBe('· 2');
       await page.getByRole('tab', { name: 'Decisiones', selected: true }).waitFor();
+      const badge = dock.getByRole('status', { name: '2 decisiones pendientes' });
+      expect(await badge.textContent()).toBe('2');
+      expect(await badge.locator('svg').count()).toBe(1);
       if (width !== 390) {
         await decisionHud.click();
         expect(await windowPanel.count()).toBe(1);
       }
-      const prStatus = page.getByTestId('dock-pr-status');
-      expect(await prStatus.textContent()).toContain('Estado: PR');
-      expect(await prStatus.getAttribute('aria-label')).toContain('Estado de PR:');
-      if (width === 390) await page.keyboard.press('Escape');
-      await prStatus.click();
+      // PR observations update the existing Trabajo tooltip without adding a control.
+      const work = page.getByRole('button', { name: 'Trabajo', exact: true });
+      expect(await work.getAttribute('title')).toContain('Estado de PR:');
+      expect(await page.getByTestId('dock-pr-status').count()).toBe(0);
+      await work.click();
       await page.getByRole('tab', { name: 'Backlog', selected: true }).waitFor();
-      if (width !== 390) {
-        await prStatus.click();
-        expect(await windowPanel.count()).toBe(1);
-      }
+      expect(await work.getAttribute('aria-pressed')).toBe('true');
+      await work.click();
+      expect(await windowPanel.count()).toBe(0);
       await page.evaluate(`window.postMessage(${JSON.stringify(board)}, '*')`);
-      await page.keyboard.press('Escape');
       // Selecting a character opens a separate accessible card at every viewport size.
       await canvas.focus();
       await page.evaluate(`
@@ -515,29 +594,27 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       // Escape cannot reach the editor while either overlay is present.
       // Open the window first because Layout hides the dock's panel shortcuts.
       await backlog.click();
-      await page.getByRole('button', { name: 'Layout', exact: true }).click();
-      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Editar oficina', exact: true }).click();
+      await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
       await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor();
       await page.keyboard.press('Escape');
       expect(await page.getByRole('dialog').count()).toBe(0);
       expect(await windowPanel.count()).toBe(1);
       expect(
-        await page
-          .getByRole('button', { name: 'Settings', exact: true })
-          .evaluate(isFocusedElement),
+        await page.getByRole('button', { name: 'Ajustes', exact: true }).evaluate(isFocusedElement),
       ).toBe(true);
       await page.keyboard.press('Escape');
       expect(await windowPanel.count()).toBe(0);
       // Layout removed the Backlog opener. Focus stays on the connected Settings control.
       expect(
-        await page
-          .getByRole('button', { name: 'Settings', exact: true })
-          .evaluate(isFocusedElement),
+        await page.getByRole('button', { name: 'Ajustes', exact: true }).evaluate(isFocusedElement),
       ).toBe(true);
       expect(
-        await page.getByRole('button', { name: 'Layout', exact: true }).getAttribute('class'),
-      ).toContain('bg-active-bg');
-      await page.getByRole('button', { name: 'Layout', exact: true }).click();
+        await page
+          .getByRole('button', { name: 'Salir de edición', exact: true })
+          .getAttribute('aria-pressed'),
+      ).toBe('true');
+      await page.getByRole('button', { name: 'Salir de edición', exact: true }).click();
 
       await page.getByRole('button', { name: 'Features', exact: true }).click();
       await page.getByRole('button', { name: 'Ver plan', exact: true }).click();
@@ -689,7 +766,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       );
       await page.addScriptTag({ content: script });
       await boot(page);
-      await page.getByRole('button', { name: 'Backlog', exact: true }).click();
+      await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
       const box = (await page.locator('[data-testid="panel-window"]:visible').boundingBox())!;
       expect(box.x).toBe(64);
       expect(box.width).toBe(720);

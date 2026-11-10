@@ -551,16 +551,9 @@ function App() {
         onToggleEditMode={editor.handleToggleEditMode}
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        isBacklogOpen={panel.isOpen && panel.tab === 'backlog'}
-        isDecisionsOpen={panel.isOpen && panel.tab === 'decisions'}
-        onToggleDecisions={() => panel.toggle('decisions')}
-        isAuditOpen={panel.isOpen && panel.tab === 'audit'}
-        isFeaturesOpen={panel.isOpen && panel.tab === 'features'}
-        onToggleFeatures={() => panel.toggle('features')}
+        activePanel={panel.isOpen ? panel.tab : null}
+        onTogglePanel={panel.toggle}
         onNewIdea={() => setIsNewIdeaOpen(true)}
-        onToggleAudit={() => panel.toggle('audit')}
-        onToggleBacklog={() => panel.toggle('backlog')}
-        onOpenBacklog={() => panel.select('backlog')}
         workspaceFolders={workspaceFolders}
       />
 

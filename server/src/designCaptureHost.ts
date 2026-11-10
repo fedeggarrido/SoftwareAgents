@@ -206,7 +206,7 @@ export async function captureInHost(
               if (!(view in VIEW_LABELS)) return;
               // All sections now live in one window. Open it through its dock entry,
               // then navigate using the same tabs as the operator.
-              await page.getByRole('button', { name: 'Backlog', exact: true }).click();
+              await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
               const window = page.getByTestId('panel-window');
               await window.waitFor({ timeout: CAPTURE_WAIT_MS });
               await page
@@ -248,7 +248,7 @@ export async function captureInHost(
               evidence: `${id}.png (demo fixture: ${fixture})`,
             });
             const toolbarButton = page.getByRole('button', {
-              name: VIEW_LABELS.features,
+              name: 'Nueva idea',
               exact: true,
             });
             const panelButton = page.locator('[role="region"] button:enabled').first();

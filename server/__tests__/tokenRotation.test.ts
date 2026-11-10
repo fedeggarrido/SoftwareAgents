@@ -66,8 +66,15 @@ it('creates a user-only credential file where OS permissions can be inspected', 
   expect(descriptor.match(/\([^)]*\)/g)).toHaveLength(1);
 });
 
-it('keeps the standalone capability and default port through restart and persists CLI revocation', async () => {
+it('keeps the standalone capability and default port through restart and persists CLI revocation', async (context) => {
   const home = isolatedHome();
+  if (!loadOfficeCredential().persistent) {
+    context.skip(
+      true,
+      'Persistent office access needs verified private ACLs, unavailable on this host',
+    );
+    return;
+  }
   const first = new PixelAgentsServer();
   const config = await first.start({ embedded: false, store: new AgentStateStore() });
   const { token, port } = config;
@@ -121,8 +128,15 @@ it('keeps the standalone capability and default port through restart and persist
   }
 });
 
-it('revokes every standalone instance from Settings and rejects managed and unprivileged rotation', async () => {
+it('revokes every standalone instance from Settings and rejects managed and unprivileged rotation', async (context) => {
   isolatedHome();
+  if (!loadOfficeCredential().persistent) {
+    context.skip(
+      true,
+      'Persistent office access needs verified private ACLs, unavailable on this host',
+    );
+    return;
+  }
   const server = new PixelAgentsServer();
   const config = await server.start({ embedded: false, port: 0, store: new AgentStateStore() });
   const original = config.token;
@@ -320,8 +334,15 @@ it('CLI rotates a live token, closes old sockets, republishes discovery and audi
   }
 });
 
-it('old standalone query loses privilege after rotation while the new query authenticates', async () => {
+it('old standalone query loses privilege after rotation while the new query authenticates', async (context) => {
   isolatedHome();
+  if (!loadOfficeCredential().persistent) {
+    context.skip(
+      true,
+      'Persistent office access needs verified private ACLs, unavailable on this host',
+    );
+    return;
+  }
   const effects = vi.fn();
   const server = new PixelAgentsServer();
   const config = await server.start({

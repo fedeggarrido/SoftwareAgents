@@ -280,6 +280,8 @@ export function BottomToolbar({
       {isEditMode ? (
         <>
           {editButton}
+          {/* Agents can still be opened while arranging seats and areas, as before. */}
+          {agentControl}
           {settingsButton}
         </>
       ) : (

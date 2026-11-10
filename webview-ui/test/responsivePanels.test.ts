@@ -310,7 +310,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await sheet.count()).toBe(0);
         await more.click();
         await page.setViewportSize({ width: 768, height: 844 });
-        expect(await sheet.count()).toBe(0);
+        await sheet.waitFor({ state: 'detached' });
         expect(await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').count()).toBe(
           4,
         );

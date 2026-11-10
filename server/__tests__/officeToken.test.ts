@@ -185,7 +185,8 @@ it('keeps a server usable with a per-run token when ACL tools are unavailable', 
   });
   expect(((await response.json()) as { token: string }).token).toBe(config.token);
   expect(fs.existsSync(path.join(home, '.pixel-agents', OFFICE_CREDENTIAL_FILE))).toBe(false);
-  expect(fs.existsSync(path.join(home, '.pixel-agents', 'server.json'))).toBe(false);
+  // Discovery keeps working with the per-run token (pre-SA-144 behaviour).
+  expect(fs.existsSync(path.join(home, '.pixel-agents', 'server.json'))).toBe(true);
   expect(await access(config.port, config.token)).toMatchObject({
     privileged: true,
     persistent: false,

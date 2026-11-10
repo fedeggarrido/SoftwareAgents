@@ -555,7 +555,7 @@ describe('dist/cli.js entry-point guard', () => {
       // before the "server running" line, which health readiness follows).
       await new Promise((resolve) => setTimeout(resolve, 500));
       expect(fs.existsSync(path.join(tmpHome, '.claude', 'settings.json'))).toBe(false);
-      expect(output()).toContain('needs one-time approval');
+      expect(output()).toContain('Hooks pendientes de aprobación');
     });
   });
 
@@ -622,7 +622,7 @@ describe('dist/cli.js entry-point guard', () => {
       // no-consent notices would each be a prompt this user must not see.
       expect(output()).not.toContain('needs to add its hooks');
       expect(output()).not.toContain('[Y/n/never]');
-      expect(output()).not.toContain('needs one-time approval');
+      expect(output()).not.toContain('Hooks pendientes de aprobación');
       expect(output()).not.toContain('asked again next time');
     });
   });

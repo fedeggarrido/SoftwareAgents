@@ -130,3 +130,19 @@ Recorrido completo en una oficina con datos reales: escritorio a 1440×900 y mó
 7. **Ventana por defecto:** tapa el centro de la oficina. Abrirla en el lado con más espacio libre.
 8. **Tour:** está en inglés y reaparece al recargar. Se arregla en SA-144, en curso.
 9. **Ficha del agente:** el nombre genérico «Agente #2» y la etiqueta vieja del personaje junto a la ficha. Va a SA-130.
+
+## Etiqueta del personaje (Fede, 2026-11-10)
+
+La etiqueta que aparece al pasar sobre un personaje dice «Dueño / Claude / Sesión externa · asignación no gestionada / Idle».
+
+- **Qué significa:** es una sesión de Claude que abriste tú y que la oficina solo observa. No la lanzó el sistema de trabajo, así que no hay una decisión registrada de por qué usa ese modelo.
+- **Problemas:**
+  - es jerga;
+  - «Dueño» no aporta nada;
+  - «Idle», «Needs approval» y los estados de herramienta («Reading x.ts») están en inglés;
+  - repite la ficha del agente.
+- **Propuesta (va en SA-149):**
+  - Etiqueta corta de una sola línea: **nombre o rol** · **estado en español** («En espera», «Leyendo archivo.ts», «Necesita tu aprobación»).
+  - Una sesión que no lanzó la oficina se marca con el chip «Abierta por ti», con un tooltip: «La oficina la observa, pero no la asignó; no hay motivo de selección de modelo registrado».
+  - El detalle completo queda en la ficha del agente.
+  - Hay que actualizar los e2e que buscan los textos en inglés de las herramientas.

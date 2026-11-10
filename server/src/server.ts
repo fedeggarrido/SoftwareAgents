@@ -313,9 +313,18 @@ export class PixelAgentsServer {
     return discoveryPath(SERVER_JSON_NAME);
   }
 
+  /**
+   * Only a persistent capability needs the verified private ACL. When protection
+   * is unavailable (e.g. CI runners), the token is per-run and the records keep
+   * the pre-SA-144 behaviour instead of failing discovery altogether.
+   */
+  private discoveryProtection(): ((file: string) => void) | undefined {
+    return this.standalone && this.accessPersistent ? protectCredential : undefined;
+  }
+
   /** Called under the discovery lock, after listen has completed. */
   private writeServerJson(config: ServerConfig): void {
-    writeDiscoveryRecord(SERVER_JSON_NAME, config, this.standalone ? protectCredential : undefined);
+    writeDiscoveryRecord(SERVER_JSON_NAME, config, this.discoveryProtection());
   }
 
   /** Cleanup only our exact generation; old scripts still see a single pointer. */
@@ -451,7 +460,7 @@ export class PixelAgentsServer {
     writeDiscoveryRecord(
       `${SERVERS_DIR}/${config.pid}-${config.port}.json`,
       config,
-      this.standalone ? protectCredential : undefined,
+      this.discoveryProtection(),
     );
   }
 

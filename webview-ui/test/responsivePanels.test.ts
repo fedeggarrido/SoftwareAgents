@@ -286,6 +286,16 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await more.click();
         await sheet.getByRole('button', { name: 'Editar oficina', exact: true }).click();
         expect(await dock.getByRole('button').count()).toBe(2);
+        expect(await dock.evaluate(fitsHorizontally)).toBe(true);
+        const dockBox = (await dock.boundingBox())!;
+        expect(dockBox.x).toBeGreaterThanOrEqual(0);
+        expect(dockBox.x + dockBox.width).toBeLessThanOrEqual(width);
+        for (const button of await dock.getByRole('button').all()) {
+          const box = (await button.boundingBox())!;
+          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+          expect(box.x).toBeGreaterThanOrEqual(dockBox.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(dockBox.x + dockBox.width);
+        }
         const editor = (await page.locator('.editor-toolbar').boundingBox())!;
         expect(editor.y + editor.height).toBeLessThan((await dock.boundingBox())!.y);
         await dock.getByRole('button', { name: 'Ajustes', exact: true }).click();

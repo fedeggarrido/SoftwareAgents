@@ -87,10 +87,16 @@ it('retains the VS Code launcher as a secondary icon without adding an accent ac
   const html = renderToStaticMarkup(createElement(BottomToolbar, props));
   expect(html).toContain('aria-label="Abrir agente"');
   expect(html.match(/class="dock-button dock-primary"/g)).toHaveLength(1);
-  const editing = renderToStaticMarkup(
-    createElement(BottomToolbar, { ...props, isEditMode: true }),
-  );
-  expect(editing).not.toContain('aria-label="Abrir agente"');
+  for (const innerWidth of [1440, 390]) {
+    vi.stubGlobal('window', { innerWidth });
+    const editing = renderToStaticMarkup(
+      createElement(BottomToolbar, { ...props, isEditMode: true }),
+    );
+    expect(
+      [...editing.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]),
+    ).toEqual(['Salir de edición', 'Abrir agente', 'Ajustes']);
+    expect(editing).not.toContain('aria-label="Más"');
+  }
 });
 
 it.each(['backlog', 'decisions', 'features', 'audit', 'meeting', null])(

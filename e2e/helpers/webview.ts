@@ -473,11 +473,12 @@ async function ensureSettingsModalFits(surface: WebviewSurface): Promise<void> {
   await arrangeReviewLayout(surface.page());
 }
 
-/** Secondary dock controls live in Más on narrow webviews. */
+/** Narrow webviews use Más outside edit mode and expose editing controls directly. */
 export async function openDockAction(surface: WebviewSurface, name: string): Promise<void> {
   const control = surface.getByRole('button', { name, exact: true });
-  if (!(await control.isVisible())) {
-    await surface.getByRole('button', { name: 'Más', exact: true }).click();
+  const more = surface.getByRole('button', { name: 'Más', exact: true });
+  if (!(await control.isVisible()) && (await more.isVisible())) {
+    await more.click();
   }
   await control.click();
 }

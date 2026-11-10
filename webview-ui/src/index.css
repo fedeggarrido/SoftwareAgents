@@ -416,6 +416,7 @@
   gap: var(--space-2);
 }
 .dock-mobile.dock-editing > .dock-button {
+  flex: 0 0 auto;
   flex-direction: row;
   min-width: var(--dock-touch-target);
   height: var(--dock-touch-target);
@@ -725,27 +726,6 @@
 }
 
 @media (max-width: 480px) {
-  .bottom-toolbar {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    gap: 2px;
-    max-width: 100%;
-    flex-wrap: nowrap;
-  }
-  .bottom-toolbar > button,
-  .bottom-toolbar > div {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  .bottom-toolbar button {
-    width: 100%;
-    padding-inline: 0;
-    min-width: var(--control-target);
-    min-height: var(--control-target);
-    font-size: var(--text-xs);
-    overflow-wrap: anywhere;
-  }
   .version-label {
     display: none;
   }

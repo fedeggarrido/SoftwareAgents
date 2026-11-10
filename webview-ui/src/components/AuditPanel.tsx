@@ -23,6 +23,7 @@ import { knownText } from '../office/displayText.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
 import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -81,7 +82,10 @@ export function AuditPanel({
       {connectionState !== 'connected' ? (
         <OfficeConnectionHelp />
       ) : !projectId ? (
-        <p>{PROJECT_EMPTY_TEXT}</p>
+        <>
+          <p>{PROJECT_EMPTY_TEXT}</p>
+          <OfficeRecoveryActions project />
+        </>
       ) : (
         <>
           <div className="audit-filters flex flex-wrap gap-8">

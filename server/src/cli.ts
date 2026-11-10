@@ -54,6 +54,7 @@ import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
+import { presentOfficeAccess, runOpenCommand } from './openOffice.js';
 import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
@@ -68,10 +69,10 @@ import { runZonesCommand } from './zonesCheck.js';
 // ── Argument parsing ──────────────────────────────────────────
 
 export interface CliArgs {
-  /** Unset -> ephemeral (OS-assigned) port, so multiple standalone instances
-   *  can run at once without a collision. --port picks a fixed one. */
+  /** Unset reuses the user's saved standalone port, assigning one on first run. */
   port?: number;
   host: string;
+  noOpen?: boolean;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -100,15 +101,19 @@ export function parseArgs(argv: string[]): CliArgs {
     } else if (argv[i] === '--host' && argv[i + 1]) {
       args.host = argv[i + 1];
       i++;
+    } else if (argv[i] === '--no-open') {
+      args.noOpen = true;
     } else if (argv[i] === '--help') {
       console.log(`Uso: pixel-agents [opciones]
 
 Opciones:
-  --port, -p <number>   Puerto de escucha (por defecto: uno libre asignado por el sistema)
+  --port, -p <number>   Puerto de escucha (por defecto: el guardado para esta oficina)
   --host <string>      Dirección de escucha (por defecto: 127.0.0.1)
+  --no-open            No abrir el navegador automáticamente
   --help               Mostrar esta ayuda
 
 Comandos:
+  open [--no-open]       Abrir la oficina con acceso de operador de un solo uso
   ${PROJECT_INIT_HELP.replace('pixel-agents ', '')}  Preparar el proyecto
   feature <acción>      Preparar requisitos y diseño, aprobar y ejecutar el flujo de una feature
   research <acción>     Investigar una pregunta o contrastar una feature construida con su plan
@@ -124,7 +129,7 @@ Comandos:
   review <acción>       Aceptar o rechazar hallazgos y consultar precisión de revisión
   learning <acción>     Listar, aprobar o rechazar aprendizajes propuestos
   eval <acción>         Listar, validar y ejecutar evaluaciones o consultar sus informes
-  token rotate [--port PORT]  Renovar el token del servidor y desconectar sus clientes`);
+  token --rotate        Revocar el acceso de todas las pestañas de la oficina`);
       process.exit(0);
     }
   }
@@ -192,6 +197,8 @@ export async function dispatchCli(
     designCaptureHost();
   } else if (argv[0] === 'token') {
     await runTokenCommand(argv.slice(1));
+  } else if (argv[0] === 'open') {
+    await runOpenCommand(argv.slice(1));
   } else if (argv[0] === 'project') {
     await runProjectCommand(argv.slice(1));
   } else if (argv[0] === 'design') {
@@ -456,7 +463,7 @@ async function startServer(argv: string[]): Promise<void> {
       }
       if (!consent) {
         console.log(
-          '[Pixel Agents] Hooks not installed: modifying ~/.claude/settings.json needs one-time approval — open the URL below to review and approve it.',
+          '[Pixel Agents] Hooks pendientes de aprobación: abre Pixel Agents de forma interactiva y revisa Settings.',
         );
       } else if (copyHookScriptOrReport(packageRoot)) {
         try {
@@ -515,18 +522,17 @@ async function startServer(argv: string[]): Promise<void> {
     );
     machineCapacity.start();
 
-    // The URL the operator opens has to be REACHABLE (a wildcard bind address
-    // is a bind target, not an address you can browse to — `--host 0.0.0.0`
-    // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,
-    // which is what makes the session it loads privileged enough to approve a
-    // hook install (see standaloneTokenValid in httpServer.ts). Under `--host
-    // 0.0.0.0` the office stays readable from the LAN at this machine's own
-    // address; only the consent-bearing toggle needs the token.
+    // The public address grants no access. Only interactive human starts receive
+    // a one-time link, opened in the browser or printed when --no-open is set.
     const displayHost =
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
-    console.log(
-      `\n  Pixel Agents server running at http://${displayHost}:${config.port}/?token=${config.token}\n`,
-    );
+    const officeUrl = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${config.port}/`;
+    console.log(`\n  Pixel Agents server running at ${officeUrl}\n`);
+    try {
+      await presentOfficeAccess(() => server.officeOpenUrl(), args.noOpen);
+    } catch {
+      console.error('No se pudo abrir Pixel Agents. Para reintentar: pixel-agents open');
+    }
 
     // ── Graceful shutdown ──
     let shuttingDown = false;

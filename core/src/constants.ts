@@ -32,3 +32,6 @@ export const TRANSPORT_STATE_CONNECTING = 'connecting';
 export const TRANSPORT_STATE_CONNECTED = 'connected';
 export const TRANSPORT_STATE_RECONNECTING = 'reconnecting';
 export const TRANSPORT_STATE_DISCONNECTED = 'disconnected';
+export const OFFICE_OPEN_QUERY = 'open';
+export const OFFICE_OPEN_PATH = '/api/office/open';
+export const OFFICE_EXCHANGE_PATH = '/api/office/exchange';

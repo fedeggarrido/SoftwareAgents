@@ -1,7 +1,7 @@
 import type { ServerMessage } from '../../../core/src/messages.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { PostMessageTransport } from './postMessageTransport.js';
-import { captureStandaloneSocketUrl } from './standaloneUrl.js';
+import { exchangeStandaloneSocketUrl } from './standaloneUrl.js';
 import type { MessageTransport } from './types.js';
 import { WebSocketTransport } from './webSocketTransport.js';
 
@@ -11,7 +11,7 @@ function createTransport(): MessageTransport {
   }
   // Capture once before connecting. Only the transport retains the token for reconnects.
   const ws = new WebSocketTransport(
-    captureStandaloneSocketUrl(window.location.href, window.history),
+    exchangeStandaloneSocketUrl(window.location.href, window.history),
   );
   ws.connect();
   // Vite dev only: there is no server to connect to, so `browserMock` injects
@@ -35,4 +35,8 @@ function createTransport(): MessageTransport {
 
 /** Singleton transport instance. Import this everywhere instead of vscodeApi. */
 export const transport: MessageTransport = createTransport();
+export async function copyOperatorToken(): Promise<void> {
+  if (!(transport instanceof WebSocketTransport)) throw new Error('Access unavailable');
+  await transport.copyOperatorToken((text) => navigator.clipboard.writeText(text));
+}
 export type { MessageTransport } from './types.js';

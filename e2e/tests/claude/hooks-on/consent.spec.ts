@@ -129,7 +129,7 @@ test.describe('Hooks consent gate', () => {
 
     narrator.step('waiting for the first-run Intro');
     const dialog = await openConsentDialog(frame);
-    await expect(dialog).toContainText('Welcome to Pixel Agents!');
+    await expect(dialog).toContainText('¡Bienvenido a Pixel Agents!');
 
     // Diegetic: the tour is a greeter character's speech bubble, and the camera
     // shifts so character + bubble are centered — the bubble ends up FULLY on
@@ -161,15 +161,15 @@ test.describe('Hooks consent gate', () => {
 
     // The disclosure is the point: what is written, what data moves, how to undo.
     const text = (await dialog.textContent()) ?? '';
-    expect(text).toContain('One more thing: hooks!');
-    expect(text).toMatch(/adds hooks for 12 Claude Code events/);
+    expect(text).toContain('Detección de actividad en tiempo real');
+    expect(text).toMatch(/añade hooks para 12 eventos de Claude Code/);
     expect(text).toContain('~/.claude/settings.json');
     expect(text).toContain('.pixel-agents.backup');
-    expect(text).toMatch(/tool inputs/);
+    expect(text).toMatch(/entradas de las herramientas/);
     expect(text).toContain('127.0.0.1');
     // The LAST sentence of the disclosure — asserted at the tail so a clipped
     // or half-rendered body fails here rather than passing on its opening.
-    expect(text).toContain('Instant Detection (Hooks)');
+    expect(text).toContain('Detección instantánea (hooks)');
     narrator.check(
       'the consent step discloses event scope, payload destination, and how to remove',
     );
@@ -180,14 +180,14 @@ test.describe('Hooks consent gate', () => {
     // choices (the x aborts the whole tour; Not Now answers and continues it).
     expect(
       (await dialog.getByRole('button').allTextContents()).map((t) => t.trim()).sort(),
-    ).toEqual(['x', 'Back', "Don't Ask Again", 'Install Hooks', 'Not Now'].sort());
+    ).toEqual(['x', 'Anterior', 'No volver a preguntar', 'Instalar hooks', 'Ahora no'].sort());
     narrator.check('exactly the three choices plus Back and the close x');
 
     // Nothing has been written yet — the tour precedes any modification.
     expect(fs.existsSync(settingsPath(tmpHome))).toBe(false);
 
     narrator.step('clicking Install Hooks');
-    await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+    await dialog.getByRole('button', { name: 'Instalar hooks' }).click();
 
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 15_000 }).toBe(12);
     expect(ourHookEvents(tmpHome)).not.toContain('UserPromptSubmit');
@@ -198,7 +198,7 @@ test.describe('Hooks consent gate', () => {
     // The install broadcast a hooksStatus installed:true — which moots an
     // UNANSWERED ask, but must not yank the tour away from the person who just
     // answered it. The closing step is still up, after the install landed.
-    await expect(dialog).toContainText("You're all set!");
+    await expect(dialog).toContainText('¡Todo listo!');
     narrator.check('the closing step survived its own install broadcast');
 
     narrator.step("finishing the tour with Let's Go");
@@ -209,7 +209,7 @@ test.describe('Hooks consent gate', () => {
 
     // The checkbox reflects ACTUAL install state, fed by the hooksStatus message.
     await expect
-      .poll(() => getSettingChecked(frame, 'Instant Detection (Hooks)'), { timeout: 15_000 })
+      .poll(() => getSettingChecked(frame, 'Detección instantánea (hooks)'), { timeout: 15_000 })
       .toBe(true);
     narrator.check('Settings shows Instant Detection ON');
   });
@@ -223,7 +223,7 @@ test.describe('Hooks consent gate', () => {
     await advanceIntroToConsentStep(dialog);
 
     narrator.step('declining with Not Now');
-    await dialog.getByRole('button', { name: 'Not Now' }).click();
+    await dialog.getByRole('button', { name: 'Ahora no' }).click();
     // A decline still gets the closing step — hooks are optional, the office
     // works without them, and the tour ends the same way for everyone.
     await finishIntro(dialog);
@@ -237,7 +237,7 @@ test.describe('Hooks consent gate', () => {
     expect(readHooksEnabled(tmpHome)).not.toBe(false);
     narrator.check('settings.json never created, consent still ungranted');
 
-    expect(await getSettingChecked(frame, 'Instant Detection (Hooks)')).toBe(false);
+    expect(await getSettingChecked(frame, 'Detección instantánea (hooks)')).toBe(false);
     narrator.check('Settings shows Instant Detection OFF — the checkbox tells the truth');
   });
 
@@ -250,7 +250,7 @@ test.describe('Hooks consent gate', () => {
     await advanceIntroToConsentStep(dialog);
 
     narrator.step("declining permanently with Don't Ask Again");
-    await dialog.getByRole('button', { name: "Don't Ask Again" }).click();
+    await dialog.getByRole('button', { name: 'No volver a preguntar' }).click();
     await finishIntro(dialog);
 
     await expect.poll(() => readHooksEnabled(tmpHome), { timeout: 15_000 }).toBe(false);
@@ -273,11 +273,11 @@ test.describe('Hooks consent gate', () => {
 
     const dialog = await openConsentDialog(frame);
     // The x is on every step — here, mid-tour, one step before the disclosure.
-    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await dialog.getByRole('button', { name: 'Continuar' }).click();
     await expect(dialog).toContainText('Claude Code');
 
     narrator.step('aborting the tour with the x — no choice made');
-    await dialog.getByRole('button', { name: 'Close' }).click();
+    await dialog.getByRole('button', { name: 'Cerrar' }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
 
     // Settle: an install, had it happened, would land well inside this window.
@@ -304,17 +304,17 @@ test.describe('Hooks consent gate', () => {
     await advanceIntroToConsentStep(dialog);
 
     narrator.step('installing, then walking back to revise');
-    await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+    await dialog.getByRole('button', { name: 'Instalar hooks' }).click();
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 15_000 }).toBe(12);
     expect(readConsent(tmpHome)).toBe(true);
     narrator.check('the install landed');
 
-    await expect(dialog).toContainText("You're all set!");
-    await dialog.getByRole('button', { name: 'Back' }).click();
-    await expect(dialog.getByRole('button', { name: 'Install Hooks' })).toBeVisible();
+    await expect(dialog).toContainText('¡Todo listo!');
+    await dialog.getByRole('button', { name: 'Anterior' }).click();
+    await expect(dialog.getByRole('button', { name: 'Instalar hooks' })).toBeVisible();
 
     narrator.step("revising to Don't Ask Again");
-    await dialog.getByRole('button', { name: "Don't Ask Again" }).click();
+    await dialog.getByRole('button', { name: 'No volver a preguntar' }).click();
 
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 15_000 }).toBe(0);
     await expect.poll(() => readHooksEnabled(tmpHome), { timeout: 15_000 }).toBe(false);
@@ -322,7 +322,7 @@ test.describe('Hooks consent gate', () => {
 
     await finishIntro(dialog);
     // The checkbox tells the truth about the revised state.
-    expect(await getSettingChecked(frame, 'Instant Detection (Hooks)')).toBe(false);
+    expect(await getSettingChecked(frame, 'Detección instantánea (hooks)')).toBe(false);
     narrator.check('Settings shows Instant Detection OFF');
   });
 
@@ -340,16 +340,16 @@ test.describe('Hooks consent gate', () => {
     await advanceIntroToConsentStep(dialog);
 
     narrator.step("declining with Don't Ask Again, then walking back to revise");
-    await dialog.getByRole('button', { name: "Don't Ask Again" }).click();
+    await dialog.getByRole('button', { name: 'No volver a preguntar' }).click();
     await expect.poll(() => readHooksEnabled(tmpHome), { timeout: 15_000 }).toBe(false);
     narrator.check('the decline persisted hooks-off');
 
-    await expect(dialog).toContainText("You're all set!");
-    await dialog.getByRole('button', { name: 'Back' }).click();
-    await expect(dialog.getByRole('button', { name: 'Install Hooks' })).toBeVisible();
+    await expect(dialog).toContainText('¡Todo listo!');
+    await dialog.getByRole('button', { name: 'Anterior' }).click();
+    await expect(dialog.getByRole('button', { name: 'Instalar hooks' })).toBeVisible();
 
     narrator.step('revising to Not Now');
-    await dialog.getByRole('button', { name: 'Not Now' }).click();
+    await dialog.getByRole('button', { name: 'Ahora no' }).click();
 
     // The decline's own preference write is taken back with it: the key is
     // gone (default true applies), consent is unanswered, nothing installed.
@@ -387,13 +387,13 @@ test.describe('Hooks consent gate', () => {
       await advanceIntroToConsentStep(dialog);
 
       narrator.step('clicking Install Hooks over an unparseable settings.json');
-      await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+      await dialog.getByRole('button', { name: 'Instalar hooks' }).click();
 
       // The installer refuses to rewrite a shape it cannot read, so nothing of
       // ours reaches the file — and the closing step says so rather than
       // claiming success.
-      await expect(dialog).toContainText("Hooks couldn't be installed", { timeout: 15_000 });
-      await expect(dialog).not.toContainText("You're all set!");
+      await expect(dialog).toContainText('No se pudieron instalar los hooks', { timeout: 15_000 });
+      await expect(dialog).not.toContainText('¡Todo listo!');
       expect(ourHookEvents(tmpHome)).toEqual([]);
       narrator.check('the closing step reports the failure instead of congratulating');
 
@@ -404,9 +404,9 @@ test.describe('Hooks consent gate', () => {
       narrator.check('the unparseable file was left byte-for-byte alone');
 
       narrator.step('walking back and revising to Not Now');
-      await dialog.getByRole('button', { name: 'Back' }).click();
-      await expect(dialog.getByRole('button', { name: 'Install Hooks' })).toBeVisible();
-      await dialog.getByRole('button', { name: 'Not Now' }).click();
+      await dialog.getByRole('button', { name: 'Anterior' }).click();
+      await expect(dialog.getByRole('button', { name: 'Instalar hooks' })).toBeVisible();
+      await dialog.getByRole('button', { name: 'Ahora no' }).click();
       await finishIntro(dialog);
 
       // The load-bearing half: the grant the failed install left is taken back,
@@ -491,13 +491,13 @@ test.describe('Hooks consent gate / pre-consent install', () => {
 
     // Migrated hooks are live, and the checkbox says so.
     await expect
-      .poll(() => getSettingChecked(frame, 'Instant Detection (Hooks)'), { timeout: 15_000 })
+      .poll(() => getSettingChecked(frame, 'Detección instantánea (hooks)'), { timeout: 15_000 })
       .toBe(true);
     narrator.check('Settings shows Instant Detection ON');
   });
 
   // The undo route the disclosure PROMISES ("You can remove the hooks at any
-  // time from Settings → Instant Detection (Hooks)"), driven for exactly the
+  // time from Settings → Detección instantánea (hooks)"), driven for exactly the
   // population that gets no prompt. With the Remove Hooks button gone this is
   // their ONLY removal route, so it is asserted end-to-end — toggle off,
   // entries gone from disk — rather than assumed from the toggle existing.
@@ -509,10 +509,10 @@ test.describe('Hooks consent gate / pre-consent install', () => {
     // The silent migration lands first, so the toggle below is a genuine state
     // change over live hooks rather than a no-op click.
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 30_000 }).toBe(12);
-    expect(await getSettingChecked(frame, 'Instant Detection (Hooks)')).toBe(true);
+    expect(await getSettingChecked(frame, 'Detección instantánea (hooks)')).toBe(true);
     narrator.check('migrated hooks installed and the checkbox reads ON');
 
-    narrator.step('toggling Instant Detection (Hooks) OFF');
+    narrator.step('toggling Detección instantánea (hooks) OFF');
     await setSettings(frame, { hooksEnabled: false });
 
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 15_000 }).toBe(0);
@@ -523,7 +523,7 @@ test.describe('Hooks consent gate / pre-consent install', () => {
     expect(readConsent(tmpHome)).toBe(true);
     narrator.check('our entries gone, third-party hook kept, hooks persisted off');
 
-    expect(await getSettingChecked(frame, 'Instant Detection (Hooks)')).toBe(false);
+    expect(await getSettingChecked(frame, 'Detección instantánea (hooks)')).toBe(false);
     narrator.check('Settings shows Instant Detection OFF');
   });
 });
@@ -558,7 +558,7 @@ test.describe('Hooks consent gate / toggle-off failure', () => {
     // Startup installed for real (consent seeded), so the checkbox is ON and
     // the toggle below is a genuine state change rather than a no-op click.
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 30_000 }).toBe(12);
-    expect(await getSettingChecked(frame, 'Instant Detection (Hooks)')).toBe(true);
+    expect(await getSettingChecked(frame, 'Detección instantánea (hooks)')).toBe(true);
     narrator.check('hooks installed and the checkbox reads ON');
 
     const before = fs.readFileSync(settingsPath(tmpHome), 'utf8');

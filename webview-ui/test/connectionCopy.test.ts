@@ -23,26 +23,46 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('office connection copy', () => {
-  it('names the local process and gives restart instructions and the next automatic attempt', () => {
+  it('backs off to the cap, cancels the pending retry on demand and resets after success', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', Socket);
+    const transport = new WebSocketTransport('ws://office/ws');
+    transport.connect();
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      Socket.latest.onclose?.({ code: 1006 });
+      expect(getConnectionStatus().retryAt! - Date.now()).toBe(delay);
+      vi.advanceTimersByTime(delay);
+    }
+    Socket.latest.onclose?.({ code: 1006 });
+    transport.reconnect();
+    expect(vi.getTimerCount()).toBe(0);
+    Socket.latest.onopen?.();
+    expect(transport.state).toBe('connected');
+    Socket.latest.onclose?.({ code: 1006 });
+    expect(getConnectionStatus().retryAt! - Date.now()).toBe(1000);
+    transport.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('names the closed office and the next automatic attempt without terminal instructions', () => {
     const copy = connectionCopy(
       'reconnecting',
       { cause: 'unavailable', attempt: 3, retryAt: 15_000 },
       10_000,
     );
     expect(copy.label).toContain('Reintentando');
-    expect(copy.label).toContain('Próximo intento 3 en 5 s');
-    expect(copy.explanation).toContain('pixel-agents que se ejecuta en tu ordenador');
-    expect(copy.explanation).toContain('terminal donde lo lanzaste');
-    expect(copy.explanation).toContain('npx pixel-agents');
+    expect(copy.label).toBe('Reintentando… (próximo intento en 5s)');
+    expect(copy.explanation).toContain('La oficina está cerrada en tu ordenador');
+    expect(copy.explanation).toContain('Abre Pixel Agents');
+    expect(copy.explanation).not.toContain('terminal');
     expect(copy.explanation).not.toContain('token');
   });
   it.each([
-    ['unauthorized', 'La URL de acceso no es válida'],
+    ['unauthorized', 'El acceso de esta pestaña ha caducado'],
     ['origin', 'ha rechazado el origen'],
   ] as const)('explains %s without inventing a retry or printing a token', (cause, text) => {
     const copy = connectionCopy('disconnected', { cause, attempt: 0, retryAt: null });
     expect(copy.explanation).toContain(text);
-    expect(copy.explanation).toContain('terminal');
+    expect(copy.explanation).not.toContain('terminal');
     expect(copy.label).not.toContain('Reintentando');
   });
   it('uses a neutral handshake message while connecting', () => {

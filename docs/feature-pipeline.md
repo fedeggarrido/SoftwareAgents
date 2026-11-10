@@ -207,8 +207,11 @@ sin FeatureSpec». «Este checkout» significa la carpeta del repositorio vincul
 a la oficina; se muestra su nombre si el cliente ya dispone de una única carpeta
 de workspace, sin añadir rutas al protocolo ni deducirlo de sesiones ajenas. Cuando
 no hay un nombre inequívoco disponible, se mantiene la explicación general.
-El token del operador es el valor de `token` en la URL que `pixel-agents` mostró
-al iniciarse en la terminal del usuario; no se muestra ni se copia en el comando.
+Las instrucciones CLI y el comando están dentro de «Detalles» cerrado. Para la
+confirmación oculta, el operador usa Settings → Detalles → «Copiar token para CLI».
+Se copia desde la memoria de la pestaña autenticada; no se obtiene de la URL
+impresa ni se muestra o incorpora al comando. El navegador entra mediante un
+código de un solo uso que caduca en 60 segundos.
 
 Ejecutarlo desde esa carpeta sigue requiriendo la confirmación humana SA-107.
 Guardar no crea FeatureSpec, Task, Execution ni commit y no concede autoridad.

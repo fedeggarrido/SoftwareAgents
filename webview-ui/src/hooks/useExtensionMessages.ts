@@ -907,6 +907,27 @@ export function useExtensionMessages(
     const stopLifecycle = bindExtensionTransportLifecycle(transport);
     const stopAuditLifecycle = transport.onStateChange(() => {
       const office = getOfficeState();
+      if (transport.state === 'connected') {
+        for (const id of office.characters.keys()) {
+          clearProviderLabel(id);
+          clearAgentRole(id);
+        }
+        office.resetConnectionAgents();
+        agentHistory.clear();
+        pendingAgents = [];
+        meetingSeats.clear();
+        meetingId = null;
+        backgroundParentToolIdsRef.current = {};
+        setAgents([]);
+        setSelectedAgent(null);
+        setAgentTools({});
+        setAgentStatuses({});
+        setSubagentTools({});
+        setSubagentCharacters([]);
+        setAgentFolderNames([]);
+        setConsentQueue([]);
+        setBoardState(null);
+      }
       office.workSnapshot = null;
       office.workEvents = [];
       office.workStates.clear();

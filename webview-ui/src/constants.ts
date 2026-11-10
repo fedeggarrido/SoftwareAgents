@@ -496,14 +496,13 @@ export const PROJECT_EMPTY_TEXT =
 export const AUDIT_EXPLANATION =
   'Registro de acciones de personas y agentes en este proyecto: ejecuciones, aprobaciones, decisiones y resultados de las reglas de seguridad. No se puede editar.';
 export const AUDIT_EMPTY_TEXT = 'Aún no hay nada registrado.';
-export const OFFICE_OFFLINE_TEXT =
-  'Sin conexión con la oficina: el programa pixel-agents que se ejecuta en tu ordenador.';
+export const OFFICE_OFFLINE_TEXT = 'La oficina está cerrada en tu ordenador.';
 export const OFFICE_OFFLINE_HELP =
-  '¿Sigue abierta la terminal donde lo lanzaste? Si la cerraste, vuelve a ejecutar npx pixel-agents y abre la URL que imprime.';
-export const OFFICE_INVALID_ACCESS_TEXT =
-  'La URL de acceso no es válida o le falta el acceso de operador; usa la que imprime la terminal.';
+  'Abre Pixel Agents en tu ordenador. Esta pestaña se conectará automáticamente.';
+export const OFFICE_START_COMMAND = 'npx pixel-agents';
+export const OFFICE_INVALID_ACCESS_TEXT = 'El acceso de esta pestaña ha caducado o se ha revocado.';
 export const OFFICE_ORIGIN_TEXT =
-  'La oficina ha rechazado el origen de esta página. Abre la URL que imprime la terminal de pixel-agents.';
+  'La oficina ha rechazado el origen de esta página. Abre Pixel Agents en tu ordenador para volver a entrar.';
 export const OFFICE_HANDSHAKE_TEXT =
   'Conectando con la oficina: el programa pixel-agents que se ejecuta en tu ordenador. Esperando a que confirme el modo de acceso.';
 export const OFFICE_RETRY_BASE_MS = 1000;
@@ -568,3 +567,4 @@ export const AUDIT_DETAIL_FIELDS = [
 /** Compact previews link to the complete readable sections below. */
 export const FEATURE_PLAN_PREVIEW_ITEMS = 3;
 export const FEATURE_PLAN_REVISION_CHARS = 8;
+export const OFFICE_BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000;

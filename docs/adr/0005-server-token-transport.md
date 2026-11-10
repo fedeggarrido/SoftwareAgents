@@ -9,6 +9,12 @@ los mensajes) o un subprotocolo con credenciales (que también hay que redactar 
 cabeceras). No es un cambio trivial del transporte actual y sus reconexiones.
 VS Code usa Bearer y no necesita la URL.
 
+Actualización SA-144: las navegaciones nuevas usan `?open=` con un código aleatorio
+de un solo uso y 60 segundos. La SPA lo retira e intercambia por la capacidad en
+memoria. El lanzador nunca recibe el token persistente. Se conserva `/ws?token=`
+y la captura de URLs antiguas con token por compatibilidad. La exposición actual
+y las ACL verificadas se describen en [discovery](../reference/discovery.md).
+
 SA-075 redacta las peticiones HTTP y upgrades, elimina el log del tipo de mensaje
 WS controlado por el cliente y permite revocar el token cerrando los sockets.
 El token sigue siendo un secreto en terminal, historial y discovery. Antes de

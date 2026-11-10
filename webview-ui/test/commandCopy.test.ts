@@ -41,6 +41,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('SA-115 command copy control', () => {
+  it('keeps continuation commands and token instructions inside collapsed Detalles', async () => {
+    const html = renderToStaticMarkup(await tree());
+    expect(html).toMatch(/^<details[^>]*><summary>Detalles<\/summary>/);
+    expect(html).not.toMatch(/<details[^>]*\bopen/);
+    expect(html).toContain('Settings → Detalles →');
+    expect(html).not.toContain('valor de «token»');
+  });
   it('writes the exact command and displays visible confirmation', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });

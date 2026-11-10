@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
 import { AuditPanel } from './components/AuditPanel.js';
@@ -15,6 +15,7 @@ import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
+import { OfficeConnectionHelp } from './components/OfficeConnectionHelp.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -35,6 +36,7 @@ import { OfficeState } from './office/engine/officeState.js';
 import { exportLayoutToFile } from './office/layout/exportLayout.js';
 import { isRotatable } from './office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from './office/layout/layoutSerializer.js';
+import { OfficeRecoveryContext } from './office/recoveryActions.js';
 import { getPetCount } from './office/sprites/petSpriteData.js';
 import { EditTool, type OfficeLayout } from './office/types.js';
 import { isBrowserRuntime, isE2E } from './runtime.js';
@@ -342,10 +344,21 @@ function App() {
     })();
 
   if (!layoutReady) {
-    return <div className="w-full h-full flex items-center justify-center ">Loading...</div>;
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <OfficeConnectionHelp />
+      </div>
+    );
   }
 
-  return (
+  return createElement(
+    OfficeRecoveryContext,
+    {
+      value: {
+        openSettings: () => setIsSettingsOpen(true),
+        prepareProject: () => setIsNewIdeaOpen(true),
+      },
+    },
     <div ref={containerRef} className="w-full h-full relative overflow-hidden">
       <OfficeCanvas
         officeState={officeState}
@@ -692,7 +705,7 @@ function App() {
           }
         />
       )}
-    </div>
+    </div>,
   );
 }
 

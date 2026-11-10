@@ -1,8 +1,12 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { OFFICE_EPHEMERAL_WARNING } from '../../../core/src/officeAccess.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
+import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
+import { useConnectionStatus } from '../office/connectionStatus.js';
+import { useOfficeRecovery } from '../office/recoveryActions.js';
 import { isBrowserRuntime } from '../runtime.js';
-import { transport } from '../transport/index.js';
+import { copyOperatorToken, transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 import { Checkbox } from './ui/Checkbox.js';
 import { MenuItem } from './ui/MenuItem.js';
@@ -61,9 +65,124 @@ export function SettingsModal({
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assetDirDraft, setAssetDirDraft] = useState('');
+  const [confirmRevocation, setConfirmRevocation] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revocationFailed, setRevocationFailed] = useState(false);
+  const officeAccess = useOfficeAccess();
+  const access = officeAccessView(officeAccess, !isBrowserRuntime);
+  const [copyFeedback, setCopyFeedback] = useState('');
+  const connection = useConnectionStatus();
+  const recovery = useOfficeRecovery();
+  useEffect(
+    () =>
+      transport.onMessage((message) => {
+        if (message.type === 'officeTokenRotationFailed') {
+          setRevoking(false);
+          setRevocationFailed(true);
+        }
+      }),
+    [],
+  );
+  useEffect(() => {
+    if (revoking && connection.state !== 'connected') {
+      setRevoking(false);
+      setConfirmRevocation(false);
+      onClose();
+    }
+  }, [revoking, connection.state, onClose]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+      <p className="p-10" role="status">
+        {access.explanation}
+      </p>
+      {isBrowserRuntime && officeAccess?.persistent === false && (
+        <p className="p-10" role="alert">
+          {OFFICE_EPHEMERAL_WARNING}
+        </p>
+      )}
+      {isBrowserRuntime && !access.blocked && !access.pending && (
+        <details className="p-10">
+          <summary>Detalles</summary>
+          <p>
+            Si un comando pide el token del operador, cópialo aquí y pégalo en la confirmación
+            oculta de tu terminal. No lo compartas.
+          </p>
+          <Button
+            onClick={() =>
+              void copyOperatorToken().then(
+                () => setCopyFeedback('Token copiado.'),
+                () =>
+                  setCopyFeedback(
+                    'No se pudo copiar el token. Comprueba el permiso del portapapeles.',
+                  ),
+              )
+            }
+          >
+            Copiar token para CLI
+          </Button>
+          <p role="status">{copyFeedback}</p>
+        </details>
+      )}
+      {isBrowserRuntime && (
+        <>
+          <MenuItem
+            onClick={() => {
+              onClose();
+              recovery.prepareProject();
+            }}
+          >
+            Preparar proyecto
+          </MenuItem>
+          {!access.pending && !access.blocked && connection.state === 'connected' && (
+            <MenuItem
+              onClick={() => {
+                setRevocationFailed(false);
+                setConfirmRevocation(true);
+              }}
+            >
+              Revocar acceso de esta pestaña
+            </MenuItem>
+          )}
+          {confirmRevocation && (
+            <div
+              className="p-10 flex flex-col gap-8"
+              role="group"
+              aria-label="Confirmar revocación"
+            >
+              <p>
+                Se revocará el acceso de todas las pestañas abiertas. Abre Pixel Agents de nuevo
+                para volver a entrar.
+              </p>
+              {revocationFailed && (
+                <p role="alert">No se pudo revocar el acceso. Reintenta desde Settings.</p>
+              )}
+              <Button
+                disabled={
+                  revoking || access.blocked || access.pending || connection.state !== 'connected'
+                }
+                onClick={() => {
+                  setRevocationFailed(false);
+                  setRevoking(true);
+                  try {
+                    transport.send({ type: 'rotateOfficeToken' });
+                  } catch {
+                    setRevoking(false);
+                    setRevocationFailed(true);
+                  }
+                }}
+              >
+                {revoking
+                  ? 'Revocando…'
+                  : revocationFailed
+                    ? 'Reintentar'
+                    : 'Revocar todas las pestañas'}
+              </Button>
+              <Button onClick={() => setConfirmRevocation(false)}>Cancelar</Button>
+            </div>
+          )}
+        </>
+      )}
       {/* Open Sessions Folder opens an OS file manager — impossible in the browser. */}
       {!isBrowserRuntime && (
         <MenuItem
@@ -185,7 +304,7 @@ export function SettingsModal({
         onChange={onToggleWatchAllSessions}
       />
       <Checkbox
-        label="Instant Detection (Hooks)"
+        label="Detección instantánea (hooks)"
         checked={hooksInstalled}
         onChange={onToggleHooksEnabled}
       />

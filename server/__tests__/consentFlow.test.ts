@@ -83,6 +83,28 @@ describe('clientMessageHandler: hooks consent flow', () => {
     await settle(); // the request rides the async areHooksInstalled follow-up
   }
 
+  it('persists tour dismissal on close without answering or installing hooks', async () => {
+    await connect();
+    expect(sent.some((message) => message.type === 'hooksConsentRequest')).toBe(true);
+    handleClientMessage({ type: 'setHooksInfoShown' }, (message) => sent.push(message), ctx);
+    expect(getHooksConsent('claude')).toBe('unanswered');
+    expect(settingsJsonExists()).toBe(false);
+    sent.length = 0;
+    // Recreate the persisted adapter as a fresh office load does.
+    store.setAdapter(new FileStateAdapter({ namespace: 'standalone' }));
+    await connect();
+    expect(sent.some((message) => message.type === 'hooksConsentRequest')).toBe(false);
+  });
+
+  it('does not let an untokened spectator dismiss the operator tour', async () => {
+    handleClientMessage({ type: 'setHooksInfoShown' }, (message) => sent.push(message), {
+      ...ctx,
+      privileged: false,
+    });
+    await connect();
+    expect(sent.some((message) => message.type === 'hooksConsentRequest')).toBe(true);
+  });
+
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-consent-flow-'));
     originalHome = process.env.HOME;

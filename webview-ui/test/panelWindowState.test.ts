@@ -15,10 +15,27 @@ import {
   fitPanelRect,
   readPanelPreferences,
   resizePanelRect,
+  restorePanelRect,
   savePanelPreferences,
 } from '../src/office/panelWindowState.js';
 
 describe('viewer-local panel preferences', () => {
+  it.each([120, 239, 900, Number.NaN])(
+    'replaces invalid restored height %s with the viewport-aware default',
+    (height) => {
+      const viewport = { width: 1024, height: 844 };
+      expect(restorePanelRect({ x: 64, y: 110, width: 720, height }, viewport, 104, 780)).toEqual(
+        defaultPanelRect(viewport, 104, 780),
+      );
+    },
+  );
+  it('preserves valid dimensions and fits the default into a small viewport', () => {
+    const rect = { x: 64, y: 110, width: 600, height: 400 };
+    expect(restorePanelRect(rect, { width: 1024, height: 844 }, 104, 780)).toEqual(rect);
+    const small = restorePanelRect(rect, { width: 390, height: 300 }, 104, 280);
+    expect(small.width).toBeLessThanOrEqual(390);
+    expect(small.y + small.height).toBeLessThanOrEqual(280);
+  });
   it('migrates the removed character tab to Backlog while retaining geometry', () => {
     const rect = { x: 64, y: 150, width: 720, height: 500 };
     expect(

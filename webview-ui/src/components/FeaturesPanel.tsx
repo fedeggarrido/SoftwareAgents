@@ -29,6 +29,7 @@ import { transport } from '../transport/index.js';
 import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
 import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -98,11 +99,14 @@ export function FeaturesPanel({
           <p role="status">Cargando ideas pendientes…</p>
         ) : ideas.snapshot.errorCode === 'denied' ||
           ideas.snapshot.preparationError === 'denied' ? (
-          <p role="status">
-            {ideas.snapshot.preparationError === 'denied'
-              ? OFFICE_MANAGED_EXPLANATION
-              : OFFICE_ACCESS_INSTRUCTIONS}
-          </p>
+          <div role="status">
+            <p>
+              {ideas.snapshot.preparationError === 'denied'
+                ? OFFICE_MANAGED_EXPLANATION
+                : OFFICE_ACCESS_INSTRUCTIONS}
+            </p>
+            <OfficeRecoveryActions />
+          </div>
         ) : ideas.snapshot.errorCode ? (
           <PanelError
             cause={`No se pudieron leer las ideas. ${ideaErrorText(ideas.snapshot.errorCode)}`}
@@ -115,7 +119,14 @@ export function FeaturesPanel({
         )}
       </div>
       {!projectId ? (
-        <div>{connectionState === 'connected' ? <p>{PROJECT_EMPTY_TEXT}</p> : null}</div>
+        <div>
+          {connectionState === 'connected' ? (
+            <>
+              <p>{PROJECT_EMPTY_TEXT}</p>
+              <OfficeRecoveryActions project />
+            </>
+          ) : null}
+        </div>
       ) : (
         <>
           <div role="status">

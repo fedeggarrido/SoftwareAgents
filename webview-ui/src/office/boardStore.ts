@@ -20,7 +20,7 @@ import { useSyncExternalStore } from 'react';
 let board: BoardState | null = null;
 const listeners = new Set<() => void>();
 
-export function setBoardState(next: BoardState): void {
+export function setBoardState(next: BoardState | null): void {
   board = next;
   for (const l of listeners) l();
 }

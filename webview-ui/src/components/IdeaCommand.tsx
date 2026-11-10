@@ -19,37 +19,41 @@ export function IdeaCommand({ command, checkoutName }: { command: string; checko
     setFeedback(COMMAND_COPY_FEEDBACK[outcome]);
   };
   return (
-    <div className="idea-command flex flex-col gap-8 min-w-0">
-      <p>Para continuar, ejecuta este comando en tu terminal.</p>
-      <p>
-        «Este checkout» es la carpeta del repositorio vinculada a esta oficina
-        {checkoutName ? (
-          <>
-            : <strong>{checkoutName}</strong>
-          </>
-        ) : (
-          ''
-        )}
-        .
-      </p>
-      <input
-        ref={input}
-        aria-label="Comando para continuar la idea"
-        className="idea-command-text bg-bg-dark text-text border-2 border-border p-8 w-full"
-        readOnly
-        value={command}
-        spellCheck={false}
-      />
-      <Button size="sm" onClick={() => void copy()}>
-        {COMMAND_COPY_LABEL}
-      </Button>
-      <p role="status" aria-live="polite">
-        {feedback}
-      </p>
-      <p>
-        El comando pedirá el token del operador: es el valor de «token» en la URL que pixel-agents
-        mostró al iniciarse en tu terminal.
-      </p>
-    </div>
+    <details className="idea-command min-w-0">
+      <summary>Detalles</summary>
+      <div className="flex flex-col gap-8">
+        <p>Para continuar, ejecuta este comando en tu terminal.</p>
+        <p>
+          «Este checkout» es la carpeta del repositorio vinculada a esta oficina
+          {checkoutName ? (
+            <>
+              : <strong>{checkoutName}</strong>
+            </>
+          ) : (
+            ''
+          )}
+          .
+        </p>
+        <input
+          ref={input}
+          aria-label="Comando para continuar la idea"
+          className="idea-command-text bg-bg-dark text-text border-2 border-border p-8 w-full"
+          readOnly
+          value={command}
+          spellCheck={false}
+        />
+        <Button size="sm" onClick={() => void copy()}>
+          {COMMAND_COPY_LABEL}
+        </Button>
+        <p role="status" aria-live="polite">
+          {feedback}
+        </p>
+        <p>
+          El comando pedirá el token del operador. En esta oficina, abre Settings → Detalles →
+          Copiar token para CLI y pégalo en la confirmación oculta. El token no aparece en la URL
+          impresa al iniciar Pixel Agents.
+        </p>
+      </div>
+    </details>
   );
 }

@@ -260,6 +260,7 @@ Per-agent runtime data: provider reference, session key, transcript-fallback fie
   config.json              { vscode, standalone, externalAssetDirectories, hooksConsent, hooksEnabled (both per-provider) }
   vscode-state.json        { agents, seats }
   standalone-state.json    { agents, seats }
+  office-access.json       Persistent standalone capability + default port (SA-144)
   layout.json              OfficeLayout (shared across surfaces)
   server.json              legacy pointer { port, pid, token, host? }
   servers/<pid>-<port>.json  registry entry per live server (+ .discovery.lock, .reaped-*.lock)

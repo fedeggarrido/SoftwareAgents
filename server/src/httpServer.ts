@@ -22,12 +22,15 @@ import {
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
+  OFFICE_TOKEN_POLL_MS,
   OPERATOR_PROOF_NONCE_BYTES,
   OPERATOR_PROOF_PATH,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
   WS_MAX_PAYLOAD_BYTES,
 } from './constants.js';
+import { featureIngressActor } from './featureIngress.js';
+import { registerOfficeBootstrap } from './officeBootstrap.js';
 import { serverProof } from './serverProof.js';
 import type { AgentState } from './types.js';
 
@@ -41,7 +44,9 @@ export interface HttpServerOptions {
   port?: number;
   /** Bearer auth token for hook and WebSocket endpoints */
   token: string;
+  getToken?: () => string;
   onRotateToken?: () => string;
+  accessPersistent?: () => boolean;
   logStream?: Writable;
   /** AgentStateStore for WebSocket broadcast piping */
   store: AgentStateStore;
@@ -114,6 +119,27 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   await app.register(fastifyCors, { origin: true });
   await app.register(fastifyWebsocket, { options: { maxPayload: WS_MAX_PAYLOAD_BYTES } });
+  const currentToken = () => {
+    const token = options.getToken?.() ?? options.token;
+    if (token !== options.token) {
+      options.token = token;
+      for (const socket of app.websocketServer.clients)
+        socket.close(WS_CLOSE_UNAUTHORIZED, 'access revoked');
+    }
+    return token;
+  };
+  if (options.getToken) {
+    const timer = setInterval(() => {
+      try {
+        currentToken();
+      } catch {
+        for (const socket of app.websocketServer.clients)
+          socket.close(WS_CLOSE_UNAUTHORIZED, 'access unavailable');
+      }
+    }, OFFICE_TOKEN_POLL_MS);
+    timer.unref();
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
 
   // Static SPA serving (standalone mode only)
   if (!options.embedded && options.staticDir) {
@@ -130,6 +156,10 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // ── Routes ──────────────────────────────────────────────────
 
   registerHealthRoute(app);
+  if (!options.embedded)
+    registerOfficeBootstrap(app, currentToken, (request) =>
+      timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${currentToken()}`),
+    );
   app.get<{ Querystring: { nonce?: string } }>(OPERATOR_PROOF_PATH, (request, reply) => {
     if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
     const nonce = request.query.nonce;
@@ -140,22 +170,20 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
       return reply.code(400).send('invalid nonce');
     return reply
       .header('Cache-Control', 'no-store')
-      .send({ proof: serverProof(options.token, nonce, process.pid) });
+      .send({ proof: serverProof(currentToken(), nonce, process.pid) });
   });
-  registerHookRoute(app, options);
-  registerWebSocketRoute(app, options);
+  registerHookRoute(app, options, currentToken);
+  registerWebSocketRoute(app, options, currentToken);
   if (options.onRotateToken) {
-    app.post(
-      '/api/token/rotate',
-      { preHandler: bearerAuth(() => options.token) },
-      (request, reply) => {
-        // Human CLI only: browser pages must never rotate via ambient CORS access.
-        if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
-        options.token = options.onRotateToken!();
-        for (const socket of app.websocketServer.clients) socket.terminate();
-        return reply.header('Cache-Control', 'no-store').send({ status: 'rotated' });
-      },
-    );
+    app.post('/api/token/rotate', { preHandler: bearerAuth(currentToken) }, (request, reply) => {
+      // Human CLI only: browser pages must never rotate via ambient CORS access.
+      if (request.headers.origin !== undefined) return reply.code(403).send('forbidden origin');
+      if (featureIngressActor() !== 'human') return reply.code(403).send('human office required');
+      options.token = options.onRotateToken!();
+      for (const socket of app.websocketServer.clients)
+        socket.close(WS_CLOSE_UNAUTHORIZED, 'access revoked');
+      return reply.header('Cache-Control', 'no-store').send({ status: 'rotated' });
+    });
   }
 
   // ── Listen ──────────────────────────────────────────────────
@@ -181,14 +209,18 @@ function registerHealthRoute(app: FastifyInstance): void {
 
 // ── Hook Events ────────────────────────────────────────────────
 
-function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): void {
+function registerHookRoute(
+  app: FastifyInstance,
+  options: HttpServerOptions,
+  currentToken: () => string,
+): void {
   app.post<{
     Params: { providerId: string };
     Body: Record<string, unknown>;
   }>(
     `${HOOK_API_PREFIX}/:providerId`,
     {
-      preHandler: bearerAuth(() => options.token),
+      preHandler: bearerAuth(currentToken),
       schema: {
         params: {
           type: 'object',
@@ -214,15 +246,20 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
 
 // ── WebSocket ──────────────────────────────────────────────────
 
-function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions): void {
+function registerWebSocketRoute(
+  app: FastifyInstance,
+  options: HttpServerOptions,
+  currentToken: () => string,
+): void {
   app.get('/ws', { websocket: true }, (socket, request) => {
+    const token = currentToken();
     // CONNECTION gate. Embedded (VS Code) requires the Bearer token. Standalone
     // requires a same-origin handshake instead (isAllowedWebSocketOrigin), so a
     // non-browser local client with no Origin can still watch the office. What
     // may be DONE over an accepted connection is a separate question, decided
     // below.
     if (options.embedded) {
-      if (!timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${options.token}`)) {
+      if (!timingSafeStringEqual(request.headers.authorization ?? '', `Bearer ${token}`)) {
         socket.close(WS_CLOSE_UNAUTHORIZED, 'unauthorized');
         return;
       }
@@ -233,17 +270,24 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
 
     // Both modes prove privilege with the SAME out-of-band secret, differently
     // carried: embedded sends the Bearer token it was handed in-process;
-    // standalone sends the `?token=` the CLI printed in the local URL and the
-    // SPA forwarded on this handshake. Nothing about a network POSITION is
+    // standalone forwards the capability exchanged from the opener's one-use
+    // bootstrap code. Nothing about a network POSITION is
     // consulted, because every position is reproducible by a forwarder.
-    const privileged = options.embedded || standaloneTokenValid(request.url, options.token);
-    const connectionToken = options.token;
+    const privileged = options.embedded || standaloneTokenValid(request.url, token);
+    const connectionToken = token;
+    const send = (message: Record<string, unknown>) => {
+      try {
+        if (connectionToken === currentToken()) safeSend(socket, message);
+      } catch {
+        socket.close(WS_CLOSE_UNAUTHORIZED, 'access unavailable');
+      }
+    };
 
     const { store } = options;
 
     // Pipe store events to WebSocket client
     const onAgentAdded = (id: number, agent: AgentState) => {
-      safeSend(socket, {
+      send({
         type: 'agentCreated',
         projectId: agent.projectId,
         id,
@@ -260,11 +304,11 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     };
 
     const onAgentRemoved = (id: number) => {
-      safeSend(socket, { type: 'agentClosed', id });
+      send({ type: 'agentClosed', id });
     };
 
     const onBroadcast = (message: Record<string, unknown>) => {
-      safeSend(socket, message);
+      send(message);
     };
 
     store.on('agentAdded', onAgentAdded);
@@ -273,7 +317,6 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
 
     // One send per connection: handlers key per-connection state (e.g. the
     // executorState sequence) by it, so a fresh closure per message would reset it.
-    const send = (m: Record<string, unknown>) => safeSend(socket, m);
 
     const ctx: ClientMessageContext = {
       store,
@@ -285,15 +328,34 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       privileged,
       ideasSupported: !options.embedded,
       featurePlansSupported: !options.embedded,
+      accessPersistent: options.accessPersistent?.(),
     };
     const onExecutorStateChanged = () => refreshExecutorState(send, ctx);
     store.on('executorStateChanged', onExecutorStateChanged);
 
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
-      if (connectionToken !== options.token) return;
       try {
+        if (connectionToken !== currentToken()) return;
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+        if (msg.type === 'rotateOfficeToken') {
+          if (!privileged || options.embedded || featureIngressActor() !== 'human') {
+            send({
+              type: 'companyNotice',
+              text: 'Revocar acceso requiere una oficina operada por ti.',
+            });
+            return;
+          }
+          try {
+            if (!options.onRotateToken) throw new Error();
+            options.token = options.onRotateToken();
+            for (const client of app.websocketServer.clients)
+              client.close(WS_CLOSE_UNAUTHORIZED, 'access revoked');
+          } catch {
+            send({ type: 'officeTokenRotationFailed' });
+          }
+          return;
+        }
         handleClientMessage(msg, send, ctx);
       } catch {
         // Malformed JSON, ignore
@@ -348,9 +410,10 @@ export function isAllowedWebSocketOrigin(
  * installs (or removes) a 12-event hook set.
  *
  * The handshake must carry the server token in its `?token=` query. That token
- * is minted at startup (server.ts), printed by the CLI inside the LOCAL url it
- * emits to the operator's terminal, and forwarded by the SPA loaded from that
- * url (webview-ui/src/transport/index.ts). It is the Jupyter model.
+ * is persisted per user when OS protection succeeds. Interactive human startup
+ * passes only a short-lived, one-use bootstrap code to the browser opener; the
+ * SPA strips the code and exchanges it for the capability retained in memory
+ * (webview-ui/src/transport/index.ts). Legacy token URLs remain supported.
  *
  * Why a secret rather than a network position: EVERY position is reproducible.
  * The predecessor of this function required a loopback peer address AND a
@@ -398,7 +461,9 @@ function timingSafeStringEqual(actual: string, expected: string): boolean {
 export function redactRequestUrl(url: string): string {
   return url.replace(/([?&])([^=&#]+)=([^&#]*)/g, (match, separator: string, key: string) => {
     try {
-      return decodeURIComponent(key.replace(/\+/g, ' ')).toLowerCase() === 'token'
+      return ['token', 'open', 'code'].includes(
+        decodeURIComponent(key.replace(/\+/g, ' ')).toLowerCase(),
+      )
         ? `${separator}${key}=REDACTED`
         : match;
     } catch {

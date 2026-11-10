@@ -71,6 +71,23 @@ const state: ExecutorState = {
 };
 
 describe('executor transport regressions (DOM-free)', () => {
+  it('clears the previous roster before a restarted server reuses character IDs', () => {
+    const office = new OfficeState();
+    office.addAgent(1, 2);
+    office.addAgent(2, 3);
+    office.addSubagent(1, 'old-tool');
+    office.agentProjects.set(1, 'old-project');
+    office.selectedAgentId = 1;
+    office.resetConnectionAgents();
+    expect(office.characters.size).toBe(0);
+    expect(office.subagentMeta.size).toBe(0);
+    expect(office.subagentIdMap.size).toBe(0);
+    expect(office.agentProjects.size).toBe(0);
+    expect(office.selectedAgentId).toBeNull();
+    reconcileExistingAgents(office, [1], { 1: { palette: 4 } }, {}, true, [], {});
+    expect([...office.characters.keys()]).toEqual([1]);
+    expect(office.characters.get(1)?.palette).toBe(4);
+  });
   let transport: WebSocketTransport;
   let stop: (() => void) | undefined;
   beforeEach(() => {
@@ -140,7 +157,7 @@ describe('executor transport regressions (DOM-free)', () => {
           : startToggle('claude', false)!;
       sendExecutorCommand(message, transport);
       expect(getExecutorStore().pending.claude).toBeUndefined();
-      expect(getExecutorStore().errors.claude).toMatch(/Sin conexión/);
+      expect(getExecutorStore().errors.claude).toMatch(/La oficina está cerrada/);
       expect(getExecutorStore().needsSnapshot).toBe(true);
       FakeSocket.instances[0].open();
       expect(FakeSocket.instances[0].sent).toEqual([
@@ -200,7 +217,7 @@ describe('executor transport regressions (DOM-free)', () => {
     FakeSocket.instances[0].readyState = 3;
     sendExecutorCommand(message, transport);
     expect(getExecutorStore().pending.claude).toBeUndefined();
-    expect(getExecutorStore().errors.claude).toMatch(/Sin conexión/);
+    expect(getExecutorStore().errors.claude).toMatch(/La oficina está cerrada/);
     FakeSocket.instances[0].close();
     vi.advanceTimersByTime(1000);
     FakeSocket.instances[1].open();

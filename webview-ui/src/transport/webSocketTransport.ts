@@ -35,16 +35,17 @@ export class WebSocketTransport implements MessageTransport {
   private ws: TransportSocket | null = null;
   private handlers: Array<(msg: ServerMessage) => void> = [];
   private stateHandlers: Array<(state: TransportState) => void> = [];
-  private url: string;
+  private url: string | Promise<string>;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private resolvingUrl = false;
   private pendingMessages: ClientMessage[] = [];
   private _state: TransportState = TRANSPORT_STATE_CONNECTING;
   private readonly _ready: Promise<void>;
   private resolveReady!: () => void;
 
-  constructor(url: string) {
+  constructor(url: string | Promise<string>) {
     this.url = url;
     this._ready = new Promise<void>((resolve) => {
       this.resolveReady = resolve;
@@ -68,6 +69,16 @@ export class WebSocketTransport implements MessageTransport {
 
   connect(): void {
     if (this.disposed) return;
+    if (typeof this.url !== 'string') {
+      if (this.resolvingUrl) return;
+      this.resolvingUrl = true;
+      void this.url.then((url) => {
+        this.url = url;
+        this.resolvingUrl = false;
+        this.connect();
+      });
+      return;
+    }
 
     // First attempt is "connecting"; any retry after a drop is "reconnecting".
     this.setState(
@@ -123,6 +134,12 @@ export class WebSocketTransport implements MessageTransport {
     };
   }
 
+  async copyOperatorToken(write: (text: string) => Promise<void>): Promise<void> {
+    const token = new URL(await this.url).searchParams.get('token');
+    if (!token || this._state !== TRANSPORT_STATE_CONNECTED) throw new Error('Access unavailable');
+    await write(token);
+  }
+
   reconnect(): void {
     if (this.disposed) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -147,7 +164,8 @@ export class WebSocketTransport implements MessageTransport {
         message.type === 'setExecutorEnabled' ||
         message.type === 'setExecutorLevels' ||
         message.type === 'submitIdea' ||
-        message.type === 'prepareProject'
+        message.type === 'prepareProject' ||
+        message.type === 'rotateOfficeToken'
       )
         throw new Error('Office mutations require a connected transport');
       // Queue messages while connecting (flushed in onopen)

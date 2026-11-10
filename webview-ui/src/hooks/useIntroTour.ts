@@ -28,8 +28,7 @@ export function useIntroTour(args: {
   installPending: boolean;
   /** A consent-step button click: sends the choice, arms the verdict wait. */
   onChoice: (choice: ConsentChoice) => void;
-  /** Every way the tour ends. Sends NOTHING — an unanswered ask must return
-   *  on the next open. */
+  /** Every way the tour ends persists dismissal without granting hook consent. */
   onClose: () => void;
 } {
   const [state, dispatch] = useReducer(reduceIntroTour, INTRO_TOUR_IDLE);
@@ -75,6 +74,7 @@ export function useIntroTour(args: {
 
   const { dismissConsentRequest } = args;
   const onClose = useCallback(() => {
+    transport.send({ type: 'setHooksInfoShown' });
     dispatch({ kind: 'closed' });
     // Dismiss the ask THIS tour was about (the snapshot's provider) so a
     // queued ask for another provider is never dropped in its place.

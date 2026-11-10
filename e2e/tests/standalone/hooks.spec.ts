@@ -141,11 +141,11 @@ test.describe('Standalone / hooks consent', () => {
     // The disclosure travels with the request — the browser renders the
     // server's exact terms.
     await expect(dialog).toContainText('~/.claude/settings.json');
-    await expect(dialog).toContainText('Instant Detection (Hooks)');
+    await expect(dialog).toContainText('Detección instantánea (hooks)');
 
     expect(fs.existsSync(path.join(standalone.tmpHome, '.claude', 'settings.json'))).toBe(false);
 
-    await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+    await dialog.getByRole('button', { name: 'Instalar hooks' }).click();
 
     await expect.poll(() => readConsentFrom(standalone.tmpHome), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => ourHookEventCount(standalone.tmpHome), { timeout: 15_000 }).toBe(12);
@@ -198,7 +198,7 @@ test.describe('Standalone / hooks consent', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await advanceIntroToConsentStep(dialog);
-    await dialog.getByRole('button', { name: 'Not Now' }).click();
+    await dialog.getByRole('button', { name: 'Ahora no' }).click();
     await finishIntro(dialog);
     await page.waitForTimeout(1_000);
 
@@ -213,7 +213,7 @@ test.describe('Standalone / hooks consent', () => {
     // would pass vacuously over a state this test never caused.
     const settingsModal = await openSettingsModal(page);
     const hooksCheckbox = settingsModal.locator('button', {
-      hasText: 'Instant Detection (Hooks)',
+      hasText: 'Detección instantánea (hooks)',
     });
     const isChecked = async (): Promise<boolean> =>
       ((await hooksCheckbox.locator('span').last().textContent()) ?? '').trim().toLowerCase() ===

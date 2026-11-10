@@ -9,15 +9,27 @@ import {
   TOKEN_ROTATE_REQUEST_TIMEOUT_MS,
 } from './constants.js';
 import { discoveryEntryPath, discoveryPath } from './discoveryRecords.js';
+import { featureIngressActor } from './featureIngress.js';
+import { loadOfficeCredential, rotateOfficeToken } from './officeToken.js';
 import { isServerTarget } from './serverConfig.js';
 import { probeServer } from './serverProbe.js';
 
 export async function runTokenCommand(argv: string[], log = console.log): Promise<void> {
   if (
-    argv[0] !== 'rotate' ||
+    !['rotate', '--rotate'].includes(argv[0]) ||
     (argv.length !== 1 && !(argv.length === 3 && argv[1] === '--port' && /^\d+$/.test(argv[2])))
   )
-    throw new CliUsageError('Usage: pixel-agents token rotate [--port PORT]');
+    throw new CliUsageError('Uso: pixel-agents token --rotate [--port PORT]');
+  if (featureIngressActor() !== 'human')
+    throw new CliUsageError('La revocación requiere al operador humano');
+  if (argv.length === 1 && argv[0] === '--rotate') {
+    loadOfficeCredential();
+    rotateOfficeToken();
+    log(
+      'Acceso revocado en todas las pestañas de la oficina. Abre Pixel Agents para volver a entrar.',
+    );
+    return;
+  }
   const port = argv[2] ? Number(argv[2]) : undefined;
   if (port !== undefined && (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT))
     throw new CliUsageError('Invalid server port');
@@ -50,7 +62,5 @@ export async function runTokenCommand(argv: string[], log = console.log): Promis
     },
   );
   if (!response.ok) throw new Error(`Token rotation failed (${response.status})`);
-  log(
-    `Token rotated on port ${target.port}. Reopen the office using discovery; existing sockets were disconnected.`,
-  );
+  log(`Acceso revocado en el puerto ${target.port}. Abre Pixel Agents para volver a entrar.`);
 }

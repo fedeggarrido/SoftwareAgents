@@ -8,6 +8,7 @@
  */
 
 export type ServerMessage =
+  | OfficeTokenRotationFailed
   | OfficeAccess
   | FeaturePlanSnapshot
   | FeatureApprovalResult
@@ -77,6 +78,7 @@ export type ClientMessage =
   | SetHooksEnabled
   | HooksConsentResponse
   | SetHooksInfoShown
+  | RotateOfficeToken
   | SetWatchAllSessions
   | ExportLayout
   | ImportLayout
@@ -92,9 +94,14 @@ export type ClientMessage =
   | SetExecutorLevels
   | RequestExecutorState;
 
+export interface OfficeTokenRotationFailed {
+  type: 'officeTokenRotationFailed';
+}
+
 export interface OfficeAccess {
   type: 'officeAccess';
   privileged: boolean;
+  persistent?: boolean;
   reason: OfficeAccessReason | null;
 }
 
@@ -1201,6 +1208,10 @@ export type HooksConsentChoice = 'install' | 'notNow' | 'never';
 
 export interface SetHooksInfoShown {
   type: 'setHooksInfoShown';
+}
+
+export interface RotateOfficeToken {
+  type: 'rotateOfficeToken';
 }
 
 export interface SetWatchAllSessions {

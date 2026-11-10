@@ -79,6 +79,10 @@ export const MAX_PORT = 65_535;
  *  tolerate unknown/missing fields (see ServerConfig.debugLog precedent). */
 export const SERVER_REGISTRY_PROTOCOL_VERSION = 1;
 export const TOKEN_ROTATE_REQUEST_TIMEOUT_MS = 10_000;
+export const OFFICE_CREDENTIAL_FILE = 'office-access.json';
+export const OFFICE_TOKEN_POLL_MS = 1000;
+export const PRIVATE_FILE_MODE = 0o600;
+export const PRIVATE_COMMAND_TIMEOUT_MS = 5000;
 /** A live PID is not a live server (Windows recycles PIDs, SA-076): before reuse,
  *  /api/health must answer on the entry's port with the same PID. A refused
  *  connection arrives in milliseconds; past this deadline the server is busy,
@@ -426,3 +430,7 @@ export const PROJECT_ID_SLUG_LENGTH = 48;
 export const PROJECT_LOCAL_REMOTE = 'local';
 export const PROJECT_FALLBACK_BRANCH = 'main';
 export const PROJECT_LEGACY_BRANCH = 'master';
+export const OFFICE_BOOTSTRAP_TTL_MS = 60_000;
+export const OFFICE_BOOTSTRAP_BYTES = 32;
+export const OFFICE_BOOTSTRAP_RATE_LIMIT = 20;
+export const OFFICE_BOOTSTRAP_RATE_WINDOW_MS = 60_000;

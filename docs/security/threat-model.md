@@ -311,20 +311,72 @@ ni seguridad semántica de sus resúmenes.
   el WebSocket. La URL de conexión permanece solo en memoria para los handshakes
   y reconexiones. No se persiste en cookies, localStorage ni sessionStorage, ni se
   vuelve a leer de `location` para enlaces, copias o informes. Recargar pierde el
-  privilegio y el indicador explica que hay que volver a abrir la URL de la
-  terminal. VS Code conserva su autoridad por el canal integrado sin token en URL.
+  privilegio. SA-144 permite volver a entrar abriendo Pixel Agents desde un
+  arranque humano interactivo que entrega un código efímero al navegador.
+  VS Code conserva su autoridad por el canal integrado sin token en URL.
   `officeAccess` comunica únicamente el privilegio existente y los motivos
   cerrados de falta de token o proceso gestionado. Los guards del servidor siguen
   siendo la autoridad. La UI muestra esos estados sin alertas de lectura denegada
   de ideas ni formularios de entrevista o reintentos por permisos.
 - **Riesgo residual de SA-116.** `replaceState` sustituye la entrada actual del
   historial. No garantiza eliminar copias previas o sincronizadas ni capturas
-  anteriores al arranque de JavaScript. La petición inicial ya transportó el
-  token y el handshake WS continúa llevándolo en query. La terminal, discovery,
+  anteriores al arranque de JavaScript. La navegación nueva transporta un código
+  efímero y el handshake WS continúa llevando el token en query. Discovery,
   memoria de página y herramientas de red del navegador siguen exponiendo la
   capacidad a quien tenga acceso. La redacción de logs de SA-075 permanece. La
   retirada de la barra no revoca el bearer ni resuelve el riesgo de mismo usuario
   del SO. Revisar al cambiar el transporte o implementar SA-058.
+
+- **SA-144.** Standalone conserva un token por usuario en
+  `~/.pixel-agents/office-access.json`, junto al puerto predeterminado para
+  reconectar tras reiniciar. Creación y rotación usan el lock de discovery,
+  temporales exclusivos, fsync y rename. El archivo usa 0600 en POSIX. Windows
+  aplica una ACL de acceso completo únicamente para el SID del usuario, sin
+  herencia, antes de escribir el secreto. Get-Acl verifica una única regla
+  explícita Allow FullControl para ese SID y DACL protegida. Cualquier fallo
+  de identidad, aplicación o verificación abandona la persistencia y genera
+  un token en memoria por ejecución; Settings avisa de que no sobrevivirá al
+  reinicio. Las copias standalone de discovery también exigen protección
+  verificada antes de escribir; si no se consigue, no se publican.
+  El CLI nunca imprime el token persistente. El lanzador recibe un código
+  aleatorio de 32 bytes, de un solo uso y con TTL de 60 segundos centralizado
+  en constantes. La SPA lo retira de la URL antes de intercambiarlo por el token.
+  Emisión exige Bearer y proceso humano sin Origin. Emisión e intercambio exigen
+  peer y Host loopback y rechazan Origin ajeno, con límite común de 20 intentos
+  por minuto por proceso, incluidos fallos. Respuestas no-store y redacción de
+  códigos en logs; solo memoria, sin reintentos de intercambio. Rotar invalida
+  códigos pendientes. Solo se guardan digests SHA-256 de los códigos y el
+  intercambio compara todas las entradas con timingSafeEqual, sin búsqueda por
+  el secreto. El arranque humano interactivo sin auto-open imprime un enlace
+  efímero y «Si caduca: pixel-agents open». El comando open autentica el registro
+  local mediante prueba HMAC antes de enviar Bearer a loopback y abre o imprime
+  otro enlace de un solo uso; rechaza los marcadores gestionados existentes.
+  Los arranques sin TTY o gestionados no imprimen enlaces de acceso.
+  Auto-open exige stdin y stdout TTY, sin marcadores gestionados, CI, VITEST,
+  PLAYWRIGHT, NODE_ENV=test, PIXEL_AGENTS_NO_OPEN ni `--no-open`.
+- **Riesgo residual aceptado de SA-144.** Reiniciar deja de revocar un token
+  robado. Todas las instancias standalone del usuario comparten la capacidad
+  hasta `pixel-agents token --rotate` o la revocación desde Settings. Se audita
+  sin secretos y no se devuelve la nueva capacidad al cliente. La rotación WS
+  exige conexión privilegiada y proceso humano, conservando los marcadores
+  gestionados. Cada instancia revalida antes de mensajes y peticiones, y cierra
+  sockets inactivos al detectar el cambio mediante un sondeo de un segundo.
+  Se mantienen los gates de conexión y el bind loopback predeterminado.
+  La capacidad puede leerse en el perfil, discovery, memoria y herramientas del
+  navegador. El código efímero puede verse en argumentos del lanzador o capturas
+  de la navegación inicial o en la terminal cuando el operador pide el enlace:
+  un proceso que lo robe y lo canjee dentro del plazo,
+  antes que la página, obtiene la capacidad. Un proceso del mismo
+  usuario puede suplantar el listener del puerto guardado para recibir el
+  token que una pestaña envía al reintentar. El handshake no autentica al servidor.
+  La separación frente a ese adversario sigue dependiendo de SA-058.
+  Los cambios no conceden privilegio
+  a una pestaña que carece de capacidad ni permiten lanzar trabajo de agentes.
+  La copia explícita del token para la confirmación CLI vive solo en Settings →
+  Detalles; añade el portapapeles como canal elegido por el operador. No se muestra
+  ni se incluye en comandos, URLs de navegación nuevas ni logs. Un borrador de idea
+  conserva su proyecto de origen y bloquea guardar tras reconectar a otro proyecto,
+  manteniendo texto y respuestas para copiar o descartar.
 
 - **SA-111.** `approveFeaturePlan` usa exclusivamente el privilegio decidido por
   el handshake WS de esta sección. Antes de resolver el Project rechaza conexiones
@@ -355,13 +407,15 @@ ni seguridad semántica de sus resúmenes.
   y estados; nunca prompts, salidas, argumentos/resultados, rutas de usuario ni
   token del servidor. Sin opt-in de contenido. Véase [execution-telemetry.md](../execution-telemetry.md).
 
-- **Descripción:** el CLI imprime `?token=` y la SPA lo transmite al WebSocket.
-  Es una capacidad bearer reutilizable que puede quedar en historial, terminal y
-  logs de versiones anteriores a SA-075; quien la obtenga puede enviar mensajes privilegiados.
+- **Descripción:** la navegación inicial y el handshake WS transportan `?token=`.
+  Es una capacidad bearer reutilizable que puede quedar en historial y memoria,
+  en terminales de versiones anteriores a SA-144 y en logs anteriores a SA-075.
+  Quien la obtenga puede enviar mensajes privilegiados.
 - **Mitigación (SA-075):** Fastify redacta el query token en HTTP y upgrades WS,
   omite Authorization del serializador y redacta cabeceras explícitas. Se elimina
   el log de tipos WS arbitrarios; AuditLog redacta credenciales. Cada servidor
-  nuevo genera un UUID. `pixel-agents token rotate [--port PORT]` exige Bearer,
+  embedded nuevo genera un UUID. Standalone conserva el token de SA-144.
+  `pixel-agents token rotate [--port PORT]` exige Bearer,
   rechaza Origin, audita sin secretos, revoca el anterior y desconecta sockets.
   Discovery se republica con escritura restringida y reintentos ante fallos.
   Véase [discovery](../reference/discovery.md) y [ADR-0005](../adr/0005-server-token-transport.md).

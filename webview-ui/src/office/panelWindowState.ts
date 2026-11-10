@@ -91,6 +91,29 @@ export function fitPanelRect(
   };
 }
 
+/** Reject saved dimensions against today's usable viewport before restoring. */
+export function restorePanelRect(
+  rect: PanelRect,
+  viewport: PanelViewport,
+  top: number,
+  bottom: number,
+): PanelRect {
+  const availableWidth = Math.max(0, viewport.width - PANEL_WINDOW_MARGIN_PX * 2);
+  const availableHeight = Math.max(
+    0,
+    Math.min(bottom, viewport.height - PANEL_WINDOW_MARGIN_PX) - top,
+  );
+  const valid =
+    [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) &&
+    rect.width >= Math.min(PANEL_WINDOW_MIN_WIDTH_PX, availableWidth) &&
+    rect.height >= Math.min(PANEL_WINDOW_MIN_HEIGHT_PX, availableHeight) &&
+    rect.width <= availableWidth &&
+    rect.height <= availableHeight;
+  return valid
+    ? fitPanelRect(rect, viewport, top, bottom)
+    : defaultPanelRect(viewport, top, bottom);
+}
+
 /** Resize from the opposite, fixed edge before applying viewport constraints. */
 export function resizePanelRect(rect: PanelRect, edge: string, dx: number, dy: number): PanelRect {
   const next = { ...rect };

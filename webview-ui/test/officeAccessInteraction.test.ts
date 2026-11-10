@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from '@playwright/test';
-import { buildSync } from 'esbuild';
+import { build as bundle } from 'esbuild';
 import { build } from 'vite';
 import { expect, it } from 'vitest';
 
@@ -30,7 +30,7 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
       .map((entry) => (entry.type === 'asset' ? String(entry.source) : ''))
       .join('\n');
     // Bundle the real interactive components without adding TSX to tsconfig.node.
-    const script = buildSync({
+    const bundled = await bundle({
       stdin: {
         resolveDir: path.resolve('src'),
         loader: 'tsx',
@@ -64,12 +64,33 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
           root.render(<Harness />);
         `,
       },
+      // Access help now imports connection help. Keep this connected-office harness
+      // isolated from real WebSocket attempts, as well as from operator profiles.
+      plugins: [
+        {
+          name: 'connected-office-transport',
+          setup(build) {
+            build.onLoad({ filter: /[\\/]transport[\\/]index\.ts$/ }, () => ({
+              loader: 'js',
+              contents: `
+                export const transport = {
+                  state: 'connected', ready: Promise.resolve(),
+                  onStateChange: () => () => {},
+                  onMessage: () => () => {},
+                  send() {}, dispose() {},
+                };
+              `,
+            }));
+          },
+        },
+      ],
       bundle: true,
       write: false,
       platform: 'browser',
       format: 'iife',
       jsx: 'automatic',
-    }).outputFiles[0].text;
+    });
+    const script = bundled.outputFiles[0].text;
     const font = readFileSync('public/fonts/FSPixelSansUnicode-Regular.ttf').toString('base64');
     const page = await browser.newPage();
     await page.route('**/*', (route) => route.abort());

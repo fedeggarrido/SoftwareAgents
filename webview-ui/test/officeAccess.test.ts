@@ -3,12 +3,21 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { officeAccessView, setOfficeAccess } from '../src/office/accessStore.js';
-import { setConnectionStatus } from '../src/office/connectionStatus.js';
+import { getConnectionStatus, setConnectionStatus } from '../src/office/connectionStatus.js';
 
 const runtime = vi.hoisted(() => ({ browser: true }));
 vi.mock('../src/runtime.js', () => ({
   get isBrowserRuntime() {
     return runtime.browser;
+  },
+}));
+vi.mock('../src/transport/index.js', () => ({
+  transport: {
+    get state() {
+      return getConnectionStatus().state ?? 'connected';
+    },
+    onStateChange: () => () => {},
+    reconnect: vi.fn(),
   },
 }));
 // Keep TSX outside the node-only test TypeScript project.
@@ -24,9 +33,31 @@ afterEach(() => {
 });
 
 describe('SA-116 permanent office mode', () => {
+  it('warns in Settings when persistence is unavailable', async () => {
+    setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null, persistent: false });
+    expect(
+      officeAccessView(
+        { type: 'officeAccess', privileged: true, reason: null, persistent: false },
+        false,
+      ).explanation,
+    ).toContain('dura mientras Pixel Agents siga abierto');
+    const settingsPath = '../src/components/SettingsModal.js';
+    const { SettingsModal } = await import(settingsPath);
+    const html = renderToStaticMarkup(
+      createElement(SettingsModal, {
+        isOpen: true,
+        onClose: () => {},
+        externalAssetDirectories: [],
+      }),
+    );
+    expect(html).toContain('no sobrevivirá a los reinicios');
+    expect(html).toContain('role="alert"');
+    expect(html).toMatch(/<details[^>]*><summary>Detalles<\/summary>/);
+    expect(html).toContain('Copiar token para CLI');
+  });
   it.each([
-    ['unavailable', 'reconnecting', 'terminal donde lo lanzaste'],
-    ['unauthorized', 'disconnected', 'La URL de acceso no es válida'],
+    ['unavailable', 'reconnecting', 'La oficina está cerrada en tu ordenador'],
+    ['unauthorized', 'disconnected', 'El acceso de esta pestaña ha caducado'],
     ['origin', 'disconnected', 'ha rechazado el origen'],
   ] as const)(
     'names the office connection and explains %s in the badge',
@@ -39,7 +70,7 @@ describe('SA-116 permanent office mode', () => {
         retryAt: null,
       });
       const html = await indicator();
-      expect(html).toContain('conexión con la oficina');
+      expect(html).toContain('Reintentar ahora');
       expect(html).toContain(text);
     },
   );
@@ -55,9 +86,16 @@ describe('SA-116 permanent office mode', () => {
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     const html = await indicator();
     expect(html).toContain('Solo lectura');
-    expect(html).toContain('La URL de acceso no es válida');
-    expect(html).toContain('inicia pixel-agents tú mismo en tu terminal');
-    expect(html).toContain('URL con token que imprime');
+    expect(html).toContain(
+      'Puedes consultar la oficina. Para hacer cambios necesitas acceso de operador.',
+    );
+    const view = officeAccessView(
+      { type: 'officeAccess', privileged: false, reason: 'token_required' },
+      false,
+    );
+    expect(view.details).toContain('enlace de un solo uso que muestra la terminal');
+    expect(view.details).toContain('pixel-agents open');
+    expect(html).not.toContain('terminal');
     expect(html).not.toContain('role="alert"');
   });
 
@@ -65,8 +103,8 @@ describe('SA-116 permanent office mode', () => {
     setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
     const html = await indicator();
     expect(html).toContain('Operador');
-    expect(html).toContain('Recargar la página quita el modo operador');
-    expect(html).toContain('vuelve a abrir la URL de la terminal');
+    expect(html).toContain('recupera la conexión cuando reinicias Pixel Agents');
+    expect(html).toContain('revocar su acceso desde Settings');
     expect(officeAccessView(null, false)).toMatchObject({
       label: 'Conectando con la oficina…',
       blocked: false,

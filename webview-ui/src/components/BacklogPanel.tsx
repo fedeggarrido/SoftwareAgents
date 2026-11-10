@@ -6,6 +6,7 @@ import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { taskPullRequestLabel } from '../office/prStatusView.js';
+import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { PanelHeading } from './ui/PanelHeading.js';
 
@@ -226,6 +227,7 @@ export function BacklogPanel({
         <div className="text-xs text-text-muted">
           {view.message}
           {view.configurationHint && <div>{view.configurationHint}</div>}
+          <OfficeRecoveryActions project />
         </div>
       )}
       {view.clickupLink && (

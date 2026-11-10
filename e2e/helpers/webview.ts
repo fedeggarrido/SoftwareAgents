@@ -509,7 +509,7 @@ export async function setSettings(frame: WebviewSurface, settings: WebviewSettin
     await setCheckbox(settingsModal, 'Watch All Sessions', settings.watchAllSessions);
   }
   if (settings.hooksEnabled !== undefined) {
-    await setCheckbox(settingsModal, 'Instant Detection (Hooks)', settings.hooksEnabled);
+    await setCheckbox(settingsModal, 'Detección instantánea (hooks)', settings.hooksEnabled);
   }
   if (settings.alwaysShowLabels !== undefined) {
     await setCheckbox(settingsModal, 'Always Show Labels', settings.alwaysShowLabels);

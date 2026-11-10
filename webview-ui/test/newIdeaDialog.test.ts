@@ -342,7 +342,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   });
 
   it.each([
-    [false, 'token_required', 'Abre Pixel Agents en tu ordenador'],
+    [false, 'token_required', 'Para hacer cambios necesitas acceso de operador'],
     [true, 'managed_process', 'Esta oficina se inició desde un agente'],
   ] as const)(
     'SA-116 explains restricted access before the interview (%s, %s)',
@@ -473,7 +473,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   it('explains read-only preparation and refuses unsupported adapters without a creation form', async () => {
     await render();
     respond({ projectId: null, canSubmit: false, errorCode: 'denied' });
-    expect(await render()).toContain('Abre Pixel Agents en tu ordenador');
+    expect(await render()).toContain('pixel-agents open');
     expect(await render()).not.toContain('<textarea');
     expect(await render()).not.toContain('Reintentar lectura de ideas');
     expect(await render()).not.toContain('role="alert"');

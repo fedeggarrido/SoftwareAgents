@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { openOffice, shouldOpenOffice } from '../src/openOffice.js';
+import { openOffice, presentOfficeAccess, shouldOpenOffice } from '../src/openOffice.js';
 
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), on: vi.fn(), unref: vi.fn() }));
 vi.mock('child_process', () => ({ spawn: mocks.spawn }));
@@ -64,5 +64,54 @@ it.each(['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])(
   (key) => {
     vi.stubEnv(key, '');
     expect(shouldOpenOffice(false, true, true, {})).toBe(false);
+  },
+);
+
+function humanTerminal() {
+  for (const key of [
+    'SA_MANAGED_EXECUTION',
+    'SA_AUTOPILOT',
+    'SA_WORKER',
+    'CLAUDECODE',
+    'CI',
+    'VITEST',
+    'PLAYWRIGHT',
+    'PIXEL_AGENTS_NO_OPEN',
+    'NODE_ENV',
+  ])
+    vi.stubEnv(key, undefined);
+  vi.spyOn(process, 'stdin', 'get').mockReturnValue({ isTTY: true } as typeof process.stdin);
+  vi.spyOn(process, 'stdout', 'get').mockReturnValue({ isTTY: true } as typeof process.stdout);
+}
+
+it.each(['--no-open', 'PIXEL_AGENTS_NO_OPEN'])(
+  'prints a one-time link on an interactive human start with %s',
+  async (mode) => {
+    humanTerminal();
+    if (mode === 'PIXEL_AGENTS_NO_OPEN') vi.stubEnv('PIXEL_AGENTS_NO_OPEN', '1');
+    const url = `http://127.0.0.1:1234/?open=${'c'.repeat(64)}`;
+    const getUrl = vi.fn().mockResolvedValue(url);
+    const log = vi.fn();
+    await presentOfficeAccess(getUrl, mode === '--no-open', log);
+    expect(getUrl).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(url));
+    expect(log).toHaveBeenCalledWith('Si caduca: pixel-agents open');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE', 'no TTY'])(
+  'issues no link at startup with %s',
+  async (mode) => {
+    humanTerminal();
+    if (mode === 'no TTY')
+      vi.spyOn(process, 'stdin', 'get').mockReturnValue({ isTTY: false } as typeof process.stdin);
+    else vi.stubEnv(mode, '');
+    const getUrl = vi.fn();
+    const log = vi.fn();
+    await presentOfficeAccess(getUrl, true, log);
+    expect(getUrl).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
   },
 );

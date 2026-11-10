@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { isIP } from 'net';
 
@@ -35,7 +35,10 @@ export function registerOfficeBootstrap(
   currentToken: () => string,
   authenticate: (request: FastifyRequest) => boolean,
 ): void {
-  const pending = new Map<string, { expires: number; token: string }>();
+  const digest = (code: string) => createHash('sha256').update(code).digest();
+  type PendingCode = { digest: Buffer; expires: number; token: string };
+  const pending = new Set<PendingCode>();
+  const emptyDigest = digest('');
   let windowStart = Date.now();
   let attempts = 0;
   const guard = (request: FastifyRequest) => {
@@ -56,9 +59,10 @@ export function registerOfficeBootstrap(
       !authenticate(request)
     )
       return reply.code(403).send({ error: 'unavailable' });
-    for (const [code, entry] of pending) if (Date.now() >= entry.expires) pending.delete(code);
+    for (const entry of pending) if (Date.now() >= entry.expires) pending.delete(entry);
     const code = randomBytes(OFFICE_BOOTSTRAP_BYTES).toString('hex');
-    pending.set(code, {
+    pending.add({
+      digest: digest(code),
       expires: Date.now() + OFFICE_BOOTSTRAP_TTL_MS,
       token: currentToken(),
     });
@@ -72,12 +76,21 @@ export function registerOfficeBootstrap(
       const status = guard(request);
       if (status) return reply.code(status).send({ error: 'unavailable' });
       const code = typeof request.body?.code === 'string' ? request.body.code : '';
-      const entry = pending.get(code);
-      if (entry && Date.now() >= entry.expires) pending.delete(code);
-      if (!entry || Date.now() >= entry.expires || entry.token !== currentToken())
+      const supplied = digest(code);
+      // Scan every entry, including after a match. Empty/malformed/replayed codes
+      // follow the same comparison and rejection path, even with no pending entries.
+      timingSafeEqual(supplied, emptyDigest);
+      let match: PendingCode | undefined;
+      const now = Date.now();
+      for (const entry of pending) {
+        const equal = timingSafeEqual(supplied, entry.digest);
+        if (equal) match = entry;
+        if (now >= entry.expires) pending.delete(entry);
+      }
+      if (!match || now >= match.expires || match.token !== currentToken())
         return reply.code(403).send({ error: 'unavailable' });
-      const token = entry.token;
-      pending.delete(code);
+      const token = match.token;
+      pending.delete(match);
       return { token };
     },
   );

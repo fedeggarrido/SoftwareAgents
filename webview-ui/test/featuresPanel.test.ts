@@ -121,7 +121,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       },
     });
     const html = await render();
-    expect(html).toContain('Abre Pixel Agents en tu ordenador');
+    expect(html).toContain('pixel-agents open');
     expect(html).not.toContain('No se pudieron leer las ideas');
     expect(html).not.toContain('role="alert"');
     expect(html).not.toContain('Reintentar');

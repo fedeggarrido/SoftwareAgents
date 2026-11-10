@@ -9,9 +9,10 @@ import {
   OFFICE_MANAGED_LABEL,
   OFFICE_OPERATOR_EXPLANATION,
   OFFICE_OPERATOR_LABEL,
+  OFFICE_READ_ONLY_EXPLANATION,
   OFFICE_READ_ONLY_LABEL,
 } from '../../../core/src/officeAccess.js';
-import { OFFICE_HANDSHAKE_TEXT, OFFICE_INVALID_ACCESS_TEXT } from '../constants.js';
+import { OFFICE_HANDSHAKE_TEXT } from '../constants.js';
 
 let current: OfficeAccess | null = null;
 const listeners = new Set<() => void>();
@@ -46,6 +47,7 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
         : OFFICE_OPERATOR_LABEL,
     blocked: !privileged || managed,
     pending: false,
+    details: !privileged ? OFFICE_ACCESS_INSTRUCTIONS : undefined,
     explanation: managed
       ? OFFICE_MANAGED_EXPLANATION
       : embedded
@@ -54,6 +56,6 @@ export function officeAccessView(access: OfficeAccess | null, embedded: boolean)
           ? access?.persistent === false
             ? OFFICE_EPHEMERAL_OPERATOR_EXPLANATION
             : OFFICE_OPERATOR_EXPLANATION
-          : `${OFFICE_INVALID_ACCESS_TEXT} ${OFFICE_ACCESS_INSTRUCTIONS}`,
+          : OFFICE_READ_ONLY_EXPLANATION,
   };
 }

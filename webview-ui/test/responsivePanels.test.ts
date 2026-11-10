@@ -69,6 +69,28 @@ async function expectControlsClear(page: Page) {
   expect(title.y + title.height).toBeLessThanOrEqual(viewport.height);
 }
 
+async function expectAccessHelpClear(page: Page) {
+  await expect
+    .poll(async () => {
+      const help = (await page.locator('#office-mode-explanation').boundingBox())!;
+      const hud = (await page.getByTestId('company-hud').boundingBox())!;
+      const clear =
+        help.x >= hud.x + hud.width || help.x + help.width <= hud.x || help.y >= hud.y + hud.height;
+      return clear && help.y + help.height <= page.viewportSize()!.height;
+    })
+    .toBe(true);
+  const help = page.locator('#office-mode-explanation');
+  expect(await help.textContent()).toContain(
+    'Puedes consultar la oficina. Para hacer cambios necesitas acceso de operador.',
+  );
+  expect(await help.textContent()).toContain(
+    'Detalles: Para tener acceso de operador, abre la oficina desde el enlace de un solo uso que muestra la terminal o con pixel-agents open.',
+  );
+  const box = (await help.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+}
+
 async function expectWindowOwnsHeading(page: Page, name: string) {
   const panel = page.getByRole('tabpanel', { name, exact: true });
   expect(await panel.count()).toBe(1);
@@ -98,7 +120,7 @@ async function boot(page: Page) {
   const messages = [
     { type: 'layoutLoaded', layout: null },
     board,
-    { type: 'officeAccess', privileged: true, reason: 'managed_process' },
+    { type: 'officeAccess', privileged: false, reason: 'token_required' },
     {
       type: 'executorState',
       projectId: 'demo',
@@ -231,6 +253,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.goto('http://office-window.test/');
       await page.addScriptTag({ content: script });
       await boot(page);
+      await page.locator('.office-mode-indicator button[aria-controls]').click();
+      await expectAccessHelpClear(page);
+      await page.keyboard.press('Escape');
       const windowPanel = page.locator('[data-testid="panel-window"]:visible');
       const backlog = page.getByRole('button', { name: 'Backlog', exact: true });
       const canvas = page.locator('canvas').first();
@@ -293,10 +318,13 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();
         await page.locator('.office-mode-indicator button[aria-controls]').click();
         await page.locator('#office-mode-explanation').waitFor();
+        await expectAccessHelpClear(page);
         await expectControlsClear(page);
         await page.setViewportSize({ width: width === 1024 ? 1440 : 1024, height: 844 });
+        await expectAccessHelpClear(page);
         await expectControlsClear(page);
         await page.setViewportSize({ width, height: 844 });
+        await expectAccessHelpClear(page);
         await expectControlsClear(page);
         await page.locator('.office-mode-indicator button[aria-controls]').click();
         await page.getByTestId('company-hud').locator('button[aria-expanded]').first().click();

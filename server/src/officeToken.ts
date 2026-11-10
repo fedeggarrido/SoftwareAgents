@@ -39,7 +39,11 @@ function applyCredentialProtection(file: string): void {
     fs.chmodSync(file, PRIVATE_FILE_MODE);
     return;
   }
-  const options = { windowsHide: true, timeout: PRIVATE_COMMAND_TIMEOUT_MS };
+  const options = {
+    windowsHide: true,
+    timeout: PRIVATE_COMMAND_TIMEOUT_MS,
+    stdio: 'pipe' as const,
+  };
   const systemDir = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
   const identity = execFileSync(
     path.join(systemDir, 'whoami.exe'),
@@ -54,7 +58,7 @@ function applyCredentialProtection(file: string): void {
     options,
   );
   // Verify the effective DACL independently. icacls can retain explicit grants.
-  const script = `$ErrorActionPreference = 'Stop'; $acl = Get-Acl -LiteralPath '${file.replace(/'/g, "''")}'; $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])); if (!$acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IsInherited -or $rules[0].IdentityReference.Value -ne '${sid}' -or $rules[0].AccessControlType -ne 'Allow' -or $rules[0].FileSystemRights -ne 'FullControl') { exit 1 }; 'verified'`;
+  const script = `$ProgressPreference = 'SilentlyContinue'; $ErrorActionPreference = 'Stop'; $acl = Get-Acl -LiteralPath '${file.replace(/'/g, "''")}'; $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])); if (!$acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IsInherited -or $rules[0].IdentityReference.Value -ne '${sid}' -or $rules[0].AccessControlType -ne 'Allow' -or $rules[0].FileSystemRights -ne 'FullControl') { exit 1 }; 'verified'`;
   const result = execFileSync(
     path.join(systemDir, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     [

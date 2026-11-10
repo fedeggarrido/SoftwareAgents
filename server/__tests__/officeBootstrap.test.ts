@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'crypto';
 import { Writable } from 'stream';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -5,6 +6,11 @@ import { OFFICE_EXCHANGE_PATH, OFFICE_OPEN_PATH } from '../../core/src/constants
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { OFFICE_BOOTSTRAP_RATE_LIMIT, OFFICE_BOOTSTRAP_TTL_MS } from '../src/constants.js';
 import { createHttpServer } from '../src/httpServer.js';
+
+vi.mock('crypto', async (original) => {
+  const crypto = await original<typeof import('crypto')>();
+  return { ...crypto, timingSafeEqual: vi.fn(crypto.timingSafeEqual) };
+});
 
 let app: Awaited<ReturnType<typeof createHttpServer>>['app'];
 const token = 'persistent-token-test-fixture';
@@ -89,6 +95,30 @@ it('rejects invalid codes and preserves the unused valid code', async () => {
   const value = await code();
   expect((await exchange('wrong')).statusCode).toBe(403);
   expect((await exchange(value)).statusCode).toBe(200);
+});
+
+it('compares fixed-size SHA-256 digests for every pending entry on hits and misses', async () => {
+  const first = await code();
+  const second = await code();
+  const compare = vi.mocked(timingSafeEqual);
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  for (const value of ['wrong', '', 'a'.repeat(128), first]) {
+    compare.mockClear();
+    const response = await exchange(value);
+    expect(response.statusCode).toBe(value === first ? 200 : 403);
+    expect(compare).toHaveBeenCalledWith(digest(value), digest(first));
+    expect(compare).toHaveBeenCalledWith(digest(value), digest(second));
+    expect(compare).toHaveBeenCalledTimes(3);
+    for (const [supplied, stored] of compare.mock.calls) {
+      expect(supplied.byteLength).toBe(32);
+      expect(stored.byteLength).toBe(32);
+    }
+  }
+  expect((await exchange(first)).json()).toEqual({ error: 'unavailable' });
+  expect((await exchange(second)).json()).toEqual({ token });
+  compare.mockClear();
+  expect((await exchange('missing')).json()).toEqual({ error: 'unavailable' });
+  expect(compare).toHaveBeenCalledOnce();
 });
 
 it.each([

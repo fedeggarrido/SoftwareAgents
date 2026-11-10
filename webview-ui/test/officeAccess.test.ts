@@ -86,7 +86,15 @@ describe('SA-116 permanent office mode', () => {
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     const html = await indicator();
     expect(html).toContain('Solo lectura');
-    expect(html).toContain('Abre Pixel Agents en tu ordenador');
+    expect(html).toContain(
+      'Puedes consultar la oficina. Para hacer cambios necesitas acceso de operador.',
+    );
+    const view = officeAccessView(
+      { type: 'officeAccess', privileged: false, reason: 'token_required' },
+      false,
+    );
+    expect(view.details).toContain('enlace de un solo uso que muestra la terminal');
+    expect(view.details).toContain('pixel-agents open');
     expect(html).not.toContain('terminal');
     expect(html).not.toContain('role="alert"');
   });

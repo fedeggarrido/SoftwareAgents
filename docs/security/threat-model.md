@@ -338,14 +338,20 @@ ni seguridad semántica de sus resúmenes.
   un token en memoria por ejecución; Settings avisa de que no sobrevivirá al
   reinicio. Las copias standalone de discovery también exigen protección
   verificada antes de escribir; si no se consigue, no se publican.
-  El CLI imprime únicamente la dirección pública. El lanzador recibe un código
+  El CLI nunca imprime el token persistente. El lanzador recibe un código
   aleatorio de 32 bytes, de un solo uso y con TTL de 60 segundos centralizado
   en constantes. La SPA lo retira de la URL antes de intercambiarlo por el token.
   Emisión exige Bearer y proceso humano sin Origin. Emisión e intercambio exigen
   peer y Host loopback y rechazan Origin ajeno, con límite común de 20 intentos
   por minuto por proceso, incluidos fallos. Respuestas no-store y redacción de
   códigos en logs; solo memoria, sin reintentos de intercambio. Rotar invalida
-  códigos pendientes. Ni el token ni el código se imprimen.
+  códigos pendientes. Solo se guardan digests SHA-256 de los códigos y el
+  intercambio compara todas las entradas con timingSafeEqual, sin búsqueda por
+  el secreto. El arranque humano interactivo sin auto-open imprime un enlace
+  efímero y «Si caduca: pixel-agents open». El comando open autentica el registro
+  local mediante prueba HMAC antes de enviar Bearer a loopback y abre o imprime
+  otro enlace de un solo uso; rechaza los marcadores gestionados existentes.
+  Los arranques sin TTY o gestionados no imprimen enlaces de acceso.
   Auto-open exige stdin y stdout TTY, sin marcadores gestionados, CI, VITEST,
   PLAYWRIGHT, NODE_ENV=test, PIXEL_AGENTS_NO_OPEN ni `--no-open`.
 - **Riesgo residual aceptado de SA-144.** Reiniciar deja de revocar un token
@@ -358,7 +364,8 @@ ni seguridad semántica de sus resúmenes.
   Se mantienen los gates de conexión y el bind loopback predeterminado.
   La capacidad puede leerse en el perfil, discovery, memoria y herramientas del
   navegador. El código efímero puede verse en argumentos del lanzador o capturas
-  de la navegación inicial: un proceso que lo robe y lo canjee dentro del plazo,
+  de la navegación inicial o en la terminal cuando el operador pide el enlace:
+  un proceso que lo robe y lo canjee dentro del plazo,
   antes que la página, obtiene la capacidad. Un proceso del mismo
   usuario puede suplantar el listener del puerto guardado para recibir el
   token que una pestaña envía al reintentar. El handshake no autentica al servidor.

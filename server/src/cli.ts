@@ -54,7 +54,7 @@ import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
-import { openOffice, shouldOpenOffice } from './openOffice.js';
+import { presentOfficeAccess, runOpenCommand } from './openOffice.js';
 import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
@@ -113,6 +113,7 @@ Opciones:
   --help               Mostrar esta ayuda
 
 Comandos:
+  open [--no-open]       Abrir la oficina con acceso de operador de un solo uso
   ${PROJECT_INIT_HELP.replace('pixel-agents ', '')}  Preparar el proyecto
   feature <acción>      Preparar requisitos y diseño, aprobar y ejecutar el flujo de una feature
   research <acción>     Investigar una pregunta o contrastar una feature construida con su plan
@@ -196,6 +197,8 @@ export async function dispatchCli(
     designCaptureHost();
   } else if (argv[0] === 'token') {
     await runTokenCommand(argv.slice(1));
+  } else if (argv[0] === 'open') {
+    await runOpenCommand(argv.slice(1));
   } else if (argv[0] === 'project') {
     await runProjectCommand(argv.slice(1));
   } else if (argv[0] === 'design') {
@@ -519,18 +522,16 @@ async function startServer(argv: string[]): Promise<void> {
     );
     machineCapacity.start();
 
-    // Logs carry only the public address. Interactive human startup opens the
-    // capability directly in the browser. Managed processes never launch a browser.
+    // The public address grants no access. Only interactive human starts receive
+    // a one-time link, opened in the browser or printed when --no-open is set.
     const displayHost =
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
     const officeUrl = `http://${displayHost.includes(':') ? `[${displayHost}]` : displayHost}:${config.port}/`;
     console.log(`\n  Pixel Agents server running at ${officeUrl}\n`);
-    if (shouldOpenOffice(args.noOpen)) {
-      try {
-        openOffice(await server.officeOpenUrl());
-      } catch {
-        console.error('No se pudo abrir Pixel Agents en el navegador.');
-      }
+    try {
+      await presentOfficeAccess(() => server.officeOpenUrl(), args.noOpen);
+    } catch {
+      console.error('No se pudo abrir Pixel Agents. Para reintentar: pixel-agents open');
     }
 
     // ── Graceful shutdown ──

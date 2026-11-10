@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 
 import { OFFICE_HELP_Z_INDEX } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
+import { useOfficeHelpPlacement } from '../hooks/useOfficeHelpPlacement.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
 import { isBrowserRuntime } from '../runtime.js';
@@ -17,6 +18,8 @@ export function OfficeModeIndicator() {
   const explanation = view.explanation;
   const [expanded, setExpanded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  useOfficeHelpPlacement(expanded && !offline, popupRef);
   useDismissibleLayer(
     expanded,
     () => {
@@ -46,11 +49,13 @@ export function OfficeModeIndicator() {
           </Button>
           {expanded && (
             <div
+              ref={popupRef}
               id="office-mode-explanation"
               role="status"
-              className="pixel-panel p-10 w-256 max-w-full text-sm"
+              className="pixel-panel p-10 w-256 max-w-full text-sm overflow-y-auto"
             >
               <p>{explanation}</p>
+              {view.details && <p>Detalles: {view.details}</p>}
               <OfficeRecoveryActions />
             </div>
           )}

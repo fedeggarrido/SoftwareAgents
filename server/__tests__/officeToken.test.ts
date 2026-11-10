@@ -102,6 +102,28 @@ it('verifies the ACL on an empty temporary before writing and publishing the sec
   expect(mocks.exec.mock.calls.some(([command]) => command.endsWith('powershell.exe'))).toBe(true);
 });
 
+it('suppresses PowerShell progress and captures child stdout/stderr, including CLIXML on failure', () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  mocks.exec.mockImplementation((command: string, args: string[], options) => {
+    expect(options.stdio).toBe('pipe');
+    if (command.endsWith('whoami.exe')) return Buffer.from(sid);
+    if (command.endsWith('powershell.exe')) {
+      expect(args).toContain('-NoProfile');
+      expect(args).toContain('-NonInteractive');
+      const script = Buffer.from(args[args.indexOf('-EncodedCommand') + 1], 'base64').toString(
+        'utf16le',
+      );
+      expect(script).toContain("$ProgressPreference = 'SilentlyContinue'");
+      throw Object.assign(new Error('PowerShell failed'), {
+        stderr: Buffer.from('#< CLIXML <Objs>progress</Objs>'),
+      });
+    }
+    return Buffer.from('');
+  });
+  expect(loadOfficeCredential().persistent).toBe(false);
+  expect(error).not.toHaveBeenCalled();
+});
+
 it.each(['EPERM', 'ENOENT', 'EACCES'])(
   'falls back without writing a secret if whoami fails with %s',
   (code) => {

@@ -8,10 +8,19 @@ SA-075: Fastify redacta los valores query `token` (también claves codificadas y
 repetidas) en HTTP y upgrades WS; las cabeceras Authorization se omiten del
 serializador de petición y se redactan si se registran explícitamente. No se
 registran mensajes WS controlados por el cliente. AuditLog ya redacta tokens y
-Authorization. Desde SA-144 el CLI imprime únicamente la dirección pública.
+Authorization. Desde SA-144 el CLI nunca imprime el token persistente.
 El arranque humano requiere stdin y stdout TTY para abrir el navegador. No abre
 con CI, VITEST, PLAYWRIGHT, NODE_ENV=test, PIXEL_AGENTS_NO_OPEN, los marcadores
 gestionados existentes ni `--no-open`.
+
+Si el arranque humano interactivo no abre el navegador (`--no-open` o
+`PIXEL_AGENTS_NO_OPEN`), imprime un enlace de un solo uso válido durante 60 s y
+«Si caduca: pixel-agents open». Los arranques sin TTY y los procesos gestionados
+no imprimen enlaces de acceso. `pixel-agents open` autentica el registro local
+`server.json` mediante la prueba HMAC del servidor en `127.0.0.1`, pide un código
+nuevo por Bearer en loopback y abre el navegador o imprime el enlace.
+`pixel-agents open --no-open` fuerza la impresión. Rechaza los mismos marcadores
+gestionados antes de leer discovery o contactar con el servidor.
 
 El lanzador recibe `/?open=<código aleatorio>`, nunca el token persistente.
 `POST /api/office/open` requiere Bearer, proceso humano y petición sin Origin;
@@ -20,7 +29,9 @@ La SPA retira `open` con `replaceState` antes de esperar la red y lo intercambia
 una vez por el token con `POST /api/office/exchange`. No reintenta el intercambio.
 Ambas rutas requieren peer y Host loopback, rechazan Origin ajeno y comparten
 un límite por proceso de 20 peticiones por minuto, incluidas las fallidas.
-Las respuestas usan no-store; los códigos solo existen en memoria, se invalidan
+Las respuestas usan no-store; solo los digests SHA-256 de los códigos quedan en
+memoria y se comparan con `timingSafeEqual` recorriendo todas las entradas, con
+el mismo rechazo para códigos ausentes, caducados o reutilizados. Se invalidan
 con la rotación y se redactan en logs, también en queries repetidas o codificadas.
 Un fallo de intercambio deja el acceso habitual de lectura.
 

@@ -42,6 +42,25 @@ export default defineConfig([
     },
   },
   {
+    // SA-155 honest types and size for product code (see the root eslint.config.mjs).
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'pixel-agents/no-double-cast': 'error',
+      'pixel-agents/assertion-safety': 'warn',
+      'max-lines': ['warn', { max: 1000, skipBlankLines: false, skipComments: false }],
+    },
+  },
+  {
+    // Shrink-only list of files that predate SA-155 and still use `as unknown as`.
+    files: [
+      'src/App.tsx',
+      'src/hooks/useEditorActions.ts',
+      'src/runtime.ts',
+      'src/transport/webSocketTransport.ts',
+    ],
+    rules: { 'pixel-agents/no-double-cast': 'off' },
+  },
+  {
     files: ['src/constants.ts', 'src/fonts/**', 'src/office/sprites/**'],
     rules: {
       'pixel-agents/no-inline-colors': 'off',

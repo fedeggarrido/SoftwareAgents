@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
+import { backlogPulse } from '../office/backlogGroups.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import { capacityHudView, capacityView, visibleProviderCounts } from '../office/capacityView.js';
@@ -182,6 +183,8 @@ export function CompanyHud({
   const withoutSignal = active.filter(
     (i) => i.owner?.stale || !i.agentIds.some((id) => officeState.characters.get(id)?.isActive),
   ).length;
+  // Same three numbers as the Trabajo panel strip, from the same policy (SA-152).
+  const pulse = backlogPulse(board.items.map((i) => i.phase));
   const pilotStatus = ap ? (AUTOPILOT_TEXT[ap.status ?? ''] ?? ap.status ?? 'sin estado') : null;
 
   return (
@@ -191,7 +194,7 @@ export function CompanyHud({
     >
       <div className="flex items-center justify-between gap-8 min-w-0">
         <button
-          className="flex min-w-0 items-center gap-5 text-left text-xs text-text cursor-pointer hover:text-accent-bright"
+          className="hud-project flex min-w-0 items-center gap-5 text-left text-text cursor-pointer hover:text-accent-bright"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           title={open ? 'Ocultar detalles' : 'Ver detalles de la oficina'}
@@ -220,18 +223,10 @@ export function CompanyHud({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-10 gap-y-5">
         <div className="flex min-w-0 flex-wrap items-center gap-4">
-          {(by.ACTIVE ?? 0) + (by.LEASED ?? 0) + (by.RUNNING ?? 0) > 0 && (
-            <StatusChip
-              text={`${(by.ACTIVE ?? 0) + (by.LEASED ?? 0) + (by.RUNNING ?? 0)} en curso`}
-              color={PHASE_COLORS.ACTIVE}
-            />
-          )}
-          {(by.AWAITING_REVIEW ?? 0) + (by.REVIEW ?? 0) + (by.QA ?? 0) > 0 && (
-            <StatusChip
-              text={`${(by.AWAITING_REVIEW ?? 0) + (by.REVIEW ?? 0) + (by.QA ?? 0)} en revisión`}
-              color={PHASE_COLORS.AWAITING_REVIEW}
-            />
-          )}
+          <span className="hud-pulse" data-testid="hud-pulse">
+            <strong>{pulse.working}</strong> trabajando · <strong>{pulse.needsYou}</strong> te
+            necesitan · <strong>{pulse.blocked}</strong> bloqueadas
+          </span>
           {board.manager?.stale && (
             <StatusChip text="Manager sin latido" color={PHASE_COLORS.BLOCKED} />
           )}

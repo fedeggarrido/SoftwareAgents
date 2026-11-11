@@ -1,3 +1,15 @@
+/** One stacking scale for the office, including portalled UI. */
+export const UI_LAYERS = {
+  office: 0,
+  hud: 10,
+  panel: 20,
+  agentCard: 21,
+  notices: 30,
+  connection: 31,
+  modal: 40,
+  modalContent: 41,
+} as const;
+
 import type { ColorValue } from './components/ui/types.js';
 
 export const WORK_STATE = {
@@ -250,18 +262,13 @@ export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32;
-/** Above the office panel window, below modal dialogs. */
-export const SELECTED_AGENT_OVERLAY_Z_INDEX = 46;
 
 // ── Greeter + Intro bubble ──────────────────────────────────
 /** Reserved character id for the Intro's greeter. Far outside both real agent
  *  ids (positive) and sub-agent ids (small negatives from -1 down). */
 export const GREETER_ID = -1_000_000_000;
-/** Stacking order for the Intro's bubble. Deliberately BELOW the modal stack
- *  (ui/Modal defaults to 50, ChangelogModal 51, the migration notice z-100): the
- *  Intro is diegetic furniture over the office, not a modal, so a modal opened
- *  on top of it must cover it rather than slide underneath. */
-export const INTRO_BUBBLE_Z_INDEX = 45;
+/** Intro notices follow the shared scale and remain below modal dialogs. */
+export const INTRO_BUBBLE_Z_INDEX = UI_LAYERS.notices;
 /** The greeter stands this many tiles in from the office's bottom-left corner
  *  (target tile (margin, rows-1-margin); nearest walkable tile if blocked). */
 export const GREETER_TILE_MARGIN = 3;
@@ -456,7 +463,7 @@ export const PANEL_WINDOW_STORAGE_KEY = 'pixel-agents.panel-window.v1';
 export const PANEL_MOBILE_BREAKPOINT_PX = 480;
 export const DOCK_MOBILE_BREAKPOINT_PX = 768;
 export const DOCK_ICON_SIZE_PX = 16;
-export const DOCK_SHEET_Z_INDEX = 46;
+export const DOCK_SHEET_Z_INDEX = UI_LAYERS.panel;
 export const PANEL_WINDOW_DEFAULT_WIDTH_PX = 720;
 export const PANEL_WINDOW_DEFAULT_HEIGHT_PX = 520;
 export const PANEL_WINDOW_MIN_WIDTH_PX = 320;
@@ -467,15 +474,14 @@ export const PANEL_WINDOW_DEFAULT_TOP_PX = 104;
 export const PANEL_WINDOW_TITLE_HEIGHT_PX = 44;
 export const PANEL_WINDOW_MOVE_STEP_PX = 16;
 export const PANEL_WINDOW_RESIZE_STEP_PX = 16;
-export const PANEL_WINDOW_Z_INDEX = 44;
-export const MODAL_Z_INDEX = 50;
-export const OFFICE_HELP_Z_INDEX = 20;
-export const MIGRATION_NOTICE_Z_INDEX = 100;
+export const PANEL_WINDOW_Z_INDEX = UI_LAYERS.panel;
+export const MODAL_Z_INDEX = UI_LAYERS.modal;
+export const OFFICE_HELP_Z_INDEX = UI_LAYERS.notices;
 export const PANEL_TABS = [
-  { id: 'backlog', label: 'Backlog' },
+  { id: 'backlog', label: 'Trabajo' },
   { id: 'decisions', label: 'Decisiones' },
   { id: 'audit', label: 'Auditoría' },
-  { id: 'features', label: 'Features' },
+  { id: 'features', label: 'Funcionalidades' },
   { id: 'meeting', label: 'Reuniones' },
 ] as const;
 
@@ -483,13 +489,7 @@ export const AGENT_HISTORY_LIMIT = 10;
 export const AGENT_CARD_WIDTH_PX = 380;
 export const AGENT_CARD_MAX_HEIGHT_PX = 520;
 export const AGENT_CARD_GAP_PX = 16;
-export const AGENT_CARD_Z_INDEX = 48;
-export const AGENT_CARD_STATUS_CLASSES = {
-  active: 'bg-status-active',
-  attention: 'bg-status-permission',
-  error: 'bg-status-error',
-  available: 'bg-status-success',
-} as const;
+export const AGENT_CARD_Z_INDEX = UI_LAYERS.agentCard;
 export const RELATIVE_SECOND_MS = 1000;
 export const RELATIVE_MINUTE_MS = 60_000;
 export const RELATIVE_HOUR_MS = 3_600_000;
@@ -571,3 +571,125 @@ export const AUDIT_DETAIL_FIELDS = [
 export const FEATURE_PLAN_PREVIEW_ITEMS = 3;
 export const FEATURE_PLAN_REVISION_CHARS = 8;
 export const OFFICE_BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000;
+
+export const TEXT_SIZE_STORAGE_KEY = 'pixel-agents.text-size.v1';
+export const EXTERNAL_SESSION_LABEL = 'Abierta por ti';
+export const EXTERNAL_SESSION_TOOLTIP =
+  'La oficina la observa, pero no la asignó; no hay motivo de selección de modelo registrado';
+export const CHARACTER_ACTIVITY_TEXT = {
+  working: 'Trabajando',
+  waiting: 'En espera',
+  needs_you: 'Necesita tu aprobación',
+  meeting: 'En reunión',
+} as const;
+export const TOOL_STATUS_TRANSLATIONS: Readonly<Record<string, string>> = {
+  'Searching files': 'Buscando archivos',
+  'Searching code': 'Buscando en el código',
+  'Fetching web content': 'Consultando una página web',
+  'Searching the web': 'Buscando en la web',
+  'Running subtask': 'Ejecutando subtarea',
+  'Editing notebook': 'Editando cuaderno',
+  'Waiting for input': 'Esperando tu respuesta',
+  'Needs approval': 'Necesita tu aprobación',
+  Idle: 'En espera',
+  'Waiting for your answer': 'Esperando tu respuesta',
+  'Creating team': 'Creando equipo',
+  'Sending message': 'Enviando mensaje',
+  Using: 'Usando herramienta',
+  Planning: 'Planificando',
+  Thinking: 'Pensando',
+  Reading: 'Leyendo',
+  Editing: 'Editando',
+  Writing: 'Escribiendo',
+  Running: 'Ejecutando',
+  Searching: 'Buscando',
+  Globbing: 'Buscando archivos',
+  Fetching: 'Consultando',
+  'Subtask:': 'Subtarea:',
+  'Task:': 'Tarea:',
+};
+
+export const STATUS_ICONS = {
+  play: 'M5 3h2v2h2v2h2v2H9v2H7v2H5z',
+  pause: 'M4 3h3v10H4zM9 3h3v10H9z',
+  check: 'M2 8h2v2h2V8h2V6h2V4h2V2h2v4h-2v2h-2v2H8v2H6v2H4v-2H2z',
+  attention: 'M7 2h2v7H7zM7 11h2v3H7z',
+  stop: 'M4 2h8v2h2v8h-2v2H4v-2H2V4h2zm1 3v6h6V5z',
+  clock: 'M4 2h8v2h2v8h-2v2H4v-2H2V4h2zm1 2v8h6V4zM7 5h2v3h2v2H7z',
+  minus: 'M3 7h10v2H3z',
+} as const;
+export interface StatusDefinition {
+  label: string;
+  icon: keyof typeof STATUS_ICONS;
+  tone: 'active' | 'attention' | 'success' | 'error' | 'muted';
+}
+/** Protocol and domain states share the same Spanish presentation. */
+export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
+  DRAFT: { label: 'Borrador', icon: 'minus', tone: 'muted' },
+  QUEUED: { label: 'En cola', icon: 'clock', tone: 'muted' },
+  LEASED: { label: 'Reservada', icon: 'clock', tone: 'active' },
+  RUNNING: { label: 'En curso', icon: 'play', tone: 'active' },
+  ACTIVE: { label: 'En curso', icon: 'play', tone: 'active' },
+  READY: { label: 'Lista para empezar', icon: 'play', tone: 'success' },
+  REVIEW: { label: 'En revisión', icon: 'clock', tone: 'attention' },
+  AWAITING_REVIEW: { label: 'Esperando revisión', icon: 'clock', tone: 'attention' },
+  QA: { label: 'En pruebas', icon: 'play', tone: 'active' },
+  WAITING_HUMAN: { label: 'Esperando tu decisión', icon: 'attention', tone: 'attention' },
+  WAITING_QUOTA: { label: 'Esperando cuota', icon: 'pause', tone: 'attention' },
+  WAITING_DEPENDENCY: { label: 'Esperando otra tarea', icon: 'pause', tone: 'attention' },
+  BLOCKED: { label: 'Bloqueada', icon: 'stop', tone: 'attention' },
+  FAILED_RETRYABLE: { label: 'Reintento pendiente', icon: 'clock', tone: 'attention' },
+  FAILED_FINAL: { label: 'Fallida', icon: 'stop', tone: 'error' },
+  FAILED: { label: 'Fallida', icon: 'stop', tone: 'error' },
+  CANCELLED: { label: 'Cancelada', icon: 'stop', tone: 'muted' },
+  ANALYSIS: { label: 'En análisis', icon: 'play', tone: 'active' },
+  VERIFIED: { label: 'Verificada', icon: 'check', tone: 'success' },
+  DONE: { label: 'Hecha', icon: 'check', tone: 'success' },
+  AVAILABLE: { label: 'En espera', icon: 'pause', tone: 'muted' },
+  CODING: { label: 'Programando', icon: 'play', tone: 'active' },
+  PLANNING: { label: 'Planificando', icon: 'play', tone: 'active' },
+  REVIEWING: { label: 'Revisando', icon: 'play', tone: 'active' },
+  TESTING: { label: 'Probando', icon: 'play', tone: 'active' },
+  working: { label: 'Trabajando', icon: 'play', tone: 'active' },
+  waiting: { label: 'En espera', icon: 'pause', tone: 'muted' },
+  needs_you: { label: 'Necesita tu aprobación', icon: 'attention', tone: 'attention' },
+  in_review: { label: 'Requisitos en revisión', icon: 'clock', tone: 'attention' },
+  in_design: { label: 'En diseño', icon: 'play', tone: 'active' },
+  in_development: { label: 'En desarrollo', icon: 'play', tone: 'active' },
+  ready_to_merge: { label: 'Lista para integrar', icon: 'check', tone: 'attention' },
+  merged: { label: 'Integrada', icon: 'check', tone: 'success' },
+  finished: { label: 'Finalizada', icon: 'check', tone: 'success' },
+  approved: { label: 'Plan aprobado', icon: 'check', tone: 'success' },
+  changed: { label: 'Plan con cambios', icon: 'attention', tone: 'attention' },
+  unbound: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
+  pending: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
+  meeting: { label: 'En reunión', icon: 'clock', tone: 'active' },
+  unknown: { label: 'Sin estado registrado', icon: 'minus', tone: 'muted' },
+};
+
+export const FEATURE_STEP_LABELS: Readonly<Record<string, string>> = {
+  spike: 'Investigación',
+  spec: 'Requisitos',
+  architecture: 'Arquitectura',
+  design: 'Diseño',
+  plan: 'Planificación',
+  develop: 'Desarrollo',
+  development: 'Desarrollo',
+  qa: 'Pruebas',
+  review: 'Revisión',
+  spec_approval: 'Aprobación de requisitos',
+  requirements_questions: 'Preguntas sobre requisitos',
+  design_questions: 'Preguntas sobre diseño',
+  waiting_human: 'Esperando tu respuesta',
+  quota: 'Esperando cuota',
+  qa_not_tested: 'Pruebas pendientes',
+  zone_overlap: 'Cambios en conflicto',
+  human_decision: 'Decisión pendiente',
+  plan_approval: 'Aprobación del plan',
+  merge: 'Integración',
+};
+export const MODEL_TIER_LABELS = {
+  economy: 'Económico',
+  standard: 'Estándar',
+  deep: 'Profundo',
+} as const;

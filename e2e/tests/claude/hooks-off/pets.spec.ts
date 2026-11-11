@@ -70,7 +70,7 @@ async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 async function openPetsTab(frame: Frame): Promise<Locator> {
   await dismissFirstRunTooltips(frame);
   await openDockAction(frame, 'Editar oficina');
-  await frame.locator('button[title="Place pets"]').click();
+  await frame.locator('button[title="Colocar mascotas"]').click();
   const carousel = frame.locator(PETS_CAROUSEL);
   await expect(carousel).toBeVisible({ timeout: 15_000 });
   return carousel;
@@ -161,7 +161,7 @@ test.describe('Pets', () => {
     narrator.check('two pets on the canvas (getPets → 2)');
 
     narrator.step('clicking Save — persisting the layout to disk');
-    const saveBtn = frame.locator('button', { hasText: 'Save' });
+    const saveBtn = frame.locator('button', { hasText: 'Guardar' });
     await expect(saveBtn).toBeVisible({ timeout: 5_000 });
     await saveBtn.click();
 

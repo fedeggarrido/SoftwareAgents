@@ -45,7 +45,7 @@ describe('SA-115 command copy control', () => {
     const html = renderToStaticMarkup(await tree());
     expect(html).toMatch(/^<details[^>]*><summary>Detalles<\/summary>/);
     expect(html).not.toMatch(/<details[^>]*\bopen/);
-    expect(html).toContain('Settings → Detalles →');
+    expect(html).toContain('Ajustes → Detalles →');
     expect(html).not.toContain('valor de «token»');
   });
   it('writes the exact command and displays visible confirmation', async () => {

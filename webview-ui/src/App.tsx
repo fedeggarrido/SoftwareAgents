@@ -15,7 +15,6 @@ import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
-import { OfficeConnectionHelp } from './components/OfficeConnectionHelp.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -286,7 +285,7 @@ function App() {
       // bypassing the layoutLoaded message whose dirty guard would skip it.
       if (
         isEditDirty() &&
-        !window.confirm('Replace the current layout? Unsaved edits will be lost.')
+        !window.confirm('¿Reemplazar la distribución actual? Se perderán los cambios sin guardar.')
       ) {
         return;
       }
@@ -301,7 +300,7 @@ function App() {
             !Array.isArray(imported.tiles) ||
             !Array.isArray(imported.furniture)
           ) {
-            window.alert('Invalid layout file.');
+            window.alert('El archivo de distribución no es válido.');
             return;
           }
           const migrated = migrateLayoutColors(imported as unknown as OfficeLayout);
@@ -313,7 +312,7 @@ function App() {
           });
           editor.markClean();
         } catch {
-          window.alert('Failed to read or parse layout file.');
+          window.alert('No se pudo leer el archivo de distribución.');
         }
       };
       reader.readAsText(file);
@@ -345,8 +344,9 @@ function App() {
 
   if (!layoutReady) {
     return (
-      <div className="w-full h-full flex items-center justify-center">
-        <OfficeConnectionHelp />
+      <div className="office-shell w-full h-full">
+        <ConnectionIndicator />
+        <p className="m-auto">Cargando oficina…</p>
       </div>
     );
   }
@@ -359,345 +359,344 @@ function App() {
         prepareProject: () => setIsNewIdeaOpen(true),
       },
     },
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-      <OfficeCanvas
-        officeState={officeState}
-        onClick={handleClick}
-        isEditMode={editor.isEditMode}
-        editorState={editorState}
-        onEditorTileAction={editor.handleEditorTileAction}
-        onEditorEraseAction={editor.handleEditorEraseAction}
-        onEditorSelectionChange={editor.handleEditorSelectionChange}
-        onDeleteSelected={editor.handleDeleteSelected}
-        onRotateSelected={editor.handleRotateSelected}
-        onDragMove={editor.handleDragMove}
-        editorTick={editor.editorTick}
-        zoom={editor.zoom}
-        onZoomChange={editor.handleZoomChange}
-        panRef={editor.panRef}
-        showAreas={effectiveShowAreas}
-        activeAreaLabel={activeAreaLabel}
-      />
-
-      {!isDebugMode ? (
-        <>
-          <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
-
-          {/* Vignette overlay */}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{ background: 'var(--vignette)' }}
-          />
-
-          {editor.isEditMode && editor.isDirty && (
-            <EditActionBar editor={editor} editorState={editorState} />
-          )}
-
-          {showRotateHint && (
-            <div
-              className="absolute left-1/2 -translate-x-1/2 z-11 bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
-              style={{ top: editor.isDirty ? 64 : 8 }}
-            >
-              Rotate (R)
-            </div>
-          )}
-
-          {editor.isEditMode &&
-            (() => {
-              const selUid = editorState.selectedFurnitureUid;
-              const selColor = selUid
-                ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ?? null)
-                : null;
-              return (
-                <EditorToolbar
-                  activeTool={editorState.activeTool}
-                  selectedTileType={editorState.selectedTileType}
-                  selectedFurnitureType={editorState.selectedFurnitureType}
-                  selectedFurnitureUid={selUid}
-                  selectedFurnitureColor={selColor}
-                  floorColor={editorState.floorColor}
-                  wallColor={editorState.wallColor}
-                  selectedWallSet={editorState.selectedWallSet}
-                  onToolChange={editor.handleToolChange}
-                  onTileTypeChange={editor.handleTileTypeChange}
-                  onFloorColorChange={editor.handleFloorColorChange}
-                  onWallColorChange={editor.handleWallColorChange}
-                  onWallSetChange={editor.handleWallSetChange}
-                  onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
-                  pickedFurnitureColor={editorState.pickedFurnitureColor}
-                  onPickedFurnitureColorChange={editor.handlePickedFurnitureColorChange}
-                  onFurnitureTypeChange={editor.handleFurnitureTypeChange}
-                  loadedAssets={loadedAssets}
-                  activePetTypes={officeState.getActivePetTypes()}
-                  petCount={getPetCount()}
-                  onPetToggle={editor.handlePetToggle}
-                  carpetVariant={editor.carpetVariant}
-                  carpetColor={editor.carpetColor}
-                  carpetAccentColor={editor.carpetAccentColor}
-                  onCarpetVariantChange={editor.handleCarpetVariantChange}
-                  onCarpetColorChange={editor.handleCarpetColorChange}
-                  onCarpetAccentColorChange={editor.handleCarpetAccentColorChange}
-                  areas={officeState.getLayout().areas ?? []}
-                  selectedAreaLabel={editor.selectedAreaLabel}
-                  workspaceFolders={areaFolders}
-                  areasAvailable={areasAvailable}
-                  areaMappings={areaMappings}
-                  onSelectArea={editor.handleSelectArea}
-                  onAddArea={editor.handleAddArea}
-                  onRemoveArea={editor.handleRemoveArea}
-                  onRenameArea={editor.handleRenameArea}
-                  onAreaColorChange={editor.handleAreaColorChange}
-                  onAreaMappingChange={handleAreaMappingChange}
-                />
-              );
-            })()}
-
-          <ToolOverlay
-            officeState={officeState}
-            agents={agents}
-            agentTools={agentTools}
-            subagentTools={subagentTools}
-            subagentCharacters={subagentCharacters}
-            containerRef={containerRef}
-            zoom={editor.zoom}
-            panRef={editor.panRef}
-            onCloseAgent={handleCloseAgent}
-            alwaysShowOverlay={alwaysShowOverlay}
-            agentHistory={agentHistory}
-            onOpenBacklog={(taskKey) => {
-              setFocusedTask(taskKey ?? null);
-              panel.select('backlog');
-            }}
-          />
-        </>
-      ) : (
-        <DebugView
-          agents={agents}
-          selectedAgent={selectedAgent}
-          agentTools={agentTools}
-          agentStatuses={agentStatuses}
-          subagentTools={subagentTools}
+    <div className="office-shell w-full h-full">
+      <ConnectionIndicator />
+      <div ref={containerRef} className="office-viewport relative overflow-hidden">
+        <OfficeCanvas
           officeState={officeState}
-          onSelectAgent={handleSelectAgent}
+          onClick={handleClick}
+          isEditMode={editor.isEditMode}
+          editorState={editorState}
+          onEditorTileAction={editor.handleEditorTileAction}
+          onEditorEraseAction={editor.handleEditorEraseAction}
+          onEditorSelectionChange={editor.handleEditorSelectionChange}
+          onDeleteSelected={editor.handleDeleteSelected}
+          onRotateSelected={editor.handleRotateSelected}
+          onDragMove={editor.handleDragMove}
+          editorTick={editor.editorTick}
+          zoom={editor.zoom}
+          onZoomChange={editor.handleZoomChange}
+          panRef={editor.panRef}
+          showAreas={effectiveShowAreas}
+          activeAreaLabel={activeAreaLabel}
         />
-      )}
 
-      {/* Hooks first-run tooltip. Gated on hooksInstalled (the hooksStatus
+        {!isDebugMode ? (
+          <>
+            <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
+
+            {/* Vignette overlay */}
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'var(--vignette)' }}
+            />
+
+            {editor.isEditMode && editor.isDirty && (
+              <EditActionBar editor={editor} editorState={editorState} />
+            )}
+
+            {showRotateHint && (
+              <div
+                className="absolute left-1/2 -translate-x-1/2 layer-hud bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
+                style={{ top: editor.isDirty ? 64 : 8 }}
+              >
+                Girar (R)
+              </div>
+            )}
+
+            {editor.isEditMode &&
+              (() => {
+                const selUid = editorState.selectedFurnitureUid;
+                const selColor = selUid
+                  ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ?? null)
+                  : null;
+                return (
+                  <EditorToolbar
+                    activeTool={editorState.activeTool}
+                    selectedTileType={editorState.selectedTileType}
+                    selectedFurnitureType={editorState.selectedFurnitureType}
+                    selectedFurnitureUid={selUid}
+                    selectedFurnitureColor={selColor}
+                    floorColor={editorState.floorColor}
+                    wallColor={editorState.wallColor}
+                    selectedWallSet={editorState.selectedWallSet}
+                    onToolChange={editor.handleToolChange}
+                    onTileTypeChange={editor.handleTileTypeChange}
+                    onFloorColorChange={editor.handleFloorColorChange}
+                    onWallColorChange={editor.handleWallColorChange}
+                    onWallSetChange={editor.handleWallSetChange}
+                    onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
+                    pickedFurnitureColor={editorState.pickedFurnitureColor}
+                    onPickedFurnitureColorChange={editor.handlePickedFurnitureColorChange}
+                    onFurnitureTypeChange={editor.handleFurnitureTypeChange}
+                    loadedAssets={loadedAssets}
+                    activePetTypes={officeState.getActivePetTypes()}
+                    petCount={getPetCount()}
+                    onPetToggle={editor.handlePetToggle}
+                    carpetVariant={editor.carpetVariant}
+                    carpetColor={editor.carpetColor}
+                    carpetAccentColor={editor.carpetAccentColor}
+                    onCarpetVariantChange={editor.handleCarpetVariantChange}
+                    onCarpetColorChange={editor.handleCarpetColorChange}
+                    onCarpetAccentColorChange={editor.handleCarpetAccentColorChange}
+                    areas={officeState.getLayout().areas ?? []}
+                    selectedAreaLabel={editor.selectedAreaLabel}
+                    workspaceFolders={areaFolders}
+                    areasAvailable={areasAvailable}
+                    areaMappings={areaMappings}
+                    onSelectArea={editor.handleSelectArea}
+                    onAddArea={editor.handleAddArea}
+                    onRemoveArea={editor.handleRemoveArea}
+                    onRenameArea={editor.handleRenameArea}
+                    onAreaColorChange={editor.handleAreaColorChange}
+                    onAreaMappingChange={handleAreaMappingChange}
+                  />
+                );
+              })()}
+
+            <ToolOverlay
+              officeState={officeState}
+              agents={agents}
+              agentTools={agentTools}
+              subagentTools={subagentTools}
+              subagentCharacters={subagentCharacters}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+              onCloseAgent={handleCloseAgent}
+              alwaysShowOverlay={alwaysShowOverlay}
+              agentHistory={agentHistory}
+              onOpenBacklog={(taskKey) => {
+                setFocusedTask(taskKey ?? null);
+                panel.select('backlog');
+              }}
+            />
+          </>
+        ) : (
+          <DebugView
+            agents={agents}
+            selectedAgent={selectedAgent}
+            agentTools={agentTools}
+            agentStatuses={agentStatuses}
+            subagentTools={subagentTools}
+            officeState={officeState}
+            onSelectAgent={handleSelectAgent}
+          />
+        )}
+
+        {/* Hooks first-run tooltip. Gated on hooksInstalled (the hooksStatus
           message), NOT the hooksEnabled preference: hooksEnabled defaults true
           while first-run consent is still pending, and announcing "Instant
           Detection Active" before anything is installed would be a lie. */}
-      <OfficeNotices>
-        {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
-          <Tooltip
-            title="Instant Detection Active"
-            position="stack"
-            onDismiss={() => {
-              setHooksTooltipDismissed(true);
-              transport.send({ type: 'setHooksInfoShown' });
-            }}
-          >
-            <span className="text-sm text-text leading-none">
-              Your agents now respond in real-time.{' '}
-              <span
-                className="text-accent cursor-pointer underline"
-                onClick={() => {
-                  setIsHooksInfoOpen(true);
-                  setHooksTooltipDismissed(true);
-                  transport.send({ type: 'setHooksInfoShown' });
-                }}
-              >
-                View more
-              </span>
-            </span>
-          </Tooltip>
-        )}
-      </OfficeNotices>
-
-      {/* Hooks info modal */}
-      <Modal
-        isOpen={isHooksInfoOpen}
-        onClose={() => setIsHooksInfoOpen(false)}
-        title="Instant Detection is ON"
-        zIndex={52}
-      >
-        <div className="text-base text-text px-10" style={{ lineHeight: 1.4 }}>
-          <p className="mb-8">Your Pixel Agents office now reacts in real-time:</p>
-          <ul className="mb-8 pl-18 list-disc m-0">
-            <li className="text-sm mb-2">Permission prompts appear instantly</li>
-            <li className="text-sm mb-2">Turn completions detected the moment they happen</li>
-            <li className="text-sm mb-2">Sound notifications play immediately</li>
-          </ul>
-          <p className="mb-12 text-text-muted">
-            This works through Claude Code Hooks, small event listeners that notify Pixel Agents
-            whenever something happens in your Claude sessions.
-          </p>
-          <div className="text-center">
-            <button
-              onClick={() => setIsHooksInfoOpen(false)}
-              className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
+        <OfficeNotices>
+          {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
+            <Tooltip
+              title="Detección instantánea activa"
+              position="stack"
+              onDismiss={() => {
+                setHooksTooltipDismissed(true);
+                transport.send({ type: 'setHooksInfoShown' });
+              }}
             >
-              Got it
-            </button>
+              <span className="text-sm text-text leading-none">
+                La actividad de tus agentes se actualiza al instante.{' '}
+                <span
+                  className="text-accent cursor-pointer underline"
+                  onClick={() => {
+                    setIsHooksInfoOpen(true);
+                    setHooksTooltipDismissed(true);
+                    transport.send({ type: 'setHooksInfoShown' });
+                  }}
+                >
+                  Ver más
+                </span>
+              </span>
+            </Tooltip>
+          )}
+        </OfficeNotices>
+
+        {/* Hooks info modal */}
+        <Modal
+          isOpen={isHooksInfoOpen}
+          onClose={() => setIsHooksInfoOpen(false)}
+          title="Detección instantánea activada"
+        >
+          <div className="text-base text-text px-10" style={{ lineHeight: 1.4 }}>
+            <p className="mb-8">Tu oficina muestra la actividad en cuanto ocurre:</p>
+            <ul className="mb-8 pl-18 list-disc m-0">
+              <li className="text-sm mb-2">Las solicitudes de aprobación aparecen al instante</li>
+              <li className="text-sm mb-2">La oficina detecta cuándo termina cada turno</li>
+              <li className="text-sm mb-2">Los avisos sonoros se reproducen en el momento</li>
+            </ul>
+            <p className="mb-12 text-text-muted">
+              Claude Code envía avisos a la oficina cuando hay actividad en tus sesiones.
+            </p>
+            <div className="text-center">
+              <button
+                onClick={() => setIsHooksInfoOpen(false)}
+                className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
+              >
+                Entendido
+              </button>
+            </div>
+            <p className="mt-8 text-xs text-text-muted text-center">
+              Para desactivarlo, abre Ajustes {'>'} Detección instantánea
+            </p>
           </div>
-          <p className="mt-8 text-xs text-text-muted text-center">
-            To disable, go to Settings {'>'} Instant Detection
-          </p>
+        </Modal>
+
+        <BottomToolbar
+          isEditMode={editor.isEditMode}
+          onOpenClaude={editor.handleOpenClaude}
+          onToggleEditMode={editor.handleToggleEditMode}
+          isSettingsOpen={isSettingsOpen}
+          onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+          activePanel={panel.isOpen ? panel.tab : null}
+          onTogglePanel={panel.toggle}
+          onNewIdea={() => setIsNewIdeaOpen(true)}
+          workspaceFolders={workspaceFolders}
+        />
+
+        <div className="office-panels">
+          <div className="office-panel-hud">
+            <CompanyHud
+              agents={agents}
+              officeState={officeState}
+              onOpenDecisions={() => panel.select('decisions')}
+              onOpenMeeting={() => panel.select('meeting')}
+              meetingUnread={panel.meetingUnread}
+            />
+          </div>
         </div>
-      </Modal>
-
-      <BottomToolbar
-        isEditMode={editor.isEditMode}
-        onOpenClaude={editor.handleOpenClaude}
-        onToggleEditMode={editor.handleToggleEditMode}
-        isSettingsOpen={isSettingsOpen}
-        onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        activePanel={panel.isOpen ? panel.tab : null}
-        onTogglePanel={panel.toggle}
-        onNewIdea={() => setIsNewIdeaOpen(true)}
-        workspaceFolders={workspaceFolders}
-      />
-
-      <div className="office-panels">
-        <div className="office-panel-hud">
-          <CompanyHud
-            agents={agents}
-            officeState={officeState}
-            onOpenDecisions={() => panel.select('decisions')}
-            onOpenMeeting={() => panel.select('meeting')}
-            meetingUnread={panel.meetingUnread}
+        <PanelWindow
+          isOpen={panel.isOpen}
+          tab={panel.tab}
+          rect={panel.rect}
+          mobile={panel.mobile}
+          meetingUnread={panel.meetingUnread}
+          onSelect={panel.select}
+          onRectChange={panel.setRect}
+          onReset={panel.reset}
+          onClose={panel.close}
+        >
+          <AuditPanel hosted isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
+          <FeaturesPanel
+            hosted
+            isOpen={panel.isOpen && panel.tab === 'features'}
+            onClose={panel.close}
+            checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
           />
-        </div>
+
+          <BacklogPanel
+            hosted
+            isOpen={panel.isOpen && panel.tab === 'backlog'}
+            onClose={panel.close}
+            officeState={officeState}
+            focusedTask={focusedTask}
+            onFocusAgent={(id) => {
+              const os = getOfficeState();
+              os.selectedAgentId = id;
+              os.cameraFollowId = id;
+            }}
+          />
+          <DecisionsPanel
+            hosted
+            isOpen={panel.isOpen && panel.tab === 'decisions'}
+            onClose={panel.close}
+          />
+          {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
+        </PanelWindow>
+        {isNewIdeaOpen && (
+          <NewIdeaDialog
+            checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
+            onClose={() => {
+              setIsNewIdeaOpen(false);
+              panel.select('features');
+            }}
+          />
+        )}
+
+        <VersionIndicator
+          currentVersion={extensionVersion}
+          lastSeenVersion={lastSeenVersion}
+          onDismiss={handleWhatsNewDismiss}
+          onOpenChangelog={handleOpenChangelog}
+        />
+
+        <ChangelogModal
+          isOpen={isChangelogOpen}
+          onClose={() => setIsChangelogOpen(false)}
+          currentVersion={extensionVersion}
+        />
+
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          isDebugMode={isDebugMode}
+          onToggleDebugMode={handleToggleDebugMode}
+          alwaysShowOverlay={alwaysShowOverlay}
+          onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
+          ghostHeadlessAgents={ghostHeadlessAgents}
+          onToggleGhostHeadlessAgents={handleToggleGhostHeadlessAgents}
+          externalAssetDirectories={externalAssetDirectories}
+          watchAllSessions={watchAllSessions}
+          onToggleWatchAllSessions={() => {
+            const newVal = !watchAllSessions;
+            setWatchAllSessions(newVal);
+            transport.send({ type: 'setWatchAllSessions', enabled: newVal });
+          }}
+          hooksInstalled={claudeHooksInstalled}
+          onToggleHooksEnabled={() => {
+            // Toggle the DISPLAYED state (actual install), not the preference: when the two disagree — preference on,
+            // nothing installed while consent is pending — toggling the preference would turn hooks OFF for a user
+            // asking for ON. No optimistic local update either; both backends answer with the truthful hooksStatus this
+            // checkbox renders, so it lands correct instead of flickering when an install fails. The providerId is
+            // ECHOED from that row (never originated here), so nothing sends until the row has arrived.
+            const [rowProviderId] =
+              Object.entries(hooksInstalled).find(([id]) => id === 'claude') ?? [];
+            if (rowProviderId !== undefined) {
+              transport.send({
+                type: 'setHooksEnabled',
+                providerId: rowProviderId,
+                enabled: !claudeHooksInstalled,
+              });
+            }
+          }}
+          showAreas={showAreas}
+          onToggleShowAreas={onToggleShowAreas}
+          showAreasAvailable={areasAvailable}
+          onExportLayout={handleExportLayout}
+          onImportLayout={handleImportLayout}
+        />
+
+        {showMigrationNotice && (
+          <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
+        )}
+
+        {intro && (
+          <IntroBubble
+            officeState={officeState}
+            headline={intro.headline}
+            disclosure={intro.disclosure}
+            containerRef={containerRef}
+            zoom={editor.zoom}
+            panRef={editor.panRef}
+            installFailed={installFailed}
+            installPending={installPending}
+            onChoice={handleConsentChoice}
+            onClose={handleIntroClose}
+            escapeSuppressed={
+              isSettingsOpen ||
+              isNewIdeaOpen ||
+              panel.isOpen ||
+              isChangelogOpen ||
+              isHooksInfoOpen ||
+              showMigrationNotice ||
+              editor.isEditMode
+            }
+          />
+        )}
       </div>
-      <PanelWindow
-        isOpen={panel.isOpen}
-        tab={panel.tab}
-        rect={panel.rect}
-        mobile={panel.mobile}
-        meetingUnread={panel.meetingUnread}
-        onSelect={panel.select}
-        onRectChange={panel.setRect}
-        onReset={panel.reset}
-        onClose={panel.close}
-      >
-        <AuditPanel hosted isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
-        <FeaturesPanel
-          hosted
-          isOpen={panel.isOpen && panel.tab === 'features'}
-          onClose={panel.close}
-          checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
-        />
-
-        <BacklogPanel
-          hosted
-          isOpen={panel.isOpen && panel.tab === 'backlog'}
-          onClose={panel.close}
-          officeState={officeState}
-          focusedTask={focusedTask}
-          onFocusAgent={(id) => {
-            const os = getOfficeState();
-            os.selectedAgentId = id;
-            os.cameraFollowId = id;
-          }}
-        />
-        <DecisionsPanel
-          hosted
-          isOpen={panel.isOpen && panel.tab === 'decisions'}
-          onClose={panel.close}
-        />
-        {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
-      </PanelWindow>
-      {isNewIdeaOpen && (
-        <NewIdeaDialog
-          checkoutName={workspaceFolders.length === 1 ? workspaceFolders[0].name : undefined}
-          onClose={() => {
-            setIsNewIdeaOpen(false);
-            panel.select('features');
-          }}
-        />
-      )}
-
-      <VersionIndicator
-        currentVersion={extensionVersion}
-        lastSeenVersion={lastSeenVersion}
-        onDismiss={handleWhatsNewDismiss}
-        onOpenChangelog={handleOpenChangelog}
-      />
-
-      <ConnectionIndicator />
-
-      <ChangelogModal
-        isOpen={isChangelogOpen}
-        onClose={() => setIsChangelogOpen(false)}
-        currentVersion={extensionVersion}
-      />
-
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        isDebugMode={isDebugMode}
-        onToggleDebugMode={handleToggleDebugMode}
-        alwaysShowOverlay={alwaysShowOverlay}
-        onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
-        ghostHeadlessAgents={ghostHeadlessAgents}
-        onToggleGhostHeadlessAgents={handleToggleGhostHeadlessAgents}
-        externalAssetDirectories={externalAssetDirectories}
-        watchAllSessions={watchAllSessions}
-        onToggleWatchAllSessions={() => {
-          const newVal = !watchAllSessions;
-          setWatchAllSessions(newVal);
-          transport.send({ type: 'setWatchAllSessions', enabled: newVal });
-        }}
-        hooksInstalled={claudeHooksInstalled}
-        onToggleHooksEnabled={() => {
-          // Toggle the DISPLAYED state (actual install), not the preference: when the two disagree — preference on,
-          // nothing installed while consent is pending — toggling the preference would turn hooks OFF for a user
-          // asking for ON. No optimistic local update either; both backends answer with the truthful hooksStatus this
-          // checkbox renders, so it lands correct instead of flickering when an install fails. The providerId is
-          // ECHOED from that row (never originated here), so nothing sends until the row has arrived.
-          const [rowProviderId] =
-            Object.entries(hooksInstalled).find(([id]) => id === 'claude') ?? [];
-          if (rowProviderId !== undefined) {
-            transport.send({
-              type: 'setHooksEnabled',
-              providerId: rowProviderId,
-              enabled: !claudeHooksInstalled,
-            });
-          }
-        }}
-        showAreas={showAreas}
-        onToggleShowAreas={onToggleShowAreas}
-        showAreasAvailable={areasAvailable}
-        onExportLayout={handleExportLayout}
-        onImportLayout={handleImportLayout}
-      />
-
-      {showMigrationNotice && (
-        <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
-      )}
-
-      {intro && (
-        <IntroBubble
-          officeState={officeState}
-          headline={intro.headline}
-          disclosure={intro.disclosure}
-          containerRef={containerRef}
-          zoom={editor.zoom}
-          panRef={editor.panRef}
-          installFailed={installFailed}
-          installPending={installPending}
-          onChoice={handleConsentChoice}
-          onClose={handleIntroClose}
-          escapeSuppressed={
-            isSettingsOpen ||
-            isNewIdeaOpen ||
-            panel.isOpen ||
-            isChangelogOpen ||
-            isHooksInfoOpen ||
-            showMigrationNotice ||
-            editor.isEditMode
-          }
-        />
-      )}
     </div>,
   );
 }

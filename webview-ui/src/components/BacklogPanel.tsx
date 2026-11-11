@@ -4,9 +4,13 @@ import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
 import { backlogView } from '../office/backlogView.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
+import { characterActivity } from '../office/characterActivity.js';
+import { knownText } from '../office/displayText.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { taskPullRequestLabel } from '../office/prStatusView.js';
+import { readableStateText, statusPresentation } from '../office/statusPresentation.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { PanelHeading } from './ui/PanelHeading.js';
 
@@ -19,31 +23,16 @@ function workStatus(
   if (item.phase === 'VERIFIED') return 'verificada, pendiente de integrar';
   if (item.owner?.stale) return 'reserva sin latido';
   if (board?.waiting?.some((e) => e.session === item.owner?.session)) return 'esperando cuota';
-  if (item.agentIds.some((id) => office.characters.get(id)?.isActive)) return 'trabajando ahora';
+  if (
+    item.agentIds.some((id) => {
+      const ch = office.characters.get(id);
+      return ch && characterActivity(ch) === 'working';
+    })
+  )
+    return 'trabajando ahora';
   if (item.owner?.state === 'active') return 'reservada, sin actividad visible';
-  return PHASE_LABELS[item.phase]?.toLowerCase() ?? item.phase.toLowerCase();
+  return statusPresentation(item.phase).label.toLowerCase();
 }
-
-const PHASE_LABELS: Record<string, string> = {
-  DRAFT: 'Borrador',
-  QUEUED: 'En cola',
-  LEASED: 'Reservada',
-  RUNNING: 'En ejecución',
-  REVIEW: 'En revisión',
-  QA: 'En QA',
-  WAITING_HUMAN: 'Esperando decisión',
-  WAITING_QUOTA: 'Esperando cuota',
-  FAILED_RETRYABLE: 'Reintento pendiente',
-  FAILED_FINAL: 'Fallida',
-  CANCELLED: 'Cancelada',
-  ACTIVE: 'En curso',
-  AWAITING_REVIEW: 'En revisión',
-  READY: 'Listo',
-  ANALYSIS: 'Análisis',
-  BLOCKED: 'Bloqueado',
-  VERIFIED: 'Verificado',
-  DONE: 'Hecho',
-};
 
 function ago(at: number, now: number): string {
   const s = Math.max(0, Math.round((now - at) / 1000));
@@ -56,9 +45,12 @@ function ago(at: number, now: number): string {
 function EventLine({ e, now }: { e: BoardEvent; now: number }) {
   return (
     <div className="text-2xs leading-tight text-text-muted">
-      <span className="text-text">{e.session}</span> · {e.phase} {e.state} · {ago(e.at, now)}
-      <div className="overflow-hidden text-ellipsis whitespace-nowrap" title={e.detail}>
-        {e.detail}
+      <StatusChip state={e.phase} /> · {ago(e.at, now)}
+      <div
+        className="overflow-hidden text-ellipsis whitespace-nowrap"
+        title={readableStateText(e.detail)}
+      >
+        {readableStateText(e.detail)}
       </div>
     </div>
   );
@@ -98,15 +90,18 @@ function Card({
       data-testid="backlog-card"
     >
       <div className="flex items-baseline gap-6">
-        <span className="text-2xs text-text-muted whitespace-nowrap">{item.id}</span>
-        <span className="text-xs leading-tight">{item.title}</span>
+        <span className="text-2xs text-text-muted whitespace-nowrap">{knownText(item.id)}</span>
+        <span className="text-xs leading-tight">
+          {knownText(item.title) !== knownText(item.id) ? knownText(item.title) : undefined}
+        </span>
       </div>
+      <StatusChip state={item.phase} />
       {item.owner && (
         <div
           className="text-2xs"
           style={{ color: item.owner.stale ? PHASE_COLORS.BLOCKED : undefined }}
         >
-          {item.owner.worker} · {item.owner.session} · {workStatus(item, board, officeState)}
+          {knownText(item.owner.worker)} · {workStatus(item, board, officeState)}
         </div>
       )}
       {item.agentIds.length > 0 && (
@@ -115,7 +110,8 @@ function Card({
             <Button
               key={id}
               size="sm"
-              variant="active"
+              variant="secondary"
+              aria-pressed
               onClick={(ev) => {
                 ev.stopPropagation();
                 onFocusAgent(id);
@@ -135,7 +131,7 @@ function Card({
       )}
       {open && (
         <div className="text-2xs text-text-muted leading-tight flex flex-col gap-1">
-          {item.epic && <div>{item.epic}</div>}
+          {item.epic && <div>{knownText(item.epic)}</div>}
           {item.prRef && <div>PR {item.prStatus?.url ?? item.prRef}</div>}
           {item.prStatus?.failedChecks.length ? (
             <div>{item.prStatus.failedChecks.join(', ')}</div>
@@ -144,11 +140,11 @@ function Card({
             Prioridad {item.priority ?? '—'} · tamaño {item.size ?? '—'}
             {item.clickupId ? ` · ClickUp ${item.clickupId}` : ''}
           </div>
-          {item.implementer && <div>Implementa: {item.implementer}</div>}
+          {item.implementer && <div>Implementa: {knownText(item.implementer)}</div>}
           {item.dependsOn && item.dependsOn.length > 0 && (
-            <div>Depende de: {item.dependsOn.join(', ')}</div>
+            <div>Depende de: {item.dependsOn.map(knownText).filter(Boolean).join(', ')}</div>
           )}
-          {item.note && <div className="text-text">{item.note}</div>}
+          {item.note && <div className="text-text">{readableStateText(item.note)}</div>}
         </div>
       )}
     </div>
@@ -210,18 +206,19 @@ export function BacklogPanel({
       className="read-only-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
       role="region"
-      aria-label="Backlog"
+      aria-label="Trabajo"
     >
-      <PanelHeading hosted={hosted} title="Backlog" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose}>
         <Button
           size="sm"
-          variant={showDone ? 'active' : 'default'}
+          variant="secondary"
+          aria-pressed={showDone}
           onClick={() => setShowDone((v) => !v)}
         >
           Hechas
         </Button>
       </PanelHeading>
-      {board && <p className="ui-info">{board.project}</p>}
+      {board && <p className="ui-info">{knownText(board.project)}</p>}
 
       {view.message && (
         <div className="text-xs text-text-muted">
@@ -248,20 +245,22 @@ export function BacklogPanel({
               const n = board.items.filter((i) => i.phase === phase).length;
               if (n === 0) return null;
               return (
-                <span key={phase} style={{ color: PHASE_COLORS[phase] }}>
-                  {PHASE_LABELS[phase] ?? phase} {n}
+                <span key={phase}>
+                  <StatusChip state={phase} /> {n}
                 </span>
               );
             })}
           </div>
           <div className="ui-info text-text-muted">
             {board.sources.workStore ? (
-              'WorkStore · solo lectura'
+              'Registro de tareas del proyecto'
             ) : (
               <>
-                Manager:{' '}
+                Coordinación:{' '}
                 {board.manager
-                  ? `${board.manager.session}${board.manager.stale ? ' (reserva sin latido)' : ' (ronda reservada)'}`
+                  ? board.manager.stale
+                    ? 'reserva sin latido'
+                    : 'ronda reservada'
                   : 'sin ronda activa'}
                 {!board.sources.claims && ' · reservas no disponibles'}
                 {!board.sources.progress && ' · sin registro de progreso'}
@@ -272,8 +271,8 @@ export function BacklogPanel({
           {board.items.length === 0 && (
             <p className="ui-info">
               {board.sources.workStore
-                ? 'Sin tareas de trabajo. Importa un DAG con task import.'
-                : 'Sin tareas en el backlog. Las tareas aparecen cuando el Manager inicia una ronda.'}
+                ? 'Aún no hay tareas. Crea una idea y aprueba su plan para empezar.'
+                : 'Aún no hay tareas. Aparecerán cuando los agentes empiecen una ronda de trabajo.'}
             </p>
           )}
           {board.summary && (
@@ -283,7 +282,8 @@ export function BacklogPanel({
             >
               {Object.entries(board.summary.byEpic).map(([epic, count]) => (
                 <span key={epic}>
-                  {epic}: {count.done}/{count.total} hechas
+                  {epic === '?' ? 'Sin funcionalidad asociada' : knownText(epic)}: {count.done}/
+                  {count.total} hechas
                 </span>
               ))}
             </div>
@@ -293,7 +293,7 @@ export function BacklogPanel({
             {[...groups, ...(unknown.length ? [{ phase: '?', items: unknown }] : [])].map((g) => (
               <div key={g.phase} className="flex flex-col gap-4">
                 <div className="text-sm" style={{ color: PHASE_COLORS[g.phase] }}>
-                  {PHASE_LABELS[g.phase] ?? g.phase} · {g.items.length}
+                  {statusPresentation(g.phase).label} · {g.items.length}
                 </div>
                 {g.items.map((item) => (
                   <Card

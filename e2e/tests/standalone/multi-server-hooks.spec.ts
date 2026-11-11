@@ -84,9 +84,9 @@ test.describe('Standalone / multi-server hooks', () => {
         scenario: hookDrivenScenario('multi-server extension-owned session', extensionCommand),
       });
 
-      await expectOverlayVisible(frame, `Running: ${extensionCommand}`);
+      await expectOverlayVisible(frame, `Ejecutando: ${extensionCommand}`);
       await page.waitForTimeout(500);
-      await expectNoOverlay(page, `Running: ${extensionCommand}`);
+      await expectNoOverlay(page, `Ejecutando: ${extensionCommand}`);
 
       const standaloneSessionId = 'multi-server-standalone-owned';
       const standaloneCommand = 'npm run standalone-owned';
@@ -98,9 +98,9 @@ test.describe('Standalone / multi-server hooks', () => {
         scenario: hookDrivenScenario('multi-server standalone-owned session', standaloneCommand),
       });
 
-      await expectOverlayVisible(page, `Running: ${standaloneCommand}`);
+      await expectOverlayVisible(page, `Ejecutando: ${standaloneCommand}`);
       await frame.waitForTimeout(500);
-      await expectNoOverlay(frame, `Running: ${standaloneCommand}`);
+      await expectNoOverlay(frame, `Ejecutando: ${standaloneCommand}`);
 
       await expectOverlayCount(frame, 1);
       await expectOverlayCount(page, 1);

@@ -49,7 +49,7 @@ describe('agent card', () => {
       'codex',
       '10 s',
       'Historial',
-      'Ver en Backlog',
+      'Ver en Trabajo',
       'Cerrar agente',
     ])
       expect(html).toContain(text);

@@ -63,7 +63,7 @@ export function VersionIndicator({
       {showUpdateNotice && (
         <div
           onClick={handleOpenChangelog}
-          className="absolute bottom-42 right-28 z-20 pixel-panel px-10 pt-8 pb-9 cursor-pointer flex flex-col gap-8 max-w-2xs"
+          className="absolute bottom-42 right-28 layer-notices pixel-panel px-10 pt-8 pb-9 cursor-pointer flex flex-col gap-8 max-w-2xs"
           style={{
             opacity: fading ? 0 : 1,
             transition: `opacity ${WHATS_NEW_FADE_MS / 1000}s ease-out`,
@@ -77,16 +77,16 @@ export function VersionIndicator({
               x
             </Button>
           </div>
-          <span className="text-sm whitespace-nowrap">See what's new</span>
+          <span className="text-sm whitespace-nowrap">Ver novedades</span>
         </div>
       )}
-      {/* Hover tooltip — "See what's new" appears on label hover after notice is gone */}
+      {/* Hover tooltip — "Ver novedades" appears on label hover after notice is gone */}
       {!showUpdateNotice && labelHovered && (
         <div
           onClick={handleOpenChangelog}
-          className="absolute bottom-42 right-28 z-20 pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
+          className="absolute bottom-42 right-28 layer-notices pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
         >
-          See what's new!
+          Ver novedades!
         </div>
       )}
       {/* Version label — always visible */}
@@ -94,7 +94,7 @@ export function VersionIndicator({
         onMouseEnter={() => setLabelHovered(true)}
         onMouseLeave={() => setLabelHovered(false)}
         onClick={handleOpenChangelog}
-        className="version-label absolute bottom-8 right-28 z-20 text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
+        className="version-label absolute bottom-8 right-28 layer-notices text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
       >
         {currentVersion === 'demo' ? 'versión: demo' : `v${currentVersion}`}
       </div>

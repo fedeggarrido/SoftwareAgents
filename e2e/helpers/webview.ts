@@ -430,7 +430,7 @@ export async function clickAddAgent(frame: Frame): Promise<void> {
 }
 
 async function setCheckbox(modal: Locator, label: string, checked: boolean): Promise<void> {
-  const button = modal.locator('button', { hasText: label });
+  const button = modal.getByRole('checkbox', { name: label, exact: true });
   await expect(button).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
 
   const indicator = button.locator('span').last();
@@ -489,7 +489,7 @@ export async function openSettingsModal(frame: WebviewSurface): Promise<Locator>
 
   const settingsModal = frame
     .locator('div.fixed')
-    .filter({ has: frame.getByText('Settings', { exact: true }) });
+    .filter({ has: frame.getByText('Ajustes', { exact: true }) });
   await expect(settingsModal).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
   return settingsModal;
 }
@@ -507,7 +507,7 @@ async function closeSettingsModal(settingsModal: Locator): Promise<void> {
  */
 export async function getSettingChecked(frame: WebviewSurface, label: string): Promise<boolean> {
   const settingsModal = await openSettingsModal(frame);
-  const button = settingsModal.locator('button', { hasText: label });
+  const button = settingsModal.getByRole('checkbox', { name: label, exact: true });
   await expect(button).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
   const indicator = button.locator('span').last();
   const checked = ((await indicator.textContent()) ?? '').trim().toLowerCase() === 'x';
@@ -519,19 +519,19 @@ export async function setSettings(frame: WebviewSurface, settings: WebviewSettin
   const settingsModal = await openSettingsModal(frame);
 
   if (settings.watchAllSessions !== undefined) {
-    await setCheckbox(settingsModal, 'Watch All Sessions', settings.watchAllSessions);
+    await setCheckbox(settingsModal, 'Observar todas las sesiones', settings.watchAllSessions);
   }
   if (settings.hooksEnabled !== undefined) {
     await setCheckbox(settingsModal, 'Detección instantánea (hooks)', settings.hooksEnabled);
   }
   if (settings.alwaysShowLabels !== undefined) {
-    await setCheckbox(settingsModal, 'Always Show Labels', settings.alwaysShowLabels);
+    await setCheckbox(settingsModal, 'Mostrar siempre las etiquetas', settings.alwaysShowLabels);
   }
   if (settings.ghostHeadlessAgents !== undefined) {
-    await setCheckbox(settingsModal, 'Display Headless as Ghosts', settings.ghostHeadlessAgents);
+    await setCheckbox(settingsModal, 'Atenuar sesiones sin terminal', settings.ghostHeadlessAgents);
   }
   if (settings.debugView !== undefined) {
-    await setCheckbox(settingsModal, 'Debug View', settings.debugView);
+    await setCheckbox(settingsModal, 'Vista de diagnóstico', settings.debugView);
   }
 
   await closeSettingsModal(settingsModal);
@@ -541,8 +541,8 @@ export async function setSettings(frame: WebviewSurface, settings: WebviewSettin
 }
 
 /**
- * Enable Watch All Sessions so hooks-only external sessions are adopted.
- * (Always Show Labels and hooks are already on via the fixture-seeded
+ * Enable Observar todas las sesiones so hooks-only external sessions are adopted.
+ * (Mostrar siempre las etiquetas and hooks are already on via the fixture-seeded
  * config.json and the product default — see e2e/helpers/launch.ts.)
  */
 export async function configureHookServerTestSettings(frame: WebviewSurface): Promise<void> {

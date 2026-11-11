@@ -5,6 +5,7 @@ import type { PlanView } from '../office/featurePlanController.js';
 import { FeaturePlanController } from '../office/featurePlanController.js';
 import { PLAN_MISSING_COPY, planDecisionText } from '../office/featurePlanPresentation.js';
 import { transport } from '../transport/index.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -79,7 +80,7 @@ export function FeaturePlanView({
   const missing = plan?.sections.filter((section) => section.items.length === 0) ?? [];
   const finished = plan?.approvalState === 'finished' || plan?.approvalState === 'merged';
   return (
-    <Modal isOpen onClose={onClose} title="Plan de feature" className="feature-plan-dialog">
+    <Modal isOpen onClose={onClose} title="Plan de funcionalidad" className="feature-plan-dialog">
       <div className="feature-plan-layout" role="region" aria-label={`Plan de ${featureKey}`}>
         {plan && (
           <nav className="feature-plan-nav" aria-label="Secciones del plan">
@@ -99,6 +100,7 @@ export function FeaturePlanView({
                 <h2 id={target('title')}>
                   {featureKey} {plan.title}
                 </h2>
+                <StatusChip state={plan.approvalState} />
                 <p className="feature-plan-goal">{plan.summary.goal}</p>
                 <p className="feature-plan-value">{plan.summary.userValue}</p>
                 <div className="feature-plan-summary">

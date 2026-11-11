@@ -13,9 +13,9 @@ import { waitForDesignCanvas } from './designCapture.js';
 import { contrastRatio } from './designer.js';
 
 const VIEW_LABELS = {
-  features: 'Features',
+  features: 'Funcionalidades',
   audit: 'Auditoría',
-  backlog: 'Backlog',
+  backlog: 'Trabajo',
 };
 const VIEWPORTS = [
   { width: 1440, height: 1000 },
@@ -225,7 +225,9 @@ export async function captureInHost(
                 ).waitFor({ timeout: CAPTURE_WAIT_MS });
               if (view === 'features' && fixture !== 'populated')
                 await panel
-                  .getByText(fixture === 'error' ? /No se|Error|error|consulta/ : 'sin features')
+                  .getByText(
+                    fixture === 'error' ? /No se|Error|error|consulta/ : /^Sin funcionalidades/i,
+                  )
                   .first()
                   .waitFor({ timeout: CAPTURE_WAIT_MS });
               if (view === 'audit')

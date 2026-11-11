@@ -48,17 +48,17 @@ test.describe('Standalone / UI', () => {
     });
 
     await expectOverlayCount(page, 1);
-    await expectOverlayVisible(page, 'Reading close-agent.ts');
+    await expectOverlayVisible(page, 'Leyendo close-agent.ts');
     await standalone.drainMessages();
 
-    await closeAgentFromOverlay(page, { text: 'Reading close-agent.ts' });
+    await closeAgentFromOverlay(page, { text: 'Leyendo close-agent.ts' });
 
     await expectOverlayCount(page, 0);
     const messages = await standalone.drainMessages();
     expect(messages.some((message) => message.type === 'agentClosed')).toBe(true);
   });
 
-  test('Debug View renders JSONL diagnostics in standalone @area:standalone', async ({
+  test('Vista de diagnóstico renders JSONL diagnostics in standalone @area:standalone', async ({
     page,
     standalone,
   }) => {
@@ -87,7 +87,7 @@ test.describe('Standalone / UI', () => {
     // agentDiagnostics reply reached the webview via transport.onMessage; do
     // not assert a specific jsonlExists branch (a hook-only session may or may
     // not have a materialized transcript file).
-    await expect(page.getByText(/JSONL (connected|not found)/)).toBeVisible({
+    await expect(page.getByText(/Registro (conectado|no encontrado)/)).toBeVisible({
       timeout: DIAGNOSTICS_POLL_TIMEOUT_MS,
     });
   });
@@ -100,9 +100,9 @@ test.describe('Standalone / UI', () => {
     await standalone.drainMessages();
 
     await modal
-      .locator('input[placeholder="Absolute asset directory path"]')
+      .locator('input[placeholder="Ruta absoluta de la carpeta de recursos"]')
       .fill(standalone.workspaceDir);
-    await modal.locator('button', { hasText: 'Add' }).click();
+    await modal.locator('button', { hasText: 'Añadir' }).click();
 
     // getByTitle matches the title attribute literally; a raw CSS
     // [title="..."] selector would mis-parse the backslashes in a Windows path
@@ -122,7 +122,7 @@ test.describe('Standalone / UI', () => {
       .toBe(true);
   });
 
-  test('browser Export Layout downloads the layout file @area:standalone', async ({
+  test('browser Exportar distribución downloads the layout file @area:standalone', async ({
     page,
     standalone,
   }) => {
@@ -131,13 +131,13 @@ test.describe('Standalone / UI', () => {
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      modal.locator('button', { hasText: 'Export Layout' }).click(),
+      modal.locator('button', { hasText: 'Exportar distribución' }).click(),
     ]);
 
     expect(download.suggestedFilename()).toBe('pixel-agents-layout.json');
   });
 
-  test('browser Import Layout applies the chosen file @area:standalone', async ({
+  test('browser Importar distribución applies the chosen file @area:standalone', async ({
     page,
     standalone,
   }) => {
@@ -193,9 +193,16 @@ test.describe('Standalone / UI', () => {
     await expect(indicator.getByRole('status')).toBeVisible({
       timeout: CONNECTION_STATE_TIMEOUT_MS,
     });
-    await expect(indicator.getByRole('status')).toContainText(
-      'La oficina está cerrada en tu ordenador.',
-    );
+    await expect(indicator.getByRole('status')).toContainText('Sin conexión');
+    // The cause stays folded under «Detalles» so the notice is one thin strip.
+    await indicator.getByText('Detalles', { exact: true }).click();
+    await expect(indicator).toContainText('La oficina está cerrada en tu ordenador.');
+    await expect(page.getByTestId('connection-notice')).toHaveCount(1);
+    await indicator.getByRole('button', { name: 'Minimizar aviso de conexión' }).click();
+    await expect(
+      indicator.getByRole('button', { name: 'Mostrar aviso de conexión' }),
+    ).toBeVisible();
+    await indicator.getByRole('button', { name: 'Mostrar aviso de conexión' }).click();
     await expect(
       indicator.getByRole('button', { name: 'Reintentar ahora', exact: true }),
     ).toBeVisible();

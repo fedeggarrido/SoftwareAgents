@@ -9,12 +9,11 @@ import {
   useExecutorStore,
 } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
-import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 
 /**
- * «Executors para nuevas tareas» (SA-091). The switch is the Operator's choice and
+ * «Ejecutores para nuevas tareas» (SA-091). The switch is the Operator's choice and
  * changes only when the server confirms it; the text is current eligibility.
  */
 export function ExecutorPanel() {
@@ -46,11 +45,11 @@ export function ExecutorPanel() {
   return (
     <section
       className="flex flex-col gap-4"
-      aria-label={`Executors para nuevas tareas de ${view.projectId}`}
+      aria-label={`Ejecutores para nuevas tareas de ${view.projectId}`}
       data-testid="executor-panel"
     >
       <div className="flex flex-wrap justify-between gap-x-8 text-2xs">
-        <span className="text-text">Executors para nuevas tareas</span>
+        <span className="text-text">Ejecutores para nuevas tareas</span>
         <span className="text-text-muted">Asignación: automática por política</span>
       </div>
       {view.banner && (
@@ -127,9 +126,7 @@ export function ExecutorPanel() {
                     </Button>
                     <OfficeRecoveryActions />
                   </>
-                ) : (
-                  <OfficeConnectionHelp />
-                )}
+                ) : null}
               </span>
             )}
           </span>

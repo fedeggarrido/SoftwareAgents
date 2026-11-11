@@ -4,28 +4,38 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { CharacterDetail, ExecutorState } from '../../../core/src/messages.js';
 import {
   AGENT_CARD_MAX_HEIGHT_PX,
-  AGENT_CARD_STATUS_CLASSES,
   AGENT_CARD_WIDTH_PX,
   AGENT_CARD_Z_INDEX,
   AGENT_HISTORY_LIMIT,
+  EXTERNAL_SESSION_LABEL,
+  EXTERNAL_SESSION_TOOLTIP,
   PANEL_WINDOW_MARGIN_PX,
   PR_DISPLAY_REFRESH_MS,
+  WORK_STATE,
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import { agentCardPosition } from '../office/agentCardState.js';
 import type { AgentHistoryEvent } from '../office/agentHistory.js';
 import { agentElapsed } from '../office/agentHistory.js';
 import { knownText, relativeTime } from '../office/displayText.js';
+import { ContextGauge } from './ContextGauge.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 
 export interface CharacterDetailPanelProps {
+  agentId?: number;
   name?: string;
   role?: string;
   status?: string;
-  statusTone?: keyof typeof AGENT_CARD_STATUS_CLASSES;
+  statusState?: string;
+  assignment?: string;
+  context?: { used: number; limit: number };
+  workspaceName?: string;
+  teamName?: string;
+  tier?: string;
   detail?: CharacterDetail;
   executorState?: ExecutorState | null;
-  task?: { key?: string; title?: string };
+  task?: { key?: string; title?: string; state?: string };
   executor?: string;
   model?: string;
   history?: readonly AgentHistoryEvent[];
@@ -38,10 +48,16 @@ export interface CharacterDetailPanelProps {
 
 /** Facts from the runtime and webview observations; absent values stay absent. */
 export function CharacterDetailPanel({
+  agentId,
   name = 'Agente',
   role,
-  status = 'Disponible',
-  statusTone = 'available',
+  status,
+  statusState = 'waiting',
+  assignment,
+  context,
+  workspaceName,
+  teamName,
+  tier,
   detail,
   executorState,
   task,
@@ -88,6 +104,7 @@ export function CharacterDetailPanel({
       aria-labelledby={nameId}
       tabIndex={-1}
       data-testid="character-detail-panel"
+      data-agent-id={agentId}
       style={style}
       className={`agent-card character-detail-panel pixel-panel p-10 text-xs ${mobile ? 'agent-card-mobile' : ''}`}
     >
@@ -99,13 +116,27 @@ export function CharacterDetailPanel({
           {(knownText(role) ?? knownText(detail?.role)) && (
             <p>{knownText(role) ?? knownText(detail?.role)}</p>
           )}
-          <p className="flex items-center gap-4">
-            <span
-              aria-hidden="true"
-              className={`inline-block w-8 h-8 rounded-full ${AGENT_CARD_STATUS_CLASSES[statusTone]}`}
-            />
-            {status}
-          </p>
+          <StatusChip state={statusState} />
+          {status && <p>{status}</p>}
+          {assignment && (
+            <p
+              className={
+                assignment === EXTERNAL_SESSION_LABEL ? 'external-session-chip' : undefined
+              }
+              title={assignment === EXTERNAL_SESSION_LABEL ? EXTERNAL_SESSION_TOOLTIP : undefined}
+            >
+              {assignment}
+            </p>
+          )}
+          {workspaceName && <p>Carpeta: {knownText(workspaceName)}</p>}
+          {teamName && <p>Equipo: {knownText(teamName)}</p>}
+          {context && (
+            <>
+              <p>Contexto usado: {Math.round((context.used / context.limit) * 100)}%</p>
+              <ContextGauge {...context} />
+            </>
+          )}
+          {tier && <p>Nivel: {tier}</p>}
         </div>
         <Button size="sm" variant="ghost" aria-label="Cerrar ficha del agente" onClick={onClose}>
           ✕
@@ -114,6 +145,7 @@ export function CharacterDetailPanel({
       {(taskKey || taskTitle || currentModel || currentExecutor || elapsed) && (
         <section>
           <h3>Ahora</h3>
+          {task?.state && task.state !== WORK_STATE.AVAILABLE && <StatusChip state={task.state} />}
           {(taskKey || taskTitle) && <p>{[taskKey, taskTitle].filter(Boolean).join(' · ')}</p>}
           <dl>
             {currentModel && (
@@ -166,7 +198,7 @@ export function CharacterDetailPanel({
       <footer className="flex flex-wrap gap-8">
         {onOpenBacklog && (
           <Button size="sm" onClick={onOpenBacklog}>
-            Ver en Backlog
+            Ver en Trabajo
           </Button>
         )}
         {onCloseAgent && (

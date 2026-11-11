@@ -57,40 +57,40 @@ export function ColorPicker({
     onChange({ ...value, [key]: v });
   };
 
-  const isColorize = colorize || !!value.colorize;
+  const isColorear = colorize || !!value.colorize;
 
   return (
     <div className="flex flex-col py-8 px-10 bg-bg-dark border-2 border-border rounded-none">
       <ColorSlider
-        label="Hue"
+        label="Tono"
         value={value.h}
-        min={isColorize ? 0 : -180}
-        max={isColorize ? 360 : 180}
+        min={isColorear ? 0 : -180}
+        max={isColorear ? 360 : 180}
         onChange={(v) => handleChange('h', v)}
       />
       <ColorSlider
-        label="Saturation"
+        label="Saturación"
         value={value.s}
-        min={isColorize ? 0 : -100}
+        min={isColorear ? 0 : -100}
         max={100}
         onChange={(v) => handleChange('s', v)}
       />
       <ColorSlider
-        label="Brightness"
+        label="Brillo"
         value={value.b}
         min={-100}
         max={100}
         onChange={(v) => handleChange('b', v)}
       />
       <ColorSlider
-        label="Contrast"
+        label="Contraste"
         value={value.c}
         min={-100}
         max={100}
         onChange={(v) => handleChange('c', v)}
       />
 
-      {/* Colorize row: a toggle, then (when on) the carpet-style swatch + hex
+      {/* Colorear row: a toggle, then (when on) the carpet-style swatch + hex
           control that opens a visual picker on click. */}
       {(showColorizeToggle || onReset) && (
         <div className="flex items-center gap-8 -mt-4">
@@ -99,9 +99,9 @@ export function ColorPicker({
               type="button"
               onClick={() => onChange({ ...value, colorize: !value.colorize || undefined })}
               className="flex items-center gap-8 shrink-0 bg-transparent border-0 p-0 cursor-pointer text-left"
-              title="Toggle colorize mode"
+              title="Alternar coloreado"
             >
-              <span className="text-sm text-text-muted w-64 shrink-0">Colorize</span>
+              <span className="text-sm text-text-muted w-64 shrink-0">Colorear</span>
               <span
                 className={`w-18 h-18 border-2 border-border inline-flex items-center justify-center text-2xs leading-none text-text shrink-0 ${
                   value.colorize ? 'bg-accent' : 'bg-bg'
@@ -121,13 +121,13 @@ export function ColorPicker({
           )}
           {onReset && (
             <Button
-              variant="default"
+              variant="secondary"
               size="sm"
               onClick={onReset}
-              title="Reset to default"
+              title="Restablecer valores"
               className="mt-6"
             >
-              Reset
+              Restablecer
             </Button>
           )}
         </div>

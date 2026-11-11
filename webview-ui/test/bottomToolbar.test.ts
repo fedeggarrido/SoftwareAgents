@@ -71,7 +71,7 @@ it('groups primary, panel segments and secondary controls in keyboard order', as
     'Nueva idea',
     'Trabajo',
     'Decisiones',
-    'Features',
+    'Funcionalidades',
     'Auditoría',
     'Editar oficina',
     'Ajustes',
@@ -110,7 +110,7 @@ it.each(['backlog', 'decisions', 'features', 'audit', 'meeting', null])(
     const labels: Record<string, string> = {
       backlog: 'Trabajo',
       decisions: 'Decisiones',
-      features: 'Features',
+      features: 'Funcionalidades',
       audit: 'Auditoría',
     };
     expect(pressed).toEqual(activePanel && labels[activePanel] ? [labels[activePanel]] : []);

@@ -170,12 +170,12 @@ describe('features store acceptance', () => {
   });
 
   it('formats states and uses fixed safe error text', () => {
-    expect(featureStateLabel(row)).toBe('en desarrollo');
-    expect(featureStateLabel({ ...row, state: 'in_review' })).toBe('spec en revisión');
-    expect(featureStateLabel({ ...row, state: 'in_design' })).toBe('en diseño');
-    expect(featureStateLabel({ ...row, state: 'ready_to_merge' })).toBe('lista para fusionar');
+    expect(featureStateLabel(row)).toBe('En desarrollo');
+    expect(featureStateLabel({ ...row, state: 'in_review' })).toBe('Requisitos en revisión');
+    expect(featureStateLabel({ ...row, state: 'in_design' })).toBe('En diseño');
+    expect(featureStateLabel({ ...row, state: 'ready_to_merge' })).toBe('Lista para integrar');
     expect(featureStateLabel({ ...row, state: 'unknown', rawStatus: 'legacy' })).toBe(
-      'estado desconocido',
+      'Sin estado registrado',
     );
     for (const reason of [
       'unavailable',
@@ -196,12 +196,12 @@ describe('features store acceptance', () => {
       .split(',')
       .map((state) => state.trim());
     const labels: Record<FeatureRow['state'], string> = {
-      merged: 'fusionada',
-      ready_to_merge: 'lista para fusionar',
-      in_review: 'spec en revisión',
-      in_design: 'en diseño',
-      in_development: 'en desarrollo',
-      unknown: 'estado desconocido',
+      merged: 'Integrada',
+      ready_to_merge: 'Lista para integrar',
+      in_review: 'Requisitos en revisión',
+      in_design: 'En diseño',
+      in_development: 'En desarrollo',
+      unknown: 'Sin estado registrado',
     };
     expect(states.sort()).toEqual(Object.keys(labels).sort());
     for (const state of states) {

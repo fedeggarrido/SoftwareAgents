@@ -34,7 +34,7 @@ describe('office without a board', () => {
     const state = board('project');
     state.sources.workStore = true;
     expect(backlogView(state)).toMatchObject({
-      message: expect.stringContaining('WorkStore no disponible'),
+      message: expect.stringContaining('No se pudieron leer las tareas del proyecto'),
       configurationHint: null,
     });
     state.sources.board = true;
@@ -89,10 +89,10 @@ describe('office without a board', () => {
     const view = backlogView(board(mode));
     expect(view.message).toContain(
       mode === 'project'
-        ? 'softwareagents'
+        ? 'SoftwareAgents'
         : mode === 'legacy'
-          ? 'docs/backlog/board.json'
-          : 'inválida',
+          ? 'tablero vinculado'
+          : 'configuración del proyecto',
     );
     expect(view.message).not.toContain('sin ronda activa');
     expect(view.configurationHint !== null).toBe(mode === 'project');
@@ -110,10 +110,10 @@ describe('office without a board', () => {
       label: 'Abrir carpeta de ClickUp',
     });
     expect(view.configurationHint).toBeNull();
-    expect(view.message).toContain('SA-053');
+    expect(view.message).toContain('SoftwareAgents');
   });
   it('handles absent and available board sources', () => {
-    expect(backlogView(null).message).toContain('Modo legacy');
+    expect(backlogView(null).message).toContain('tablero vinculado');
     const state = board('project');
     expect(backlogView({ ...state, sources: { ...state.sources, board: true } })).toMatchObject({
       message: null,

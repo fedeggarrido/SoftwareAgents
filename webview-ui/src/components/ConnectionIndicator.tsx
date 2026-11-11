@@ -10,7 +10,7 @@ export function ConnectionIndicator() {
   const state = useSyncExternalStore(subscribe, snapshot, snapshot);
   if (state === 'connected') return null;
   return (
-    <div className="connection-indicator pixel-panel p-10 text-xs">
+    <div className="connection-indicator" data-testid="connection-notice">
       <OfficeConnectionHelp />
     </div>
   );

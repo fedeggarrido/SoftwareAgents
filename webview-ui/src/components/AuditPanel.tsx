@@ -22,7 +22,6 @@ import {
 import { knownText } from '../office/displayText.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
-import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
@@ -79,9 +78,7 @@ export function AuditPanel({
     >
       <PanelHeading hosted={hosted} title="Auditoría" onClose={onClose} />
       <p>{AUDIT_EXPLANATION}</p>
-      {connectionState !== 'connected' ? (
-        <OfficeConnectionHelp />
-      ) : !projectId ? (
+      {connectionState !== 'connected' ? null : !projectId ? (
         <>
           <p>{PROJECT_EMPTY_TEXT}</p>
           <OfficeRecoveryActions project />

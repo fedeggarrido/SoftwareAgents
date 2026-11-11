@@ -30,17 +30,15 @@ export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPan
         </div>
       )}
       <div className="text-2xs text-text-muted">
-        Los agentes recomiendan; solo tú decides. Las decisiones estructuradas restauran las tareas
-        bloqueadas; las respuestas legacy las aplica el manager.
+        Aquí aparecen las preguntas que los agentes no pueden decidir solos. Tú eliges; ellos
+        continúan.
       </div>
       {decisions.length === 0 && (
         <div className="text-xs text-text-muted">No hay decisiones pendientes.</div>
       )}
       {decisions.map((d) => (
         <div key={d.id} className="bg-bg-dark border-2 border-border p-8 flex flex-col gap-4">
-          <div className="text-sm">
-            <span className="text-text-muted">{d.id}</span> {d.question}
-          </div>
+          <div className="text-sm">{d.question}</div>
           {d.context && <div className="text-2xs text-text-muted leading-tight">{d.context}</div>}
           {d.recommendation && (
             <div className="text-2xs leading-tight">Recomendación: {d.recommendation}</div>

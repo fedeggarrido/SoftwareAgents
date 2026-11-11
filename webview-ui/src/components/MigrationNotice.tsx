@@ -1,47 +1,28 @@
-import { useRef } from 'react';
-
-import { MIGRATION_NOTICE_Z_INDEX } from '../constants.js';
-import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import { Button } from './ui/Button.js';
+import { Modal } from './ui/Modal.js';
 
 interface MigrationNoticeProps {
   onDismiss: () => void;
 }
 
 export function MigrationNotice({ onDismiss }: MigrationNoticeProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDismissibleLayer(true, onDismiss, MIGRATION_NOTICE_Z_INDEX, dialogRef, true);
   return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Actualización de la oficina"
-      tabIndex={-1}
-      style={{ zIndex: MIGRATION_NOTICE_Z_INDEX }}
-      className="absolute inset-0 bg-black/70 flex items-center justify-center"
-      onClick={onDismiss}
-      onKeyDown={(event) => event.stopPropagation()}
+    <Modal
+      isOpen
+      onClose={onDismiss}
+      title="La distribución se ha restablecido"
+      className="migration-dialog"
     >
-      <div
-        className="pixel-panel py-24 px-32 max-w-xl text-center leading-[1.3]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-5xl mb-12 text-accent">We owe you an apology!</div>
-        <p className="text-xl m-0 mb-12">
-          We've just migrated to fully open-source assets, all built from scratch with love.
-          Unfortunately, this means your previous layout had to be reset.
+      <div className="p-12 flex flex-col gap-12">
+        <p>
+          La oficina usa ahora recursos gráficos de código abierto. Este cambio ha restablecido la
+          distribución anterior.
         </p>
-        <p className="text-xl m-0 mb-12">We're really sorry about that.</p>
-        <p className="text-xl m-0 mb-12">
-          The good news? This was a one-time thing, and it paves the way for some genuinely exciting
-          updates ahead.
-        </p>
-        <p className="text-xl m-0 mb-20">Stay tuned, and thanks for using Pixel Agents!</p>
-        <Button variant="accent" size="xl" onClick={onDismiss}>
-          Got it
+        <p>Puedes reorganizar los muebles desde el editor de la oficina.</p>
+        <Button variant="primary" onClick={onDismiss}>
+          Entendido
         </Button>
       </div>
-    </div>
+    </Modal>
   );
 }

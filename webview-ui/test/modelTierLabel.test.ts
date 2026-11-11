@@ -16,7 +16,7 @@ it('shows only a known historical model tier; replaces and clears it with the ro
     model: 'test-standard-model',
     effort: 'medium',
   });
-  expect(modelTierLabel(getAgentRole(84))).toBe('standard · test-standard-model');
+  expect(modelTierLabel(getAgentRole(84))).toBe('Estándar · test-standard-model');
   setAgentRole(84, { label: 'DEV', department: 'Ingeniería' });
   expect(modelTierLabel(getAgentRole(84))).toBeUndefined();
   clearAgentRole(84);

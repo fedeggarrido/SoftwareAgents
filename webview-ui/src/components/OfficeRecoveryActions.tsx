@@ -11,7 +11,7 @@ export function OfficeRecoveryActions({ project = false }: { project?: boolean }
         </Button>
       )}
       <Button size="sm" onClick={recovery.openSettings}>
-        Abrir Settings
+        Abrir Ajustes
       </Button>
     </div>
   );

@@ -47,7 +47,7 @@ test.describe('Standalone / hooks', () => {
     });
 
     await expectOverlayCount(page, 1);
-    await expectOverlayVisible(page, 'Reading demo.ts');
+    await expectOverlayVisible(page, 'Leyendo demo.ts');
     const preToolMessages = await standalone.drainMessages();
     const toolStart = preToolMessages.find(
       (message): message is RecordedServerMessage & { type: 'agentToolStart' } =>
@@ -65,7 +65,7 @@ test.describe('Standalone / hooks', () => {
       session_id: sessionId,
       hook_event_name: 'PermissionRequest',
     });
-    await expectOverlayVisible(page, 'Needs approval');
+    await expectOverlayVisible(page, 'Necesita tu aprobación');
     const permissionMessages = await standalone.drainMessages();
     expect(permissionMessages.some((message) => message.type === 'agentToolPermission')).toBe(true);
 
@@ -82,14 +82,14 @@ test.describe('Standalone / hooks', () => {
           message.id === toolStart?.id,
       ),
     ).toBe(true);
-    await expectOverlayVisible(page, 'Needs approval');
+    await expectOverlayVisible(page, 'Necesita tu aprobación');
 
     await sendHookEvent(standalone.hookServerConfig, {
       session_id: sessionId,
       hook_event_name: 'Notification',
       notification_type: 'idle_prompt',
     });
-    await expectOverlayVisible(page, 'Waiting for input');
+    await expectOverlayVisible(page, 'Esperando tu respuesta');
     const notificationMessages = await standalone.drainMessages();
     expect(notificationMessages.some((message) => message.type === 'agentToolsClear')).toBe(true);
     expect(

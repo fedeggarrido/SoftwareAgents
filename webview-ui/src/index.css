@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './ui.css';
 
 @font-face {
   font-family: 'FS Pixel Sans';
@@ -25,15 +26,15 @@
   --panel-edge: 16px;
   --panel-width: 960px;
   --hud-width: 460px;
-  --control-target: 24px;
-  --ui-info-size: 24px;
+  --control-target: 44px;
+  --ui-info-size: var(--reading-size);
   --idea-command-size: 16px;
   --panel-gap: 8px;
   --office-top: 10px;
   --office-bottom: 60px;
   --zoom-stack-bottom: 92px;
   --zoom-stack-right: 48px;
-  --window-border: 2px;
+  --window-border: var(--border-thick);
   --window-resize-edge: 6px;
   --window-resize-corner: 12px;
   --window-focus-offset: -4px;
@@ -41,6 +42,16 @@
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius: 0;
+  --border-thin: 1px;
+  --border-thick: 2px;
+  --font-reading: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-pixel: 'FS Pixel Sans', sans-serif;
+  --reading-size: 14px;
+  --metadata-size: 12px;
+  --reading-line-height: 1.4;
   --dock-control-height: 32px;
   --dock-touch-target: 44px;
   --dock-mobile-height: 64px;
@@ -79,9 +90,9 @@
   --feature-merged: var(--color-status-success);
   --feature-unknown: var(--color-text-muted);
   --plan-font: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --plan-font-size: 14px;
-  --plan-heading-size: 18px;
-  --plan-line-height: 1.45;
+  --plan-font-size: var(--reading-size);
+  --plan-heading-size: 24px;
+  --plan-line-height: var(--reading-line-height);
   --plan-width: 960px;
   --plan-summary-columns: 3;
   --plan-preview-lines: 1;
@@ -96,15 +107,15 @@
 
   /* Text sizes (pixel-art scale, base = 22px) */
   --text-*: initial;
-  --text-2xs: 16px;
-  --text-xs: 18px;
-  --text-sm: 20px;
-  --text-base: 22px;
-  --text-lg: 26px;
-  --text-xl: 30px;
+  --text-2xs: var(--reading-size);
+  --text-xs: var(--reading-size);
+  --text-sm: var(--reading-size);
+  --text-base: var(--reading-size);
+  --text-lg: 24px;
+  --text-xl: 24px;
   --text-2xl: 36px;
-  --text-3xl: 44px;
-  --text-4xl: 52px;
+  --text-3xl: 48px;
+  --text-4xl: 48px;
   --text-5xl: 64px;
 
   /* Colors — reference :root vars so VS Code shows swatches */
@@ -135,11 +146,13 @@
   html,
   body,
   #root {
-    @apply m-0 w-full h-full overflow-hidden font-pixel text-base text-text;
+    @apply m-0 w-full h-full overflow-hidden text-base text-text;
   }
 
-  * {
-    @apply font-pixel;
+  body {
+    font-family: var(--font-reading);
+    font-size: var(--reading-size);
+    line-height: var(--reading-line-height);
   }
 }
 
@@ -290,6 +303,7 @@
   border-bottom: var(--window-border) solid var(--color-text-muted);
 }
 .panel-window-mobile {
+  position: absolute;
   inset: 0;
   width: 100%;
   height: 100dvh;
@@ -303,7 +317,7 @@
   bottom: var(--dock-bottom);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 45;
+  z-index: var(--z-hud);
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -461,7 +475,7 @@
 }
 @media (max-width: 767px) {
   .panel-window-mobile {
-    height: calc(100dvh - var(--dock-mobile-height) - var(--dock-bottom) - var(--space-2));
+    height: calc(100% - var(--dock-mobile-height) - var(--dock-bottom) - var(--space-2));
   }
 }
 .ui-info {
@@ -469,9 +483,9 @@
 }
 .ui-counter,
 .ui-counter * {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-pixel);
   font-variant-numeric: tabular-nums slashed-zero;
-  font-size: var(--ui-info-size);
+  font-size: 24px;
 }
 [data-testid='company-hud'] > .flex:first-child {
   flex-wrap: wrap;
@@ -800,10 +814,7 @@
   flex-shrink: 0;
   margin: 0;
 }
-.feature-plan-dialog > div:first-child span,
-.feature-plan-dialog button {
-  font: inherit;
-}
+
 .feature-plan-layout {
   display: flex;
   flex-direction: column;
@@ -914,15 +925,4 @@
   .feature-plan-summary {
     --plan-summary-columns: 1;
   }
-}
-
-.connection-indicator {
-  position: absolute;
-  left: var(--panel-gap);
-  top: var(--panel-gap);
-  z-index: 20;
-  width: min(460px, calc(100% - 2 * var(--panel-gap)));
-  max-height: calc(100% - 2 * var(--panel-gap));
-  overflow: auto;
-  overflow-wrap: anywhere;
 }

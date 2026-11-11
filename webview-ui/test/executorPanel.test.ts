@@ -369,7 +369,7 @@ describe('assignment reason in the overlay', () => {
     expect(
       assignmentReason({ label: 'DEV', department: 'Ingeniería', tier: 'standard' }, true),
     ).toBeUndefined();
-    expect(assignmentReason(undefined, true)).toBe('Sesión externa · asignación no gestionada');
+    expect(assignmentReason(undefined, true)).toBe('Abierta por ti');
     expect(assignmentReason(undefined, false)).toBeUndefined();
   });
 });

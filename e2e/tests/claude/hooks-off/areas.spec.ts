@@ -75,7 +75,7 @@ test.describe('Areas (single-folder)', () => {
     narrator.step('opening the layout editor with no workspace folders configured');
     await enterEditMode(frame);
     // Single-folder fixture sends no workspaceFolders → the Areas button is gated off.
-    await expect(frame.locator('button[title*="Define folder-bound areas"]')).toHaveCount(0);
+    await expect(frame.locator('button[title*="Definir áreas por carpeta"]')).toHaveCount(0);
     narrator.check('no Areas tool button — the tool is gated on having folders to map');
   });
 
@@ -96,7 +96,7 @@ test.describe('Areas (single-folder)', () => {
       // areasAvailable is now (layout.areas?.length ?? 0) > 0 || <folders>, so a
       // seeded single-folder layout with areas makes the button visible even
       // without workspace folders.
-      await expect(frame.locator('button[title*="Define folder-bound areas"]')).toHaveCount(1);
+      await expect(frame.locator('button[title*="Definir áreas por carpeta"]')).toHaveCount(1);
       narrator.check('the Areas tool button is visible because the seeded layout has an area');
     });
   });

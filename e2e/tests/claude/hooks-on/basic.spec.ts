@@ -42,7 +42,7 @@ test.describe('Hooks ON / spawn paths', () => {
     // Ghosting ships off, so turn it on before anything spawns. That makes the
     // "not a ghost" assertion below say something — that this agent owns a
     // terminal — rather than merely restating the default.
-    narrator.step('enabling "Display Headless as Ghosts" so the opacity cue is live');
+    narrator.step('enabling "Atenuar sesiones sin terminal" so the opacity cue is live');
     await setSettings(frame, { ghostHeadlessAgents: true });
 
     // Sub-character appears on Task tool_use and despawns on tool_result.
@@ -92,8 +92,8 @@ test.describe('Hooks ON / spawn paths', () => {
 
     narrator.step('waiting for the t+5s Task tool_use to spawn a "Subtask" character');
     await expectCharacterCount(panelFrame, 2);
-    await expectSubagentOverlay(panelFrame, 'Subtask: spawned subtask');
-    narrator.check('"Subtask: spawned subtask" overlay up — count 1 → 2');
+    await expectSubagentOverlay(panelFrame, 'Subtarea: spawned subtask');
+    narrator.check('"Subtarea: spawned subtask" overlay up — count 1 → 2');
 
     // The agent is on no team, so this also pins that the context gauge is not
     // a teams feature. 90k of an Opus 5 window is 9%; reading 45% would mean
@@ -115,7 +115,7 @@ test.describe('Hooks ON / spawn paths', () => {
   // Phase widths are deliberate. An early scenario-driven version (emissions at
   // 200ms/2s/3.2s/4.4s/6s) flaked reliably under full-suite load: the phases
   // were so narrow that a late-starting assertion missed its state entirely —
-  // e.g. the "Idle" label only renders after the ~2s green-checkmark fade
+  // e.g. the "En espera" label only renders after the ~2s green-checkmark fade
   // (ToolOverlay's done-marker), so a sub-2s gap after Stop starves it of a
   // window. The 3.5–5s phases below give every assertion seconds of slack
   // against scheduler drift AND keep each state on screen long enough to be
@@ -129,7 +129,9 @@ test.describe('Hooks ON / spawn paths', () => {
     // Ghosting ships off, so the test turns it on — otherwise the adopted agent
     // below is headless but drawn at full opacity, which is the correct default
     // behaviour and would make the ghost assertion unreachable.
-    narrator.step('enabling Watch All Sessions + ghosting so the hooks-only session gets adopted');
+    narrator.step(
+      'enabling Observar todas las sesiones + ghosting so the hooks-only session gets adopted',
+    );
     await setSettings(frame, {
       watchAllSessions: true,
       ghostHeadlessAgents: true,
@@ -175,24 +177,24 @@ test.describe('Hooks ON / spawn paths', () => {
     // 1. PreToolUseBash (t+0.7s) confirms the session; agent appears with bash status.
     narrator.step('waiting for the t+0.7s PreToolUse(Bash) to confirm the session');
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisible(frame, 'Running: npm test');
-    narrator.check('the external agent appeared — "Running: npm test"');
+    await expectOverlayVisible(frame, 'Ejecutando: npm test');
+    narrator.check('the external agent appeared — "Ejecutando: npm test"');
 
-    // Adopted from outside via Watch All Sessions: no terminal to focus, so the
+    // Adopted from outside via Observar todas las sesiones: no terminal to focus, so the
     // character is headless and renders translucent.
     await expectCharacterGhosted(frame, true);
 
-    // 2. PermissionRequest (t+4.5s) → "Needs approval"
+    // 2. PermissionRequest (t+4.5s) → "Necesita tu aprobación"
     narrator.step('waiting for the t+4.5s PermissionRequest');
-    await expectOverlayVisible(frame, 'Needs approval');
-    narrator.check('"Needs approval" bubble on the agent');
+    await expectOverlayVisible(frame, 'Necesita tu aprobación');
+    narrator.check('"Necesita tu aprobación" bubble on the agent');
 
-    // 3. Stop (t+8.5s) → finished turn shows ONLY the checkmark; the "Idle" label
+    // 3. Stop (t+8.5s) → finished turn shows ONLY the checkmark; the "En espera" label
     //    surfaces once the checkmark fades (~2s later). The 5s gap before
-    //    SessionEnd is what guarantees "Idle" gets a visible window.
-    narrator.step('waiting for the t+8.5s Stop — checkmark, then "Idle" after the fade');
-    await expectOverlayVisible(frame, 'Idle');
-    narrator.check('turn finished — "Idle" after the green checkmark fades');
+    //    SessionEnd is what guarantees "En espera" gets a visible window.
+    narrator.step('waiting for the t+8.5s Stop — checkmark, then "En espera" after the fade');
+    await expectOverlayVisible(frame, 'En espera');
+    narrator.check('turn finished — "En espera" after the green checkmark fades');
 
     // 4. SessionEnd(exit) (t+13.5s) → agent is removed.
     narrator.step('waiting for the t+13.5s SessionEnd to remove the agent');

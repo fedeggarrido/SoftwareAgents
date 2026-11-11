@@ -6,7 +6,6 @@ import { useOfficeHelpPlacement } from '../hooks/useOfficeHelpPlacement.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
 import { isBrowserRuntime } from '../runtime.js';
-import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 
@@ -34,9 +33,7 @@ export function OfficeModeIndicator() {
       ref={containerRef}
       className="office-mode-indicator flex flex-col items-end gap-4 max-w-full"
     >
-      {offline ? (
-        <OfficeConnectionHelp />
-      ) : (
+      {!offline && (
         <>
           <Button
             size="sm"

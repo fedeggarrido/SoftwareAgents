@@ -48,13 +48,13 @@ import { getPixelAgentsFrame, openPixelAgentsPanel, setSettings } from '../../..
 const TEAMMATE_ROLE = 'web-researcher';
 
 async function expectLeadActivity(frame: Frame, text: string): Promise<void> {
-  await expectOverlayVisibleWithTexts(frame, ['LEAD', text]);
+  await expectOverlayVisibleWithTexts(frame, ['Responsable', text]);
   await expectNoOverlayWithTexts(frame, [TEAMMATE_ROLE, text]);
 }
 
 async function expectTeammateActivity(frame: Frame, text: string): Promise<void> {
   await expectOverlayVisibleWithTexts(frame, [TEAMMATE_ROLE, text]);
-  await expectNoOverlayWithTexts(frame, ['LEAD', text]);
+  await expectNoOverlayWithTexts(frame, ['Responsable', text]);
 }
 
 // All four tests are scenario-driven (mocking rule 1) with ~3s phases so run
@@ -106,7 +106,7 @@ test.describe('Hooks ON / teams', () => {
     await openPixelAgentsPanel(window);
     const panelFrame = await getPixelAgentsFrame(window);
 
-    await expectOverlayVisibleWithTexts(panelFrame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(panelFrame, ['Responsable']);
     narrator.check('the lead is on screen labelled "LEAD"');
     narrator.step(
       'waiting for SubagentStart + the teammate transcript to spawn the web-researcher',
@@ -114,10 +114,10 @@ test.describe('Hooks ON / teams', () => {
     await expectOverlayCount(panelFrame, 2);
     await expectOverlayVisibleWithTexts(panelFrame, [TEAMMATE_ROLE]);
     narrator.check('two characters now — the web-researcher teammate joined');
-    await expectLeadActivity(panelFrame, 'Running: npm test');
-    narrator.check('"Running: npm test" on the lead only');
-    await expectTeammateActivity(panelFrame, 'Searching the web');
-    narrator.check('"Searching the web" on the teammate only — routing is strict');
+    await expectLeadActivity(panelFrame, 'Ejecutando: npm test');
+    narrator.check('"Ejecutando: npm test" on the lead only');
+    await expectTeammateActivity(panelFrame, 'Buscando en la web');
+    narrator.check('"Buscando en la web" on the teammate only — routing is strict');
   });
 
   test('internal terminal lead with tmux teammate routes tools to teammate @area:teams', async ({
@@ -138,7 +138,7 @@ test.describe('Hooks ON / teams', () => {
         .at(500)
         .appendJsonl(buildTeamMetadataRecord(teamName))
         // Lead's Agent tool_use with run_in_background — the lead overlay shows
-        // "Subtask: Delegate research" as its activity (team gate suppresses a
+        // "Subtarea: Delegate research" as its activity (team gate suppresses a
         // basic sub-character because the lead has a teamName by now).
         .at(3_000)
         .appendJsonl(
@@ -179,19 +179,19 @@ test.describe('Hooks ON / teams', () => {
     await openPixelAgentsPanel(window);
     const panelFrame = await getPixelAgentsFrame(window);
 
-    await expectOverlayVisibleWithTexts(panelFrame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(panelFrame, ['Responsable']);
     narrator.check('the lead is on screen labelled "LEAD"');
     narrator.step('waiting for the lead to delegate via a background Agent');
-    await expectLeadActivity(panelFrame, 'Subtask: Delegate research');
-    narrator.check('"Subtask: Delegate research" on the lead — the delegation');
+    await expectLeadActivity(panelFrame, 'Subtarea: Delegate research');
+    narrator.check('"Subtarea: Delegate research" on the lead — the delegation');
     narrator.step('waiting for the distinct tmux session to be adopted as the teammate');
     await expectOverlayCount(panelFrame, 2);
     await expectOverlayVisibleWithTexts(panelFrame, [TEAMMATE_ROLE]);
     narrator.check('the teammate appears — two characters');
-    await expectTeammateActivity(panelFrame, 'Running: npm test');
-    narrator.check('"Running: npm test" is routed to the tmux teammate, not the lead');
-    await expectTeammateActivity(panelFrame, 'Needs approval');
-    narrator.check('"Needs approval" is routed to the tmux teammate, not the lead');
+    await expectTeammateActivity(panelFrame, 'Ejecutando: npm test');
+    narrator.check('"Ejecutando: npm test" is routed to the tmux teammate, not the lead');
+    await expectTeammateActivity(panelFrame, 'Necesita tu aprobación');
+    narrator.check('"Necesita tu aprobación" is routed to the tmux teammate, not the lead');
   });
 
   test('new-harness background agent becomes a named teammate character @area:teams', async ({
@@ -267,7 +267,7 @@ test.describe('Hooks ON / teams', () => {
     const panelFrame = await getPixelAgentsFrame(window);
 
     narrator.step('waiting for the spawn result to mark the internal agent as team lead');
-    await expectOverlayVisibleWithTexts(panelFrame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(panelFrame, ['Responsable']);
     narrator.check(
       'the lead is marked "LEAD" purely from the spawn result — its records have no team tags',
     );
@@ -278,9 +278,11 @@ test.describe('Hooks ON / teams', () => {
     await expectTeammateSeatedNextToLead(panelFrame, role);
     narrator.check('the teammate took the free seat closest to the lead');
     narrator.step("waiting for the teammate's own-session hooks to route to it");
-    await expectOverlayVisibleWithTexts(panelFrame, [role, 'Running: npm test']);
-    await expectNoOverlayWithTexts(panelFrame, ['LEAD', 'Running: npm test']);
-    narrator.check('"Running: npm test" lands on the teammate only — its own session routes to it');
+    await expectOverlayVisibleWithTexts(panelFrame, [role, 'Ejecutando: npm test']);
+    await expectNoOverlayWithTexts(panelFrame, ['Responsable', 'Ejecutando: npm test']);
+    narrator.check(
+      '"Ejecutando: npm test" lands on the teammate only — its own session routes to it',
+    );
     narrator.step("waiting for the teammate's SessionEnd to despawn it");
     await expectOverlayCount(panelFrame, 1);
     narrator.check('the teammate despawned on its own SessionEnd — the lead remains');
@@ -345,12 +347,12 @@ test.describe('Hooks ON / teams', () => {
     narrator.check('the Subtask sub-character joined — unnamed spawns stay sub-agents');
     narrator.step('selecting the sub-agent to reveal its live activity');
     await selectCharacter(panelFrame, -1);
-    await expectOverlayVisibleWithTexts(panelFrame, ['Searching the web']);
-    narrator.check('"Searching the web" on the selected sub-agent — its own transcript drives it');
+    await expectOverlayVisibleWithTexts(panelFrame, ['Buscando en la web']);
+    narrator.check('"Buscando en la web" on the selected sub-agent — its own transcript drives it');
     narrator.step('Stop fires on the lead mid-run — the sub-character must survive');
     await panelFrame.waitForTimeout(2_000);
     await expectCharacterCount(panelFrame, 2);
-    await expectSubagentOverlay(panelFrame, 'Searching the web');
+    await expectSubagentOverlay(panelFrame, 'Buscando en la web');
     narrator.check('still two characters after Stop — the sub survives in place');
     narrator.step('waiting for the completion queue-operation to despawn it');
     await expectCharacterCount(panelFrame, 1);
@@ -411,11 +413,11 @@ test.describe('Hooks ON / teams', () => {
     await expectOverlayCount(panelFrame, 2);
     narrator.check('"ghost-writer" joined — named from the sidecar, not the description');
     narrator.step('checking the spawner got the derived-team LEAD badge');
-    await expectOverlayVisibleWithTexts(panelFrame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(panelFrame, ['Responsable']);
     narrator.check('the spawner is badged LEAD — spawning a named agent makes a team');
     narrator.step("waiting for the teammate's own transcript to animate it");
-    await expectOverlayVisibleWithTexts(panelFrame, ['ghost-writer', 'Searching the web']);
-    narrator.check('"Searching the web" on the teammate — its own transcript drives it');
+    await expectOverlayVisibleWithTexts(panelFrame, ['ghost-writer', 'Buscando en la web']);
+    narrator.check('"Buscando en la web" on the teammate — its own transcript drives it');
     narrator.step('waiting for the completion queue-operation to despawn it');
     await expectOverlayCount(panelFrame, 1);
     narrator.check('the teammate despawned on completion — the LEAD remains');
@@ -426,7 +428,9 @@ test.describe('Hooks ON / teams', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external hooks-only session is adopted');
+    narrator.step(
+      'enabling Observar todas las sesiones so the external hooks-only session is adopted',
+    );
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -481,16 +485,16 @@ test.describe('Hooks ON / teams', () => {
     // this session may be adopted before the delayed t+7s PreToolUse confirms it.
     narrator.step('waiting for JSONL discovery or PreToolUse to adopt the external lead');
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisibleWithTexts(frame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(frame, ['Responsable']);
     narrator.check('the lead is adopted and labelled "LEAD" — count 1');
     narrator.step('waiting for team metadata + SubagentStart to bring in the teammate');
     await expectOverlayCount(frame, 2);
     await expectOverlayVisibleWithTexts(frame, [TEAMMATE_ROLE]);
     narrator.check('the web-researcher teammate joined — count 2');
-    await expectLeadActivity(frame, 'Running: npm test');
-    narrator.check('"Running: npm test" on the lead only');
-    await expectTeammateActivity(frame, 'Searching the web');
-    narrator.check('"Searching the web" on the teammate only — routing is strict');
+    await expectLeadActivity(frame, 'Ejecutando: npm test');
+    narrator.check('"Ejecutando: npm test" on the lead only');
+    await expectTeammateActivity(frame, 'Buscando en la web');
+    narrator.check('"Buscando en la web" on the teammate only — routing is strict');
   });
 
   test('external session lead with tmux teammate routes tools to teammate @area:teams', async ({
@@ -498,7 +502,9 @@ test.describe('Hooks ON / teams', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external hooks-only session is adopted');
+    narrator.step(
+      'enabling Observar todas las sesiones so the external hooks-only session is adopted',
+    );
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -562,18 +568,18 @@ test.describe('Hooks ON / teams', () => {
 
     narrator.step('waiting for the external lead to be adopted via hooks');
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisibleWithTexts(frame, ['LEAD']);
+    await expectOverlayVisibleWithTexts(frame, ['Responsable']);
     narrator.check('the lead is adopted and labelled "LEAD" — count 1');
     narrator.step('waiting for the lead to delegate via a background Agent');
-    await expectLeadActivity(frame, 'Subtask: Delegate research');
-    narrator.check('"Subtask: Delegate research" on the lead — the delegation');
+    await expectLeadActivity(frame, 'Subtarea: Delegate research');
+    narrator.check('"Subtarea: Delegate research" on the lead — the delegation');
     narrator.step('waiting for the distinct tmux session to be adopted as the teammate');
     await expectOverlayCount(frame, 2);
     await expectOverlayVisibleWithTexts(frame, [TEAMMATE_ROLE]);
     narrator.check('the teammate appears — count 2');
-    await expectTeammateActivity(frame, 'Running: npm test');
-    narrator.check('"Running: npm test" is routed to the tmux teammate, not the lead');
-    await expectTeammateActivity(frame, 'Needs approval');
-    narrator.check('"Needs approval" is routed to the tmux teammate, not the lead');
+    await expectTeammateActivity(frame, 'Ejecutando: npm test');
+    narrator.check('"Ejecutando: npm test" is routed to the tmux teammate, not the lead');
+    await expectTeammateActivity(frame, 'Necesita tu aprobación');
+    narrator.check('"Necesita tu aprobación" is routed to the tmux teammate, not the lead');
   });
 });

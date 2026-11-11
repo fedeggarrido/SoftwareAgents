@@ -146,3 +146,33 @@ La etiqueta que aparece al pasar sobre un personaje dice «Dueño / Claude / Ses
   - Una sesión que no lanzó la oficina se marca con el chip «Abierta por ti», con un tooltip: «La oficina la observa, pero no la asignó; no hay motivo de selección de modelo registrado».
   - El detalle completo queda en la ficha del agente.
   - Hay que actualizar los e2e que buscan los textos en inglés de las herramientas.
+
+## Aviso de «sin conexión» superpuesto (Fede, 2026-11-10)
+
+Captura: `captura-sin-conexion-superpuesta.png`.
+
+**Problemas:**
+
+- La ayuda de conexión aparece **dos veces**: una tarjeta arriba a la izquierda y una franja a todo el ancho con su propio «Reintentar ahora».
+- El marcador del proyecto («15 de 20 hechas») queda **encima** de la tarjeta y tapa su texto.
+- No se puede cerrar ni plegar, y no deja usar lo que hay detrás.
+
+**Propuesta (SA-154):**
+
+- **Un solo aviso de conexión** en un sitio fijo: una franja fina bajo el borde superior, que empuja el HUD hacia abajo en vez de quedar tapada por él.
+- Lleva el estado («Sin conexión · reintentando en 4 s»), «Reintentar ahora» y «Detalles» plegado.
+- Se puede **minimizar** a un punto en la esquina, que se vuelve a expandir con un clic. Nunca bloquea la oficina.
+- Las capas siguen un **orden fijo (z-index)**, de abajo arriba: oficina, HUD, ventana de paneles, avisos, modales. No hay dos avisos del mismo tipo a la vez.
+- Una prueba e2e o de diseño simula la desconexión y comprueba que hay un único aviso, que no se solapa con el HUD y que se puede minimizar. Se añade a las guardas de SA-151.
+
+## Estado y dibujo no coinciden (Fede, 2026-11-10)
+
+La etiqueta dice «Idle», pero el personaje está sentado frente al ordenador, y parece que trabaja.
+
+- **Causa probable:** el personaje sigue en su puesto asignado mientras no hace nada, o es una sesión externa sin actividad reciente. La etiqueta y la animación no usan la misma fuente de verdad.
+- **Propuesta (SA-149):** que el estado mostrado y la animación salgan del mismo estado.
+  - **Trabajando:** teclea en el ordenador. Etiqueta «Trabajando · Leyendo archivo.ts».
+  - **En espera:** se levanta o queda sentado pero con la pantalla apagada y una pose de reposo visible. Etiqueta «En espera desde hace 5 min».
+  - **Te necesita:** burbuja y etiqueta «Necesita tu aprobación».
+- Cada estado tiene una señal visual distinta que se entiende sin leer la etiqueta.
+- Hay que añadir una prueba que verifique esa correspondencia.

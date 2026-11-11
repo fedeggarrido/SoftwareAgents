@@ -1,0 +1,278 @@
+[
+  {
+    "key": "connection-lost|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "connection-lost|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "connection-lost|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "connection-lost|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "connection-lost|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "connection-lost|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "new-idea|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "new-idea|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "new-idea|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "new-idea|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "new-idea|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "new-idea|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "new-idea|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "new-idea|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "office|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "office|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "office|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "office|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "office|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "office|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "office|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "office|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "settings|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "settings|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "settings|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "settings|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "settings|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "settings|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "settings|mobile|touch-target|input.flex-1|",
+    "reason": "Text input under 44 px tall on mobile. Fix in SA-152."
+  },
+  {
+    "key": "window-Auditoría|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Auditoría|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Auditoría|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Auditoría|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Auditoría|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Auditoría|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Auditoría|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Auditoría|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Decisiones|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Decisiones|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Decisiones|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Decisiones|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Decisiones|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Decisiones|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Decisiones|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Decisiones|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Funcionalidades|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Funcionalidades|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Funcionalidades|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Funcionalidades|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Funcionalidades|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Funcionalidades|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Funcionalidades|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Funcionalidades|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Reuniones|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Reuniones|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Reuniones|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Reuniones|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Reuniones|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Reuniones|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Reuniones|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Reuniones|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Trabajo|desktop|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Trabajo|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Trabajo|desktop|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Trabajo|mobile|contrast|span.text-accent|2.6|Ver más",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Trabajo|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
+    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
+  },
+  {
+    "key": "window-Trabajo|mobile|motion-duration|div.absolute|1000ms",
+    "reason": "1 s transition on an absolute overlay exceeds the 300 ms chrome limit. Fix in SA-160."
+  },
+  {
+    "key": "window-Trabajo|mobile|touch-target|button.bg-transparent|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  },
+  {
+    "key": "window-Trabajo|mobile|touch-target|button.pixel-button|x",
+    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
+  }
+]

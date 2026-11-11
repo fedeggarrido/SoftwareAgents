@@ -100,6 +100,8 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/TaskDetailSnapshot'
+        - $ref: '#/components/schemas/TaskChangeResult'
         - $ref: '#/components/schemas/OfficeTokenRotationFailed'
         - $ref: '#/components/schemas/OfficeAccess'
         - $ref: '#/components/schemas/FeaturePlanSnapshot'
@@ -165,6 +167,8 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestTaskDetail'
+        - $ref: '#/components/schemas/SubmitTaskChange'
         - $ref: '#/components/schemas/RequestFeaturePlan'
         - $ref: '#/components/schemas/ApproveFeaturePlan'
         - $ref: '#/components/schemas/RequestIdeas'
@@ -203,6 +207,125 @@ components:
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
+
+    RequestTaskDetail:
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key]
+      properties:
+        type:
+          const: requestTaskDetail
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+
+    SubmitTaskChange:
+      description: Explicit human confirmation of the displayed task and impact revision. Server derives the path from the task state.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, revision, text]
+      properties:
+        type:
+          const: submitTaskChange
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+        revision:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 16000
+
+    TaskDetailError:
+      type: string
+      enum:
+        [
+          denied,
+          managed_process,
+          unsupported_adapter,
+          invalid_request,
+          unknown_project,
+          unavailable,
+          stale_revision,
+        ]
+
+    TaskDetail:
+      type: object
+      additionalProperties: false
+      required: [item, description, featureTitle, origin, impact, decisions, revision, canChange]
+      properties:
+        item:
+          $ref: '#/components/schemas/BoardItem'
+        description:
+          type: [string, 'null']
+        featureTitle:
+          type: [string, 'null']
+        origin:
+          oneOf:
+            - $ref: '#/components/schemas/BoardItem'
+            - type: 'null'
+        impact:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardItem'
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/BoardDecision'
+        revision:
+          type: string
+        canChange:
+          type: boolean
+
+    TaskDetailSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, detail, errorCode]
+      properties:
+        type:
+          const: taskDetailSnapshot
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+        detail:
+          oneOf:
+            - $ref: '#/components/schemas/TaskDetail'
+            - type: 'null'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/TaskDetailError'
+            - type: 'null'
+
+    TaskChangeResult:
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, key, followUpKey, errorCode]
+      properties:
+        type:
+          const: taskChangeResult
+        projectId:
+          type: string
+        requestId:
+          type: string
+        key:
+          type: string
+        followUpKey:
+          type: [string, 'null']
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/TaskDetailError'
+            - type: 'null'
 
     RequestFeaturePlan:
       description: Read the server-bound feature plan. Requires a privileged connection before any Project access. No execution or writes.

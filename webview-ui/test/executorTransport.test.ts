@@ -211,6 +211,27 @@ describe('executor transport regressions (DOM-free)', () => {
     expect(FakeSocket.instances[1].sent.at(-1)).toEqual(message);
   });
 
+  it('SA-143 rejects a task change on a closing socket and keeps it out of the reconnect queue', () => {
+    const message: ClientMessage = {
+      type: 'submitTaskChange',
+      projectId: 'P',
+      requestId: 'change',
+      key: 'T1',
+      revision: 'a'.repeat(64),
+      text: 'Editar la especificación',
+    };
+    expect(() => transport.send(message)).toThrow(/connected/);
+    const socket = FakeSocket.instances[0];
+    socket.open();
+    socket.readyState = 2;
+    expect(transport.state).toBe('connected');
+    expect(() => transport.send(message)).toThrow(/connected/);
+    socket.close();
+    vi.advanceTimersByTime(1000);
+    FakeSocket.instances[1].open();
+    expect(FakeSocket.instances[1].sent).toEqual([]);
+  });
+
   it('recovers when the socket closes just before send, while its state still says connected', () => {
     FakeSocket.instances[0].open();
     const message = startToggle('claude', false)!;

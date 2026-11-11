@@ -80,15 +80,19 @@ export function readMainAncestors(root: string): ReadonlySet<string> {
   return ancestors;
 }
 
+export function workStoreFile(root: string): string {
+  const commonDir = gitCommonDir(root);
+  const filename = resolveInside(commonDir, 'softwareagents/work.sqlite3');
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    resolveInside(commonDir, `softwareagents/work.sqlite3${suffix}`);
+  }
+  return filename;
+}
+
 export function openReadOnlyWorkStore(root: string): DatabaseSync {
   let db: DatabaseSync | undefined;
   try {
-    const commonDir = gitCommonDir(root);
-    const filename = resolveInside(commonDir, 'softwareagents/work.sqlite3');
-    for (const suffix of ['-wal', '-shm', '-journal']) {
-      resolveInside(commonDir, `softwareagents/work.sqlite3${suffix}`);
-    }
-    db = new DatabaseSync(filename, { readOnly: true });
+    db = new DatabaseSync(workStoreFile(root), { readOnly: true });
     db.exec('PRAGMA busy_timeout = 1000');
     let version: unknown;
     try {

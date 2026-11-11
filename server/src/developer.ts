@@ -28,6 +28,7 @@ import { featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
 import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
+import { approvedTaskDescription } from './taskChangeDecisions.js';
 import {
   analyzeTaskDag,
   deferredAcceptanceCoverage,
@@ -323,7 +324,10 @@ export function developerRequest(
     featureSha: feature.git_sha,
     designSha: design.git_sha,
     design: readTaskInput(source, design.doc_path),
-    task,
+    task: {
+      ...task,
+      description: approvedTaskDescription(store.listDecisions(), record) ?? task.description,
+    },
     ...(reviewing
       ? {
           deferredCoverage: deferredAcceptanceCoverage(

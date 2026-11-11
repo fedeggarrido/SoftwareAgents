@@ -106,6 +106,21 @@ La lección de anti-slop es que el prompt solo no basta. Por eso son tres capas:
    - las guardas e2e de SA-151 incorporan las prohibiciones medibles: tamaño mínimo de letra, contraste, estados de foco, objetivos táctiles, ausencia de emojis funcionales y de jerga;
    - el Product Designer recibe la tabla C en su prompt.
 
+## Arquitectura de los proyectos generados (SA-158, Fede 2026-11-11)
+
+- **Por defecto, hexagonal (puertos y adaptadores):** dominio sin dependencias, casos de uso con sus puertos, adaptadores de entrada y de salida, y una única raíz de composición.
+- **Otra arquitectura** solo con un ADR que compare alternativas. La decisión es del humano.
+- **Barrera dura:** reglas de dependencias en el lint (dependency-cruiser o eslint-plugin-boundaries) que ejecutan los verificadores. El Reviewer bloquea cualquier import del dominio hacia adaptadores o frameworks.
+- **Prompts:** el Arquitecto parte de la plantilla, el Developer respeta las capas y el Reviewer lo comprueba (bloque `QUALITY_RULES` de SA-155).
+
+## Agente de Integraciones (SA-159)
+
+- **Un cliente por servicio externo**, detrás de un puerto: nada de llamadas sueltas repartidas por el código.
+- **Política común** de timeouts, reintentos con backoff, idempotencia, límites de tasa, errores tipados y logs sin secretos.
+- **Contratos tipados**, generados desde OpenAPI si existe, con tests de contrato y fakes.
+- **Catálogo de integraciones** del proyecto.
+- **Lo decide el humano:** las credenciales y cualquier acceso externo nuevo. El agente nunca crea cuentas ni claves.
+
 ## Fuentes
 
 - [Anti-Slop: Oxlint rules for safer AI-generated code (Better Stack)](https://betterstack.com/community/guides/ai/anti-slop-oxlint/)

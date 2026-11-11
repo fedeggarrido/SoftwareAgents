@@ -22,6 +22,18 @@ Este archivo fija el flujo de colaboración del Development Project.
   verificación con resultados, riesgos y dudas para Fede. No dejes notas temporales
   en el repositorio.
 
+## Anti-slop quality rules (mandatory)
+
+Apply these to every change by Claude or Codex; reviews block on them. Full rationale and the UI table: [reglas-antislop-y-thermos](docs/ux-audit-2026-11/reglas-antislop-y-thermos.md).
+
+- **Code judo first**: simplify by deleting complexity, not moving it. No ad-hoc conditionals, one-off booleans/nullable modes or scattered special cases. Put them behind a helper, state machine or policy.
+- **Canonical layer and reuse**: logic lives in its layer. Reuse existing helpers. No feature logic in shared paths. No identity wrappers or pass-through helpers.
+- **Honest types**: no `as unknown as`. No `any`, and no `unknown` params or returns without need. Every type assertion carries a `// SAFETY:` reason. No silent fallbacks that hide unclear invariants.
+- **Size and atomicity**: never grow a file past 1000 lines without decomposing. No partial updates that leave state half-written.
+- **Devex**: call out any change to secrets, env vars, ports or required scripts.
+- **Reviews (thermos style)**: report only what the diff adds or changes. Trace each finding end to end. Never inflate priority. Order: regressions/security > missed simplification and branching growth > boundaries/types > size > legibility. For medium or large changes, run two independent passes (bugs/security, quality/structure) and merge the findings.
+- **UI**: no purple gradients, glow, glassmorphism or emoji used as icons. No colour-only status: use a StatusChip with icon and Spanish text. No body text under 14 px; the pixel font is for titles, buttons and numbers only. Every hover, focus, active and disabled state, and 44 px touch targets. Motion only with purpose (100–300 ms, reduced-motion respected). No filler copy, lorem ipsum, invented numbers or jargon in the Spanish UI.
+
 ## Revisión e integración
 
 - La revisión cruzada es manual: Codex → Claude o Claude → Codex.

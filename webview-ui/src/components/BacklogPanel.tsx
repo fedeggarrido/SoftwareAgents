@@ -8,10 +8,11 @@ import { useBoard } from '../office/boardStore.js';
 import { characterActivity } from '../office/characterActivity.js';
 import { knownText } from '../office/displayText.js';
 import type { OfficeState } from '../office/engine/officeState.js';
-import { taskPullRequestLabel } from '../office/prStatusView.js';
 import { readableStateText } from '../office/statusPresentation.js';
+import { taskPrDescription, taskTitle } from '../office/taskDetailPresentation.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { StatusChip } from './StatusChip.js';
+import { TaskDetail } from './TaskDetail.js';
 import { Button } from './ui/Button.js';
 import { PanelHeading } from './ui/PanelHeading.js';
 
@@ -58,11 +59,6 @@ function EventLine({ e, now, chip = true }: { e: BoardEvent; now: number; chip?:
   );
 }
 
-/** Human title; the key only stands in when the task has no title of its own. */
-function cardTitle(item: BoardItem): string {
-  return knownText(item.title) ?? knownText(item.id) ?? item.id;
-}
-
 function Card({
   item,
   now,
@@ -70,6 +66,7 @@ function Card({
   board,
   officeState,
   focused,
+  onOpen,
 }: {
   item: BoardItem;
   now: number;
@@ -77,12 +74,11 @@ function Card({
   board: ReturnType<typeof useBoard>;
   officeState: OfficeState;
   focused: boolean;
+  onOpen: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!focused) return;
-    setOpen(true);
     ref.current?.scrollIntoView({ block: 'nearest' });
     ref.current?.focus({ preventScroll: true });
   }, [focused]);
@@ -90,16 +86,25 @@ function Card({
     <div
       className="bg-bg-dark border-2 border-border p-6 flex flex-col gap-2 cursor-pointer"
       style={{ borderLeftColor: PRIORITY_COLORS[item.priority ?? ''] ?? undefined }}
-      onClick={() => setOpen((v) => !v)}
+      onClick={onOpen}
       ref={ref}
       tabIndex={-1}
       data-task-key={item.id}
       data-testid="backlog-card"
     >
-      <div className="text-sm leading-tight">{cardTitle(item)}</div>
+      <Button
+        className="backlog-card-title"
+        variant="ghost"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
+        {taskTitle(item)}
+      </Button>
       <div className="flex items-center gap-6 flex-wrap text-2xs text-text-muted">
         <StatusChip state={item.phase} />
-        {cardTitle(item) !== knownText(item.id) && <span>{knownText(item.id)}</span>}
+        {taskTitle(item) !== knownText(item.id) && <span>{knownText(item.id)}</span>}
       </div>
       {item.owner && (
         <div
@@ -133,25 +138,7 @@ function Card({
       {item.lastEvent && <EventLine e={item.lastEvent} now={now} chip={false} />}
       {item.prRef && (
         <div className="text-2xs text-text-muted" data-testid="task-pr-status">
-          {taskPullRequestLabel(item, now)}
-        </div>
-      )}
-      {open && (
-        <div className="text-2xs text-text-muted leading-tight flex flex-col gap-1">
-          {item.epic && <div>{knownText(item.epic)}</div>}
-          {item.prRef && <div>PR {item.prStatus?.url ?? item.prRef}</div>}
-          {item.prStatus?.failedChecks.length ? (
-            <div>{item.prStatus.failedChecks.join(', ')}</div>
-          ) : null}
-          <div>
-            Prioridad {item.priority ?? '—'} · tamaño {item.size ?? '—'}
-            {item.clickupId ? ` · ClickUp ${item.clickupId}` : ''}
-          </div>
-          {item.implementer && <div>Implementa: {knownText(item.implementer)}</div>}
-          {item.dependsOn && item.dependsOn.length > 0 && (
-            <div>Depende de: {item.dependsOn.map(knownText).filter(Boolean).join(', ')}</div>
-          )}
-          {item.note && <div className="text-text">{readableStateText(item.note)}</div>}
+          {taskPrDescription(item)}
         </div>
       )}
     </div>
@@ -179,7 +166,12 @@ export function BacklogPanel({
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [returnFocus, setReturnFocus] = useState<string | null>(null);
   const needsYouRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (isOpen && focusedTask) setSelectedTask(focusedTask);
+  }, [isOpen, focusedTask]);
   useEffect(() => {
     if (!isOpen) return;
     setNow(Date.now());
@@ -205,6 +197,29 @@ export function BacklogPanel({
   const pulse = backlogPulse(items.map((i) => i.phase));
   const view = backlogView(board);
 
+  const selected = board?.items.find((item) => item.id === selectedTask);
+  if (selected && board)
+    return (
+      <div
+        className="read-only-panel p-8 flex flex-col gap-8"
+        data-testid="backlog-panel"
+        role="region"
+        aria-label="Trabajo"
+      >
+        <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
+        <TaskDetail
+          key={`${board.projectId}-${selected.id}`}
+          item={selected}
+          board={board}
+          onSelectTask={setSelectedTask}
+          onBack={() => {
+            setReturnFocus(selected.id);
+            setSelectedTask(null);
+          }}
+        />
+      </div>
+    );
+
   return (
     <div
       className="read-only-panel p-8 flex flex-col gap-8"
@@ -213,6 +228,10 @@ export function BacklogPanel({
       aria-label="Trabajo"
     >
       <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
+      <p>
+        Consulta las tareas y sus decisiones pendientes. Abre una tarea para ver el detalle o pedir
+        un cambio.
+      </p>
       {board && (
         <div className="backlog-project">
           <span>{knownText(board.project)}</span>
@@ -302,7 +321,8 @@ export function BacklogPanel({
                 <Card
                   key={item.id}
                   item={item}
-                  focused={item.id === focusedTask}
+                  focused={item.id === returnFocus}
+                  onOpen={() => setSelectedTask(item.id)}
                   now={now}
                   onFocusAgent={onFocusAgent}
                   board={board}

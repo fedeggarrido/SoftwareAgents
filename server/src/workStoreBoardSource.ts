@@ -5,6 +5,7 @@ import type { HumanDecision } from '../../core/src/humanDecision.js';
 import type { BoardDecision, BoardEvent, BoardItem } from '../../core/src/messages.js';
 import { projectPullRequest, projectPullRequestObservation } from '../../core/src/pullRequest.js';
 import { BOARD_RECENT_EVENTS } from './constants.js';
+import { taskDecisionText } from './taskChangeDecisions.js';
 
 interface TaskRow {
   key: string;
@@ -204,7 +205,7 @@ function projectBoard(snapshot: Snapshot, now: number): WorkStoreBoard {
       .map((d) => ({
         id: d.id,
         status: d.status,
-        question: d.context,
+        question: taskDecisionText(d.context),
         options: d.options.map((o) => o.id),
         structuredOptions: d.options.map(({ id, label, benefit, cost, risk }) => ({
           id,

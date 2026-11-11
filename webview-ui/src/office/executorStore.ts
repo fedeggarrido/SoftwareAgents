@@ -9,6 +9,7 @@ import type {
 import type { MessageTransport } from '../../../core/src/transport.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
 import { connectionCopy } from './connectionStatus.js';
+import { newRequestId } from './requestId.js';
 
 // ── Executor availability (server `executorState`, SA-087/088/089/091) ──────
 // The server is the only source of truth. A toggle never changes `state`
@@ -210,12 +211,6 @@ export function subscribeExecutorStore(listener: () => void): () => void {
 
 export function useExecutorStore(): ExecutorStore {
   return useSyncExternalStore(subscribeExecutorStore, getExecutorStore);
-}
-
-function newRequestId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function commit(started: { store: ExecutorStore; message: ClientMessage } | null) {

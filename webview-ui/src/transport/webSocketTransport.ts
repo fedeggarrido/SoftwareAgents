@@ -25,6 +25,14 @@ interface TransportSocket {
   onerror: (() => void) | null;
 }
 const SOCKET_OPEN = 1;
+const LIVE_CONNECTION_COMMANDS: ReadonlySet<ClientMessage['type']> = new Set([
+  'setExecutorEnabled',
+  'setExecutorLevels',
+  'submitIdea',
+  'prepareProject',
+  'rotateOfficeToken',
+  'submitTaskChange',
+]);
 
 /**
  * WebSocket transport for standalone browser mode.
@@ -160,13 +168,7 @@ export class WebSocketTransport implements MessageTransport {
       this.ws.send(JSON.stringify(message));
     } else {
       // Mutations are only valid for the live connection and its confirmed revision.
-      if (
-        message.type === 'setExecutorEnabled' ||
-        message.type === 'setExecutorLevels' ||
-        message.type === 'submitIdea' ||
-        message.type === 'prepareProject' ||
-        message.type === 'rotateOfficeToken'
-      )
+      if (LIVE_CONNECTION_COMMANDS.has(message.type))
         throw new Error('Office mutations require a connected transport');
       // Queue messages while connecting (flushed in onopen)
       this.pendingMessages.push(message);

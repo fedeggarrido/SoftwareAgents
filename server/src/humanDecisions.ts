@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import type { AutonomyLevel } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
 import { evaluatePolicy, type PolicyAction, type PolicyActor } from './policy.js';
+import { assertTaskChangeAnswer } from './taskChangeDecisions.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 /** Identity and privilege come from authenticated ingress, never message fields. */
@@ -41,6 +42,7 @@ export class HumanDecisions {
     level: AutonomyLevel,
     reconcile: boolean,
   ) {
+    assertTaskChangeAnswer(this.store, id);
     const policy = evaluatePolicy('answer_decision', privileged ? 'human' : 'system', level);
     const attemptId = randomUUID();
     const append = (status: string) =>

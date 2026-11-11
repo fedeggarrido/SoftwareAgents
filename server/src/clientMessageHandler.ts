@@ -58,6 +58,7 @@ import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
 import { claudeProvider, hookProviderById, hookProviders } from './providers/index.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
+import { handleTaskDetailMessage } from './taskDetail.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
 
@@ -134,6 +135,15 @@ export function handleClientMessage(
   const adapter = store.getAdapter();
 
   switch (msg.type) {
+    case 'requestTaskDetail':
+    case 'submitTaskChange':
+      void handleTaskDetailMessage(
+        msg,
+        send,
+        ctx.privileged === true,
+        ctx.featurePlansSupported !== false,
+      );
+      break;
     case 'prepareProject':
       handlePrepareProjectMessage(
         msg,

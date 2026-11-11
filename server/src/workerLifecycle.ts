@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { recordAudit } from './auditLog.js';
 import type { QuotaDecision } from './quotaGate.js';
+import { taskChangeSafePoint } from './taskChangeDecisions.js';
 import { LEASE_SWEEP_INTERVAL_MS } from './workstore/leasePolicy.js';
 import type { TaskStatus } from './workstore/taskStateMachine.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -42,6 +43,7 @@ export class WorkerLifecycle {
     publication = false,
   ): Promise<void> {
     if (this.claimed) return;
+    await taskChangeSafePoint(this.store, this.task);
     let task = this.store.getTask(this.task);
     if (!task) {
       this.store.createTask({ key: this.task, type: 'unknown', status: 'DRAFT' });
@@ -142,6 +144,7 @@ export class WorkerLifecycle {
     this.audit('task_transitioned', `${status}: ${reason}`);
     // WorkStore transitions out of active states clear the lease atomically.
     this.audit('lease_released');
+    await taskChangeSafePoint(this.store, this.task);
   }
 
   async wait(gate: Extract<QuotaDecision, { status: 'wait' }>): Promise<void> {
@@ -175,6 +178,7 @@ export class WorkerLifecycle {
     await operation();
     this.active = false;
     this.audit('lease_released', 'ReviewReport and task outcome persisted');
+    await taskChangeSafePoint(this.store, this.task);
   }
 
   async retainForRecovery(): Promise<void> {

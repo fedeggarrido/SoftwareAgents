@@ -928,6 +928,41 @@
 .feature-plan-actions > span {
   margin-right: auto;
 }
+.backlog-card-title {
+  text-align: left;
+  white-space: normal;
+  justify-content: flex-start;
+}
+.task-detail {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.task-detail h3,
+.task-detail h4 {
+  margin-block: var(--panel-gap);
+}
+.task-detail textarea {
+  min-height: 44px;
+  padding: var(--panel-gap);
+  color: var(--color-text);
+  background: var(--color-bg-dark);
+  border: var(--window-border) solid var(--color-border);
+  font: inherit;
+}
+.task-detail textarea:hover {
+  border-color: var(--color-accent-bright);
+}
+.task-detail textarea:focus-visible {
+  outline: 2px solid var(--color-accent-bright);
+  outline-offset: 2px;
+}
+.task-detail textarea:disabled {
+  opacity: 0.7;
+}
+.task-detail textarea:active {
+  border-color: var(--color-accent-bright);
+}
 @media (max-width: 640px) {
   .feature-plan-summary {
     --plan-summary-columns: 1;

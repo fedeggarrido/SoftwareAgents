@@ -8,6 +8,8 @@
  */
 
 export type ServerMessage =
+  | TaskDetailSnapshot
+  | TaskChangeResult
   | OfficeTokenRotationFailed
   | OfficeAccess
   | FeaturePlanSnapshot
@@ -58,6 +60,8 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestTaskDetail
+  | SubmitTaskChange
   | RequestFeaturePlan
   | ApproveFeaturePlan
   | RequestIdeas
@@ -93,6 +97,143 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface TaskDetailSnapshot {
+  type: 'taskDetailSnapshot';
+  projectId: string;
+  requestId: string;
+  key: string;
+  detail: TaskDetail | null;
+  errorCode: TaskDetailError | null;
+}
+
+export interface TaskDetail {
+  item: BoardItem;
+  description: string | null;
+  featureTitle: string | null;
+  origin: BoardItem | null;
+  impact: BoardItem[];
+  decisions: BoardDecision[];
+  revision: string;
+  canChange: boolean;
+}
+
+export interface BoardItem {
+  prRef?: string;
+  prStatus?: PullRequestStatus;
+  prObservation?: PullRequestObservation;
+  id: string;
+  clickupId?: string;
+  title: string;
+  epic?: string;
+  priority?: string;
+  size?: string;
+  dependsOn?: string[];
+  implementer?: string;
+  phase: string;
+  note?: string;
+  owner?: BoardOwner;
+  lastEvent?: BoardEvent;
+  agentIds: number[];
+}
+
+export interface PullRequestStatus {
+  ref: string;
+  state: PullRequestState;
+  isDraft: boolean;
+  reviewDecision: PullRequestReviewDecision;
+  ci: PullRequestCiState;
+  failedChecks: string[];
+  mergedAt: string | null;
+  url: string;
+  headRefName: string;
+  observedAt: number;
+}
+
+export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
+
+export type PullRequestReviewDecision = '' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
+
+export type PullRequestCiState = 'unknown' | 'pending' | 'success' | 'failure';
+
+export interface PullRequestObservation {
+  lastSuccessAt: number | null;
+  attemptedAt: number;
+  error: PullRequestObservationError | null;
+}
+
+export type PullRequestObservationError = 'unavailable' | 'binding_required';
+
+export interface BoardOwner {
+  worker: string;
+  session: string;
+  state: string;
+  stale: boolean;
+  heartbeatAt: number;
+  worktree?: string;
+}
+
+export interface BoardEvent {
+  at: number;
+  session: string;
+  phase: string;
+  state: string;
+  detail: string;
+  task: string;
+  provider?: string;
+}
+
+export interface BoardDecision {
+  id: string;
+  structuredOptions?: HumanDecisionOption[];
+  impact?: string;
+  urgency?: DecisionUrgency;
+  requestedBy?: string;
+  answeredBy?: string | null;
+  answeredAt?: string | null;
+  disagreement?: DecisionDisagreement[];
+  question: string;
+  context?: string;
+  options: string[];
+  recommendation?: string;
+  blocks?: string[];
+  status: string;
+  answer?: string | null;
+  additionalProperties?: Record<string, any>;
+}
+
+export interface HumanDecisionOption {
+  id: string;
+  label: string;
+  benefit: string;
+  cost: string;
+  risk: string;
+}
+
+export type DecisionUrgency = 'low' | 'medium' | 'high' | 'critical';
+
+export interface DecisionDisagreement {
+  role: string;
+  position: string;
+}
+
+export type TaskDetailError =
+  | 'denied'
+  | 'managed_process'
+  | 'unsupported_adapter'
+  | 'invalid_request'
+  | 'unknown_project'
+  | 'unavailable'
+  | 'stale_revision';
+
+export interface TaskChangeResult {
+  type: 'taskChangeResult';
+  projectId: string;
+  requestId: string;
+  key: string;
+  followUpKey: string | null;
+  errorCode: TaskDetailError | null;
+}
 
 export interface OfficeTokenRotationFailed {
   type: 'officeTokenRotationFailed';
@@ -648,71 +789,6 @@ export interface BoardState {
 
 export type BoardMode = 'legacy' | 'project' | 'invalid';
 
-export interface BoardItem {
-  prRef?: string;
-  prStatus?: PullRequestStatus;
-  prObservation?: PullRequestObservation;
-  id: string;
-  clickupId?: string;
-  title: string;
-  epic?: string;
-  priority?: string;
-  size?: string;
-  dependsOn?: string[];
-  implementer?: string;
-  phase: string;
-  note?: string;
-  owner?: BoardOwner;
-  lastEvent?: BoardEvent;
-  agentIds: number[];
-}
-
-export interface PullRequestStatus {
-  ref: string;
-  state: PullRequestState;
-  isDraft: boolean;
-  reviewDecision: PullRequestReviewDecision;
-  ci: PullRequestCiState;
-  failedChecks: string[];
-  mergedAt: string | null;
-  url: string;
-  headRefName: string;
-  observedAt: number;
-}
-
-export type PullRequestState = 'OPEN' | 'CLOSED' | 'MERGED';
-
-export type PullRequestReviewDecision = '' | 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
-
-export type PullRequestCiState = 'unknown' | 'pending' | 'success' | 'failure';
-
-export interface PullRequestObservation {
-  lastSuccessAt: number | null;
-  attemptedAt: number;
-  error: PullRequestObservationError | null;
-}
-
-export type PullRequestObservationError = 'unavailable' | 'binding_required';
-
-export interface BoardOwner {
-  worker: string;
-  session: string;
-  state: string;
-  stale: boolean;
-  heartbeatAt: number;
-  worktree?: string;
-}
-
-export interface BoardEvent {
-  at: number;
-  session: string;
-  phase: string;
-  state: string;
-  detail: string;
-  task: string;
-  provider?: string;
-}
-
 export interface BoardSources {
   workStore?: boolean;
   board: boolean;
@@ -776,40 +852,6 @@ export interface BoardSummary {
 export interface EpicSummary {
   done: number;
   total: number;
-}
-
-export interface BoardDecision {
-  id: string;
-  structuredOptions?: HumanDecisionOption[];
-  impact?: string;
-  urgency?: DecisionUrgency;
-  requestedBy?: string;
-  answeredBy?: string | null;
-  answeredAt?: string | null;
-  disagreement?: DecisionDisagreement[];
-  question: string;
-  context?: string;
-  options: string[];
-  recommendation?: string;
-  blocks?: string[];
-  status: string;
-  answer?: string | null;
-  additionalProperties?: Record<string, any>;
-}
-
-export interface HumanDecisionOption {
-  id: string;
-  label: string;
-  benefit: string;
-  cost: string;
-  risk: string;
-}
-
-export type DecisionUrgency = 'low' | 'medium' | 'high' | 'critical';
-
-export interface DecisionDisagreement {
-  role: string;
-  position: string;
 }
 
 export interface MeetingState {
@@ -1068,6 +1110,22 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestTaskDetail {
+  type: 'requestTaskDetail';
+  projectId: string;
+  requestId: string;
+  key: string;
+}
+
+export interface SubmitTaskChange {
+  type: 'submitTaskChange';
+  projectId: string;
+  requestId: string;
+  key: string;
+  revision: string;
+  text: string;
 }
 
 export interface RequestFeaturePlan {

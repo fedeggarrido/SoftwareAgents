@@ -17,7 +17,7 @@ const positionStyles: Record<string, React.CSSProperties> = {
 export function Tooltip({ title, onDismiss, position = 'top-right', children }: TooltipProps) {
   return (
     <div
-      className={`${position === 'stack' ? 'relative max-w-full' : 'absolute z-20 whitespace-nowrap'} pixel-panel p-0`}
+      className={`${position === 'stack' ? 'relative max-w-full' : 'absolute layer-notices whitespace-nowrap'} pixel-panel p-0`}
       style={positionStyles[position]}
     >
       <div className="flex items-center justify-between py-4 px-8 border-b border-border">

@@ -45,7 +45,7 @@ it('offers immediate retry and keeps the only startup command in collapsed Detai
   const { OfficeConnectionHelp } = await import(path);
   setConnectionStatus({ cause: 'unavailable', attempt: 2, retryAt: Date.now() + 5000 });
   const html = renderToStaticMarkup(createElement(OfficeConnectionHelp));
-  expect(html).toContain('próximo intento en 5s');
+  expect(html).toContain('reintentando en 5 s');
   expect(html).toContain('La oficina está cerrada en tu ordenador');
   expect(html).toContain('<details><summary>Detalles</summary>');
   expect(html).toContain('npx pixel-agents');
@@ -66,7 +66,7 @@ it('opens the existing preparation form and Settings through their app callbacks
     ),
   );
   mocks.actions.get('Preparar proyecto')!();
-  mocks.actions.get('Abrir Settings')!();
+  mocks.actions.get('Abrir Ajustes')!();
   expect(recovery.prepareProject).toHaveBeenCalledOnce();
   expect(recovery.openSettings).toHaveBeenCalledOnce();
 });
@@ -128,5 +128,23 @@ it.each([
     );
     expect(html.includes('Revocar acceso de esta pestaña')).toBe(visible);
     expect(html).toContain('Preparar proyecto');
+    for (const label of [
+      'Ajustes',
+      'Exportar distribución',
+      'Importar distribución',
+      'Avisos sonoros',
+      'Observar todas las sesiones',
+      'Detección instantánea (hooks)',
+      'Mostrar siempre las etiquetas',
+      'Vista de diagnóstico',
+      'Tamaño del texto',
+      'Normal',
+      'Grande',
+    ])
+      expect(html).toContain(label);
+    expect(html).not.toMatch(
+      /Settings|Export Layout|Import Layout|Sound Notifications|Watch All Sessions|Debug View/,
+    );
+    expect(html).toContain('Recibe la actividad de Claude Code en cuanto ocurre.');
   },
 );

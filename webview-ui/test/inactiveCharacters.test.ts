@@ -11,6 +11,7 @@ import {
   TILE_SIZE,
   WALL_COLOR,
 } from '../src/constants.js';
+import { characterActivity, characterActivityLabel } from '../src/office/characterActivity.js';
 import { getCharacterSprite } from '../src/office/engine/characters.js';
 import { OfficeState } from '../src/office/engine/officeState.js';
 import { buildDynamicCatalog } from '../src/office/layout/furnitureCatalog.js';
@@ -354,6 +355,9 @@ test('permission requests retain activity and their persistent bubble, including
   const os = office();
   const ch = os.characters.get(1)!;
   os.showPermissionBubble(1);
+  os.dismissBubble(1);
+  assert.equal(characterActivity(ch), 'needs_you', 'selection does not approve a pending tool');
+  assert.equal(characterActivityLabel(ch), 'Necesita tu aprobación');
   simulate(os, 60);
   assert.equal(ch.isActive, true);
   assert.equal(ch.state, CharacterState.TYPE);
@@ -388,3 +392,19 @@ test.each(['empty', 'sealed seat', 'disconnected floor'])(
     assert.ok(Number.isFinite(ch.x) && Number.isFinite(ch.y));
   },
 );
+
+test('resuming a turn clears the old input-wait signal and restores matching work animation', () => {
+  const os = office();
+  const ch = os.characters.get(1)!;
+  os.setAgentActive(1, false);
+  os.showWaitingBubble(1, true);
+  simulate(os, 6);
+  assert.equal(ch.bubbleType, null, 'the temporary checkmark has faded');
+  assert.equal(characterActivityLabel(ch), 'Esperando tu respuesta');
+  os.setAgentActive(1, true);
+  simulate(os, 6);
+  assert.equal(ch.waitingAwaitingInput, false);
+  assert.equal(characterActivity(ch), 'working');
+  assert.equal(characterActivityLabel(ch), 'Trabajando');
+  assert.equal(getCharacterSprite(ch, sprites), typing);
+});

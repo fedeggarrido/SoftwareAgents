@@ -278,8 +278,8 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       const html = await render();
       expect(html).not.toMatch(/<textarea[^>]*disabled/);
       if (connection === 'reconnecting' && pending) {
-        expect(html).toContain('La oficina está cerrada en tu ordenador');
-        expect(html).toContain('Reintentando…');
+        expect(html).not.toContain('office-connection-help');
+        expect(html).not.toContain('Reintentar ahora');
         expect(html).not.toContain('Esperando a que confirme');
       }
       await review();
@@ -333,7 +333,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(findControl(await tree(), (props) => props.id === 'idea-answer')!.disabled).toBe(false);
     setOfficeAccess({ type: 'officeAccess', privileged: false, reason: 'token_required' });
     html = await render();
-    expect(html).toContain('Abrir Settings');
+    expect(html).toContain('Abrir Ajustes');
     expect(html).not.toContain('<textarea');
     setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
     html = await render();
@@ -791,7 +791,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
 
   it('requests again after reconnecting from an offline mount', async () => {
     lifecycle.state = 'reconnecting';
-    expect(await render()).toContain('La oficina está cerrada');
+    expect(await render()).not.toContain('office-connection-help');
     expect(lifecycle.send).not.toHaveBeenCalled();
     lifecycle.state = 'connected';
     expect(await render()).toContain('Comprobando');

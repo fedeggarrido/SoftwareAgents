@@ -129,13 +129,13 @@ test.describe('Hooks ON / lifecycle', () => {
     narrator.check('one character on screen before the /clear');
 
     narrator.step('waiting for the reassigned character to run the new session');
-    await expectOverlayVisible(panelFrame, 'Running: npm test');
+    await expectOverlayVisible(panelFrame, 'Ejecutando: npm test');
     await expectOverlayCount(panelFrame, 1);
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
-    narrator.check('same character shows "Running: npm test" — reassigned, count still 1');
+    narrator.check('same character shows "Ejecutando: npm test" — reassigned, count still 1');
 
     await panelFrame.waitForTimeout(500);
-    await expectNoOverlay(panelFrame, 'Running: npm run stale');
+    await expectNoOverlay(panelFrame, 'Ejecutando: npm run stale');
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
     narrator.check('stale "npm run stale" never rendered; same single character throughout');
   });
@@ -191,22 +191,22 @@ test.describe('Hooks ON / lifecycle', () => {
     narrator.check('one character on screen before the /resume');
 
     narrator.step('waiting for the resumed session to reuse the same character');
-    await expectOverlayVisible(panelFrame, 'Running: npm test');
+    await expectOverlayVisible(panelFrame, 'Ejecutando: npm test');
     await expectOverlayCount(panelFrame, 1);
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
-    narrator.check('same character shows "Running: npm test" within the grace window');
+    narrator.check('same character shows "Ejecutando: npm test" within the grace window');
 
     // Settling wait: give the runtime a chance to wrongly attach the stale tool
     // to the resumed agent before asserting absence.
     await panelFrame.waitForTimeout(500);
-    await expectNoOverlay(panelFrame, 'Running: npm run stale');
+    await expectNoOverlay(panelFrame, 'Ejecutando: npm run stale');
     narrator.check('stale "npm run stale" never attaches to the resumed agent');
 
     // Wait past the 2s resume grace window for the new tool to take effect.
     // expectOverlayVisible polls until the assertion holds; bumping the timeout
     // covers grace expiry + post-grace tool propagation.
     narrator.step('rechecking after the 2s grace window has expired');
-    await expectOverlayVisible(panelFrame, 'Running: npm test', 5_000);
+    await expectOverlayVisible(panelFrame, 'Ejecutando: npm test', 5_000);
     await expectOverlayCount(panelFrame, 1);
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
     narrator.check('still the same single character past the grace window');
@@ -217,7 +217,9 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, window, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external sibling session is adopted');
+    narrator.step(
+      'enabling Observar todas las sesiones so the external sibling session is adopted',
+    );
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -289,14 +291,14 @@ test.describe('Hooks ON / lifecycle', () => {
     const externalAgentId = otherOverlayId(await readAgentOverlayIds(panelFrame), internalAgentId);
     narrator.check('two characters share the same project dir');
 
-    await expectOverlayVisibleForAgent(panelFrame, externalAgentId, 'Running: npm run sibling');
+    await expectOverlayVisibleForAgent(panelFrame, externalAgentId, 'Ejecutando: npm run sibling');
     await expectOverlayVisibleForAgent(
       panelFrame,
       internalAgentId,
-      'Running: npm run cleared',
+      'Ejecutando: npm run cleared',
       12_000,
     );
-    await expectNoOverlay(panelFrame, 'Running: npm run stale');
+    await expectNoOverlay(panelFrame, 'Ejecutando: npm run stale');
     expect(await readAgentOverlayIds(panelFrame)).toEqual([internalAgentId, externalAgentId]);
     narrator.check(
       'sibling keeps "npm run sibling", internal reassigns to "npm run cleared", stale never appears',
@@ -308,7 +310,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -362,9 +364,9 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     narrator.step('waiting for the pre-resume tool to render');
-    await expectOverlayVisible(frame, 'Running: npm run before-resume');
+    await expectOverlayVisible(frame, 'Ejecutando: npm run before-resume');
     const oldAgentId = await expectSingleAgentOverlay(frame);
-    narrator.check('old character shows "Running: npm run before-resume"');
+    narrator.check('old character shows "Ejecutando: npm run before-resume"');
 
     narrator.step('resume arrives AFTER the grace window — the old character should be cleaned up');
     // Id-scoped on purpose: the replacement session renders ~700ms after the
@@ -373,7 +375,7 @@ test.describe('Hooks ON / lifecycle', () => {
     // failed exactly this way). The contract is "the OLD character goes away".
     await expectAgentOverlayGone(frame, oldAgentId, 8_000);
     narrator.check('old character removed');
-    await expectOverlayVisible(frame, 'Running: npm run late-resume', 10_000);
+    await expectOverlayVisible(frame, 'Ejecutando: npm run late-resume', 10_000);
     await expectOverlayCount(frame, 1);
     const [newAgentId] = await readAgentOverlayIds(frame);
     expect(newAgentId).toBeDefined();
@@ -444,7 +446,7 @@ test.describe('Hooks ON / lifecycle', () => {
     const panelFrame = await getPixelAgentsFrame(window);
 
     narrator.step('waiting for all three parallel Subtask sub-characters to appear');
-    await expectOverlayVisible(panelFrame, 'Subtask: Parallel task 3');
+    await expectOverlayVisible(panelFrame, 'Subtarea: Parallel task 3');
     await expectCharacterCount(panelFrame, 4, 10_000);
     await expectSubagentOverlay(panelFrame, 'Parallel task 1', -1);
     await expectSubagentOverlay(panelFrame, 'Parallel task 2', -2);
@@ -500,9 +502,9 @@ test.describe('Hooks ON / lifecycle', () => {
     const panelFrame = await getPixelAgentsFrame(window);
 
     await expectOverlayVisibleWithTexts(panelFrame, [INLINE_TEAMMATE_ROLE], 10_000);
-    await expectOverlayVisible(panelFrame, 'Searching the web');
+    await expectOverlayVisible(panelFrame, 'Buscando en la web');
     await expectOverlayCount(panelFrame, 2, 10_000);
-    narrator.check('lead + teammate on screen; teammate shows "Searching the web" (count 2)');
+    narrator.check('lead + teammate on screen; teammate shows "Buscando en la web" (count 2)');
 
     narrator.step('waiting for the 1s config poll to drop the removed teammate');
     await expectOverlayCount(panelFrame, 1, 12_000);
@@ -524,7 +526,7 @@ test.describe('Hooks ON / lifecycle', () => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
     const teamName = uniqueTeamName('lead-cascade-hooks-on');
 
-    narrator.step('enabling Watch All Sessions so the external lead session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external lead session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -609,7 +611,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external lead session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external lead session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -659,11 +661,11 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     narrator.step('waiting for a basic Subtask sub-character (run_in_background, no team)');
-    await expectOverlayVisible(frame, 'Subtask: Background basic subtask');
+    await expectOverlayVisible(frame, 'Subtarea: Background basic subtask');
     await expectOverlayCount(frame, 1, 10_000);
     await expectNoOverlay(frame, 'general-purpose', 2_000);
     narrator.check(
-      'basic "Subtask: Background basic subtask" shown; no "general-purpose" teammate overlay',
+      'basic "Subtarea: Background basic subtask" shown; no "general-purpose" teammate overlay',
     );
     // Stability check: a misrouted SubagentStart could spawn a teammate-style
     // overlay seconds later (the lead has no teamName, so this is the regression).
@@ -679,7 +681,7 @@ test.describe('Hooks ON / lifecycle', () => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
     const teamName = uniqueTeamName('teammate-permission-hooks-on');
 
-    narrator.step('enabling Watch All Sessions so the external lead session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external lead session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -753,12 +755,16 @@ test.describe('Hooks ON / lifecycle', () => {
     narrator.step(
       'a permission_prompt arrives on the LEAD — the bubble should land on the working teammate',
     );
-    await expectOverlayVisibleWithTexts(frame, [INLINE_TEAMMATE_ROLE, 'Needs approval'], 8_000);
-    await expectNoOverlayWithTexts(frame, ['LEAD', 'Needs approval']);
-    narrator.check('"Needs approval" is on the teammate; the lead has no bubble');
+    await expectOverlayVisibleWithTexts(
+      frame,
+      [INLINE_TEAMMATE_ROLE, 'Necesita tu aprobación'],
+      8_000,
+    );
+    await expectNoOverlayWithTexts(frame, ['Responsable', 'Necesita tu aprobación']);
+    narrator.check('"Necesita tu aprobación" is on the teammate; the lead has no bubble');
 
     narrator.step('waiting for the teammate to finish its task');
-    await expectNoOverlayWithTexts(frame, [INLINE_TEAMMATE_ROLE, 'Needs approval'], 8_000);
+    await expectNoOverlayWithTexts(frame, [INLINE_TEAMMATE_ROLE, 'Necesita tu aprobación'], 8_000);
     narrator.check('bubble clears when the teammate completes');
   });
 
@@ -768,7 +774,7 @@ test.describe('Hooks ON / lifecycle', () => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
     const teamName = uniqueTeamName('targeted-teammate-idle-hooks-on');
 
-    narrator.step('enabling Watch All Sessions so the external lead session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external lead session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -867,12 +873,15 @@ test.describe('Hooks ON / lifecycle', () => {
         { timeout: 8_000 },
       )
       .toMatchObject({ bubbleType: 'waiting', waitingAwaitingInput: false });
-    await expectOverlayVisibleWithTexts(frame, [SECOND_TEAMMATE_ROLE, 'Running: npm run reviewer']);
-    await expectNoOverlayWithTexts(frame, [INLINE_TEAMMATE_ROLE, 'Waiting for input']);
-    await expectNoOverlayWithTexts(frame, [SECOND_TEAMMATE_ROLE, 'Waiting for input']);
-    await expectNoOverlayWithTexts(frame, ['LEAD', 'Waiting for input']);
+    await expectOverlayVisibleWithTexts(frame, [
+      SECOND_TEAMMATE_ROLE,
+      'Ejecutando: npm run reviewer',
+    ]);
+    await expectNoOverlayWithTexts(frame, [INLINE_TEAMMATE_ROLE, 'Esperando tu respuesta']);
+    await expectNoOverlayWithTexts(frame, [SECOND_TEAMMATE_ROLE, 'Esperando tu respuesta']);
+    await expectNoOverlayWithTexts(frame, ['Responsable', 'Esperando tu respuesta']);
     narrator.check(
-      'first teammate exposes the Done checkmark; second still "Running: npm run reviewer"; lead unaffected',
+      'first teammate exposes the Done checkmark; second still "Ejecutando: npm run reviewer"; lead unaffected',
     );
   });
 
@@ -923,13 +932,13 @@ test.describe('Hooks ON / lifecycle', () => {
     narrator.check('one character before the rapid /clear');
 
     narrator.step('waiting for the reassigned character to land on the fresh tool');
-    await expectOverlayVisible(panelFrame, 'Running: npm run fresh');
+    await expectOverlayVisible(panelFrame, 'Ejecutando: npm run fresh');
     await expectOverlayCount(panelFrame, 1);
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
-    narrator.check('same character shows "Running: npm run fresh", count 1');
+    narrator.check('same character shows "Ejecutando: npm run fresh", count 1');
 
     await panelFrame.waitForTimeout(750);
-    await expectNoOverlay(panelFrame, 'Running: npm run ghost');
+    await expectNoOverlay(panelFrame, 'Ejecutando: npm run ghost');
     expect(await readAgentOverlayIds(panelFrame)).toEqual([originalAgentId]);
     narrator.check('ghost "npm run ghost" never renders; id unchanged');
   });
@@ -939,7 +948,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so external sessions are adopted');
+    narrator.step('enabling Observar todas las sesiones so external sessions are adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -977,9 +986,9 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     narrator.step('waiting for the external agent to be active');
-    await expectOverlayVisible(frame, 'Running: npm run old-live');
+    await expectOverlayVisible(frame, 'Ejecutando: npm run old-live');
     const oldAgentId = await expectSingleAgentOverlay(frame);
-    narrator.check('external agent shows "Running: npm run old-live"');
+    narrator.check('external agent shows "Ejecutando: npm run old-live"');
     await closeAgentFromOverlay(frame, { agentId: oldAgentId });
     await expectOverlayCount(frame, 0, 8_000);
     narrator.check('agent removed after the "×" (count → 0)');
@@ -1010,7 +1019,7 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     narrator.step('waiting for the fresh external session to appear');
-    await expectOverlayVisible(frame, 'Running: npm run reopened', 10_000);
+    await expectOverlayVisible(frame, 'Ejecutando: npm run reopened', 10_000);
     await expectOverlayCount(frame, 1);
     const [newAgentId] = await readAgentOverlayIds(frame);
     expect(newAgentId).not.toBe(oldAgentId);
@@ -1022,7 +1031,7 @@ test.describe('Hooks ON / lifecycle', () => {
       'holding while the dismissed JSONL gets a late stale write that must not be re-adopted',
     );
     await frame.waitForTimeout(4_000);
-    await expectNoOverlay(frame, 'Running: npm run old-stale', 2_000);
+    await expectNoOverlay(frame, 'Ejecutando: npm run old-stale', 2_000);
     await expectOverlayCount(frame, 1);
     narrator.check('closed JSONL never re-adopted during cooldown; count stays 1');
   });
@@ -1038,7 +1047,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -1067,8 +1076,8 @@ test.describe('Hooks ON / lifecycle', () => {
     // change rather than a no-op on a never-active agent).
     await sendHookEvent(serverConfig, preToolUseBash(sessionId, 'npm test'));
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisible(frame, 'Running: npm test');
-    narrator.check('external agent active — "Running: npm test"');
+    await expectOverlayVisible(frame, 'Ejecutando: npm test');
+    narrator.check('external agent active — "Ejecutando: npm test"');
 
     // Reset the marker AFTER active-state dispatch so we only capture sounds
     // triggered by the idle_prompt under test.
@@ -1081,8 +1090,8 @@ test.describe('Hooks ON / lifecycle', () => {
 
     narrator.step('sending an idle_prompt to flip the agent to waiting');
     await sendHookEvent(serverConfig, idlePrompt(sessionId));
-    await expectOverlayVisible(frame, 'Waiting for input');
-    narrator.check('overlay shows "Waiting for input"');
+    await expectOverlayVisible(frame, 'Esperando tu respuesta');
+    narrator.check('overlay shows "Esperando tu respuesta"');
 
     narrator.step(
       'checking a "done" chime was dispatched (test hook — the chime is not audible in the video)',
@@ -1203,7 +1212,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
   // verify formatToolStatus produces the right overlay text for every
   // PreToolUse'd tool, not just Bash. Every other e2e test fires Bash and
-  // asserts "Running: npm test"; the 9 other tool-name branches in
+  // asserts "Ejecutando: npm test"; the 9 other tool-name branches in
   // claudeProvider.formatToolStatus had zero direct coverage prior to this.
   //
   // Each entry below maps a hook payload (tool_name + tool_input) to the
@@ -1215,7 +1224,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -1226,19 +1235,23 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Task / Agent tools follow the sub-character code path (covered by the basic-spawn test)
     // and don't change the parent overlay text — they're excluded here.
-    // WebSearch returns "Searching the web" but is covered implicitly by
+    // WebSearch returns "Buscando en la web" but is covered implicitly by
     // the same code branch as Glob/Grep; one Search variant is enough.
     type ToolCase = { toolName: string; toolInput: Record<string, unknown>; expectedText: string };
     const cases: ToolCase[] = [
-      { toolName: 'Read', toolInput: { file_path: '/x/foo.ts' }, expectedText: 'Reading foo.ts' },
-      { toolName: 'Edit', toolInput: { file_path: '/x/bar.ts' }, expectedText: 'Editing bar.ts' },
-      { toolName: 'Write', toolInput: { file_path: '/x/baz.ts' }, expectedText: 'Writing baz.ts' },
-      { toolName: 'Glob', toolInput: { pattern: '**/*.ts' }, expectedText: 'Searching files' },
-      { toolName: 'Grep', toolInput: { pattern: 'foo' }, expectedText: 'Searching code' },
+      { toolName: 'Read', toolInput: { file_path: '/x/foo.ts' }, expectedText: 'Leyendo foo.ts' },
+      { toolName: 'Edit', toolInput: { file_path: '/x/bar.ts' }, expectedText: 'Editando bar.ts' },
+      {
+        toolName: 'Write',
+        toolInput: { file_path: '/x/baz.ts' },
+        expectedText: 'Escribiendo baz.ts',
+      },
+      { toolName: 'Glob', toolInput: { pattern: '**/*.ts' }, expectedText: 'Buscando archivos' },
+      { toolName: 'Grep', toolInput: { pattern: 'foo' }, expectedText: 'Buscando en el código' },
       {
         toolName: 'WebFetch',
         toolInput: { url: 'https://x' },
-        expectedText: 'Fetching web content',
+        expectedText: 'Consultando una página web',
       },
     ];
 
@@ -1285,15 +1298,15 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisible(frame, 'Running: npm test');
-    narrator.check('agent active — "Running: npm test"');
+    await expectOverlayVisible(frame, 'Ejecutando: npm test');
+    narrator.check('agent active — "Ejecutando: npm test"');
 
     narrator.step('cycling through Read, Edit, Write, Glob, Grep, WebFetch — one tool every 3s');
     for (const c of cases) {
       await expectOverlayVisible(frame, c.expectedText);
     }
     narrator.check(
-      'each tool shows its exact status: Reading foo.ts, Editing bar.ts, Writing baz.ts, Searching files/code, Fetching web content',
+      'each tool shows its exact status: Leyendo foo.ts, Editando bar.ts, Escribiendo baz.ts, Buscando archivos/code, Consultando una página web',
     );
 
     narrator.step('waiting for SessionEnd to remove the character');
@@ -1310,7 +1323,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -1345,8 +1358,8 @@ test.describe('Hooks ON / lifecycle', () => {
 
     narrator.step('sending a permissionRequest hook to raise the approval bubble');
     await sendHookEvent(serverConfig, permissionRequest(sessionId));
-    await expectOverlayVisible(frame, 'Needs approval');
-    narrator.check('"Needs approval" bubble is visible');
+    await expectOverlayVisible(frame, 'Necesita tu aprobación');
+    narrator.check('"Necesita tu aprobación" bubble is visible');
 
     narrator.step(
       'checking a "permission" chime was dispatched (test hook — not audible in the video)',
@@ -1508,7 +1521,7 @@ test.describe('Hooks ON / lifecycle', () => {
   }) => {
     const { frame, tmpHome, workspaceDir, mockLogFile, narrator } = pixelAgents;
 
-    narrator.step('enabling Watch All Sessions so the external session is adopted');
+    narrator.step('enabling Observar todas las sesiones so the external session is adopted');
     await setSettings(frame, {
       watchAllSessions: true,
     });
@@ -1553,16 +1566,16 @@ test.describe('Hooks ON / lifecycle', () => {
     });
 
     await expectOverlayCount(frame, 1);
-    await expectOverlayVisible(frame, 'Running: npm test');
-    narrator.check('agent active — "Running: npm test"');
+    await expectOverlayVisible(frame, 'Ejecutando: npm test');
+    narrator.check('agent active — "Ejecutando: npm test"');
 
-    await expectOverlayVisible(frame, 'Needs approval');
-    narrator.check('"Needs approval" bubble is up');
+    await expectOverlayVisible(frame, 'Necesita tu aprobación');
+    narrator.check('"Necesita tu aprobación" bubble is up');
 
     narrator.step('a fresh PreToolUse(Read) arrives, as if the user approved in the terminal');
-    await expectOverlayVisible(frame, 'Reading foo.ts');
-    await expectNoOverlay(frame, 'Needs approval', 2_000);
-    narrator.check('overlay swaps to "Reading foo.ts"; the stale approval bubble is gone');
+    await expectOverlayVisible(frame, 'Leyendo foo.ts');
+    await expectNoOverlay(frame, 'Necesita tu aprobación', 2_000);
+    narrator.check('overlay swaps to "Leyendo foo.ts"; the stale approval bubble is gone');
   });
 
   // persisted settings survive a webview reload.
@@ -1574,7 +1587,7 @@ test.describe('Hooks ON / lifecycle', () => {
   // PixelAgentsViewProvider's webviewReady handler} would surface as "I
   // turned X off, restarted, X is back on."
   //
-  // Trigger: toggle Always Show Labels off, close+reopen the panel (forces a
+  // Trigger: toggle Mostrar siempre las etiquetas off, close+reopen the panel (forces a
   // fresh webviewReady), open the Settings modal, read the indicator state.
   // It must still be unchecked.
   test('settings toggles persist across a webview reload @area:cross-cutting', async ({
@@ -1586,15 +1599,17 @@ test.describe('Hooks ON / lifecycle', () => {
     // Read whatever the fixture default is, then flip it. The persistence
     // assertion is about the FLIPPED state surviving a reload, not about the
     // initial default value.
-    const initial = await getSettingChecked(frame, 'Always Show Labels');
-    const initialGhost = await getSettingChecked(frame, 'Display Headless as Ghosts');
-    narrator.step('flipping "Always Show Labels" + "Display Headless as Ghosts" in Settings');
+    const initial = await getSettingChecked(frame, 'Mostrar siempre las etiquetas');
+    const initialGhost = await getSettingChecked(frame, 'Atenuar sesiones sin terminal');
+    narrator.step(
+      'flipping "Mostrar siempre las etiquetas" + "Atenuar sesiones sin terminal" in Settings',
+    );
     await setSettings(frame, {
       alwaysShowLabels: !initial,
       ghostHeadlessAgents: !initialGhost,
     });
-    expect(await getSettingChecked(frame, 'Always Show Labels')).toBe(!initial);
-    expect(await getSettingChecked(frame, 'Display Headless as Ghosts')).toBe(!initialGhost);
+    expect(await getSettingChecked(frame, 'Mostrar siempre las etiquetas')).toBe(!initial);
+    expect(await getSettingChecked(frame, 'Atenuar sesiones sin terminal')).toBe(!initialGhost);
     narrator.check('both toggles are now flipped');
 
     // Force a fresh webview by closing and reopening the panel (same
@@ -1606,8 +1621,8 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // After settingsLoaded re-hydrates, the toggle must still be in the
     // flipped state — not back to the fixture default.
-    expect(await getSettingChecked(frame, 'Always Show Labels')).toBe(!initial);
-    expect(await getSettingChecked(frame, 'Display Headless as Ghosts')).toBe(!initialGhost);
+    expect(await getSettingChecked(frame, 'Mostrar siempre las etiquetas')).toBe(!initial);
+    expect(await getSettingChecked(frame, 'Atenuar sesiones sin terminal')).toBe(!initialGhost);
     narrator.check('flipped state survives the reload — persisted through config.json');
   });
 

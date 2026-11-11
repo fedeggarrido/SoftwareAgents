@@ -171,6 +171,12 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           import { flushSync } from 'react-dom';
           import { createRoot } from 'react-dom/client';
           import App from './App';
+          import { UI_LAYERS } from './constants';
+          import { initialiseTextSize } from './hooks/useTextSize';
+          import { setConnectionStatus } from './office/connectionStatus';
+          for (const [key, value] of Object.entries(UI_LAYERS)) document.documentElement.style.setProperty('--z-' + key, String(value));
+          initialiseTextSize();
+          window.updateConnectionCopy = state => setConnectionStatus({ state, cause: 'unavailable', attempt: 2, retryAt: Date.now() + 4000 });
           import { NewIdeaDialog } from './components/NewIdeaDialog';
           import { FeaturePlanDialog } from './components/FeaturePlanDialog';
           let root;
@@ -205,9 +211,16 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
               loader: 'js',
               contents: `
               export async function copyOperatorToken() {}
+              const listeners = new Set();
+              window.setOfficeConnection = state => {
+                transport.state = state;
+                window.updateConnectionCopy(state);
+                for (const listener of listeners) listener(state);
+              };
               export const transport = {
                 state: 'connected', ready: Promise.resolve(),
-                onStateChange: () => () => {}, dispose() {},
+                onStateChange(listener) { listeners.add(listener); return () => listeners.delete(listener); }, dispose() {},
+                reconnect() { window.manualRetries = (window.manualRetries ?? 0) + 1; },
                 onMessage(handler) {
                   const listener = event => handler(event.data);
                   window.addEventListener('message', listener);
@@ -253,6 +266,32 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.goto('http://office-window.test/');
       await page.addScriptTag({ content: script });
       await boot(page);
+      // A real disconnect has exactly one notice, above the HUD in normal flow.
+      await page.evaluate("window.setOfficeConnection('reconnecting')");
+      const notice = page.getByTestId('connection-notice');
+      await notice.waitFor();
+      expect(await notice.count()).toBe(1);
+      expect(await page.locator('.office-connection-help').count()).toBe(1);
+      expect(await notice.textContent()).toContain('Sin conexión · reintentando en');
+      expect(await notice.locator('details').getAttribute('open')).toBeNull();
+      const noticeBox = (await notice.boundingBox())!;
+      const hudBox = (await page.getByTestId('company-hud').boundingBox())!;
+      expect(hudBox.y).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height);
+      await notice.getByRole('button', { name: 'Reintentar ahora', exact: true }).click();
+      expect(await page.evaluate('window.manualRetries')).toBe(1);
+      await notice.getByRole('button', { name: 'Minimizar aviso de conexión' }).click();
+      expect(await page.locator('.office-connection-help').count()).toBe(0);
+      const expand = notice.getByRole('button', { name: 'Mostrar aviso de conexión' });
+      await expand.waitFor();
+      await page
+        .locator('canvas')
+        .first()
+        .click({ position: { x: 1, y: 200 } });
+      await expand.click();
+      expect(await page.locator('.office-connection-help').count()).toBe(1);
+      await page.evaluate("window.setOfficeConnection('connected')");
+      expect(await notice.count()).toBe(0);
+      await boot(page);
       const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
       expect(await dock.locator('.dock-primary').count()).toBe(1);
       expect(await dock.evaluate(fitsHorizontally)).toBe(true);
@@ -267,7 +306,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await more.click();
         const sheet = page.getByRole('dialog', { name: 'Más opciones', exact: true });
         await sheet.waitFor();
-        for (const name of ['Features', 'Auditoría', 'Editar oficina', 'Ajustes']) {
+        for (const name of ['Funcionalidades', 'Auditoría', 'Editar oficina', 'Ajustes']) {
           const action = sheet.getByRole('button', { name, exact: true });
           const box = (await action.boundingBox())!;
           expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
@@ -276,8 +315,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await sheet.count()).toBe(0);
         expect(await more.evaluate(isFocusedElement)).toBe(true);
         await more.click();
-        await sheet.getByRole('button', { name: 'Features', exact: true }).click();
-        await page.getByRole('tab', { name: 'Features', selected: true }).waitFor();
+        await sheet.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
+        await page.getByRole('tab', { name: 'Funcionalidades', selected: true }).waitFor();
         expect(await sheet.count()).toBe(0);
         await more.click();
         await sheet.getByRole('button', { name: 'Auditoría', exact: true }).click();
@@ -299,7 +338,20 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         const editor = (await page.locator('.editor-toolbar').boundingBox())!;
         expect(editor.y + editor.height).toBeLessThan((await dock.boundingBox())!.y);
         await dock.getByRole('button', { name: 'Ajustes', exact: true }).click();
-        await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor();
+        const settings = page.getByRole('dialog', { name: 'Ajustes', exact: true });
+        await settings.waitFor();
+        await settings.getByRole('button', { name: 'Grande', exact: true }).click();
+        expect(await page.evaluate('document.documentElement.dataset.textSize')).toBe('large');
+        expect(await page.evaluate('localStorage.getItem("pixel-agents.text-size.v1")')).toBe(
+          'large',
+        );
+        expect(
+          await settings
+            .locator('.setting-help')
+            .first()
+            .evaluate('el => getComputedStyle(el).fontSize'),
+        ).toBe('16px');
+        await settings.getByRole('button', { name: 'Normal', exact: true }).click();
         await page.keyboard.press('Escape');
         await dock.getByRole('button', { name: 'Salir de edición', exact: true }).click();
         await more.click();
@@ -318,9 +370,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       } else {
         expect(
           await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').allTextContents(),
-        ).toEqual(['Trabajo', 'Decisiones', 'Features', 'Auditoría']);
+        ).toEqual(['Trabajo', 'Decisiones', 'Funcionalidades', 'Auditoría']);
         for (const button of await dock.getByRole('button').all()) {
-          expect((await button.boundingBox())!.height).toBe(32);
+          expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         }
       }
       await page.locator('.office-mode-indicator button[aria-controls]').click();
@@ -335,7 +387,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await windowPanel.waitFor();
       const panelBox = (await windowPanel.boundingBox())!;
       expect(await canvas.boundingBox()).toEqual(officeBox);
-      expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Backlog');
+      expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Tareas');
       expect(await page.getByTestId('backlog-panel').count()).toBe(1);
       if (width === 390) {
         expect(panelBox.x).toBe(0);
@@ -412,7 +464,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
         ),
       ).toContain('slashed-zero');
-      for (const name of ['Auditoría', 'Features', 'Decisiones', 'Reuniones', 'Backlog']) {
+      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Reuniones', 'Tareas']) {
         await page.getByRole('tab', { name, exact: true }).click();
         expect(await windowPanel.count()).toBe(1);
         expect(await page.getByRole('tabpanel').count()).toBe(1);
@@ -420,12 +472,12 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         const labels: Record<string, string> = {
           Backlog: 'Trabajo',
           Decisiones: 'Decisiones',
-          Features: 'Features',
+          Features: 'Funcionalidades',
           Auditoría: 'Auditoría',
         };
         const pressed = dock.locator('.dock-segment[aria-pressed="true"]');
         expect(await pressed.count()).toBe(
-          name === 'Reuniones' || (width === 390 && ['Features', 'Auditoría'].includes(name))
+          name === 'Reuniones' || (width === 390 && ['Funcionalidades', 'Auditoría'].includes(name))
             ? 0
             : 1,
         );
@@ -484,7 +536,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       const meetingTab = page.getByRole('tab', { name: 'Reuniones', exact: true });
       const meetingHud = page.getByTestId('company-hud').getByRole('button', { name: /Reuniones/ });
       await meetingTab.getByRole('status', { name: 'Nueva actividad' }).waitFor();
-      expect(await page.getByRole('tab', { name: 'Backlog', selected: true }).count()).toBe(1);
+      expect(await page.getByRole('tab', { name: 'Tareas', selected: true }).count()).toBe(1);
       expect(await meetingHud.getByRole('status', { name: 'Nueva actividad' }).isVisible()).toBe(
         true,
       );
@@ -500,7 +552,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await meetingHud.click();
         expect(await windowPanel.count()).toBe(1);
       }
-      await page.getByRole('tab', { name: 'Backlog', exact: true }).click();
+      await page.getByRole('tab', { name: 'Tareas', exact: true }).click();
       await sendMeeting('meeting-3');
       await meetingTab.getByRole('status').waitFor();
       await meetingTab.click();
@@ -546,7 +598,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await work.getAttribute('title')).toContain('Estado de PR:');
       expect(await page.getByTestId('dock-pr-status').count()).toBe(0);
       await work.click();
-      await page.getByRole('tab', { name: 'Backlog', selected: true }).waitFor();
+      await page.getByRole('tab', { name: 'Tareas', selected: true }).waitFor();
       expect(await work.getAttribute('aria-pressed')).toBe('true');
       await work.click();
       expect(await windowPanel.count()).toBe(0);
@@ -579,8 +631,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await canvas.evaluate(isFocusedElement)).toBe(true);
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
       await card.waitFor();
-      await card.getByRole('button', { name: 'Ver en Backlog', exact: true }).click();
-      await page.getByRole('tab', { name: 'Backlog', selected: true }).waitFor();
+      await card.getByRole('button', { name: 'Ver en Tareas', exact: true }).click();
+      await page.getByRole('tab', { name: 'Tareas', selected: true }).waitFor();
       expect(await card.count()).toBe(0);
       await page.keyboard.press('Escape');
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(null)');
@@ -588,10 +640,10 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.waitForTimeout(50);
       if (width === 390) {
         await backlog.tap();
-        await page.getByRole('tab', { name: 'Features', exact: true }).tap();
+        await page.getByRole('tab', { name: 'Funcionalidades', exact: true }).tap();
         await page.getByRole('button', { name: 'Ver plan', exact: true }).tap();
-        await page.getByRole('dialog', { name: 'Plan de feature', exact: true }).waitFor();
-        await expectModalFocus(page, 'Plan de feature');
+        await page.getByRole('dialog', { name: 'Plan de funcionalidad', exact: true }).waitFor();
+        await expectModalFocus(page, 'Plan de funcionalidad');
         await page.keyboard.press('Escape');
         expect(await page.getByRole('dialog').count()).toBe(0);
         expect(await windowPanel.count()).toBe(1);
@@ -606,7 +658,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await backlog.click();
       await page.getByRole('button', { name: 'Editar oficina', exact: true }).click();
       await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
-      await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor();
+      await page.getByRole('dialog', { name: 'Ajustes', exact: true }).waitFor();
       await page.keyboard.press('Escape');
       expect(await page.getByRole('dialog').count()).toBe(0);
       expect(await windowPanel.count()).toBe(1);
@@ -626,11 +678,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       ).toBe('true');
       await page.getByRole('button', { name: 'Salir de edición', exact: true }).click();
 
-      await page.getByRole('button', { name: 'Features', exact: true }).click();
+      await page.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
       await page.getByRole('button', { name: 'Ver plan', exact: true }).click();
-      const plan = page.getByRole('dialog', { name: 'Plan de feature', exact: true });
+      const plan = page.getByRole('dialog', { name: 'Plan de funcionalidad', exact: true });
       await plan.waitFor();
-      await expectModalFocus(page, 'Plan de feature');
+      await expectModalFocus(page, 'Plan de funcionalidad');
       expect(await plan.evaluate(isOutsidePanelWindow)).toBe(true);
       await page.keyboard.press('Escape');
       expect(await plan.count()).toBe(0);
@@ -693,7 +745,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           PANEL_WINDOW_STORAGE_KEY,
         ),
       ).toBe('features');
-      await page.getByRole('button', { name: 'Features', exact: true }).click();
+      await page.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
       expect(await windowPanel.boundingBox()).toEqual(resized);
       await page.setViewportSize({ width: 600, height: 400 });
       // The clamp follows a ResizeObserver callback, so wait for it instead of racing it.
@@ -808,8 +860,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
     // Close one modal and open another in a single commit. Its connected opener
     // must not steal focus back after the new modal's layout effect focuses it.
     await focusPage.evaluate("window.showFocusProbe('plan')");
-    await expectModalFocus(focusPage, 'Plan de feature');
-    await focusPage.getByRole('dialog', { name: 'Plan de feature', exact: true }).focus();
+    await expectModalFocus(focusPage, 'Plan de funcionalidad');
+    await focusPage.getByRole('dialog', { name: 'Plan de funcionalidad', exact: true }).focus();
     await focusPage.evaluate('window.showStackedFocusProbe()');
     await expectModalFocus(focusPage, 'Nueva idea');
     await focusPage.evaluate('window.closeStackedFocusProbe()');
@@ -821,7 +873,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         .getByRole('button', { name: 'Cerrar', exact: true })
         .evaluate(isFocusedElement),
     ).toBe(true);
-    await expectModalFocus(focusPage, 'Plan de feature');
+    await expectModalFocus(focusPage, 'Plan de funcionalidad');
     await focusPage.close();
   } finally {
     await browser.close();

@@ -1,0 +1,224 @@
+/* Shared reading typography, controls and semantic layers. Values live in :root. */
+:root[data-text-size='large'] {
+  --reading-size: 16px;
+  --metadata-size: 14px;
+}
+.layer-hud {
+  z-index: var(--z-hud);
+}
+.layer-notices {
+  z-index: var(--z-notices);
+}
+.office-shell {
+  display: flex;
+  flex-direction: column;
+}
+.office-viewport {
+  flex: 1;
+  min-height: 0;
+}
+.office-viewport > canvas {
+  z-index: var(--z-office);
+}
+.office-panels {
+  z-index: var(--z-hud);
+}
+.connection-indicator {
+  position: relative;
+  z-index: var(--z-connection);
+  flex-shrink: 0;
+}
+.office-connection-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--reading-size);
+}
+.office-connection-help > p {
+  margin-right: auto;
+}
+.office-connection-help summary {
+  cursor: pointer;
+  min-height: var(--control-target);
+  display: flex;
+  align-items: center;
+}
+.connection-details {
+  position: absolute;
+  right: var(--space-2);
+  top: 100%;
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  padding: var(--space-3);
+  max-height: 40dvh;
+  overflow: auto;
+}
+.connection-chip {
+  position: absolute;
+  right: var(--space-2);
+  top: var(--space-2);
+}
+.settings-dialog,
+.changelog-dialog,
+.migration-dialog {
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+  min-width: 0;
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+.setting-help {
+  display: block;
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+  color: var(--color-text-muted);
+}
+.text-size-setting {
+  padding: var(--space-3);
+}
+.text-size-setting button + button {
+  margin-left: var(--space-2);
+}
+.character-hover-label {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--reading-size);
+  max-width: calc(100vw - 2 * var(--space-4));
+}
+.character-hover-label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.external-session-chip {
+  color: var(--color-text-muted);
+  border: var(--border-thin) solid currentColor;
+  padding-inline: var(--space-1);
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-thin) solid currentColor;
+  border-radius: var(--radius);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.status-chip svg {
+  flex-shrink: 0;
+}
+.status-chip[data-tone='active'] {
+  color: var(--color-status-active);
+}
+.status-chip[data-tone='attention'] {
+  color: var(--color-warning);
+}
+.status-chip[data-tone='success'] {
+  color: var(--color-status-success);
+}
+.status-chip[data-tone='error'] {
+  color: var(--color-error-border);
+}
+.status-chip[data-tone='muted'] {
+  color: var(--color-text-muted);
+}
+button,
+summary,
+select {
+  min-height: var(--control-target);
+}
+button {
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  border-radius: var(--radius);
+}
+h1,
+h2,
+h3,
+h4,
+.pixel-title,
+.panel-window-title {
+  font-family: var(--font-pixel);
+  line-height: var(--reading-line-height);
+}
+h2,
+h3,
+h4 {
+  font-size: 24px;
+}
+:where(p, li, dd, dt) {
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+:where(input, textarea, select) {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+  outline-offset: calc(-1 * var(--border-thick));
+}
+button:disabled {
+  opacity: var(--btn-disabled-opacity);
+  cursor: default;
+}
+button:active:not(:disabled) {
+  translate: 0 var(--border-thin);
+}
+.pixel-button {
+  border: var(--border-thick) solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.pixel-button-primary,
+.dock-primary {
+  background: var(--color-accent);
+  color: var(--color-text);
+}
+.pixel-button-primary:hover:not(:disabled) {
+  background: var(--color-accent-bright);
+  color: var(--color-bg-dark);
+}
+.pixel-button-secondary {
+  background: var(--color-btn-bg);
+  color: var(--color-text);
+}
+.pixel-button-secondary:hover:not(:disabled) {
+  background: var(--color-btn-hover);
+}
+.pixel-button[aria-pressed='true'] {
+  border-color: var(--color-text-muted);
+  background: var(--color-active-bg);
+}
+.pixel-button-ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.pixel-button-ghost:hover:not(:disabled) {
+  background: var(--color-btn-hover);
+  color: var(--color-text);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.read-only-panel :where(div, span),
+.agent-card :where(div, span) {
+  line-height: var(--reading-line-height);
+}

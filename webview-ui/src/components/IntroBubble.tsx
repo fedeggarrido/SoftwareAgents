@@ -320,7 +320,7 @@ export function IntroBubble({
               <p className="text-sm m-0 mb-8">
                 No se pudo guardar la configuración de Claude Code. La oficina seguirá leyendo tus
                 sesiones con actualizaciones más lentas. Puedes reintentar la instalación desde
-                Settings.
+                Ajustes.
               </p>
             ) : null}
             <p className="text-sm m-0 mb-8">
@@ -370,28 +370,30 @@ export function IntroBubble({
                 No volver a preguntar
               </Button>
               <Button
-                variant={installPending ? 'disabled' : 'default'}
-                size="sm"
+                variant="secondary"
                 disabled={installPending}
+                size="sm"
+
                 onClick={() => choose('notNow')}
               >
                 Ahora no
               </Button>
               <Button
-                variant={installPending ? 'disabled' : 'accent'}
-                size="sm"
+                variant="primary"
                 disabled={installPending}
+                size="sm"
+
                 onClick={() => choose('install')}
               >
                 {installPending ? 'Instalando…' : 'Instalar hooks'}
               </Button>
             </div>
           ) : step === CLOSING_STEP ? (
-            <Button variant="accent" size="sm" onClick={onClose}>
+            <Button variant="primary" size="sm" onClick={onClose}>
               Terminar
             </Button>
           ) : (
-            <Button variant="default" size="sm" onClick={forward}>
+            <Button variant="secondary" size="sm" onClick={forward}>
               Continuar
             </Button>
           )}

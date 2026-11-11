@@ -7,6 +7,7 @@ import {
 import { PROJECT_EMPTY_TEXT } from '../constants.js';
 import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
 import { useExecutorStore } from '../office/executorStore.js';
+import { featureStepLabel } from '../office/featuresStore.js';
 import {
   beginFeaturesRequest,
   emptyFeaturesStore,
@@ -16,7 +17,6 @@ import {
   featureCoverageLabel,
   featureProgressLabel,
   featuresReasonText,
-  featureStateLabel,
   getFeaturesStore,
   setFeaturesStore,
   useFeaturesStore,
@@ -28,8 +28,8 @@ import { useIdeasConnection } from '../office/useIdeasConnection.js';
 import { transport } from '../transport/index.js';
 import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
-import { OfficeConnectionHelp } from './OfficeConnectionHelp.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -77,11 +77,11 @@ export function FeaturesPanel({
   return (
     <section
       role="region"
-      aria-label="Features"
+      aria-label="Funcionalidades"
       data-testid="features-panel"
       className="read-only-panel p-10 flex flex-col gap-8"
     >
-      <PanelHeading hosted={hosted} title="Features" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Funcionalidades" onClose={onClose}>
         {state !== 'read_error' && (
           <Button
             size="sm"
@@ -93,9 +93,7 @@ export function FeaturesPanel({
         )}
       </PanelHeading>
       <div aria-label="Ideas pendientes">
-        {connectionState !== 'connected' ? (
-          <OfficeConnectionHelp />
-        ) : !ideas.snapshot ? (
+        {connectionState !== 'connected' ? null : !ideas.snapshot ? (
           <p role="status">Cargando ideas pendientes…</p>
         ) : ideas.snapshot.errorCode === 'denied' ||
           ideas.snapshot.preparationError === 'denied' ? (
@@ -130,16 +128,16 @@ export function FeaturesPanel({
       ) : (
         <>
           <div role="status">
-            {state === 'loading' && 'Cargando features…'}
+            {state === 'loading' && 'Cargando funcionalidades…'}
             {state === 'empty' && (
               <p>
-                Sin features todavía. Se crean con{' '}
+                Sin funcionalidades todavía. Se crean con{' '}
                 <code className="feature-command">
                   {'pixel-agents feature run <FEAT> --request <file>'}
                 </code>
               </p>
             )}
-            {state === 'denied' && 'Acceso denegado a las features'}
+            {state === 'denied' && 'Acceso denegado a las funcionalidades'}
           </div>
           {state === 'read_error' && (
             <PanelError
@@ -163,7 +161,7 @@ export function FeaturesPanel({
                 projectId={projectId}
                 featureKey={feature.key}
               />
-              <span className="feature-state-chip">{featureStateLabel(feature)}</span>
+              <StatusChip state={feature.state} />
               <div className="feature-progress">
                 {feature.progress && (
                   <div
@@ -192,20 +190,20 @@ export function FeaturesPanel({
                 <span>Coste est. API: {featureCostLabel(feature.cost)}</span>
                 <span>Ejecuciones: {feature.cost.executions}</span>
                 <span>Cobertura: {featureCoverageLabel(feature.cost)}</span>
-                <span>Coste est./tarea DONE: {featureCostPerDoneLabel(feature.cost)}</span>
+                <span>Coste est./tarea hecha: {featureCostPerDoneLabel(feature.cost)}</span>
                 <span>Caché: {featureCacheRateLabel(feature.cost)}</span>
               </div>
               <div className="feature-context text-text-muted">
                 {feature.currentTask && (
                   <span title="Tarea en curso">
-                    {feature.currentTask.key} {feature.currentTask.step}
+                    {feature.currentTask.key} {featureStepLabel(feature.currentTask.step)}
                     {feature.currentTask.others > 0 && ` (+${feature.currentTask.others})`}
                   </span>
                 )}
                 {feature.gates.map((gate, index) => (
                   <div key={index} className="feature-gate">
                     <span>
-                      {gate.kind} {gate.task}
+                      {featureStepLabel(gate.kind)} {gate.task}
                       {gate.expired && ' · expirado'}
                     </span>
                     <code>{gate.command}</code>

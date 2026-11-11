@@ -49,9 +49,9 @@ export function IdeaCommand({ command, checkoutName }: { command: string; checko
           {feedback}
         </p>
         <p>
-          El comando pedirá el token del operador. En esta oficina, abre Settings → Detalles →
-          Copiar token para CLI y pégalo en la confirmación oculta. El token no aparece en la URL
-          impresa al iniciar Pixel Agents.
+          El comando pedirá el token del operador. En esta oficina, abre Ajustes → Detalles → Copiar
+          token para CLI y pégalo en la confirmación oculta. El token no aparece en la URL impresa
+          al iniciar Pixel Agents.
         </p>
       </div>
     </details>

@@ -6,11 +6,13 @@
 
 **Rendering**: Game state in imperative `OfficeState` class (not React state). Pixel-perfect: zoom = integer device-pixels-per-sprite-pixel (1x–10x). No `ctx.scale(dpr)`. Default zoom = `Math.round(2 * devicePixelRatio)`. Z-sort all entities by Y. Pan via middle-mouse drag (`panRef`). **Camera follow**: `cameraFollowId` (separate from `selectedAgentId`) smoothly centers camera on the followed agent; set on agent click, cleared on deselection or manual pan.
 
-**UI styling**: Pixel art aesthetic — sharp corners (`borderRadius: 0`), solid backgrounds (`#1e1e2e`), `2px solid` borders, hard offset shadows (`2px 2px 0px #0a0a14`, no blur). CSS variables in `index.css` `:root` (`--pixel-bg`, `--pixel-border`, `--pixel-accent`, ...). Pixel font: FS Pixel Sans (`webview-ui/src/fonts/`), loaded via `@font-face`, applied globally.
+**UI styling**: Pixel art aesthetic — sharp corners (`borderRadius: 0`), solid backgrounds (`#1e1e2e`), `2px solid` borders, hard offset shadows (`2px 2px 0px #0a0a14`, no blur). CSS variables in `index.css` `:root` (`--pixel-bg`, `--pixel-border`, `--pixel-accent`, ...). Typography uses two fonts: FS Pixel Sans for titles, buttons and large HUD numbers, and the system UI stack for reading (14–16 px, line-height 1.4; metadata may use 12 px). Settings persists Normal/Grande in viewer-local storage, guarded against blocked storage. Spacing, radius and border tokens live in `index.css`; shared controls and reading styles live in `ui.css`.
 
 Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-colors` (hex/rgb/rgba/hsl/hsla literals only in `constants.ts`), `pixel-shadow` (must use `var(--pixel-shadow)` or `2px 2px 0px`), `pixel-font` (must reference FS Pixel Sans). All `error`-level — they block PRs.
 
-**Characters**: FSM states — working (`isActive || hasDomainWork`: pathfind to the assigned seat, TYPE with typing/reading animation by tool type), inactive (BFS wandering with standing IDLE pauses of `WANDER_PAUSE_MIN_SEC`–`WANDER_PAUSE_MAX_SEC`). Inactive characters never return to their assigned seats for a rest. Seats remain reserved while characters are away. A seated turn end retains the short `INACTIVE_SEAT_TIMER_MIN_SEC` + random `INACTIVE_SEAT_TIMER_RANGE_SEC` grace period (3–5 s): TYPE keeps the seated position but uses a still sprite, never typing/reading. Work resuming during this delay prevents standing up; duplicate inactive notifications do not restart it. After the delay, the character takes a reachable step off its seat before pausing. If no floor tile is reachable, it stays standing in place and retries without crashing. Rest uses standing poses only: sofa occupancy would need separate temporary reservations and desk/electronics checks, so it is not part of this change. Seat reassignment reserves the new seat without sending an inactive character there; return-to-seat commands require work. Layout rebuilds also keep inactive characters off seats when floor space exists.
+**Characters**: `office/characterActivity.ts` is the shared presentation policy for labels, sprites, bubbles and workstation electronics. It distinguishes working, waiting, approval needed and meetings; domain wait/block/failure states stop work animation even across active CLI turns. Tool history never makes an inactive character appear busy. Waiting duration starts at the observed state transition. Resuming work clears the previous input-wait flag and its temporary checkmark. Hover shows a single Spanish name/role + activity line; the selected card owns task state, model choice, folder/team, history and context details. Sessions without a recorded assignment in a managed project carry «Abierta por ti» and its explanatory tooltip.
+
+FSM states — working (`characterActivity(ch) === 'working'`: pathfind to the assigned seat, TYPE with typing/reading animation by tool type), inactive (BFS wandering with standing IDLE pauses of `WANDER_PAUSE_MIN_SEC`–`WANDER_PAUSE_MAX_SEC`). Inactive characters never return to their assigned seats for a rest. Seats remain reserved while characters are away. A seated turn end retains the short `INACTIVE_SEAT_TIMER_MIN_SEC` + random `INACTIVE_SEAT_TIMER_RANGE_SEC` grace period (3–5 s): TYPE keeps the seated position but uses a still sprite, never typing/reading. Work resuming during this delay prevents standing up; duplicate inactive notifications do not restart it. After the delay, the character takes a reachable step off its seat before pausing. If no floor tile is reachable, it stays standing in place and retries without crashing. Rest uses standing poses only: sofa occupancy would need separate temporary reservations and desk/electronics checks, so it is not part of this change. Seat reassignment reserves the new seat without sending an inactive character there; return-to-seat commands require work. Layout rebuilds also keep inactive characters off seats when floor space exists.
 
 4-directional sprites, left = flipped right. Tool animations: typing (Write/Edit/Bash/Task) vs reading (Read/Grep/Glob/WebFetch). Sitting offset: characters shift down 6 px in TYPE state. Z-sort uses `ch.y + TILE_SIZE/2 + 0.5` so characters render in front of same-row furniture but behind lower-row furniture. **Chair z-sorting**: non-back chairs use `zY = (row+1)*TILE_SIZE` (capped to first row); back-facing chairs use `zY = (row+1)*TILE_SIZE + 1` so the chair back renders in front of the character. Chair tiles are blocked for all inactive routes, including their own assigned seat. Working characters can enter their own seat via `withOwnSeatUnblocked`. Losing domain work mid-return cancels the route through that seat.
 
@@ -20,9 +22,9 @@ Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-
 
 **Sub-agents**: Negative IDs (from -1 down). Created on `agentToolStart` with "Subtask:" prefix, or lazily by `subagentToolStart` when missing (watched background spawns, post-reload recreation). Same palette + hueShift as parent. Click focuses parent terminal. Not persisted. Spawn at the closest free walkable tile to the parent (`closestFreeWalkableTile`) — around it, never in a seat. Idle (stop typing) when every tracked sub-tool row is done; overlay shows the latest non-done sub-tool status, falling back to the Subtask label.
 
-**Speech bubbles**: Permission ("..." amber dots) stays until clicked/cleared. Waiting (green checkmark) auto-fades 2 s. Sprites in `spriteData.ts`.
+**Speech bubbles**: Permission ("..." amber dots) stays until the runtime clears the pending approval; selection only focuses the session. Waiting (green checkmark) auto-fades 2 s. Sprites in `spriteData.ts`.
 
-Permission events show the persistent bubble and mark pending tools without changing `isActive` or `hasDomainWork`. A character that still has either work signal stays seated as before; if both signals are false, it leaves after the turn-end delay and carries the permission bubble while wandering. The waiting indicator is not cleared by movement. Sub-agents retain their existing seatless behavior; teammates retain their seat assignments and follow the same work predicate.
+Permission events show the persistent bubble and mark pending tools without changing `isActive` or `hasDomainWork`. A character that still has either work signal stays seated in a still pose with its screen off; if both signals are false, it leaves after the turn-end delay and carries the permission bubble while wandering. The waiting indicator is not cleared by movement. Sub-agents retain their existing seatless behavior; teammates retain their seat assignments and follow the same work predicate.
 
 **Sound notifications**: Ascending two-note chime (E5 → E6) via Web Audio API plays when waiting bubble appears (`agentStatus: 'waiting'`). `notificationSound.ts` manages AudioContext lifecycle; `unlockAudio()` on canvas mousedown resumes the context (webviews start suspended). Toggled via Settings modal. Persisted per-namespace in `~/.pixel-agents/config.json`.
 
@@ -52,11 +54,18 @@ to REVIEWING/TESTING),
 REVIEW to REVIEWING, QA to TESTING; explicit wait/block/failure statuses retain
 their meaning. DRAFT/READY/QUEUED with a known unfinished dependency maps to
 WAITING_DEPENDENCY; other ready or terminal tasks are AVAILABLE. Human answered
-uses `toStatus`, or READY when absent. ToolOverlay shows distinct pixel bubble
-shapes and short text with an accessible label/tooltip, including between turns.
-Associated work prevents wandering without changing the legacy activity signal.
+uses `toStatus`, or READY when absent. ToolOverlay retains compact labels between turns; full task states use the shared
+StatusChip map in the agent card, Backlog, Features and plan dialog. Human-wait work
+draws the approval bubble. Active domain work prevents wandering without changing
+the legacy activity signal; waiting states rest instead of typing.
 Events can introduce tasks created after the snapshot; absent type/dependency
 metadata is left unknown. Snapshots replace the base; disconnect clears domain state.
+
+## UI layers and connection notices
+
+`UI_LAYERS` in `webview-ui/src/constants.ts` is the only stacking scale: office < HUD < panel/card < notices (connection first) < modals. `main.tsx` exposes these as CSS variables; portalled dialogs use the same constants. Migration notices also use the shared Modal.
+
+App owns exactly one ConnectionIndicator, including before layout readiness. Its strip is in normal flow above `.office-viewport`, so it pushes the HUD down; minimising leaves a corner chip. Retry and collapsed Details belong to this notice. Access controls and individual panels never mount another connection notice. The mobile panel is positioned within the remaining office viewport.
 
 ## Layout Editor
 

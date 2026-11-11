@@ -157,7 +157,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     );
     expect(await render()).toContain('Cargando ideas pendientes');
     lifecycle.state = 'reconnecting';
-    expect(await render()).toContain('La oficina está cerrada en tu ordenador');
+    expect(await render()).not.toContain('office-connection-help');
   });
   it('SA-109 shows pending ideas separately in the FeaturesPanel', async () => {
     setIdeasStore({
@@ -221,7 +221,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain(`Cobertura: ${cost.costKnown} de ${cost.executions}`);
     expect(html).toContain(`Coste est. API: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`);
     expect(html).toContain(
-      `Coste est./tarea DONE: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
+      `Coste est./tarea hecha: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
     );
     expect(html.match(/sin datos/g)).toHaveLength(cost.costUsd === null ? 3 : 1);
     expect(html).not.toMatch(/NaN|Infinity|\(parcial\)/);
@@ -267,7 +267,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       'Coste est. API: 0.90 USD (parcial)',
       'Ejecuciones: 5',
       'Cobertura: 3 de 5',
-      'Coste est./tarea DONE: 0.30 USD',
+      'Coste est./tarea hecha: 0.30 USD',
       'Caché: 50 %',
     ])
       expect(block).toContain(text);
@@ -295,7 +295,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     respond({
       features: [{ ...row, cost: { ...row.cost, costUsd: 0.5, costPerDoneTaskUsd: null } }],
     });
-    expect(await render()).toContain('Coste est./tarea DONE: sin datos');
+    expect(await render()).toContain('Coste est./tarea hecha: sin datos');
     respond({ status: 'denied' });
     expect(await render()).not.toContain('feature-cost');
     expect(await render()).not.toContain('USD');
@@ -318,11 +318,11 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const html = await render();
     for (const text of [
       '&lt;b&gt;Title&lt;/b&gt;',
-      'en desarrollo',
+      'En desarrollo',
       '2/5',
-      'review',
+      'Revisión',
       '+2',
-      'human_decision',
+      'Decisión pendiente',
       'expirado',
       '<code>pixel-agents feature show FEAT-020</code>',
       'sa/FEAT-020-integration',
@@ -334,7 +334,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html.indexOf('FEAT-020')).toBeLessThan(html.indexOf('FEAT-021'));
     expect(html.match(/<article/g)).toHaveLength(2);
     expect(html).toContain('feature-row');
-    expect(html).toContain('feature-state-chip');
+    expect(html).toContain('status-chip');
     expect(html).toContain('data-state="in_development"');
     expect(html).toContain('role="progressbar"');
     expect(html).toContain('aria-valuenow="2"');
@@ -346,7 +346,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     respond({ features: [{ ...row, state: 'merged', progress: { done: 5, total: 5 } }] });
     const html = await render();
     expect(html).toContain('data-state="merged"');
-    expect(html).toContain('fusionada');
+    expect(html).toContain('Integrada');
     expect(html).toContain('width:100%');
   });
   it.each([

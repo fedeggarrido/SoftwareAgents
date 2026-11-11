@@ -7,6 +7,8 @@ import type {
   FeaturesReadError,
   FeaturesSnapshot,
 } from '../../../core/src/messages.js';
+import { FEATURE_STEP_LABELS } from '../constants.js';
+import { statusPresentation } from './statusPresentation.js';
 
 export interface FeaturesStore {
   projectId: string | null;
@@ -61,20 +63,7 @@ export function viewState(store: FeaturesStore): FeaturesViewState {
 
 /** Labels are plain text; consumers must render them as text, never markup. */
 export function featureStateLabel(feature: Pick<FeatureRow, 'state' | 'rawStatus'>): string {
-  switch (feature.state) {
-    case 'in_review':
-      return 'spec en revisión';
-    case 'in_design':
-      return 'en diseño';
-    case 'in_development':
-      return 'en desarrollo';
-    case 'ready_to_merge':
-      return 'lista para fusionar';
-    case 'merged':
-      return 'fusionada';
-    case 'unknown':
-      return 'estado desconocido';
-  }
+  return statusPresentation(feature.state).label;
 }
 
 export function featureProgressLabel(progress: FeatureProgress | null): string {
@@ -147,4 +136,8 @@ export function subscribeFeaturesStore(listener: () => void): () => void {
 
 export function useFeaturesStore(): FeaturesStore {
   return useSyncExternalStore(subscribeFeaturesStore, getFeaturesStore);
+}
+
+export function featureStepLabel(step: string | null): string {
+  return step === null ? 'Paso pendiente' : (FEATURE_STEP_LABELS[step] ?? 'Paso pendiente');
 }

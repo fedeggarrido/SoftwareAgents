@@ -196,6 +196,8 @@ export interface Character {
   isActive: boolean;
   /** A reliably associated domain task keeps its character at work between turns. */
   hasDomainWork?: boolean;
+  workState?: import('./workState.js').WorkState;
+  waitingSince?: number;
   /** A participant seated at the meeting table uses a listening pose. */
   isInMeeting?: boolean;
   /** False when this agent sits away from a PC or has no assigned desk. */

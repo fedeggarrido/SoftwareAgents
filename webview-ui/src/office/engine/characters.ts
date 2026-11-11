@@ -6,6 +6,7 @@ import {
   WANDER_PAUSE_MAX_SEC,
   WANDER_PAUSE_MIN_SEC,
 } from '../../constants.js';
+import { characterActivity, shouldCharacterSit } from '../characterActivity.js';
 import { findPath, isWalkable } from '../layout/tileMap.js';
 import type { CharacterSprites } from '../sprites/spriteData.js';
 import { isReadingToolName } from '../toolUtils.js';
@@ -132,8 +133,10 @@ export function updateCharacter(
   blockedTiles: Set<string>,
 ): void {
   ch.frameTimer += dt;
-  const hasWork = ch.isActive || ch.hasDomainWork;
-  const shouldSit = hasWork || ch.isInMeeting;
+  const activity = characterActivity(ch);
+  if (activity === 'waiting') ch.waitingSince ??= Date.now();
+  else ch.waitingSince = undefined;
+  const shouldSit = shouldCharacterSit(ch);
   const seat = ch.seatId ? seats.get(ch.seatId) : undefined;
   const atSeat = seat && ch.tileCol === seat.seatCol && ch.tileRow === seat.seatRow;
 
@@ -168,7 +171,7 @@ export function updateCharacter(
         ch.seatTimer = 0;
         ch.state = CharacterState.IDLE;
         ch.wanderTimer = 0; // leave the workstation before taking a standing pause
-      } else if (ch.isInMeeting) {
+      } else if (activity !== 'working') {
         ch.frame = 0;
         ch.frameTimer = 0;
       } else if (ch.frameTimer >= TYPE_FRAME_DURATION_SEC) {
@@ -326,7 +329,7 @@ export function updateCharacter(
 export function getCharacterSprite(ch: Character, sprites: CharacterSprites): SpriteData {
   switch (ch.state) {
     case CharacterState.TYPE:
-      if ((!ch.isActive && !ch.hasDomainWork) || ch.isInMeeting || ch.hasWorkstation === false) {
+      if (characterActivity(ch) !== 'working' || ch.hasWorkstation === false) {
         return sprites.walk[ch.dir][1];
       }
       if (isReadingTool(ch.currentTool)) {

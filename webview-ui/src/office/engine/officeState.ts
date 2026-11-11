@@ -18,6 +18,7 @@ import {
   WAITING_BUBBLE_DURATION_SEC,
   WORK_STATE,
 } from '../../constants.js';
+import { characterActivity, shouldCharacterSit } from '../characterActivity.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
@@ -213,7 +214,7 @@ export class OfficeState {
         const seat = this.seats.get(ch.seatId)!;
         if (!seat.assigned) {
           seat.assigned = true;
-          if (ch.isActive || ch.hasDomainWork) {
+          if (characterActivity(ch) === 'working') {
             // Only working characters return to their reserved seats.
             ch.tileCol = seat.seatCol;
             ch.tileRow = seat.seatRow;
@@ -237,7 +238,7 @@ export class OfficeState {
         this.seats.get(seatId)!.assigned = true;
         ch.seatId = seatId;
         const seat = this.seats.get(seatId)!;
-        if (ch.isActive || ch.hasDomainWork) {
+        if (characterActivity(ch) === 'working') {
           ch.tileCol = seat.seatCol;
           ch.tileRow = seat.seatRow;
           ch.x = seat.seatCol * TILE_SIZE + TILE_SIZE / 2;
@@ -269,7 +270,7 @@ export class OfficeState {
         this.sendToSeat(ch.id);
         continue;
       }
-      if (ch.seatId && !ch.isActive && !ch.hasDomainWork && !ch.isInMeeting) {
+      if (ch.seatId && !shouldCharacterSit(ch)) {
         const seat = this.seats.get(ch.seatId);
         if (
           ch.state === CharacterState.TYPE &&
@@ -754,7 +755,7 @@ export class OfficeState {
     if (seat) seat.assigned = true;
     ch.seatId = seatId;
     ch.hasWorkstation = seatId ? this.isWorkstationSeat(seatId) : false;
-    if (!seat || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting)) {
+    if (!seat || !shouldCharacterSit(ch)) {
       ch.path = [];
       ch.moveProgress = 0;
       ch.state = CharacterState.IDLE;
@@ -820,7 +821,7 @@ export class OfficeState {
   /** Send an agent back to their currently assigned seat */
   sendToSeat(agentId: number): void {
     const ch = this.characters.get(agentId);
-    if (!ch || !ch.seatId || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting)) return;
+    if (!ch || !ch.seatId || !shouldCharacterSit(ch)) return;
     const seat = this.seats.get(ch.seatId);
     if (!seat) return;
     const path = this.withOwnSeatUnblocked(ch, () =>
@@ -848,15 +849,11 @@ export class OfficeState {
     if (!isWalkable(col, row, this.tileMap, this.blockedTiles)) {
       // Also allow walking to own seat tile (blocked for others but not self)
       const key = this.ownSeatKey(ch);
-      if (!key || key !== `${col},${row}` || (!ch.isActive && !ch.hasDomainWork && !ch.isInMeeting))
-        return false;
+      if (!key || key !== `${col},${row}` || !shouldCharacterSit(ch)) return false;
     }
     const pathToTile = () =>
       findPath(ch.tileCol, ch.tileRow, col, row, this.tileMap, this.blockedTiles);
-    const path =
-      ch.isActive || ch.hasDomainWork || ch.isInMeeting
-        ? this.withOwnSeatUnblocked(ch, pathToTile)
-        : pathToTile();
+    const path = shouldCharacterSit(ch) ? this.withOwnSeatUnblocked(ch, pathToTile) : pathToTile();
     if (path.length === 0) return false;
     ch.path = path;
     ch.moveProgress = 0;
@@ -986,6 +983,11 @@ export class OfficeState {
         ch.moveProgress = 0;
       } else {
         ch.seatTimer = 0;
+        ch.waitingAwaitingInput = false;
+        if (ch.bubbleType === 'waiting') {
+          ch.bubbleType = null;
+          ch.bubbleTimer = 0;
+        }
       }
       this.rebuildFurnitureInstances();
     }
@@ -996,7 +998,7 @@ export class OfficeState {
     // Collect tiles where active agents face desks
     const autoOnTiles = new Set<string>();
     for (const ch of this.characters.values()) {
-      if (!ch.isActive || !ch.seatId) continue;
+      if (characterActivity(ch) !== 'working' || !ch.seatId) continue;
       const seat = this.seats.get(ch.seatId);
       if (!seat) continue;
       // Find the desk tile(s) the agent faces from their seat
@@ -1091,15 +1093,10 @@ export class OfficeState {
     }
   }
 
-  /** Dismiss bubble on click — permission: instant, waiting: quick fade */
+  /** Selection cannot resolve an approval; only completed-turn bubbles are dismissible. */
   dismissBubble(id: number): void {
     const ch = this.characters.get(id);
-    if (!ch || !ch.bubbleType) return;
-    if (ch.bubbleType === 'permission') {
-      ch.bubbleType = null;
-      ch.bubbleTimer = 0;
-    } else if (ch.bubbleType === 'waiting') {
-      // Trigger immediate fade (0.3s remaining)
+    if (ch?.bubbleType === 'waiting') {
       ch.bubbleTimer = Math.min(ch.bubbleTimer, DISMISS_BUBBLE_FAST_FADE_SEC);
     }
   }
@@ -1290,6 +1287,7 @@ export class OfficeState {
       this.workStates = deriveWorkStates(this.workSnapshot, this.workEvents, workCharacters);
       for (const ch of this.characters.values()) {
         const state = this.workStates.get(ch.id);
+        ch.workState = state;
         ch.hasDomainWork = state !== undefined && state !== WORK_STATE.AVAILABLE;
       }
     }
@@ -1318,7 +1316,7 @@ export class OfficeState {
       // Inactive routes keep chairs blocked unless attending a meeting.
       const update = () =>
         updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles);
-      if (ch.isActive || ch.hasDomainWork || ch.isInMeeting) {
+      if (shouldCharacterSit(ch)) {
         this.withOwnSeatUnblocked(ch, update);
       } else {
         update();

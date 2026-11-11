@@ -102,7 +102,10 @@ export function CompanyHud({
   if (!board) {
     if (!executors.state) return null;
     return (
-      <div className="z-30 pixel-panel min-w-0 p-8 flex flex-col gap-6" data-testid="company-hud">
+      <div
+        className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
+        data-testid="company-hud"
+      >
         <button
           className="min-w-0 truncate text-left text-xs cursor-pointer"
           onClick={() => setOpen((v) => !v)}
@@ -136,7 +139,10 @@ export function CompanyHud({
   const counts = visibleProviderCounts(agents);
   if (capacity.minimal) {
     return (
-      <div className="z-30 pixel-panel min-w-0 p-8 flex flex-col gap-6" data-testid="company-hud">
+      <div
+        className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
+        data-testid="company-hud"
+      >
         <div className="flex justify-between gap-8 text-xs">
           <button
             className="min-w-0 truncate text-left cursor-pointer"
@@ -179,7 +185,10 @@ export function CompanyHud({
   const pilotStatus = ap ? (AUTOPILOT_TEXT[ap.status ?? ''] ?? ap.status ?? 'sin estado') : null;
 
   return (
-    <div className="z-30 pixel-panel min-w-0 p-8 flex flex-col gap-6" data-testid="company-hud">
+    <div
+      className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
+      data-testid="company-hud"
+    >
       <div className="flex items-center justify-between gap-8 min-w-0">
         <button
           className="flex min-w-0 items-center gap-5 text-left text-xs text-text cursor-pointer hover:text-accent-bright"

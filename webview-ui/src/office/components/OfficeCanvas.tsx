@@ -776,7 +776,7 @@ export function OfficeCanvas({
 
       const hitId = officeState.getCharacterAt(pos.worldX, pos.worldY);
       if (hitId !== null) {
-        // Dismiss any active bubble on click
+        // Dismiss the turn-end checkmark; selecting never resolves a pending approval.
         officeState.dismissBubble(hitId);
         // Toggle selection: click same agent deselects, different agent selects
         if (officeState.selectedAgentId === hitId) {

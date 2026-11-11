@@ -49,8 +49,8 @@ describe('office connection copy', () => {
       { cause: 'unavailable', attempt: 3, retryAt: 15_000 },
       10_000,
     );
-    expect(copy.label).toContain('Reintentando');
-    expect(copy.label).toBe('Reintentando… (próximo intento en 5s)');
+    expect(copy.label).toContain('reintentando');
+    expect(copy.label).toBe('Sin conexión · reintentando en 5 s');
     expect(copy.explanation).toContain('La oficina está cerrada en tu ordenador');
     expect(copy.explanation).toContain('Abre Pixel Agents');
     expect(copy.explanation).not.toContain('terminal');
@@ -63,7 +63,7 @@ describe('office connection copy', () => {
     const copy = connectionCopy('disconnected', { cause, attempt: 0, retryAt: null });
     expect(copy.explanation).toContain(text);
     expect(copy.explanation).not.toContain('terminal');
-    expect(copy.label).not.toContain('Reintentando');
+    expect(copy.label).not.toContain('reintentando');
   });
   it('uses a neutral handshake message while connecting', () => {
     expect(connectionCopy('connecting').explanation).toContain(

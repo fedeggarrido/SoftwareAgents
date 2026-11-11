@@ -1,3 +1,9 @@
+import {
+  EXTERNAL_SESSION_LABEL,
+  MODEL_TIER_LABELS,
+  TOOL_STATUS_TRANSLATIONS,
+} from '../constants.js';
+
 /** Map status prefixes back to tool names for animation selection */
 const STATUS_TO_TOOL: Record<string, string> = {
   Reading: 'Read',
@@ -84,7 +90,9 @@ export interface AgentRoleView {
 
 /** Historical runtime choice; never inferred from the provider or current config. */
 export function modelTierLabel(role: AgentRoleView | undefined): string | undefined {
-  return role?.tier ? `${role.tier}${role.model ? ` · ${role.model}` : ''}` : undefined;
+  return role?.tier
+    ? `${MODEL_TIER_LABELS[role.tier]}${role.model ? ` · ${role.model}` : ''}`
+    : undefined;
 }
 
 /**
@@ -98,7 +106,7 @@ export function assignmentReason(
 ): string | undefined {
   if (role?.selectionReason) return role.selectionReason;
   if (role?.tier) return undefined;
-  return managedProject ? 'Sesión externa · asignación no gestionada' : undefined;
+  return managedProject ? EXTERNAL_SESSION_LABEL : undefined;
 }
 
 const agentRoles = new Map<number, AgentRoleView>();
@@ -113,4 +121,13 @@ export function clearAgentRole(id: number): void {
 
 export function getAgentRole(id: number): AgentRoleView | undefined {
   return agentRoles.get(id);
+}
+
+/** Translate presentation only; tool identifiers and provider messages remain unchanged. */
+export function spanishToolStatus(status: string): string {
+  for (const [source, target] of Object.entries(TOOL_STATUS_TRANSLATIONS)) {
+    if (status === source || status.startsWith(`${source} `) || status.startsWith(`${source}:`))
+      return target + status.slice(source.length);
+  }
+  return status;
 }

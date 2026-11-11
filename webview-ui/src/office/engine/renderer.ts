@@ -44,6 +44,7 @@ import {
   VOID_TILE_DASH_PATTERN,
   VOID_TILE_OUTLINE_COLOR,
 } from '../../constants.js';
+import { characterActivity } from '../characterActivity.js';
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js';
 import { mapOffset } from '../projection.js';
 import {
@@ -774,18 +775,18 @@ function renderBubbles(
   zoom: number,
 ): void {
   for (const ch of characters) {
-    if (!ch.bubbleType) continue;
+    const needsYou = characterActivity(ch) === 'needs_you';
+    if (!ch.bubbleType && !needsYou) continue;
     // The green checkmark bubble only represents "done" (turn finished). The
     // idle "Waiting for input" state communicates via its overlay label, not a
     // bubble, so skip the bubble for it.
-    if (ch.bubbleType === 'waiting' && ch.waitingAwaitingInput) continue;
+    if (!needsYou && ch.bubbleType === 'waiting' && ch.waitingAwaitingInput) continue;
 
-    const sprite =
-      ch.bubbleType === 'permission' ? BUBBLE_PERMISSION_SPRITE : BUBBLE_WAITING_SPRITE;
+    const sprite = needsYou ? BUBBLE_PERMISSION_SPRITE : BUBBLE_WAITING_SPRITE;
 
     // Compute opacity: permission = full, waiting = fade in last 0.5s
     let alpha = 1.0;
-    if (ch.bubbleType === 'waiting' && ch.bubbleTimer < BUBBLE_FADE_DURATION_SEC) {
+    if (!needsYou && ch.bubbleType === 'waiting' && ch.bubbleTimer < BUBBLE_FADE_DURATION_SEC) {
       alpha = ch.bubbleTimer / BUBBLE_FADE_DURATION_SEC;
     }
 

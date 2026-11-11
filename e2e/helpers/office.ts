@@ -47,8 +47,8 @@ export async function expectSubagentOverlay(
 ): Promise<void> {
   // The sub-agent spawns seconds after the parent's tool starts; selecting a character
   // that does not exist yet is a no-op, so re-select until its overlay shows. The parent
-  // shows "Subtask: <description>" while the child's own label is the description.
-  const childLabel = text.replace(/^Subtask:\s*/, '');
+  // shows "Subtarea: <description>" while the child's own label is the description.
+  const childLabel = text.replace(/^Subtarea:\s*/, '');
   await expect(async () => {
     await selectCharacter(frame, id);
     await expectOverlayVisibleForAgent(frame, id, childLabel, 1_000);
@@ -81,18 +81,22 @@ export function getAgentOverlays(frame: OverlaySurface): Locator {
 }
 
 export function getOverlayByText(frame: OverlaySurface, text: string): Locator {
-  return getAgentOverlays(frame).filter({ hasText: text });
+  return frame
+    .locator('[data-testid="agent-overlay"], [data-testid="character-detail-panel"]')
+    .filter({ hasText: text });
 }
 
 export function getOverlayByTexts(frame: OverlaySurface, texts: string[]): Locator {
   return texts.reduce<Locator>(
     (locator, text) => locator.filter({ hasText: text }),
-    getAgentOverlays(frame),
+    frame.locator('[data-testid="agent-overlay"], [data-testid="character-detail-panel"]'),
   );
 }
 
 export function getOverlayByAgentId(frame: OverlaySurface, agentId: number): Locator {
-  return frame.locator(`[data-testid="agent-overlay"][data-agent-id="${agentId}"]`);
+  return frame.locator(
+    `[data-testid="agent-overlay"][data-agent-id="${agentId}"], [data-testid="character-detail-panel"][data-agent-id="${agentId}"]`,
+  );
 }
 
 export async function expectOverlayCount(
@@ -118,12 +122,9 @@ export async function expectOverlayVisibleWithTexts(
 ): Promise<void> {
   const overlay = getOverlayByTexts(frame, texts).first();
   await expect(overlay).toBeVisible({ timeout });
-  // Compact pills expose activity to accessibility APIs but don't draw it.
-  // Select the matching character and verify the text a user can actually see.
-  await selectCharacter(frame, Number(await overlay.getAttribute('data-agent-id')));
-  for (const text of texts) {
-    await expect(overlay.getByText(text).last()).toBeVisible({ timeout });
-  }
+  // Short labels draw name and activity together; selection opens the complete card.
+  for (const text of texts)
+    await expect(overlay.getByText(text, { exact: false }).last()).toBeVisible({ timeout });
 }
 
 export async function expectOverlayVisibleForAgent(
@@ -228,7 +229,7 @@ export async function expectSingleAgentOverlay(frame: OverlaySurface): Promise<n
 /**
  * Assert whether the office's single character is drawn as a ghost — the
  * translucent rendering a headless agent gets (adopted from outside, so there
- * is no terminal to focus) while "Display Headless as Ghosts" is on.
+ * is no terminal to focus) while "Atenuar sesiones sin terminal" is on.
  *
  * Both inputs to that decision are canvas-only: the per-character flag and the
  * renderer's setting. So this reads them through the test hooks and combines

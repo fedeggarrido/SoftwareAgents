@@ -196,8 +196,8 @@ describe('SA-128 real approval causes', () => {
     ['approved', 'Esta revisión del plan ya está aprobada'],
     ['changed', 'El plan cambió después de la aprobación'],
     ['unbound', 'todavía no tiene aprobación registrada'],
-    ['finished', 'Feature finalizada. No necesita aprobación'],
-    ['merged', 'Feature integrada. No necesita aprobación'],
+    ['finished', 'Funcionalidad finalizada. No necesita aprobación'],
+    ['merged', 'Funcionalidad integrada. No necesita aprobación'],
   ] as const)('describes %s from operational state', (state, copy) => {
     const response = snapshot('r');
     response.plan!.approvalState = state;
@@ -206,7 +206,7 @@ describe('SA-128 real approval causes', () => {
   it.each([
     ['read_only', 'La conexión no tiene privilegios'],
     ['managed_process', 'servidor se ejecuta como proceso gestionado'],
-    ['unsupported_adapter', 'Este adapter no admite'],
+    ['unsupported_adapter', 'Este modo no permite'],
     ['stale_revision', 'revisión mostrada está desactualizada'],
   ] as const)('describes %s without guessing token state', (block, copy) => {
     const response = snapshot('r', false);

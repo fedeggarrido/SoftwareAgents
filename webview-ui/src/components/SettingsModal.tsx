@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { OFFICE_EPHEMERAL_WARNING } from '../../../core/src/officeAccess.js';
+import { useTextSize } from '../hooks/useTextSize.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
@@ -34,7 +35,7 @@ interface SettingsModalProps {
   /** Whether the areas overlay is rendered outside of the Areas edit tool. */
   showAreas: boolean;
   onToggleShowAreas: () => void;
-  /** Hide the Show Areas checkbox entirely when areas are unavailable. */
+  /** Hide the Mostrar áreas checkbox entirely when areas are unavailable. */
   showAreasAvailable: boolean;
   /** Browser-native layout export (standalone only; VS Code uses the host save dialog). */
   onExportLayout: () => void;
@@ -62,6 +63,7 @@ export function SettingsModal({
   onExportLayout,
   onImportLayout,
 }: SettingsModalProps) {
+  const [textSize, setTextSize] = useTextSize();
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assetDirDraft, setAssetDirDraft] = useState('');
@@ -92,7 +94,7 @@ export function SettingsModal({
   }, [revoking, connection.state, onClose]);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+    <Modal isOpen={isOpen} onClose={onClose} title="Ajustes" className="settings-dialog">
       <p className="p-10" role="status">
         {access.explanation}
       </p>
@@ -155,7 +157,7 @@ export function SettingsModal({
                 para volver a entrar.
               </p>
               {revocationFailed && (
-                <p role="alert">No se pudo revocar el acceso. Reintenta desde Settings.</p>
+                <p role="alert">No se pudo revocar el acceso. Reintenta desde Ajustes.</p>
               )}
               <Button
                 disabled={
@@ -183,7 +185,21 @@ export function SettingsModal({
           )}
         </>
       )}
-      {/* Open Sessions Folder opens an OS file manager — impossible in the browser. */}
+      <fieldset className="text-size-setting">
+        <legend>Tamaño del texto</legend>
+        <p>Elige cómo leer los paneles en este navegador.</p>
+        <Button
+          size="sm"
+          aria-pressed={textSize === 'normal'}
+          onClick={() => setTextSize('normal')}
+        >
+          Normal
+        </Button>
+        <Button size="sm" aria-pressed={textSize === 'large'} onClick={() => setTextSize('large')}>
+          Grande
+        </Button>
+      </fieldset>
+      {/* The sessions folder opens an OS file manager, unavailable in the browser. */}
       {!isBrowserRuntime && (
         <MenuItem
           onClick={() => {
@@ -191,7 +207,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Open Sessions Folder
+          Abrir carpeta de sesiones
         </MenuItem>
       )}
       <MenuItem
@@ -204,7 +220,8 @@ export function SettingsModal({
           onClose();
         }}
       >
-        Export Layout
+        Exportar distribución
+        <span className="setting-help">Guarda la distribución de tu oficina en un archivo.</span>
       </MenuItem>
       <MenuItem
         onClick={() => {
@@ -217,7 +234,8 @@ export function SettingsModal({
           }
         }}
       >
-        Import Layout
+        Importar distribución
+        <span className="setting-help">Carga una distribución guardada desde un archivo.</span>
       </MenuItem>
       {isBrowserRuntime && (
         <input
@@ -242,12 +260,12 @@ export function SettingsModal({
           <input
             type="text"
             value={assetDirDraft}
-            placeholder="Absolute asset directory path"
+            placeholder="Ruta absoluta de la carpeta de recursos"
             onChange={(e) => setAssetDirDraft(e.target.value)}
             className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text"
           />
           <Button
-            variant="default"
+            variant="secondary"
             size="sm"
             onClick={() => {
               const path = assetDirDraft.trim();
@@ -257,7 +275,7 @@ export function SettingsModal({
             }}
             className="shrink-0"
           >
-            Add
+            Añadir
           </Button>
         </div>
       ) : (
@@ -267,7 +285,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Add Asset Directory
+          Añadir carpeta de recursos
         </MenuItem>
       )}
       {externalAssetDirectories.map((dir) => (
@@ -289,7 +307,8 @@ export function SettingsModal({
         </div>
       ))}
       <Checkbox
-        label="Sound Notifications"
+        label="Avisos sonoros"
+        help="Suena un aviso cuando un agente necesita tu atención."
         checked={soundLocal}
         onChange={() => {
           const newVal = !isSoundEnabled();
@@ -299,17 +318,20 @@ export function SettingsModal({
         }}
       />
       <Checkbox
-        label="Watch All Sessions"
+        label="Observar todas las sesiones"
+        help="Incluye las sesiones que abres fuera de esta oficina."
         checked={watchAllSessions}
         onChange={onToggleWatchAllSessions}
       />
       <Checkbox
         label="Detección instantánea (hooks)"
+        help="Recibe la actividad de Claude Code en cuanto ocurre."
         checked={hooksInstalled}
         onChange={onToggleHooksEnabled}
       />
       <Checkbox
-        label="Always Show Labels"
+        label="Mostrar siempre las etiquetas"
+        help="Muestra el nombre y el estado sin pasar el cursor."
         checked={alwaysShowOverlay}
         onChange={onToggleAlwaysShowOverlay}
       />
@@ -317,15 +339,26 @@ export function SettingsModal({
           Standalone has no terminals at all, so nothing there would ever ghost. */}
       {!isBrowserRuntime && (
         <Checkbox
-          label="Display Headless as Ghosts"
+          label="Atenuar sesiones sin terminal"
+          help="Distingue las sesiones que no tienen una terminal para abrir."
           checked={ghostHeadlessAgents}
           onChange={onToggleGhostHeadlessAgents}
         />
       )}
       {showAreasAvailable && (
-        <Checkbox label="Show Areas" checked={showAreas} onChange={onToggleShowAreas} />
+        <Checkbox
+          label="Mostrar áreas"
+          help="Resalta las zonas de la oficina y sus nombres."
+          checked={showAreas}
+          onChange={onToggleShowAreas}
+        />
       )}
-      <Checkbox label="Debug View" checked={isDebugMode} onChange={onToggleDebugMode} />
+      <Checkbox
+        label="Vista de diagnóstico"
+        help="Muestra datos técnicos para investigar problemas de actividad."
+        checked={isDebugMode}
+        onChange={onToggleDebugMode}
+      />
     </Modal>
   );
 }

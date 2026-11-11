@@ -69,7 +69,11 @@ describe('SA-116 permanent office mode', () => {
         attempt: state === 'reconnecting' ? 1 : 0,
         retryAt: null,
       });
-      const html = await indicator();
+      const badge = await indicator();
+      expect(badge).not.toContain('Reintentar ahora');
+      const modulePath = '../src/components/ConnectionIndicator.js';
+      const { ConnectionIndicator } = await import(modulePath);
+      const html = renderToStaticMarkup(createElement(ConnectionIndicator));
       expect(html).toContain('Reintentar ahora');
       expect(html).toContain(text);
     },
@@ -104,7 +108,7 @@ describe('SA-116 permanent office mode', () => {
     const html = await indicator();
     expect(html).toContain('Operador');
     expect(html).toContain('recupera la conexión cuando reinicias Pixel Agents');
-    expect(html).toContain('revocar su acceso desde Settings');
+    expect(html).toContain('revocar su acceso desde Ajustes');
     expect(officeAccessView(null, false)).toMatchObject({
       label: 'Conectando con la oficina…',
       blocked: false,

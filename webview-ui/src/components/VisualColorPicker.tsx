@@ -290,7 +290,7 @@ export function VisualColorPicker({ value, onChange }: VisualColorPickerProps) {
       {/* Expanded: popup to the right of the trigger, bottom-aligned. */}
       {expanded && (
         <div
-          className="absolute z-20 flex flex-col gap-4 py-4 px-6 bg-bg-dark border-2 border-border"
+          className="absolute layer-hud flex flex-col gap-4 py-4 px-6 bg-bg-dark border-2 border-border"
           style={{ left: '100%', bottom: 0, marginLeft: VISUAL_COLOR_PICKER_POPUP_GAP_PX }}
           onClick={(e) => e.stopPropagation()}
         >

@@ -16,40 +16,47 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
   const redoDisabled = es.redoStack.length === 0;
 
   return (
-    <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 flex gap-4 items-center pixel-panel p-4">
+    <div className="absolute top-8 left-1/2 -translate-x-1/2 layer-hud flex gap-4 items-center pixel-panel p-4">
       <Button
-        variant={undoDisabled ? 'disabled' : 'default'}
+        variant="secondary"
+        disabled={undoDisabled}
         size="md"
         onClick={undoDisabled ? undefined : editor.handleUndo}
-        title="Undo (Ctrl+Z)"
+        title="Deshacer (Ctrl+Z)"
       >
-        Undo
+        Deshacer
       </Button>
       <Button
-        variant={redoDisabled ? 'disabled' : 'default'}
+        variant="secondary"
+        disabled={redoDisabled}
         size="md"
         onClick={redoDisabled ? undefined : editor.handleRedo}
-        title="Redo (Ctrl+Y)"
+        title="Rehacer (Ctrl+Y)"
       >
-        Redo
+        Rehacer
       </Button>
-      <Button variant="default" size="md" onClick={editor.handleSave} title="Save layout">
-        Save
+      <Button
+        variant="secondary"
+        size="md"
+        onClick={editor.handleSave}
+        title="Guardar distribución"
+      >
+        Guardar
       </Button>
       {!showResetConfirm ? (
         <Button
-          variant="default"
+          variant="secondary"
           size="md"
           onClick={() => setShowResetConfirm(true)}
-          title="Reset to last saved layout"
+          title="Volver a la distribución guardada"
         >
-          Reset
+          Restablecer
         </Button>
       ) : (
         <div className="flex gap-4 items-center">
-          <span className="text-base text-reset-text">Reset?</span>
+          <span className="text-base text-reset-text">¿Restablecer?</span>
           <Button
-            variant="default"
+            variant="secondary"
             size="md"
             className="bg-danger text-white"
             onClick={() => {
@@ -57,9 +64,9 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
               editor.handleReset();
             }}
           >
-            Yes
+            Sí
           </Button>
-          <Button variant="default" size="md" onClick={() => setShowResetConfirm(false)}>
+          <Button variant="secondary" size="md" onClick={() => setShowResetConfirm(false)}>
             No
           </Button>
         </div>

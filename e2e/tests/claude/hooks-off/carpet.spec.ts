@@ -41,7 +41,7 @@ async function waitForCarpetCount(frame: Frame, count: number): Promise<void> {
   );
 }
 
-test.describe('Carpet', () => {
+test.describe('Alfombras', () => {
   // Seed a small all-floor layout so paintTile(col,row) lands on a paintable
   // tile — carpet (and area) painting is gated to non-VOID/non-WALL tiles
   // (useEditorActions.ts), and the bundled default layout's tiles vary.

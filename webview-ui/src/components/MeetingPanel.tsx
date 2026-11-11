@@ -33,7 +33,14 @@ export function MeetingPanel({ hosted = false }: { hosted?: boolean }) {
   const board = useBoard();
   const [open, setOpen] = useState(true);
   const m = board?.meeting;
-  if (!m) return <p className="p-8 text-xs text-text-muted">No hay reuniones en curso.</p>;
+  if (!m)
+    return (
+      <p className="p-8 text-xs text-text-muted">
+        Una reunión es una conversación entre agentes para contrastar propuestas y acordar una
+        decisión. Aparece cuando una tarea necesita varias perspectivas. Ahora no hay ninguna en
+        curso.
+      </p>
+    );
   const status = STATUS_LABELS[m.status] ?? m.status;
   return (
     <div

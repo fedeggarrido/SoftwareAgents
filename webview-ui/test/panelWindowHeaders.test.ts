@@ -101,16 +101,14 @@ it.each(PANEL_TABS)(
     expect(html).toContain(`role="tabpanel" aria-labelledby="office-tab-${id}"`);
     expect(html).toContain(`id="office-tab-${id}" role="tab" aria-label="${label}"`);
     expect(html.match(/aria-label="Cerrar ventana"/g)).toHaveLength(1);
-    if (id === 'backlog') expect(content).toContain('Hechas');
+    if (id === 'backlog') expect(content).toContain('Te necesitan');
     if (id === 'features') expect(content).toContain('Actualizar');
     if (id === 'meeting') {
       expect(content).toContain('Ocultar detalles');
       expect(content).toContain('en curso');
       expect(content).toContain('aria-expanded="true"');
     }
-    if (['backlog', 'features', 'audit'].includes(id)) {
-      expect(content).toContain('solo lectura');
-      expect(content).toContain('panel-toolbar');
-    }
+    // The office mode badge already says «Solo lectura»; panels do not repeat it (SA-152).
+    expect(content).not.toContain('solo lectura');
   },
 );

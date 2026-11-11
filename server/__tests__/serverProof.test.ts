@@ -29,7 +29,8 @@ afterEach(async () => {
 
 it('proves the current token and PID with fresh nonces and invalidates rotation', async () => {
   // Rotation is a human-only route; a test run launched from an agent session must not inherit that marker.
-  for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE']) vi.stubEnv(key, undefined);
+  for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE'])
+    vi.stubEnv(key, undefined);
   app = await createHttpServer({
     embedded: true,
     token: 'secret',

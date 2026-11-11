@@ -14,9 +14,10 @@ export function PanelHeading({
   hosted?: boolean;
 }) {
   if (hosted) {
+    // The window title and the office mode badge already name the panel and its access.
+    if (!children) return null;
     return (
       <div className="panel-toolbar flex flex-wrap items-center justify-between gap-8">
-        <span className="ui-info text-text-muted">solo lectura</span>
         {children && <div className="panel-actions">{children}</div>}
       </div>
     );

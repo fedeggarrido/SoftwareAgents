@@ -27,7 +27,15 @@ const entry = (line: number, action: string, status: string): AuditViewEntry => 
   resourceId: null,
   policyDecision: null,
   riskLevel: 'low',
-  outcome: { status, reason: null, detail: null, tier: null, executor: null, model: null, code: null },
+  outcome: {
+    status,
+    reason: null,
+    detail: null,
+    tier: null,
+    executor: null,
+    model: null,
+    code: null,
+  },
   taskKey: null,
   executionId: null,
 });
@@ -60,7 +68,12 @@ describe('FEAT-001 audit store', () => {
   });
 
   it('AC-021/022: options use loaded entries only; whole-file notices survive filtering', () => {
-    const store = loaded({ totalValid: 520, truncated: true, corruptLines: [1, 523], excludedCount: 2 });
+    const store = loaded({
+      totalValid: 520,
+      truncated: true,
+      corruptLines: [1, 523],
+      excludedCount: 2,
+    });
     expect(filterValues(store.snapshot)).toEqual({
       actions: ['A', 'B'],
       outcomes: ['failed', 'success'],
@@ -116,7 +129,9 @@ describe('FEAT-001 audit store', () => {
     expect(viewState(beginAuditRequest(loaded(), 'P', 'r2'))).toBe('loading');
     for (const status of ['empty', 'denied', 'read_error'] as const)
       expect(viewState(loaded({ status, entries: [], totalValid: 0 }))).toBe(status);
-    expect(viewState(loaded({ status: 'unknown_project', entries: [], totalValid: 0 }))).toBe('denied');
+    expect(viewState(loaded({ status: 'unknown_project', entries: [], totalValid: 0 }))).toBe(
+      'denied',
+    );
     for (const notices of [{ corruptLines: [1, 2] }, { excludedCount: 2 }])
       expect(viewState(loaded({ entries: [], totalValid: 0, ...notices }))).toBe('list');
   });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { PHASE_COLORS, PHASE_ORDER, PRIORITY_COLORS } from '../constants.js';
+import { PHASE_COLORS, PRIORITY_COLORS } from '../constants.js';
+import { backlogPulse, groupBacklog } from '../office/backlogGroups.js';
 import { backlogView } from '../office/backlogView.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
 import { useBoard } from '../office/boardStore.js';
@@ -56,6 +57,11 @@ function EventLine({ e, now }: { e: BoardEvent; now: number }) {
   );
 }
 
+/** Human title; the key only stands in when the task has no title of its own. */
+function cardTitle(item: BoardItem): string {
+  return knownText(item.title) ?? knownText(item.id) ?? item.id;
+}
+
 function Card({
   item,
   now,
@@ -89,13 +95,11 @@ function Card({
       data-task-key={item.id}
       data-testid="backlog-card"
     >
-      <div className="flex items-baseline gap-6">
-        <span className="text-2xs text-text-muted whitespace-nowrap">{knownText(item.id)}</span>
-        <span className="text-xs leading-tight">
-          {knownText(item.title) !== knownText(item.id) ? knownText(item.title) : undefined}
-        </span>
+      <div className="text-sm leading-tight">{cardTitle(item)}</div>
+      <div className="flex items-center gap-6 flex-wrap text-2xs text-text-muted">
+        <StatusChip state={item.phase} />
+        {cardTitle(item) !== knownText(item.id) && <span>{knownText(item.id)}</span>}
       </div>
-      <StatusChip state={item.phase} />
       {item.owner && (
         <div
           className="text-2xs"
@@ -172,6 +176,7 @@ export function BacklogPanel({
   const board = useBoard();
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
+  const needsYouRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!isOpen) return;
     setNow(Date.now());
@@ -192,14 +197,10 @@ export function BacklogPanel({
 
   if (!isOpen) return null;
 
-  const groups = PHASE_ORDER.map((phase) => ({
-    phase,
-    items: (board?.items ?? []).filter((i) => i.phase === phase),
-  })).filter(
-    (g) => g.items.length > 0 && (showDone || (g.phase !== 'DONE' && g.phase !== 'VERIFIED')),
-  );
+  const items = board?.items ?? [];
+  const groups = groupBacklog(items).filter((g) => g.items.length > 0);
+  const pulse = backlogPulse(items.map((i) => i.phase));
   const view = backlogView(board);
-  const unknown = (board?.items ?? []).filter((i) => !PHASE_ORDER.includes(i.phase));
 
   return (
     <div
@@ -208,16 +209,7 @@ export function BacklogPanel({
       role="region"
       aria-label="Trabajo"
     >
-      <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose}>
-        <Button
-          size="sm"
-          variant="secondary"
-          aria-pressed={showDone}
-          onClick={() => setShowDone((v) => !v)}
-        >
-          Hechas
-        </Button>
-      </PanelHeading>
+      <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
       {board && <p className="ui-info">{knownText(board.project)}</p>}
 
       {view.message && (
@@ -240,16 +232,22 @@ export function BacklogPanel({
 
       {board?.sources.board && (
         <>
-          <div className="flex gap-6 flex-wrap text-2xs">
-            {PHASE_ORDER.map((phase) => {
-              const n = board.items.filter((i) => i.phase === phase).length;
-              if (n === 0) return null;
-              return (
-                <span key={phase}>
-                  <StatusChip state={phase} /> {n}
-                </span>
-              );
-            })}
+          <div className="backlog-pulse flex gap-8 flex-wrap" data-testid="backlog-pulse">
+            <span className="backlog-pulse-item">
+              <strong>{pulse.working}</strong> Trabajando
+            </span>
+            <Button
+              size="sm"
+              variant={pulse.needsYou > 0 ? 'primary' : 'secondary'}
+              disabled={pulse.needsYou === 0}
+              onClick={() => needsYouRef.current?.scrollIntoView({ block: 'start' })}
+              title="Ir a las tareas que esperan tu decisión"
+            >
+              <strong>{pulse.needsYou}</strong> Te necesitan
+            </Button>
+            <span className="backlog-pulse-item">
+              <strong>{pulse.blocked}</strong> Bloqueadas
+            </span>
           </div>
           <div className="ui-info text-text-muted">
             {board.sources.workStore ? (
@@ -282,36 +280,55 @@ export function BacklogPanel({
             >
               {Object.entries(board.summary.byEpic).map(([epic, count]) => (
                 <span key={epic}>
-                  {epic === '?' ? 'Sin funcionalidad asociada' : knownText(epic)}: {count.done}/
+                  {(epic !== '?' && knownText(epic)) || 'Sin funcionalidad asociada'}: {count.done}/
                   {count.total} hechas
                 </span>
               ))}
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto flex flex-col gap-8 pr-4">
-            {[...groups, ...(unknown.length ? [{ phase: '?', items: unknown }] : [])].map((g) => (
-              <div key={g.phase} className="flex flex-col gap-4">
-                <div className="text-sm" style={{ color: PHASE_COLORS[g.phase] }}>
-                  {statusPresentation(g.phase).label} · {g.items.length}
-                </div>
-                {g.items.map((item) => (
-                  <Card
-                    key={item.id}
-                    item={item}
-                    focused={item.id === focusedTask}
-                    now={now}
-                    onFocusAgent={onFocusAgent}
-                    board={board}
-                    officeState={officeState}
-                  />
-                ))}
-              </div>
-            ))}
+          <div className="flex flex-col gap-8">
+            {groups.map((g) => {
+              const cards = g.items.map((item) => (
+                <Card
+                  key={item.id}
+                  item={item}
+                  focused={item.id === focusedTask}
+                  now={now}
+                  onFocusAgent={onFocusAgent}
+                  board={board}
+                  officeState={officeState}
+                />
+              ));
+              const heading = `${g.label} · ${g.items.length}`;
+              if (g.id === 'done')
+                return (
+                  <details
+                    key={g.id}
+                    className="flex flex-col gap-4"
+                    open={showDone}
+                    onToggle={(e) => setShowDone(e.currentTarget.open)}
+                  >
+                    <summary className="text-sm cursor-pointer">{heading}</summary>
+                    <div className="flex flex-col gap-4 mt-4">{cards}</div>
+                  </details>
+                );
+              return (
+                <section
+                  key={g.id}
+                  className="flex flex-col gap-4"
+                  ref={g.id === 'needsYou' ? needsYouRef : undefined}
+                  aria-label={g.label}
+                >
+                  <h3 className="text-sm">{heading}</h3>
+                  {cards}
+                </section>
+              );
+            })}
           </div>
 
           {board.recent.length > 0 && (
-            <div className="border-t-2 border-border pt-6 flex flex-col gap-4 max-h-200 overflow-y-auto">
+            <div className="border-t-2 border-border pt-6 flex flex-col gap-4">
               <div className="text-sm">Actividad reciente</div>
               {board.recent.slice(0, 6).map((e, i) => (
                 <EventLine key={`${e.at}-${i}`} e={e} now={now} />

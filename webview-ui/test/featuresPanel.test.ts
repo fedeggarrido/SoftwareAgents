@@ -194,7 +194,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).toContain('panel-error');
     expect(html).toContain('Reintentar');
     expect(html).toContain('read-only-panel');
-    expect(html).toContain('panel-toolbar');
+    expect(html).not.toContain('solo lectura');
     expect(html).not.toContain('-translate-x-1/2');
     const node = await tree();
     function retry(node: unknown): (() => void) | undefined {

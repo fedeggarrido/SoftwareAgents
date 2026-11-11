@@ -71,6 +71,20 @@ test.describe('Design guards (SA-151)', () => {
         );
       };
 
+      // SA-160 motion tokens exist, so components can reference them.
+      const tokens = await page.evaluate(() =>
+        [
+          '--duration-fast',
+          '--duration-base',
+          '--duration-slow',
+          '--ease-out',
+          '--ease-in-out',
+        ].filter(
+          (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() === '',
+        ),
+      );
+      expect(tokens, 'missing motion tokens').toEqual([]);
+
       await check('office');
 
       await dockButton(page, viewport, 'Trabajo');

@@ -87,7 +87,7 @@ describe('Designer phase 1', () => {
   it('compiles with only read tools and stable versioned instructions', () => {
     const compiled = compileAgent(PRODUCT_DESIGNER_SPEC, 'product-designer', { task: {} });
     expect(compiled.claude.allowedTools).toEqual(['Read', 'Glob', 'Grep']);
-    expect(compiled.systemPrompt).toContain('phase2/v2.0.0');
+    expect(compiled.systemPrompt).toContain('phase2/v2.1.0');
     expect(executorSupportsRole('codex', 'product-designer')).toBe(false);
     expect(
       parse(fs.readFileSync(path.resolve('../agents/templates/product-designer.yaml'), 'utf8')),

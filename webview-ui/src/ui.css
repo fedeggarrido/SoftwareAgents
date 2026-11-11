@@ -301,3 +301,17 @@ body:has(.panel-window-mobile:not([hidden])) .office-notices {
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
 }
+
+/* Project HUD (SA-152): reading font for the name and the shared pulse numbers. */
+.hud-project {
+  /* Buttons default to the pixel face; the project name is reading text. */
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
+.hud-pulse {
+  font-size: var(--reading-size);
+  color: var(--color-text-muted);
+}
+.hud-pulse strong {
+  color: var(--color-text);
+}

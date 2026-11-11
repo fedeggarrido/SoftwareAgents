@@ -384,7 +384,18 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Linux" ]; then
             echo "::group::Install system deps"
-            npx playwright install-deps chromium
+            # The Ubuntu mirror sometimes fails to resolve on hosted runners; refresh
+            # the index and retry with a pause instead of failing the whole shard.
+            ok=0
+            for attempt in 1 2 3; do
+              if sudo apt-get update -o Acquire::Retries=3 && npx playwright install-deps chromium; then
+                ok=1
+                break
+              fi
+              echo "install-deps attempt $attempt failed; retrying in 30 s"
+              sleep 30
+            done
+            [ "$ok" = 1 ]
             echo "::endgroup::"
           fi
         continue-on-error: true

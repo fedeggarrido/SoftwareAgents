@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 import * as http from 'http';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import {
@@ -15,6 +15,7 @@ import { verifyServerProof } from '../src/serverProof.js';
 let app: HttpServerHandle | undefined;
 let listener: http.Server | undefined;
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await app?.app.close();
   app = undefined;
   if (listener) {
@@ -27,6 +28,8 @@ afterEach(async () => {
 });
 
 it('proves the current token and PID with fresh nonces and invalidates rotation', async () => {
+  // Rotation is a human-only route; a test run launched from an agent session must not inherit that marker.
+  for (const key of ['SA_MANAGED_EXECUTION', 'SA_AUTOPILOT', 'SA_WORKER', 'CLAUDECODE']) vi.stubEnv(key, undefined);
   app = await createHttpServer({
     embedded: true,
     token: 'secret',

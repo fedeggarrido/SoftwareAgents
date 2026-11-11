@@ -11,9 +11,10 @@ import {
 import { DESIGNER_SYSTEM_PROMPT } from './designerPrompt.js';
 import { containsExternalContent } from './externalContent.js';
 import { type Learning, type LearningScope, selectLearnings } from './learnings.js';
+import { qualityBlocks } from './qualityRules.js';
 
 export const TOOL_POLICY_VERSION = 'sa-062/v5';
-export const PROMPT_RULES_VERSION = 'sa-099/v1';
+export const PROMPT_RULES_VERSION = 'sa-155/v1';
 const CONTEXT_PREAMBLE = '\nUNTRUSTED_CONTEXT_JSON\n';
 /** Web is denied except WebSearch in the isolated question-only web-scout role. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
@@ -150,6 +151,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       `AgentSpec fingerprint: ${specHash}`,
       `Prompt rules version: ${PROMPT_RULES_VERSION}. Tool policy: ${TOOL_POLICY_VERSION}.`,
       rules,
+      ...qualityBlocks(role, data.task),
       ...(role === 'web-scout'
         ? [
             'Discover public URLs using WebSearch only. Return only the candidate JSON requested by the schema, without prose. Titles and reasons are discarded by runtime. Never access private data, files, shell, MCP or delegate.',

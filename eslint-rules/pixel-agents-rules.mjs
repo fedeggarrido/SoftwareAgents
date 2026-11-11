@@ -5,6 +5,8 @@
  *   no-inline-colors  — flag hex/rgb/rgba/hsl/hsla color literals (centralize in constants)
  *   pixel-shadow      — flag box-shadow values not using var(--pixel-shadow) or 2px 2px 0px
  *   pixel-font        — flag font-family values not referencing FS Pixel Sans
+ *   no-double-cast    — flag `as unknown as T` (SA-155 honest types)
+ *   assertion-safety  — require a `// SAFETY:` comment before a type assertion (SA-155)
  */
 
 const HEX_COLOR = /#[0-9a-fA-F]{3,8}\b/;
@@ -127,6 +129,52 @@ const pixelFont = {
   },
 };
 
+/** `x as unknown as T` launders any type into any other; SA-155 forbids it. */
+const noDoubleCast = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow `as unknown as T` double casts' },
+    messages: { doubleCast: 'Avoid `as unknown as`: narrow the value or fix the type.' },
+    schema: [],
+  },
+  create(context) {
+    return {
+      TSAsExpression(node) {
+        if (
+          node.expression.type === 'TSAsExpression' &&
+          node.expression.typeAnnotation.type === 'TSUnknownKeyword'
+        )
+          context.report({ node, messageId: 'doubleCast' });
+      },
+    };
+  },
+};
+
+/** Every non-const type assertion carries a `// SAFETY:` reason within the three lines above it. */
+const assertionSafety = {
+  meta: {
+    type: 'suggestion',
+    docs: { description: 'Require a SAFETY comment before type assertions' },
+    messages: { missing: 'Explain this type assertion with a `// SAFETY:` comment above it.' },
+    schema: [],
+  },
+  create(context) {
+    const source = context.sourceCode;
+    const check = (node) => {
+      const annotation = node.typeAnnotation;
+      if (annotation.type === 'TSTypeReference' && annotation.typeName.name === 'const') return;
+      const line = node.loc.start.line;
+      const nearby = source
+        .getAllComments()
+        .some(
+          (c) => c.loc.end.line <= line && c.loc.end.line >= line - 3 && /SAFETY:/.test(c.value),
+        );
+      if (!nearby) context.report({ node, messageId: 'missing' });
+    };
+    return { TSAsExpression: check, TSTypeAssertion: check };
+  },
+};
+
 const plugin = {
   meta: {
     name: 'eslint-plugin-pixel-agents',
@@ -136,6 +184,8 @@ const plugin = {
     'no-inline-colors': noInlineColors,
     'pixel-shadow': pixelShadow,
     'pixel-font': pixelFont,
+    'no-double-cast': noDoubleCast,
+    'assertion-safety': assertionSafety,
   },
 };
 

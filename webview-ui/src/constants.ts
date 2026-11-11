@@ -454,6 +454,9 @@ export const FEATURE_PLAN_TIMEOUT_MS = 15_000;
 // Viewer-local office window geometry, in CSS pixels.
 export const PANEL_WINDOW_STORAGE_KEY = 'pixel-agents.panel-window.v1';
 export const PANEL_MOBILE_BREAKPOINT_PX = 480;
+export const DOCK_MOBILE_BREAKPOINT_PX = 768;
+export const DOCK_ICON_SIZE_PX = 16;
+export const DOCK_SHEET_Z_INDEX = 46;
 export const PANEL_WINDOW_DEFAULT_WIDTH_PX = 720;
 export const PANEL_WINDOW_DEFAULT_HEIGHT_PX = 520;
 export const PANEL_WINDOW_MIN_WIDTH_PX = 320;

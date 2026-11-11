@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { PR_DISPLAY_REFRESH_MS } from '../constants.js';
+import {
+  DOCK_MOBILE_BREAKPOINT_PX,
+  DOCK_SHEET_Z_INDEX,
+  PR_DISPLAY_REFRESH_MS,
+} from '../constants.js';
+import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
 import { useBoard } from '../office/boardStore.js';
+import { decisionsHudView } from '../office/decisionsHudView.js';
+import type { PanelTab } from '../office/panelWindowState.js';
 import { pullRequestDockSummary } from '../office/prStatusView.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
-import { Button } from './ui/Button.js';
+import { DockIcon } from './DockIcon.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
 interface BottomToolbarProps {
@@ -15,15 +22,8 @@ interface BottomToolbarProps {
   onToggleEditMode: () => void;
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
-  isBacklogOpen: boolean;
-  onToggleBacklog: () => void;
-  onOpenBacklog: () => void;
-  isDecisionsOpen: boolean;
-  onToggleDecisions: () => void;
-  isAuditOpen: boolean;
-  onToggleAudit: () => void;
-  isFeaturesOpen: boolean;
-  onToggleFeatures: () => void;
+  activePanel: PanelTab | null;
+  onTogglePanel: (tab: PanelTab) => void;
   onNewIdea: () => void;
   workspaceFolders: WorkspaceFolder[];
 }
@@ -34,15 +34,8 @@ export function BottomToolbar({
   onToggleEditMode,
   isSettingsOpen,
   onToggleSettings,
-  isBacklogOpen,
-  onToggleBacklog,
-  onOpenBacklog,
-  isDecisionsOpen,
-  onToggleDecisions,
-  isAuditOpen,
-  onToggleAudit,
-  isFeaturesOpen,
-  onToggleFeatures,
+  activePanel,
+  onTogglePanel,
   onNewIdea,
   workspaceFolders,
 }: BottomToolbarProps) {
@@ -53,6 +46,49 @@ export function BottomToolbar({
     return () => clearInterval(timer);
   }, []);
   const prs = pullRequestDockSummary(board?.items ?? [], prNow);
+  const pending = decisionsHudView(board ?? {}).open;
+  const [mobile, setMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < DOCK_MOBILE_BREAKPOINT_PX,
+  );
+  const [moreOpen, setMoreOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const firstSheetButtonRef = useRef<HTMLButtonElement>(null);
+  const moreVisible = moreOpen && mobile && !isEditMode;
+  useDismissibleLayer(
+    moreVisible,
+    () => setMoreOpen(false),
+    DOCK_SHEET_Z_INDEX,
+    firstSheetButtonRef,
+    true,
+    sheetRef,
+  );
+  useEffect(() => {
+    const resize = () => {
+      setMobile(window.innerWidth < DOCK_MOBILE_BREAKPOINT_PX);
+      setMoreOpen(false);
+      setIsFolderPickerOpen(false);
+      setIsBypassMenuOpen(false);
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  useEffect(() => {
+    if (!moreVisible) return;
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (
+        !sheetRef.current?.contains(event.target) &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest('[aria-controls="dock-more-sheet"]')
+        )
+      ) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [moreVisible]);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
   const folderPickerRef = useRef<HTMLDivElement>(null);
@@ -78,6 +114,7 @@ export function BottomToolbar({
     if (hasMultipleFolders) {
       setIsFolderPickerOpen((v) => !v);
     } else {
+      setMoreOpen(false);
       onOpenClaude();
     }
   };
@@ -96,6 +133,7 @@ export function BottomToolbar({
 
   const handleFolderSelect = (folder: WorkspaceFolder) => {
     setIsFolderPickerOpen(false);
+    setMoreOpen(false);
     const bypassPermissions = pendingBypassRef.current;
     pendingBypassRef.current = false;
     transport.send({ type: 'launchAgent', folderPath: folder.path, bypassPermissions });
@@ -107,34 +145,115 @@ export function BottomToolbar({
       pendingBypassRef.current = bypassPermissions;
       setIsFolderPickerOpen(true);
     } else {
+      setMoreOpen(false);
       transport.send({ type: 'launchAgent', bypassPermissions });
     }
   };
 
-  return (
-    <div className="bottom-toolbar absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4">
-      {/* Hide + Agent in standalone browser mode (no terminal to interact with) */}
+  const panels = [
+    { id: 'backlog', label: 'Trabajo', title: 'Backlog de la empresa de agentes' },
+    { id: 'decisions', label: 'Decisiones', title: 'Decisiones del propietario' },
+    { id: 'features', label: 'Features', title: 'Features de solo lectura' },
+    { id: 'audit', label: 'Auditoría', title: 'Auditoría de solo lectura' },
+  ] as const;
+  const selectPanel = (tab: PanelTab) => {
+    setMoreOpen(false);
+    onTogglePanel(tab);
+  };
+  const panelButton = (entry: (typeof panels)[number]) => (
+    <button
+      key={entry.id}
+      type="button"
+      className="dock-button dock-segment"
+      aria-label={entry.label}
+      aria-pressed={activePanel === entry.id}
+      aria-controls="office-panel-content"
+      aria-describedby={
+        entry.id === 'decisions' && pending > 0 ? 'dock-decisions-pending' : undefined
+      }
+      title={
+        entry.id === 'backlog' && prs
+          ? `${entry.title}\nEstado de PR: ${prs.label}\n${prs.title}`
+          : entry.title
+      }
+      onClick={() => selectPanel(entry.id)}
+    >
+      <span className="dock-symbol">
+        <DockIcon name={entry.id} />
+        {entry.id === 'decisions' && pending > 0 && (
+          <span
+            id="dock-decisions-pending"
+            className="dock-badge"
+            role="status"
+            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}`}
+          >
+            <DockIcon name="attention" />
+            {pending}
+          </span>
+        )}
+      </span>
+      <span>{entry.label}</span>
+    </button>
+  );
+  const settingsButton = (
+    <button
+      type="button"
+      className="dock-button dock-icon-button"
+      title="Ajustes"
+      aria-label="Ajustes"
+      aria-pressed={isSettingsOpen}
+      onClick={() => {
+        setMoreOpen(false);
+        onToggleSettings();
+      }}
+    >
+      <DockIcon name="settings" />
+      {moreVisible && <span>Ajustes</span>}
+    </button>
+  );
+  const editButton = (
+    <button
+      type="button"
+      className="dock-button dock-icon-button"
+      title={isEditMode ? 'Salir de edición' : 'Editar oficina'}
+      aria-label={isEditMode ? 'Salir de edición' : 'Editar oficina'}
+      aria-pressed={isEditMode}
+      onClick={() => {
+        setMoreOpen(false);
+        setIsFolderPickerOpen(false);
+        setIsBypassMenuOpen(false);
+        onToggleEditMode();
+      }}
+    >
+      <DockIcon name="edit" />
+      {(isEditMode || moreVisible) && (
+        <span>{isEditMode ? 'Salir de edición' : 'Editar oficina'}</span>
+      )}
+    </button>
+  );
+  const agentControl = (
+    <>
+      {/* VS Code retains its terminal launcher as a secondary control. */}
       {!isBrowserRuntime && (
         <div
           ref={folderPickerRef}
-          className="relative"
+          className="dock-agent relative"
           onMouseEnter={handleAgentHover}
           onMouseLeave={handleAgentLeave}
         >
-          <Button
-            variant="accent"
+          <button
+            type="button"
             onClick={handleAgentClick}
-            className={
-              isFolderPickerOpen || isBypassMenuOpen
-                ? 'bg-accent-bright'
-                : 'bg-accent hover:bg-accent-bright'
-            }
+            className="dock-button dock-icon-button"
+            title="Abrir agente"
+            aria-label="Abrir agente"
           >
-            + Agent
-          </Button>
+            <DockIcon name="agent" />
+            {moreVisible && <span>Abrir agente</span>}
+          </button>
           <Dropdown isOpen={isBypassMenuOpen}>
             <DropdownItem onClick={() => handleBypassSelect(true)}>
-              Skip permissions mode <span className="text-2xs text-warning">⚠</span>
+              Omitir permisos <span className="text-2xs text-warning">⚠</span>
             </DropdownItem>
           </Dropdown>
           <Dropdown isOpen={isFolderPickerOpen} className="min-w-128">
@@ -150,64 +269,82 @@ export function BottomToolbar({
           </Dropdown>
         </div>
       )}
-      <Button
-        variant={isEditMode ? 'active' : 'default'}
-        onClick={onToggleEditMode}
-        title="Edit office layout"
-      >
-        Layout
-      </Button>
-      {/* Panel and idea buttons hide while editing: a wider toolbar wraps and covers the editor toolbar above it. */}
-      {!isEditMode && (
+    </>
+  );
+
+  return (
+    <nav
+      className={`bottom-toolbar pixel-panel ${mobile ? 'dock-mobile' : ''} ${isEditMode ? 'dock-editing' : ''}`}
+      aria-label="Controles de la oficina"
+    >
+      {isEditMode ? (
         <>
-          <Button
-            variant={isBacklogOpen ? 'active' : 'default'}
-            onClick={onToggleBacklog}
-            title="Backlog de la empresa de agentes"
+          {editButton}
+          {/* Agents can still be opened while arranging seats and areas, as before. */}
+          {agentControl}
+          {settingsButton}
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="dock-button dock-primary"
+            onClick={onNewIdea}
+            aria-label="Nueva idea"
+            title="Nueva idea"
           >
-            Backlog
-          </Button>
-          {prs && (
-            <Button
-              onClick={onOpenBacklog}
-              title={prs.title}
-              aria-label={`Estado de PR: ${prs.label}. Abrir Backlog`}
-              data-testid="dock-pr-status"
+            <DockIcon name="idea" />
+            <span>{mobile ? 'Idea' : 'Nueva idea'}</span>
+          </button>
+          <div className="dock-panels" role="group" aria-label="Paneles">
+            {(mobile ? panels.slice(0, 2) : panels).map(panelButton)}
+          </div>
+          {mobile ? (
+            <button
+              type="button"
+              className="dock-button"
+              aria-label="Más"
+              title="Más"
+              aria-expanded={moreVisible}
+              aria-controls="dock-more-sheet"
+              onClick={() => setMoreOpen((open) => !open)}
             >
-              Estado: {prs.label}
-            </Button>
+              <DockIcon name="more" />
+              <span>Más</span>
+            </button>
+          ) : (
+            <div className="dock-secondary" role="group" aria-label="Oficina y ajustes">
+              {agentControl}
+              {editButton}
+              {settingsButton}
+            </div>
           )}
-          <Button
-            variant={isDecisionsOpen ? 'active' : 'default'}
-            onClick={onToggleDecisions}
-            title="Decisiones del propietario"
-          >
-            Decisiones
-          </Button>
-          <Button
-            variant={isAuditOpen ? 'active' : 'default'}
-            onClick={onToggleAudit}
-            title="Auditoría de solo lectura"
-          >
-            Auditoría
-          </Button>
-          <Button
-            variant={isFeaturesOpen ? 'active' : 'default'}
-            onClick={onToggleFeatures}
-            title="Features de solo lectura"
-          >
-            Features
-          </Button>
-          <Button onClick={onNewIdea}>Nueva idea</Button>
         </>
       )}
-      <Button
-        variant={isSettingsOpen ? 'active' : 'default'}
-        onClick={onToggleSettings}
-        title="Settings"
-      >
-        Settings
-      </Button>
-    </div>
+      {moreVisible && (
+        <div
+          id="dock-more-sheet"
+          className="dock-sheet pixel-panel"
+          ref={sheetRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Más opciones"
+        >
+          <button
+            type="button"
+            className="dock-button dock-sheet-close"
+            ref={firstSheetButtonRef}
+            aria-label="Cerrar más opciones"
+            onClick={() => setMoreOpen(false)}
+          >
+            Cerrar
+          </button>
+          {panels.slice(2).map(panelButton)}
+          {agentControl}
+          {editButton}
+          {settingsButton}
+        </div>
+      )}
+    </nav>
   );
 }

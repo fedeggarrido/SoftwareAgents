@@ -5,7 +5,7 @@ import path from 'path';
 
 import { getClaudeProjectDir } from './team';
 import { narrate } from './test-narration';
-import { clickAddAgent } from './webview';
+import { clickAddAgent, openDockAction } from './webview';
 
 const INTERNAL_AGENT_TIMEOUT_MS = 20_000;
 
@@ -160,7 +160,7 @@ export async function addAgentForFolder(
 ): Promise<InternalAgentSpawn> {
   const launchesBefore = countInvocations(readInvocationLog(mockLogFile));
   narrate.step(`clicking "+ Agent" and picking the "${folderName}" folder`);
-  await frame.locator('button', { hasText: '+ Agent' }).click();
+  await openDockAction(frame, 'Abrir agente');
   // The folder-picker entries are <button> DropdownItems; scope to the button
   // role so we don't collide with the same folder name shown as a <span> in an
   // Area card's mapped-folders list (when the folder is already area-mapped).

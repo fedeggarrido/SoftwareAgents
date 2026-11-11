@@ -11,6 +11,8 @@
 import type { Frame } from '@playwright/test';
 import { expect } from '@playwright/test';
 
+import { openDockAction } from './webview';
+
 /** The carpet/area observability surface installed under the isE2E guard. */
 export interface TestHooksWindow extends Window {
   __pixelAgentsTestHooks?: {
@@ -68,7 +70,7 @@ export async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 /** Enter the layout editor (idempotent-ish: only clicks the Layout button). */
 export async function enterEditMode(frame: Frame): Promise<void> {
   await dismissFirstRunTooltips(frame);
-  await frame.locator('button[title="Edit office layout"]').click();
+  await openDockAction(frame, 'Editar oficina');
 }
 
 /**

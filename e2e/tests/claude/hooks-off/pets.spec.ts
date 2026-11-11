@@ -161,7 +161,7 @@ test.describe('Pets', () => {
     narrator.check('two pets on the canvas (getPets → 2)');
 
     narrator.step('clicking Save — persisting the layout to disk');
-    const saveBtn = frame.locator('button', { hasText: 'Save' });
+    const saveBtn = frame.locator('button', { hasText: 'Guardar' });
     await expect(saveBtn).toBeVisible({ timeout: 5_000 });
     await saveBtn.click();
 

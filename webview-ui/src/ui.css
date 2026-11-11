@@ -226,3 +226,8 @@ button:active:not(:disabled) {
 .bottom-toolbar:has(.dock-sheet) {
   z-index: var(--z-notices);
 }
+/* On mobile the panel window is a full-screen sheet over the office: office notices
+   belong to the office and stay under it instead of covering the sheet's header. */
+body:has(.panel-window-mobile:not([hidden])) .office-notices {
+  z-index: var(--z-office);
+}

@@ -15,7 +15,7 @@ import { contrastRatio } from './designer.js';
 const VIEW_LABELS = {
   features: 'Funcionalidades',
   audit: 'Auditoría',
-  backlog: 'Tareas',
+  backlog: 'Trabajo',
 };
 const VIEWPORTS = [
   { width: 1440, height: 1000 },

@@ -85,12 +85,12 @@ export async function selectCarpetTool(frame: Frame): Promise<void> {
 
 /** Select a carpet variant by index (thumbnails are titled "Carpet N", N=index+1). */
 export async function selectCarpetVariant(frame: Frame, variant: number): Promise<void> {
-  await frame.locator(`[title="Carpet ${variant + 1}"]`).click();
+  await frame.locator(`[title="Alfombra ${variant + 1}"]`).click();
 }
 
 /** Switch to the carpet eyedropper (CARPET_PICK). */
 export async function selectCarpetPickTool(frame: Frame): Promise<void> {
-  await frame.locator('button[title*="Pick carpet"]').click();
+  await frame.locator('button[title*="Copiar variante y colores de la alfombra"]').click();
 }
 
 /** Select the Areas tool (button is gated on workspaceFolders > 0 → multi-root). */
@@ -127,7 +127,7 @@ export async function eraseTile(frame: Frame, col: number, row: number): Promise
 
 /** Save the layout via the EditActionBar (only visible while the editor is dirty). */
 export async function saveLayout(frame: Frame): Promise<void> {
-  const saveBtn = frame.locator('button', { hasText: 'Save' });
+  const saveBtn = frame.locator('button', { hasText: 'Guardar' });
   await expect(saveBtn).toBeVisible({ timeout: 5_000 });
   await saveBtn.click();
 }

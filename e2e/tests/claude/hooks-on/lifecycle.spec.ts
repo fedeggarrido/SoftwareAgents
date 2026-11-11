@@ -1690,7 +1690,7 @@ test.describe('Hooks ON / lifecycle', () => {
     await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
 
     // EditActionBar appears only when isDirty=true. Save button is part of it.
-    const saveBtn = frame.locator('button', { hasText: 'Save' });
+    const saveBtn = frame.locator('button', { hasText: 'Guardar' });
     await expect(saveBtn).toBeVisible({ timeout: 5_000 });
     narrator.step('clicking Save — persisting the layout to disk');
     await saveBtn.click();

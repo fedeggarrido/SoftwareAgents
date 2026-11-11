@@ -30,7 +30,7 @@ import { closeBottomPanel, getPixelAgentsFrame, reopenBottomPanel } from '../../
  * hooks-off lane: carpet has no hook dependency; this is the lighter fixture.
  */
 
-const CARPET_THUMB = (variant: number) => `[title="Carpet ${variant + 1}"]`;
+const CARPET_THUMB = (variant: number) => `[title="Alfombra ${variant + 1}"]`;
 
 async function waitForCarpetCount(frame: Frame, count: number): Promise<void> {
   await frame.waitForFunction(
@@ -65,7 +65,7 @@ test.describe('Alfombras', () => {
     await selectCarpetTool(frame);
     // At least one carpet variant thumbnail renders inside the Furniture panel.
     await expect(frame.locator(CARPET_THUMB(0))).toBeVisible({ timeout: 15_000 });
-    narrator.check('"Carpet 1" variant thumbnail renders in the Furniture panel');
+    narrator.check('"Alfombra 1" variant thumbnail renders in the Furniture panel');
   });
 
   test('painting a tile records it in the carpet layer @area:carpet', async ({ pixelAgents }) => {
@@ -193,7 +193,7 @@ test.describe('Alfombras', () => {
     narrator.check('two carpet tiles from the single stroke');
 
     narrator.step('clicking Undo once');
-    await frame.locator('button', { hasText: 'Undo' }).click();
+    await frame.locator('button', { hasText: 'Deshacer' }).click();
     await waitForCarpetCount(frame, 0);
     narrator.check('count drops 2 → 0 — the whole stroke is one undo entry');
   });

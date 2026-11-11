@@ -70,7 +70,7 @@ async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 async function openPetsTab(frame: Frame): Promise<Locator> {
   await dismissFirstRunTooltips(frame);
   await openDockAction(frame, 'Editar oficina');
-  await frame.locator('button[title="Place pets"]').click();
+  await frame.locator('button[title="Colocar mascotas"]').click();
   const carousel = frame.locator(PETS_CAROUSEL);
   await expect(carousel).toBeVisible({ timeout: 15_000 });
   return carousel;

@@ -222,3 +222,7 @@ button:active:not(:disabled) {
 .agent-card :where(div, span) {
   line-height: var(--reading-line-height);
 }
+/* An open dock menu is a transient popover: it must sit above the panel window it opens. */
+.bottom-toolbar:has(.dock-sheet) {
+  z-index: var(--z-notices);
+}

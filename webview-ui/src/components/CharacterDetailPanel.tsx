@@ -198,7 +198,7 @@ export function CharacterDetailPanel({
       <footer className="flex flex-wrap gap-8">
         {onOpenBacklog && (
           <Button size="sm" onClick={onOpenBacklog}>
-            Ver en Tareas
+            Ver en Trabajo
           </Button>
         )}
         {onCloseAgent && (

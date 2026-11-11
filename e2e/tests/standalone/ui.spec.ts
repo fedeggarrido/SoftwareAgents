@@ -193,9 +193,16 @@ test.describe('Standalone / UI', () => {
     await expect(indicator.getByRole('status')).toBeVisible({
       timeout: CONNECTION_STATE_TIMEOUT_MS,
     });
-    await expect(indicator.getByRole('status')).toContainText(
-      'La oficina está cerrada en tu ordenador.',
-    );
+    await expect(indicator.getByRole('status')).toContainText('Sin conexión');
+    // The cause stays folded under «Detalles» so the notice is one thin strip.
+    await indicator.getByText('Detalles', { exact: true }).click();
+    await expect(indicator).toContainText('La oficina está cerrada en tu ordenador.');
+    await expect(page.getByTestId('connection-notice')).toHaveCount(1);
+    await indicator.getByRole('button', { name: 'Minimizar aviso de conexión' }).click();
+    await expect(
+      indicator.getByRole('button', { name: 'Mostrar aviso de conexión' }),
+    ).toBeVisible();
+    await indicator.getByRole('button', { name: 'Mostrar aviso de conexión' }).click();
     await expect(
       indicator.getByRole('button', { name: 'Reintentar ahora', exact: true }),
     ).toBeVisible();

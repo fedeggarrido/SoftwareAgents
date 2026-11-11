@@ -478,7 +478,7 @@ export const PANEL_WINDOW_Z_INDEX = UI_LAYERS.panel;
 export const MODAL_Z_INDEX = UI_LAYERS.modal;
 export const OFFICE_HELP_Z_INDEX = UI_LAYERS.notices;
 export const PANEL_TABS = [
-  { id: 'backlog', label: 'Tareas' },
+  { id: 'backlog', label: 'Trabajo' },
   { id: 'decisions', label: 'Decisiones' },
   { id: 'audit', label: 'Auditoría' },
   { id: 'features', label: 'Funcionalidades' },

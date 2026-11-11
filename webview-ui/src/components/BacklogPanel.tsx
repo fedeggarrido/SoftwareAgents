@@ -206,9 +206,9 @@ export function BacklogPanel({
       className="read-only-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
       role="region"
-      aria-label="Tareas"
+      aria-label="Trabajo"
     >
-      <PanelHeading hosted={hosted} title="Tareas" onClose={onClose}>
+      <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose}>
         <Button
           size="sm"
           variant="secondary"

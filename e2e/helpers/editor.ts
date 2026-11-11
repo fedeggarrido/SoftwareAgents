@@ -79,8 +79,8 @@ export async function enterEditMode(frame: Frame): Promise<void> {
  * first (the "Paint carpets" tab only renders while Furniture is active).
  */
 export async function selectCarpetTool(frame: Frame): Promise<void> {
-  await frame.locator('button[title="Place furniture"]').click();
-  await frame.locator('button[title="Paint carpets"]').click();
+  await frame.locator('button[title="Colocar muebles"]').click();
+  await frame.locator('button[title="Pintar alfombras"]').click();
 }
 
 /** Select a carpet variant by index (thumbnails are titled "Carpet N", N=index+1). */
@@ -95,7 +95,7 @@ export async function selectCarpetPickTool(frame: Frame): Promise<void> {
 
 /** Select the Areas tool (button is gated on workspaceFolders > 0 → multi-root). */
 export async function selectAreaTool(frame: Frame): Promise<void> {
-  await frame.locator('button[title*="Define folder-bound areas"]').click();
+  await frame.locator('button[title*="Definir áreas por carpeta"]').click();
 }
 
 /** Add a new Area via the Areas panel add-row. The placeholder uses a real ellipsis. */

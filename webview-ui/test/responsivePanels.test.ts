@@ -115,7 +115,7 @@ const board = {
   summary: { total: 123, byPhase: { DONE: 12 }, byEpic: {} },
 };
 
-async function boot(page: Page) {
+async function boot(page: Page, sequence = 1) {
   await page.waitForFunction('window.officeSubscribed === true');
   const messages = [
     { type: 'layoutLoaded', layout: null },
@@ -125,7 +125,7 @@ async function boot(page: Page) {
       type: 'executorState',
       projectId: 'demo',
       revision: 'r',
-      sequence: 1,
+      sequence,
       observedAt: 1,
       canManage: false,
       configurationStatus: 'ready',
@@ -291,7 +291,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await page.locator('.office-connection-help').count()).toBe(1);
       await page.evaluate("window.setOfficeConnection('connected')");
       expect(await notice.count()).toBe(0);
-      await boot(page);
+      // The server answers the reconnect handshake with a fresh (newer) executor snapshot.
+      await boot(page, 2);
       const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
       expect(await dock.locator('.dock-primary').count()).toBe(1);
       expect(await dock.evaluate(fitsHorizontally)).toBe(true);
@@ -345,11 +346,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await page.evaluate('localStorage.getItem("pixel-agents.text-size.v1")')).toBe(
           'large',
         );
+        await settings.locator('.setting-help').first().waitFor();
         expect(
-          await settings
-            .locator('.setting-help')
-            .first()
-            .evaluate('el => getComputedStyle(el).fontSize'),
+          await page.evaluate(
+            'getComputedStyle(document.querySelector("[role=dialog] .setting-help")).fontSize',
+          ),
         ).toBe('16px');
         await settings.getByRole('button', { name: 'Normal', exact: true }).click();
         await page.keyboard.press('Escape');
@@ -387,7 +388,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await windowPanel.waitFor();
       const panelBox = (await windowPanel.boundingBox())!;
       expect(await canvas.boundingBox()).toEqual(officeBox);
-      expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Tareas');
+      expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Trabajo');
       expect(await page.getByTestId('backlog-panel').count()).toBe(1);
       if (width === 390) {
         expect(panelBox.x).toBe(0);
@@ -464,15 +465,15 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
         ),
       ).toContain('slashed-zero');
-      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Reuniones', 'Tareas']) {
+      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Reuniones', 'Trabajo']) {
         await page.getByRole('tab', { name, exact: true }).click();
         expect(await windowPanel.count()).toBe(1);
         expect(await page.getByRole('tabpanel').count()).toBe(1);
         expect(await page.getByRole('tab', { selected: true }).textContent()).toBe(name);
         const labels: Record<string, string> = {
-          Backlog: 'Trabajo',
+          Trabajo: 'Trabajo',
           Decisiones: 'Decisiones',
-          Features: 'Funcionalidades',
+          Funcionalidades: 'Funcionalidades',
           Auditoría: 'Auditoría',
         };
         const pressed = dock.locator('.dock-segment[aria-pressed="true"]');
@@ -536,7 +537,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       const meetingTab = page.getByRole('tab', { name: 'Reuniones', exact: true });
       const meetingHud = page.getByTestId('company-hud').getByRole('button', { name: /Reuniones/ });
       await meetingTab.getByRole('status', { name: 'Nueva actividad' }).waitFor();
-      expect(await page.getByRole('tab', { name: 'Tareas', selected: true }).count()).toBe(1);
+      expect(await page.getByRole('tab', { name: 'Trabajo', selected: true }).count()).toBe(1);
       expect(await meetingHud.getByRole('status', { name: 'Nueva actividad' }).isVisible()).toBe(
         true,
       );
@@ -552,7 +553,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await meetingHud.click();
         expect(await windowPanel.count()).toBe(1);
       }
-      await page.getByRole('tab', { name: 'Tareas', exact: true }).click();
+      await page.getByRole('tab', { name: 'Trabajo', exact: true }).click();
       await sendMeeting('meeting-3');
       await meetingTab.getByRole('status').waitFor();
       await meetingTab.click();
@@ -598,7 +599,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await work.getAttribute('title')).toContain('Estado de PR:');
       expect(await page.getByTestId('dock-pr-status').count()).toBe(0);
       await work.click();
-      await page.getByRole('tab', { name: 'Tareas', selected: true }).waitFor();
+      await page.getByRole('tab', { name: 'Trabajo', selected: true }).waitFor();
       expect(await work.getAttribute('aria-pressed')).toBe('true');
       await work.click();
       expect(await windowPanel.count()).toBe(0);
@@ -631,8 +632,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await canvas.evaluate(isFocusedElement)).toBe(true);
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
       await card.waitFor();
-      await card.getByRole('button', { name: 'Ver en Tareas', exact: true }).click();
-      await page.getByRole('tab', { name: 'Tareas', selected: true }).waitFor();
+      await card.getByRole('button', { name: 'Ver en Trabajo', exact: true }).click();
+      await page.getByRole('tab', { name: 'Trabajo', selected: true }).waitFor();
       expect(await card.count()).toBe(0);
       await page.keyboard.press('Escape');
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(null)');

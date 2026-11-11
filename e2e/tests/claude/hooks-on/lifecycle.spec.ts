@@ -1675,7 +1675,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Editor toolbar should reveal at least one tool button. Paint floor is
     // always present in the floor section of the toolbar.
-    const paintFloorBtn = frame.locator('button[title="Paint floor tiles"]');
+    const paintFloorBtn = frame.locator('button[title="Pintar suelo"]');
     await expect(paintFloorBtn).toBeVisible({ timeout: 10_000 });
     narrator.check('the layout editor toolbar is showing');
     narrator.step('selecting Paint floor and painting one tile');

@@ -20,7 +20,7 @@ export const REVIEW_RULES = [
 
 export const UI_RULES = [
   'UI rules: no purple gradients, glow, glassmorphism or emoji used as icons. No colour-only status: use the StatusChip with icon and Spanish text. Body text is at least 14 px; the pixel font is for titles, buttons and numbers only. Provide hover, focus, active and disabled states and 44 px touch targets.',
-  'Motion only with purpose: 100–300 ms, transform and opacity, CSS first, never `transition: all`, `scale(0)` or ease-in on UI; respect prefers-reduced-motion. No filler copy, lorem ipsum, invented numbers or jargon in the Spanish UI.',
+  'Motion only with purpose: 100–300 ms (--duration-fast/base/slow), easing --ease-out, transform and opacity, CSS first, hover effects only under (hover: hover), never `transition: all`, `scale(0)` or ease-in on UI; respect prefers-reduced-motion. No filler copy, lorem ipsum, invented numbers or jargon in the Spanish UI.',
 ].join('\n');
 
 const QUALITY_ROLES: ReadonlySet<string> = new Set(['developer', 'reviewer', 'qa-author']);

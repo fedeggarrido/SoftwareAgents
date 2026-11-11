@@ -45,6 +45,13 @@
   --space-4: 16px;
   --space-5: 24px;
   --radius: 0;
+  /* Motion (SA-160): purposeful UI motion stays within 100–300 ms, eases out, and is
+     disabled under prefers-reduced-motion (ui.css). */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 280ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --border-thin: 1px;
   --border-thick: 2px;
   --font-reading: system-ui, -apple-system, 'Segoe UI', sans-serif;

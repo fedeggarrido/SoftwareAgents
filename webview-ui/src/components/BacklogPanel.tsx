@@ -9,7 +9,7 @@ import { characterActivity } from '../office/characterActivity.js';
 import { knownText } from '../office/displayText.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { taskPullRequestLabel } from '../office/prStatusView.js';
-import { readableStateText, statusPresentation } from '../office/statusPresentation.js';
+import { readableStateText } from '../office/statusPresentation.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
@@ -19,7 +19,7 @@ function workStatus(
   item: BoardItem,
   board: ReturnType<typeof useBoard>,
   office: OfficeState,
-): string {
+): string | undefined {
   if (item.phase === 'AWAITING_REVIEW') return 'esperando revisión';
   if (item.phase === 'VERIFIED') return 'verificada, pendiente de integrar';
   if (item.owner?.stale) return 'reserva sin latido';
@@ -32,7 +32,8 @@ function workStatus(
   )
     return 'trabajando ahora';
   if (item.owner?.state === 'active') return 'reservada, sin actividad visible';
-  return statusPresentation(item.phase).label.toLowerCase();
+  // Otherwise the card's StatusChip already says it; repeating it adds noise.
+  return undefined;
 }
 
 function ago(at: number, now: number): string {
@@ -43,10 +44,10 @@ function ago(at: number, now: number): string {
   return `${Math.round(s / 86400)}d`;
 }
 
-function EventLine({ e, now }: { e: BoardEvent; now: number }) {
+function EventLine({ e, now, chip = true }: { e: BoardEvent; now: number; chip?: boolean }) {
   return (
     <div className="text-2xs leading-tight text-text-muted">
-      <StatusChip state={e.phase} /> · {ago(e.at, now)}
+      {chip ? <StatusChip state={e.phase} /> : 'Último cambio'} · hace {ago(e.at, now)}
       <div
         className="overflow-hidden text-ellipsis whitespace-nowrap"
         title={readableStateText(e.detail)}
@@ -105,7 +106,9 @@ function Card({
           className="text-2xs"
           style={{ color: item.owner.stale ? PHASE_COLORS.BLOCKED : undefined }}
         >
-          {knownText(item.owner.worker)} · {workStatus(item, board, officeState)}
+          {[knownText(item.owner.worker), workStatus(item, board, officeState)]
+            .filter(Boolean)
+            .join(' · ')}
         </div>
       )}
       {item.agentIds.length > 0 && (
@@ -127,7 +130,7 @@ function Card({
           ))}
         </div>
       )}
-      {item.lastEvent && <EventLine e={item.lastEvent} now={now} />}
+      {item.lastEvent && <EventLine e={item.lastEvent} now={now} chip={false} />}
       {item.prRef && (
         <div className="text-2xs text-text-muted" data-testid="task-pr-status">
           {taskPullRequestLabel(item, now)}
@@ -210,7 +213,21 @@ export function BacklogPanel({
       aria-label="Trabajo"
     >
       <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
-      {board && <p className="ui-info">{knownText(board.project)}</p>}
+      {board && (
+        <div className="backlog-project">
+          <span>{knownText(board.project)}</span>
+          {view.clickupLink && (
+            <a
+              className="text-accent-bright underline"
+              href={view.clickupLink.href}
+              target={view.clickupLink.target}
+              rel={view.clickupLink.rel}
+            >
+              {view.clickupLink.label}
+            </a>
+          )}
+        </div>
+      )}
 
       {view.message && (
         <div className="text-xs text-text-muted">
@@ -219,52 +236,47 @@ export function BacklogPanel({
           <OfficeRecoveryActions project />
         </div>
       )}
-      {view.clickupLink && (
-        <a
-          className="text-xs text-accent-bright underline"
-          href={view.clickupLink.href}
-          target={view.clickupLink.target}
-          rel={view.clickupLink.rel}
-        >
-          {view.clickupLink.label}
-        </a>
-      )}
 
       {board?.sources.board && (
         <>
-          <div className="backlog-pulse flex gap-8 flex-wrap" data-testid="backlog-pulse">
-            <span className="backlog-pulse-item">
-              <strong>{pulse.working}</strong> Trabajando
-            </span>
-            <Button
-              size="sm"
-              variant={pulse.needsYou > 0 ? 'primary' : 'secondary'}
-              disabled={pulse.needsYou === 0}
-              onClick={() => needsYouRef.current?.scrollIntoView({ block: 'start' })}
-              title="Ir a las tareas que esperan tu decisión"
-            >
-              <strong>{pulse.needsYou}</strong> Te necesitan
-            </Button>
-            <span className="backlog-pulse-item">
-              <strong>{pulse.blocked}</strong> Bloqueadas
-            </span>
-          </div>
-          <div className="ui-info text-text-muted">
-            {board.sources.workStore ? (
-              'Registro de tareas del proyecto'
+          <div className="backlog-pulse" data-testid="backlog-pulse">
+            <div className="backlog-stat">
+              <span className="backlog-stat-value">{pulse.working}</span>
+              <span className="backlog-stat-label">Trabajando</span>
+            </div>
+            {pulse.needsYou > 0 ? (
+              <button
+                type="button"
+                className="backlog-stat backlog-stat-attention"
+                onClick={() => needsYouRef.current?.scrollIntoView({ block: 'start' })}
+                title="Ir a las tareas que esperan tu decisión"
+              >
+                <span className="backlog-stat-value">{pulse.needsYou}</span>
+                <span className="backlog-stat-label">Te necesitan</span>
+              </button>
             ) : (
-              <>
-                Coordinación:{' '}
-                {board.manager
-                  ? board.manager.stale
-                    ? 'reserva sin latido'
-                    : 'ronda reservada'
-                  : 'sin ronda activa'}
-                {!board.sources.claims && ' · reservas no disponibles'}
-                {!board.sources.progress && ' · sin registro de progreso'}
-              </>
+              <div className="backlog-stat">
+                <span className="backlog-stat-value">0</span>
+                <span className="backlog-stat-label">Te necesitan</span>
+              </div>
             )}
+            <div className="backlog-stat">
+              <span className="backlog-stat-value">{pulse.blocked}</span>
+              <span className="backlog-stat-label">Bloqueadas</span>
+            </div>
           </div>
+          {!board.sources.workStore && (
+            <div className="ui-info text-text-muted">
+              Coordinación:{' '}
+              {board.manager
+                ? board.manager.stale
+                  ? 'reserva sin latido'
+                  : 'ronda reservada'
+                : 'sin ronda activa'}
+              {!board.sources.claims && ' · reservas no disponibles'}
+              {!board.sources.progress && ' · sin registro de progreso'}
+            </div>
+          )}
 
           {board.items.length === 0 && (
             <p className="ui-info">
@@ -274,12 +286,9 @@ export function BacklogPanel({
             </p>
           )}
           {board.summary && (
-            <div
-              className="flex gap-5 flex-wrap text-2xs text-text-muted"
-              data-testid="epic-progress"
-            >
+            <div className="backlog-epics" data-testid="epic-progress">
               {Object.entries(board.summary.byEpic).map(([epic, count]) => (
-                <span key={epic}>
+                <span key={epic} className="backlog-epic">
                   {(epic !== '?' && knownText(epic)) || 'Sin funcionalidad asociada'}: {count.done}/
                   {count.total} hechas
                 </span>

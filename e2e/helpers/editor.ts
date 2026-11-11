@@ -100,8 +100,8 @@ export async function selectAreaTool(frame: Frame): Promise<void> {
 
 /** Add a new Area via the Areas panel add-row. The placeholder uses a real ellipsis. */
 export async function addArea(frame: Frame, name: string): Promise<void> {
-  await frame.locator('input[placeholder="Area name…"]').fill(name);
-  await frame.locator('button[title="Add a new Area"]').click();
+  await frame.locator('input[placeholder="Nombre del área…"]').fill(name);
+  await frame.locator('button[title="Añadir un área"]').click();
 }
 
 /** Select an existing Area card (single click on its label bubbles to onSelect). */

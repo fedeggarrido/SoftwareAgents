@@ -75,3 +75,7 @@ npm run test:report:open                       # serve Allure locally (file:// c
 ```
 
 **Reproducing CI failures locally**: CI uses `--workers=1` because the runners can't handle more. Reproduce locally with `npm run e2e -- --workers=1 --grep "<test>"`. For full Linux fidelity, `act -j linux-e2e --matrix shard:1 -P ubuntu-latest=catthehacker/ubuntu:full-22.04 --container-architecture linux/amd64` or run inside `mcr.microsoft.com/playwright:v1.58.2-noble` Docker with `--cpus=2 --memory=4g` to simulate runner throttling.
+
+## Design guards (SA-151)
+
+`e2e/tests/standalone/design-guards.spec.ts` (`@area:design`) sweeps every screen at 1440×900 and 375×812 with computed-style rules from `e2e/helpers/designGuards.ts`: text size, WCAG AA contrast, Spanish UI without jargon (deny list in the helper), mid-word wraps, horizontal overflow, 44 px touch targets on mobile, motion (no `transition: all`, no `ease-in`, ≤ 300 ms, reduced-motion respected), mobile layers and the single connection notice of SA-154. Known violations live in `e2e/design-guards.baseline.json`, each with a reason. A new violation fails, and so does a fixed one still listed, so the list only shrinks. After a reviewed burn-down, regenerate it with `PIXEL_AGENTS_DESIGN_BASELINE=write npm run e2e -- --grep @area:design` (new env var, e2e only).

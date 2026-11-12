@@ -48,6 +48,7 @@ import { handleIdeaMessage } from './featureIdeas.js';
 import { featureIngressActor } from './featureIngress.js';
 import { handleFeaturePlanMessage } from './featurePlan.js';
 import { readFeaturesView } from './featuresView.js';
+import { handleGithubHostingMessage } from './githubHosting.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { handleIdeaDocumentMessage } from './ideaDocument.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
@@ -149,6 +150,10 @@ export function handleClientMessage(
   };
 
   switch (msg.type) {
+    case 'requestGithubHosting':
+    case 'confirmGithubHosting':
+      void handleGithubHostingMessage(msg, send, ctx.privileged === true);
+      break;
     case 'requestNewProject':
     case 'browseProjectDirectories':
     case 'validateNewProject':

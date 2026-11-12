@@ -12,6 +12,34 @@ Fundtrinsic queda fuera del alcance: no se inspeccionan ni modifican sus archivo
 datos o procesos. Las fronteras de confianza son contenido → runtime, runtime →
 Executor/herramientas, rama → CI y propuesta → Human Decision.
 
+## SA-146 · Creación de alojamiento GitHub
+
+`githubHosting.ts` ejecuta una acción externa del operador mediante `gh` y `git`
+con `execFile`, sin shell y con timeout. Tanto consulta como confirmación requieren
+privilegio del transporte e ingress humano antes de acceder al proyecto. El destino
+local procede del proyecto seleccionado por el servidor. Se validan nombre y
+propietario contra la cuenta y sus organizaciones en github.com. La cuenta se
+comprueba otra vez al confirmar. Un identificador efímero caduca a los cinco minutos
+y se consume antes del primer await de creación. Los intentos concurrentes se
+serializan por proyecto. Cada fallo exige una nueva lectura y confirmación.
+
+El primer commit incluye únicamente el manifiesto preparado, usa la identidad Git
+configurada y desactiva hooks y firma interactiva. La creación añade origin y el
+envío comprueba su URL de push. Una creación correcta seguida de fallo de push
+conserva el destino en memoria y permite confirmar solo ese envío. Tras reiniciar
+el runtime, un origin existente requiere revisión manual en la terminal. Un timeout
+de creación puede dejar un repositorio remoto creado sin respuesta local, por lo
+que el mensaje pide comprobar GitHub antes de reintentar. El historial completo del
+proyecto se envía al propietario y con la visibilidad mostrados al confirmar.
+
+La UI carece de campos de token. El runtime no lee la configuración de gh ni registra
+stdout/stderr, credenciales o errores crudos. La auditoría conserva proyecto y estado.
+GitHub CLI mantiene su autenticación en el entorno del operador y se conecta con
+`gh auth login` en su terminal. El runner de pruebas está inyectado y el e2e usa un
+ejecutable gh falso en PATH, con perfiles aislados. Persisten las fronteras de
+confianza de los ejecutables/configuración Git del operador y de procesos del mismo
+usuario que puedan cambiar archivos o remotos durante una operación.
+
 ## SA-108: descubrimiento y fuentes sin claves
 
 Inventario añadido: `server/src/webScout.ts`, `agents/templates/web-scout.yaml` y

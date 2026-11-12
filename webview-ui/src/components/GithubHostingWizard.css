@@ -1,0 +1,45 @@
+.github-hosting {
+  font-family: var(--font-reading);
+  font-size: 14px;
+  line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.github-hosting fieldset {
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.github-hosting input,
+.github-hosting select {
+  box-sizing: border-box;
+  min-height: 44px;
+  width: 100%;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg-dark);
+  border: 1px solid var(--color-border);
+  padding: 8px;
+}
+.github-hosting button {
+  min-height: 44px;
+}
+.github-hosting :is(input, select):focus-visible {
+  outline: 2px solid var(--color-accent-bright);
+  outline-offset: 2px;
+}
+.github-hosting :is(input, select):active {
+  border-color: var(--color-accent-bright);
+}
+.github-hosting :is(input, select):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+@media (hover: hover) and (pointer: fine) {
+  .github-hosting :is(input, select):hover:enabled {
+    border-color: var(--color-accent-bright);
+  }
+}

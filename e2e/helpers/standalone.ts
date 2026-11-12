@@ -35,6 +35,8 @@ export interface StandaloneSession {
 }
 
 export interface LaunchStandaloneOptions {
+  /** Process-boundary fakes and isolated CLI configuration for this host only. */
+  env?: NodeJS.ProcessEnv;
   /** Reuse an existing isolated HOME (for cross-surface multi-server tests).
    *  A supplied directory is never removed by standalone cleanup. */
   homeDir?: string;
@@ -101,6 +103,7 @@ function spawnStandaloneHost(args: {
   homeDir: string;
   hostPort: number;
   workspaceDir: string;
+  env?: NodeJS.ProcessEnv;
 }): ChildProcessWithoutNullStreams {
   if (!fs.existsSync(STANDALONE_CLI)) {
     throw new Error(
@@ -114,6 +117,7 @@ function spawnStandaloneHost(args: {
       cwd: args.workspaceDir,
       env: {
         ...process.env,
+        ...args.env,
         HOME: args.homeDir,
         USERPROFILE: args.homeDir,
       },
@@ -238,7 +242,12 @@ export async function launchStandalone(
   let hostStdout = '';
   let hostStderr = '';
   function spawnAndAttach(): ChildProcessWithoutNullStreams {
-    const proc = spawnStandaloneHost({ homeDir: tmpHome, hostPort, workspaceDir });
+    const proc = spawnStandaloneHost({
+      homeDir: tmpHome,
+      hostPort,
+      workspaceDir,
+      env: options.env,
+    });
     proc.stdout.on('data', (chunk) => {
       hostStdout += chunk.toString();
     });

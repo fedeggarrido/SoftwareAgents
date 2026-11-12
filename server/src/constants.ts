@@ -477,3 +477,9 @@ export const PROJECT_SUMMARY_DECISION_LABELS: Readonly<Record<string, string>> =
 
 /** Initial Git repository, manifest and Brain reserve (SA-157). */
 export const NEW_PROJECT_MIN_FREE_BYTES = 16 * 1024 * 1024;
+// GitHub hosting commands and single-use human confirmations (SA-146).
+export const GITHUB_COMMAND_TIMEOUT_MS = 30_000;
+export const GITHUB_COMMAND_MAX_BUFFER = 1024 * 1024;
+export const GITHUB_CONFIRMATION_TTL_MS = 5 * 60_000;
+export const GITHUB_CONFIRMATION_LIMIT = 128;
+export const GITHUB_INITIAL_COMMIT_MESSAGE = 'chore: preparar proyecto';

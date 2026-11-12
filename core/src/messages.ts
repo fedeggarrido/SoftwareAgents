@@ -12,6 +12,8 @@ export type ServerMessage =
   | ProjectDirectories
   | NewProjectValidation
   | NewProjectResult
+  | GithubHostingOptions
+  | GithubHostingResult
   | TaskDetailSnapshot
   | TaskChangeResult
   | OfficeTokenRotationFailed
@@ -70,6 +72,8 @@ export type ClientMessage =
   | BrowseProjectDirectories
   | ValidateNewProject
   | CreateNewProject
+  | RequestGithubHosting
+  | ConfirmGithubHosting
   | RequestTaskDetail
   | SubmitTaskChange
   | RequestFeaturePlan
@@ -167,6 +171,51 @@ export interface NewProjectResult {
 }
 
 export type NewProjectCreationStatus = 'created' | 'rejected';
+
+export interface GithubHostingOptions {
+  type: 'githubHostingOptions';
+  requestId: string;
+  projectId: string;
+  login: string | null;
+  owners: string[];
+  confirmationId: string | null;
+  operation: GithubHostingOperation;
+  owner: string;
+  name: string;
+  visibility: GithubVisibility;
+  errorCode: GithubHostingError | null;
+}
+
+export type GithubHostingOperation = 'create' | 'push';
+
+export type GithubVisibility = 'private' | 'public';
+
+export type GithubHostingError =
+  | 'denied'
+  | 'invalid_request'
+  | 'unknown_project'
+  | 'gh_missing'
+  | 'unauthenticated'
+  | 'account_changed'
+  | 'origin_exists'
+  | 'identity_missing'
+  | 'name_taken'
+  | 'permission_denied'
+  | 'network'
+  | 'push_failed'
+  | 'confirmation_required'
+  | 'busy'
+  | 'unavailable';
+
+export interface GithubHostingResult {
+  type: 'githubHostingResult';
+  requestId: string;
+  projectId: string;
+  status: GithubHostingStatus;
+  errorCode: GithubHostingError | null;
+}
+
+export type GithubHostingStatus = 'published' | 'rejected';
 
 export interface TaskDetailSnapshot {
   type: 'taskDetailSnapshot';
@@ -1303,6 +1352,22 @@ export interface CreateNewProject {
   parentPath: string;
   folderMode: ProjectFolderMode;
   hosting: ProjectHosting;
+}
+
+export interface RequestGithubHosting {
+  type: 'requestGithubHosting';
+  requestId: string;
+  projectId: string;
+}
+
+export interface ConfirmGithubHosting {
+  type: 'confirmGithubHosting';
+  requestId: string;
+  projectId: string;
+  confirmationId: string;
+  owner: string;
+  name: string;
+  visibility: GithubVisibility;
 }
 
 export interface RequestTaskDetail {

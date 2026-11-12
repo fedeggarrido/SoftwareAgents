@@ -82,7 +82,7 @@ describe('SA-157 wizard state machine', () => {
         hosting: 'github_private',
       },
     });
-    expect(created.step).toBe('created');
+    expect(created.step).toBe('github');
     expect(created.result?.hosting).toBe('github_private');
   });
   it('rejects invalid names, correlates replies and discards validation after editing the path', () => {

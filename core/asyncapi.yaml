@@ -104,6 +104,8 @@ components:
         - $ref: '#/components/schemas/ProjectDirectories'
         - $ref: '#/components/schemas/NewProjectValidation'
         - $ref: '#/components/schemas/NewProjectResult'
+        - $ref: '#/components/schemas/GithubHostingOptions'
+        - $ref: '#/components/schemas/GithubHostingResult'
         - $ref: '#/components/schemas/TaskDetailSnapshot'
         - $ref: '#/components/schemas/TaskChangeResult'
         - $ref: '#/components/schemas/OfficeTokenRotationFailed'
@@ -177,6 +179,8 @@ components:
         - $ref: '#/components/schemas/BrowseProjectDirectories'
         - $ref: '#/components/schemas/ValidateNewProject'
         - $ref: '#/components/schemas/CreateNewProject'
+        - $ref: '#/components/schemas/RequestGithubHosting'
+        - $ref: '#/components/schemas/ConfirmGithubHosting'
         - $ref: '#/components/schemas/RequestTaskDetail'
         - $ref: '#/components/schemas/SubmitTaskChange'
         - $ref: '#/components/schemas/RequestFeaturePlan'
@@ -3577,6 +3581,126 @@ components:
           type: number
           description: Epoch milliseconds.
 
+    GithubHostingError:
+      type: string
+      enum:
+        [
+          denied,
+          invalid_request,
+          unknown_project,
+          gh_missing,
+          unauthenticated,
+          account_changed,
+          origin_exists,
+          identity_missing,
+          name_taken,
+          permission_denied,
+          network,
+          push_failed,
+          confirmation_required,
+          busy,
+          unavailable,
+        ]
+    GithubVisibility:
+      type: string
+      enum: [private, public]
+    GithubHostingOperation:
+      type: string
+      enum: [create, push]
+    GithubHostingStatus:
+      type: string
+      enum: [published, rejected]
+    RequestGithubHosting:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId]
+      properties:
+        type:
+          const: requestGithubHosting
+        requestId:
+          type: string
+        projectId:
+          type: string
+    ConfirmGithubHosting:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, confirmationId, owner, name, visibility]
+      properties:
+        type:
+          const: confirmGithubHosting
+        requestId:
+          type: string
+        projectId:
+          type: string
+        confirmationId:
+          type: string
+        owner:
+          type: string
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/GithubVisibility'
+    GithubHostingOptions:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          type,
+          requestId,
+          projectId,
+          login,
+          owners,
+          owner,
+          name,
+          visibility,
+          confirmationId,
+          operation,
+          errorCode,
+        ]
+      properties:
+        type:
+          const: githubHostingOptions
+        requestId:
+          type: string
+        projectId:
+          type: string
+        login:
+          type: [string, 'null']
+        owners:
+          type: array
+          items:
+            type: string
+        confirmationId:
+          type: [string, 'null']
+        operation:
+          $ref: '#/components/schemas/GithubHostingOperation'
+        owner:
+          type: string
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/GithubVisibility'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/GithubHostingError'
+            - type: 'null'
+    GithubHostingResult:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, status, errorCode]
+      properties:
+        type:
+          const: githubHostingResult
+        requestId:
+          type: string
+        projectId:
+          type: string
+        status:
+          $ref: '#/components/schemas/GithubHostingStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/GithubHostingError'
+            - type: 'null'
     ProjectHosting:
       type: string
       enum: [local, github_private]

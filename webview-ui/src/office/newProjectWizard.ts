@@ -14,7 +14,15 @@ import {
 } from '../../../core/src/projectNaming.js';
 
 export type WizardStep =
-  'loading' | 'name' | 'path' | 'hosting' | 'confirm' | 'creating' | 'created' | 'uncertain';
+  | 'loading'
+  | 'name'
+  | 'path'
+  | 'hosting'
+  | 'confirm'
+  | 'creating'
+  | 'created'
+  | 'github'
+  | 'uncertain';
 export interface ProjectDraft {
   name: string;
   parentPath: string;
@@ -125,7 +133,12 @@ export function projectWizardReducer(
         return {
           ...next,
           result: message,
-          step: message.status === 'created' ? 'created' : 'path',
+          step:
+            message.status === 'created'
+              ? state.draft.hosting === 'github_private'
+                ? 'github'
+                : 'created'
+              : 'path',
           validation:
             message.status === 'created'
               ? state.validation
@@ -133,7 +146,8 @@ export function projectWizardReducer(
         };
     }
   }
-  if (state.pending || ['creating', 'created', 'uncertain'].includes(state.step)) return state;
+  if (state.pending || ['creating', 'created', 'github', 'uncertain'].includes(state.step))
+    return state;
   switch (event.type) {
     case 'edit':
       return {

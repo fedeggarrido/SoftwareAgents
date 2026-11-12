@@ -22,8 +22,6 @@ test.describe('Standalone / new project', () => {
     await expect(wizard.getByText('Carpeta predeterminada guardada.')).toBeVisible();
     await wizard.getByRole('button', { name: 'Comprobar carpeta', exact: true }).click();
     await expect(wizard.getByLabel('Alojamiento', { exact: true })).toHaveValue('local');
-    await wizard.getByLabel('Alojamiento', { exact: true }).selectOption('github_private');
-    await expect(wizard.getByText('Se configurará en el siguiente paso')).toBeVisible();
     await wizard.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await expect(
       wizard.getByText(path.join(parent, 'agenda-del-barrio'), { exact: true }),
@@ -32,7 +30,7 @@ test.describe('Standalone / new project', () => {
     await expect(
       wizard.getByRole('heading', { name: 'Proyecto creado', exact: true }),
     ).toBeVisible();
-    await expect(wizard.getByText('Alojamiento elegido GitHub (privado)')).toBeVisible();
+    await expect(wizard.getByText('Alojamiento elegido Solo local')).toBeVisible();
     await wizard.getByRole('button', { name: 'Ver el proyecto', exact: true }).click();
     await page.getByRole('button', { name: 'Proyecto', exact: true }).click();
     await expect(

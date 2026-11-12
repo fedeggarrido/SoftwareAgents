@@ -13,6 +13,7 @@ import {
 } from '../office/newProjectWizard.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
+import { GithubHostingWizard } from './GithubHostingWizard.js';
 import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
@@ -25,6 +26,7 @@ const stepTitles = {
   confirm: 'Confirmar proyecto',
   creating: 'Creando proyecto',
   created: 'Proyecto creado',
+  github: 'Alojamiento del proyecto',
   uncertain: 'Comprobar creación',
 };
 const subscribeConnection = (listener: () => void) => transport.onStateChange(listener);
@@ -256,7 +258,10 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
                 <option value="github_private">GitHub (privado)</option>
               </select>
               {state.draft.hosting === 'github_private' && (
-                <p>Se configurará en el siguiente paso</p>
+                <p>
+                  Después de preparar el proyecto podrás conectar tu cuenta y confirmar la creación
+                  del repositorio.
+                </p>
               )}
               <Button onClick={() => dispatch({ type: 'next' })}>Siguiente</Button>
             </>
@@ -272,7 +277,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
                 <dd>{projectHostingText(state.draft.hosting)}</dd>
               </dl>
               {state.draft.hosting === 'github_private' && (
-                <p>Se configurará en el siguiente paso</p>
+                <p>La creación en GitHub se confirmará en el siguiente paso.</p>
               )}
               <p>
                 Se preparará el repositorio Git, el archivo de proyecto y su carpeta de
@@ -307,15 +312,20 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <p>Carpeta comprobada. Se volverá a validar al crear.</p>
           </div>
         )}
-        {state.step === 'created' && (
+        {(state.step === 'created' || state.step === 'github') && (
           <div role="status">
             <StatusChip state="DONE" />
             <p>{state.result?.path}</p>
-            <p>
-              Alojamiento elegido {projectHostingText(state.result?.hosting ?? state.draft.hosting)}
-            </p>
-            {state.draft.hosting === 'github_private' && <p>Se configurará en el siguiente paso</p>}
+            {state.step === 'created' && (
+              <p>
+                Alojamiento elegido{' '}
+                {projectHostingText(state.result?.hosting ?? state.draft.hosting)}
+              </p>
+            )}
           </div>
+        )}
+        {state.step === 'github' && state.result?.projectId && (
+          <GithubHostingWizard key={state.result.projectId} projectId={state.result.projectId} />
         )}
         {state.step === 'uncertain' && (
           <p role="alert">
@@ -330,7 +340,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
         <Button disabled={state.step === 'creating'} onClick={close}>
-          {state.step === 'created' ? 'Ver el proyecto' : 'Cancelar'}
+          {state.step === 'created' || state.step === 'github' ? 'Ver el proyecto' : 'Cancelar'}
         </Button>
       </div>
     </Modal>

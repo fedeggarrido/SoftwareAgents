@@ -426,7 +426,7 @@ export const FEATURE_PLAN_EXCLUSION_RULE =
 // Project preparation writes only these repository-owned paths.
 export const PROJECT_MANIFEST_PATH = '.softwareagents/project.yaml';
 export const PROJECT_BRAIN_PATH = '.softwareagents/brain';
-export const PROJECT_NAME_MAX_LENGTH = 120;
+export { PROJECT_NAME_MAX_LENGTH } from '../../core/src/projectNaming.js';
 export const PROJECT_ID_HASH_LENGTH = 12;
 export const PROJECT_ID_SLUG_LENGTH = 48;
 export const PROJECT_LOCAL_REMOTE = 'local';
@@ -474,3 +474,6 @@ export const PROJECT_SUMMARY_DECISION_LABELS: Readonly<Record<string, string>> =
   'usage-budget': 'Revisar el presupuesto agotado',
   'executor-availability': 'Revisar la disponibilidad de los ejecutores',
 };
+
+/** Initial Git repository, manifest and Brain reserve (SA-157). */
+export const NEW_PROJECT_MIN_FREE_BYTES = 16 * 1024 * 1024;

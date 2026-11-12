@@ -1,0 +1,84 @@
+.new-project-dialog {
+  width: min(640px, calc(100vw - 24px));
+  min-width: 0;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  font-family: var(--font-reading);
+  font-size: 14px;
+}
+.new-project-content,
+.new-project-content fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.new-project-content {
+  padding: 12px;
+}
+.new-project-content fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.new-project-content p,
+.new-project-content dd {
+  overflow-wrap: anywhere;
+}
+.new-project-content h2 {
+  font-size: 16px;
+}
+.new-project-content input,
+.new-project-content select {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-dark);
+  color: var(--color-text);
+  font: inherit;
+}
+.new-project-content button {
+  min-height: 44px;
+  font-size: 14px;
+  white-space: normal;
+}
+.new-project-content :is(input, select):focus-visible {
+  outline: 2px solid var(--color-accent-bright);
+  outline-offset: 2px;
+}
+.new-project-content :is(input, select):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.new-project-content :is(input, select):active {
+  border-color: var(--color-accent-bright);
+}
+@media (hover: hover) and (pointer: fine) {
+  .new-project-content :is(input, select):hover:not(:disabled) {
+    border-color: var(--color-accent-bright);
+  }
+}
+.new-project-proposals,
+.new-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.new-project-content ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.new-project-content li button {
+  width: 100%;
+  text-align: left;
+}
+.new-project-content dt {
+  font-weight: bold;
+}
+.new-project-content dd {
+  margin: 0 0 12px;
+}

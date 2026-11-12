@@ -16,6 +16,7 @@ import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
+import { NewProjectDialog } from './components/NewProjectDialog.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
 import { ProjectSummaryPanel } from './components/ProjectSummaryPanel.js';
@@ -61,6 +62,7 @@ function getOfficeState(): OfficeState {
 }
 
 function App() {
+  const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [isNewIdeaOpen, setIsNewIdeaOpen] = useState(false);
   // Browser runtime (dev or static dist): dispatch mock messages after the
   // useExtensionMessages listener has been registered.
@@ -648,7 +650,12 @@ function App() {
           currentVersion={extensionVersion}
         />
 
+        {isNewProjectOpen && <NewProjectDialog onClose={() => setIsNewProjectOpen(false)} />}
         <SettingsModal
+          onNewProject={() => {
+            setIsSettingsOpen(false);
+            setIsNewProjectOpen(true);
+          }}
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           isDebugMode={isDebugMode}
@@ -707,6 +714,7 @@ function App() {
             escapeSuppressed={
               isSettingsOpen ||
               isNewIdeaOpen ||
+              isNewProjectOpen ||
               panel.isOpen ||
               isChangelogOpen ||
               isHooksInfoOpen ||

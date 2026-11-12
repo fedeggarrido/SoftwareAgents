@@ -51,6 +51,7 @@ import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { handleIdeaDocumentMessage } from './ideaDocument.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import { handleNewProjectMessage } from './newProject.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { handlePrepareProjectMessage } from './projectPreparation.js';
@@ -136,7 +137,24 @@ export function handleClientMessage(
   const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
 
+  const bindProject = (root: string) => {
+    const selection = loadBoardSelection(root);
+    configureCompanyControl(root, selection);
+    store.bindProjectWorkspace(root);
+    ctx.onProjectPrepared?.(root);
+    const snapshot = currentWorkSnapshot();
+    if (snapshot) store.broadcast({ ...snapshot });
+    if (selection.kind === 'project')
+      store.notifyExecutorStateChanged(selection.project.project.id);
+  };
+
   switch (msg.type) {
+    case 'requestNewProject':
+    case 'browseProjectDirectories':
+    case 'validateNewProject':
+    case 'createNewProject':
+      handleNewProjectMessage(msg, send, ctx.privileged === true, 'standalone', bindProject);
+      break;
     case 'requestTaskDetail':
     case 'submitTaskChange':
       void handleTaskDetailMessage(
@@ -152,16 +170,7 @@ export function handleClientMessage(
         send,
         ctx.privileged === true,
         ctx.ideasSupported !== false,
-        (root) => {
-          const selection = loadBoardSelection(root);
-          configureCompanyControl(root, selection);
-          store.bindProjectWorkspace(root);
-          ctx.onProjectPrepared?.(root);
-          const snapshot = currentWorkSnapshot();
-          if (snapshot) store.broadcast({ ...snapshot });
-          if (selection.kind === 'project')
-            store.notifyExecutorStateChanged(selection.project.project.id);
-        },
+        bindProject,
       );
       break;
     case 'requestFeaturePlan':

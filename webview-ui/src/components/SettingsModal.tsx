@@ -14,6 +14,7 @@ import { MenuItem } from './ui/MenuItem.js';
 import { Modal } from './ui/Modal.js';
 
 interface SettingsModalProps {
+  onNewProject: () => void;
   isOpen: boolean;
   onClose: () => void;
   isDebugMode: boolean;
@@ -44,6 +45,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({
+  onNewProject,
   isOpen,
   onClose,
   isDebugMode,
@@ -95,6 +97,7 @@ export function SettingsModal({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Ajustes" className="settings-dialog">
+      <MenuItem onClick={onNewProject}>Nuevo proyecto</MenuItem>
       <p className="p-10" role="status">
         {access.explanation}
       </p>

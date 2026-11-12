@@ -17,6 +17,13 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `githubHosting.ts` y `githubCommand.ts` (SA-146) crean el alojamiento desde Nuevo
+  proyecto y el panel Proyecto. GitHub CLI aporta cuenta y organizaciones sin
+  transferir credenciales a la UI. Confirmación humana de un solo uso, visibilidad
+  privada inicial y recuperación del envío con nueva confirmación. Comandos con
+  timeout e inyección de runner para pruebas. Requiere `gh` conectado mediante
+  `gh auth login` y una identidad Git para el primer commit.
+
 - `featurePlan.ts` y `featurePlanProjection.ts` (SA-111) proyectan el FeatureSpec,
   TechnicalDesign y DAG ya vinculados mediante lectura SQLite y barreras Git compartidas. Marcan secciones
   ausentes y publica una revisión SHA-256. La aprobación WS exige privilegio del

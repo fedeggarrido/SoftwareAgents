@@ -7,6 +7,7 @@ import { PROJECT_EMPTY_TEXT } from '../constants.js';
 import { featureCostLabel, featuresReasonText } from '../office/featuresStore.js';
 import type { PanelTab } from '../office/panelWindowState.js';
 import { useProjectSummary } from '../office/useProjectSummary.js';
+import { GithubHostingWizard } from './GithubHostingWizard.js';
 import { ProjectWorkflow } from './ProjectWorkflow.js';
 import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
@@ -241,6 +242,7 @@ export function ProjectSummaryPanel({
           Ver decisiones
         </Button>
       </nav>
+      {projectId && <GithubHostingWizard key={projectId} projectId={projectId} />}
     </section>
   );
 }

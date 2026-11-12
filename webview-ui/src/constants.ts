@@ -710,3 +710,4 @@ export const MODEL_TIER_LABELS = {
 } as const;
 
 export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
+export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;

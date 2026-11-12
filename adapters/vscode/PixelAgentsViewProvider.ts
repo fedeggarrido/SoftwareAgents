@@ -39,6 +39,7 @@ import {
 import { handleIdeaMessage } from '../../server/src/featureIdeas.js';
 import { handleFeaturePlanMessage } from '../../server/src/featurePlan.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
+import { handleGithubHostingMessage } from '../../server/src/githubHosting.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
   readLayoutFromFile,
@@ -443,7 +444,13 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (message.type === 'requestFeaturePlan' || message.type === 'approveFeaturePlan') {
+      if (message.type === 'requestGithubHosting' || message.type === 'confirmGithubHosting') {
+        await handleGithubHostingMessage(
+          message,
+          (reply) => void this.webview?.postMessage(reply),
+          true,
+        );
+      } else if (message.type === 'requestFeaturePlan' || message.type === 'approveFeaturePlan') {
         await handleFeaturePlanMessage(
           message,
           (reply) => void this.webview?.postMessage(reply),

@@ -29,6 +29,7 @@ import {
   setFeaturesStore,
 } from '../office/featuresStore.js';
 import { setFloorSprites } from '../office/floorTiles.js';
+import { receiveIdeaDocument } from '../office/ideaDocument.js';
 import {
   applyIdeaResult,
   applyIdeasSnapshot,
@@ -416,6 +417,8 @@ export function useExtensionMessages(
         setIdeasStore(applyIdeasSnapshot(getIdeasStore(), msg));
       } else if (msg.type === 'submitIdeaResult') {
         setIdeasStore(applyIdeaResult(getIdeasStore(), msg));
+      } else if (msg.type === 'extractIdeaDocumentResult') {
+        receiveIdeaDocument(msg);
       } else if (msg.type === 'prepareProjectResult') {
         receiveProjectPreparationResult(msg, transport);
       } else if (msg.type === 'executorToggleResult') {

@@ -108,6 +108,7 @@ components:
         - $ref: '#/components/schemas/FeatureApprovalResult'
         - $ref: '#/components/schemas/IdeasSnapshot'
         - $ref: '#/components/schemas/SubmitIdeaResult'
+        - $ref: '#/components/schemas/ExtractIdeaDocumentResult'
         - $ref: '#/components/schemas/PrepareProjectResult'
         - $ref: '#/components/schemas/FeaturesSnapshot'
         - $ref: '#/components/schemas/AuditLogSnapshot'
@@ -173,6 +174,7 @@ components:
         - $ref: '#/components/schemas/ApproveFeaturePlan'
         - $ref: '#/components/schemas/RequestIdeas'
         - $ref: '#/components/schemas/SubmitIdea'
+        - $ref: '#/components/schemas/ExtractIdeaDocument'
         - $ref: '#/components/schemas/PrepareProject'
         - $ref: '#/components/schemas/RequestFeatures'
         - $ref: '#/components/schemas/RequestAuditLog'
@@ -622,6 +624,58 @@ components:
     ProjectPreparationStatus:
       type: string
       enum: [created, rejected]
+
+    ExtractIdeaDocument:
+      description: Human-only, privileged local extraction for review. No path access, persistence or agent execution. Filename selects PDF/MD/TXT parsing. Base64 bytes and extracted UTF-8 text are limited to 5 MiB. The existing saved idea/interview limit remains 1 MiB.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, name, base64]
+      properties:
+        type:
+          const: extractIdeaDocument
+        requestId:
+          type: string
+        projectId:
+          type: string
+        name:
+          type: string
+        base64:
+          type: string
+          maxLength: 6990508
+
+    ExtractIdeaDocumentResult:
+      description: Point-to-point extracted text for explicit human review and editing. Errors contain no text or exception details. Never saves an idea.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, projectId, text, errorCode]
+      properties:
+        type:
+          const: extractIdeaDocumentResult
+        requestId:
+          type: string
+        projectId:
+          type: string
+        text:
+          type: [string, 'null']
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/IdeaDocumentError'
+            - type: 'null'
+
+    IdeaDocumentError:
+      type: string
+      enum:
+        [
+          denied,
+          unsupported_adapter,
+          unknown_project,
+          invalid_request,
+          unavailable,
+          document_too_large,
+          unsupported_type,
+          corrupt_file,
+          no_text,
+        ]
 
     SubmitIdea:
       description: Privileged draft storage only. No client-selected feature id, authority grant, spec, commit or execution. Untrusted text and a complete fixed interview are rendered as Markdown by the server. The built file is at most 1 MiB in UTF-8.

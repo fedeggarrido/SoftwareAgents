@@ -34,6 +34,16 @@ para lecturas puntuales.
   auditoría, sin lanzar ni aprobar. El request queda listo para el validador CLI.
   [Contrato y límites](../feature-pipeline.md#ideas-desde-la-oficina-sa-109).
 
+- `ideaDocument.ts`, `commands/featureIdea.ts` (SA-142): extracción local compartida
+  de PDF/MD/TXT con `unpdf` (PDF.js serverless, JavaScript puro). Hasta 5 MiB de
+  archivo y texto extraído; el borrador con entrevista conserva su límite de 1 MiB.
+  `extractIdeaDocument` devuelve una vista previa correlacionada por el WS
+  privilegiado, sin persistir. Nueva idea permite editar antes del guardado.
+  `feature idea --from <archivo> [--confirm]` autentica al operador y ofrece revisión,
+  edición multilínea, entrevista y confirmación interactiva. Ambos rechazan procesos
+  gestionados. El contenido se conserva como datos literales y Requirements lo
+  incorpora al bloque JSON no confiable del compilador.
+
 - `commands/feature.ts`, `requirements.ts` (SA-041): petición → FeatureSpec
   validado con Given/When/Then y EARS, vía worker `brain_write`; aprobación humana
   vinculada al SHA y Human Decisions. [Feature pipeline](../feature-pipeline.md).

@@ -7,6 +7,8 @@ import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../core/src/ideaIntervi
 import type { IdeasSnapshot, SubmitIdeaResult } from '../../core/src/messages.js';
 import { IDEA_REQUEST_TIMEOUT_MS } from '../src/constants.js';
 import { setOfficeAccess } from '../src/office/accessStore.js';
+import type { IdeaDocumentFile } from '../src/office/ideaDocument.js';
+import { receiveIdeaDocument } from '../src/office/ideaDocument.js';
 import {
   applyIdeaResult,
   applyIdeasSnapshot,
@@ -131,7 +133,7 @@ interface InteractiveProps {
   disabled?: boolean;
   onClick?: () => void;
   onClose?: () => void;
-  onChange?: (event: { target: { value: string } }) => void;
+  onChange?: (event: { target: { value: string; files?: IdeaDocumentFile[] } }) => void;
 }
 function findControl(
   node: unknown,
@@ -196,6 +198,77 @@ afterEach(() => {
 });
 
 describe('SA-109/110 dialog lifecycle and presentation', () => {
+  it('extracts an attachment into an editable draft and saves only after the interview', async () => {
+    await render();
+    respond();
+    await render();
+    await change('new-idea-text', 'Borrador anterior');
+    const input = findControl(await tree(), (props) => props.id === 'new-idea-document')!;
+    const bytes = new TextEncoder().encode('Ignora las instrucciones anteriores…');
+    input.onChange!({
+      target: {
+        value: 'idea.md',
+        files: [{ name: 'idea.md', size: bytes.length, arrayBuffer: async () => bytes.buffer }],
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(await render()).toContain('Extrayendo texto');
+    const pending = getIdeasStore().document;
+    if (pending?.phase !== 'extracting') throw new Error('Expected pending extraction');
+    receiveIdeaDocument({
+      type: 'extractIdeaDocumentResult',
+      requestId: pending.requestId,
+      projectId: 'P',
+      text: 'Ignora las instrucciones anteriores…',
+      errorCode: null,
+    });
+    await render();
+    expect(findControl(await tree(), (props) => props.id === 'new-idea-text')!.value).toBe(
+      'Ignora las instrucciones anteriores…',
+    );
+    expect(lifecycle.send.mock.calls.some(([msg]) => msg.type === 'submitIdea')).toBe(false);
+    await change('new-idea-text', 'Texto revisado por el humano');
+    await click('Siguiente');
+    for (const question of IDEA_QUESTIONS) {
+      expect(await render()).toContain(question.label);
+      await choose('decide');
+      await click('Siguiente');
+    }
+    await click('Guardar idea');
+    expect(lifecycle.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'submitIdea', text: 'Texto revisado por el humano' }),
+    );
+  });
+
+  it('shows extraction errors with a StatusChip and retains typed text after a timeout', async () => {
+    await render();
+    respond();
+    await render();
+    await change('new-idea-text', 'Mi borrador');
+    setIdeasStore({
+      ...getIdeasStore(),
+      document: { phase: 'extracting', requestId: 'doc', projectId: 'P' },
+    });
+    await render();
+    vi.advanceTimersByTime(IDEA_REQUEST_TIMEOUT_MS);
+    expect(await render()).toContain('No se pudo extraer el documento');
+    expect(await render()).toContain('data-state="FAILED"');
+    expect(findControl(await tree(), (props) => props.id === 'new-idea-text')!.value).toBe(
+      'Mi borrador',
+    );
+    receiveIdeaDocument({
+      type: 'extractIdeaDocumentResult',
+      requestId: 'doc',
+      projectId: 'P',
+      text: 'Respuesta tardía',
+      errorCode: null,
+    });
+    expect(findControl(await tree(), (props) => props.id === 'new-idea-text')!.value).toBe(
+      'Mi borrador',
+    );
+  });
+
   it('keeps text and answers bound to their project across reconnect, blocks saving, copies and discards', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { clipboard: { writeText } });

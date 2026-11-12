@@ -18,6 +18,20 @@ export function useIdeasConnection(active: boolean, projectId?: string | null) {
   const store = useIdeasStore();
   const connection = useSyncExternalStore(subscribe, connectionState, connectionState);
   useEffect(() => {
+    const document = store.document;
+    if (!active || (document?.phase !== 'reading' && document?.phase !== 'extracting')) return;
+    const timer = setTimeout(() => {
+      const current = getIdeasStore();
+      const pending = current.document;
+      if (
+        (pending?.phase === 'reading' || pending?.phase === 'extracting') &&
+        pending.requestId === document.requestId
+      )
+        setIdeasStore({ ...current, document: { phase: 'error', errorCode: 'unavailable' } });
+    }, IDEA_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [active, store.document]);
+  useEffect(() => {
     if (!active) return;
     if (connection === 'connected') requestIdeas(transport);
     else setIdeasStore(invalidateIdeas(getIdeasStore()));

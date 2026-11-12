@@ -11,6 +11,7 @@ import {
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import type { PanelRect, PanelTab } from '../office/panelWindowState.js';
 import { resizePanelRect } from '../office/panelWindowState.js';
+import { DockIcon } from './DockIcon.js';
 import { Button } from './ui/Button.js';
 
 interface PanelWindowProps {
@@ -138,8 +139,14 @@ export function PanelWindow({
         onLostPointerCapture={end}
       >
         <span className="min-w-0 flex-1">{label}</span>
-        <Button size="sm" variant="ghost" onClick={onReset}>
-          Restablecer posición
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onReset}
+          aria-label="Restablecer posición"
+          title="Restablecer posición"
+        >
+          <DockIcon name="recenter" />
         </Button>
         <Button size="sm" variant="ghost" onClick={onClose} aria-label="Cerrar ventana">
           ✕

@@ -708,3 +708,5 @@ export const MODEL_TIER_LABELS = {
   standard: 'Estándar',
   deep: 'Profundo',
 } as const;
+
+export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;

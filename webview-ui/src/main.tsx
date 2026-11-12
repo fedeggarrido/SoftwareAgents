@@ -1,4 +1,5 @@
 import './index.css';
+import './components/NewProjectDialog.css';
 import './components/NewIdeaDialog.css';
 import './components/ProjectSummaryPanel.css';
 

@@ -26,6 +26,7 @@ import { researchLimitSchema } from './researchPolicy.js';
 import { compileSchema, SchemaValidationError } from './schemaValidation.js';
 
 export interface AdapterSettings {
+  projectsParentDirectory?: string;
   soundEnabled: boolean;
   lastSeenVersion: string;
   alwaysShowLabels: boolean;
@@ -41,6 +42,7 @@ export interface AdapterSettings {
  *  (the hooks it governs live in one home-directory file per provider), so it
  *  lives beside `hooksConsent` at the config top level, not per namespace. */
 export const ADAPTER_SETTING_KEYS = [
+  'projectsParentDirectory',
   'soundEnabled',
   'lastSeenVersion',
   'alwaysShowLabels',
@@ -86,6 +88,7 @@ export interface PixelAgentsConfig {
 }
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
+  projectsParentDirectory: '',
   soundEnabled: true,
   lastSeenVersion: '',
   alwaysShowLabels: false,
@@ -419,6 +422,8 @@ export function parseAreaMappings(raw: unknown): Record<string, string[]> {
 function parseAdapterSettings(raw: unknown): AdapterSettings {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Partial<AdapterSettings>;
   return {
+    projectsParentDirectory:
+      typeof obj.projectsParentDirectory === 'string' ? obj.projectsParentDirectory : '',
     soundEnabled:
       typeof obj.soundEnabled === 'boolean'
         ? obj.soundEnabled

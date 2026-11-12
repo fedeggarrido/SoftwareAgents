@@ -9,6 +9,7 @@ import type {
   ProjectPreparationError,
 } from '../../core/src/messages.js';
 import type { ProjectManifest } from '../../core/src/project.js';
+import { validProjectName } from '../../core/src/projectNaming.js';
 import { AuditLog } from './auditLog.js';
 import { taskPath } from './commands/taskFiles.js';
 import { companyWorkspaceRoot } from './companyControl.js';
@@ -21,7 +22,6 @@ import {
   PROJECT_LEGACY_BRANCH,
   PROJECT_LOCAL_REMOTE,
   PROJECT_MANIFEST_PATH,
-  PROJECT_NAME_MAX_LENGTH,
 } from './constants.js';
 import { evalGit } from './evalTasks.js';
 import { featureIngressActor } from './featureIngress.js';
@@ -103,9 +103,7 @@ export function inspectProjectPreparation(cwd: string, name?: unknown) {
   const projectName = name === undefined ? folder : name;
   if (
     typeof projectName !== 'string' ||
-    !projectName.trim() ||
-    projectName.length > PROJECT_NAME_MAX_LENGTH ||
-    /[\u0000-\u001f\u007f-\u009f]/.test(projectName) ||
+    !validProjectName(projectName) ||
     Buffer.from(projectName, 'utf8').toString('utf8') !== projectName
   )
     return reject('invalid_request');

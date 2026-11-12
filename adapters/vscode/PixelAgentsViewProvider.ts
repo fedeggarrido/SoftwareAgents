@@ -45,6 +45,7 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
+import { handleNewProjectMessage } from '../../server/src/newProject.js';
 import { PathSet } from '../../server/src/pathKey.js';
 import { handlePrepareProjectMessage } from '../../server/src/projectPreparation.js';
 import type { ConsentEffects } from '../../server/src/providers/hook/consentExecutor.js';
@@ -448,6 +449,33 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           (reply) => void this.webview?.postMessage(reply),
           false,
           false,
+        );
+      } else if (
+        [
+          'requestNewProject',
+          'browseProjectDirectories',
+          'validateNewProject',
+          'createNewProject',
+        ].includes(message.type)
+      ) {
+        handleNewProjectMessage(
+          message,
+          (reply) => void this.webview?.postMessage(reply),
+          true,
+          'vscode',
+          (root) => {
+            queueMicrotask(() => {
+              void vscode.commands
+                .executeCommand('vscode.openFolder', vscode.Uri.file(root))
+                .then(
+                  undefined,
+                  () =>
+                    void vscode.window.showErrorMessage(
+                      'El proyecto está creado. Abre su carpeta para continuar.',
+                    ),
+                );
+            });
+          },
         );
       } else if (message.type === 'prepareProject') {
         handlePrepareProjectMessage(

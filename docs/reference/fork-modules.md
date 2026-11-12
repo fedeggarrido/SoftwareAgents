@@ -120,6 +120,15 @@ para lecturas puntuales.
 
 ### Paneles (`webview-ui/src/components/`)
 
+- `NewProjectDialog.tsx` y `office/newProjectWizard.ts` (SA-157) abren «Nuevo
+  proyecto» desde Ajustes. `newProject.ts` comprueba ingreso humano y privilegio
+  antes de leer configuración o disco, propone nombres por palabras del contexto
+  y explora solo directorios locales sin enlaces. Guarda la carpeta predeterminada
+  en la configuración existente del adaptador. Valida escritura, espacio libre y
+  conflictos, reutiliza `prepareProject` y el rebind de la oficina. VS Code abre la
+  carpeta resultante. El resultado conserva el alojamiento elegido, con GitHub
+  privado pendiente del siguiente paso (SA-146).
+
 - `ProjectSummaryPanel.tsx` (SA-145) abre «Proyecto» desde la barra y la ventana
   de la oficina. `projectSummary.ts` compone una única proyección de solo lectura
   con el manifiesto, Features/WorkStore, planes vinculados, ideas y auditoría.

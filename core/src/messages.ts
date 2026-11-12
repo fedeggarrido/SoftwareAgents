@@ -8,6 +8,10 @@
  */
 
 export type ServerMessage =
+  | NewProjectOptions
+  | ProjectDirectories
+  | NewProjectValidation
+  | NewProjectResult
   | TaskDetailSnapshot
   | TaskChangeResult
   | OfficeTokenRotationFailed
@@ -62,6 +66,10 @@ export type ServerMessage =
   | AgentDiagnostics;
 
 export type ClientMessage =
+  | RequestNewProject
+  | BrowseProjectDirectories
+  | ValidateNewProject
+  | CreateNewProject
   | RequestTaskDetail
   | SubmitTaskChange
   | RequestFeaturePlan
@@ -101,6 +109,64 @@ export type ClientMessage =
   | SetExecutorEnabled
   | SetExecutorLevels
   | RequestExecutorState;
+
+export interface NewProjectOptions {
+  type: 'newProjectOptions';
+  requestId: string;
+  proposals: string[];
+  defaultParent: string | null;
+  errorCode: NewProjectError | null;
+}
+
+export type NewProjectError =
+  | 'denied'
+  | 'invalid_request'
+  | 'unsafe_path'
+  | 'not_directory'
+  | 'not_empty'
+  | 'existing_available'
+  | 'conflicting_project'
+  | 'unwritable'
+  | 'no_space'
+  | 'unavailable'
+  | 'preparation_failed'
+  | 'audit_failed'
+  | 'binding_failed';
+
+export interface ProjectDirectories {
+  type: 'projectDirectories';
+  requestId: string;
+  path: string | null;
+  parent: string | null;
+  directories: string[];
+  errorCode: NewProjectError | null;
+}
+
+export interface NewProjectValidation {
+  type: 'newProjectValidation';
+  requestId: string;
+  path: string | null;
+  projectId: string | null;
+  hosting: ProjectHosting;
+  status: NewProjectValidationStatus;
+  errorCode: NewProjectError | null;
+}
+
+export type ProjectHosting = 'local' | 'github_private';
+
+export type NewProjectValidationStatus = 'ready' | 'rejected';
+
+export interface NewProjectResult {
+  type: 'newProjectResult';
+  requestId: string;
+  path: string | null;
+  projectId: string | null;
+  hosting: ProjectHosting;
+  status: NewProjectCreationStatus;
+  errorCode: NewProjectError | null;
+}
+
+export type NewProjectCreationStatus = 'created' | 'rejected';
 
 export interface TaskDetailSnapshot {
   type: 'taskDetailSnapshot';
@@ -1203,6 +1269,40 @@ export type DomainEventKind =
 export interface AgentDiagnostics {
   type: 'agentDiagnostics';
   agents: Record<string, any>[];
+}
+
+export interface RequestNewProject {
+  type: 'requestNewProject';
+  requestId: string;
+}
+
+export interface BrowseProjectDirectories {
+  type: 'browseProjectDirectories';
+  requestId: string;
+  path?: string;
+  purpose: ProjectDirectoryPurpose;
+}
+
+export type ProjectDirectoryPurpose = 'browse' | 'save_default';
+
+export interface ValidateNewProject {
+  type: 'validateNewProject';
+  requestId: string;
+  name: string;
+  parentPath: string;
+  folderMode: ProjectFolderMode;
+  hosting: ProjectHosting;
+}
+
+export type ProjectFolderMode = 'create' | 'existing';
+
+export interface CreateNewProject {
+  type: 'createNewProject';
+  requestId: string;
+  name: string;
+  parentPath: string;
+  folderMode: ProjectFolderMode;
+  hosting: ProjectHosting;
 }
 
 export interface RequestTaskDetail {

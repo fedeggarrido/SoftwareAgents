@@ -100,6 +100,10 @@ components:
 
     ServerMessage:
       oneOf:
+        - $ref: '#/components/schemas/NewProjectOptions'
+        - $ref: '#/components/schemas/ProjectDirectories'
+        - $ref: '#/components/schemas/NewProjectValidation'
+        - $ref: '#/components/schemas/NewProjectResult'
         - $ref: '#/components/schemas/TaskDetailSnapshot'
         - $ref: '#/components/schemas/TaskChangeResult'
         - $ref: '#/components/schemas/OfficeTokenRotationFailed'
@@ -169,6 +173,10 @@ components:
 
     ClientMessage:
       oneOf:
+        - $ref: '#/components/schemas/RequestNewProject'
+        - $ref: '#/components/schemas/BrowseProjectDirectories'
+        - $ref: '#/components/schemas/ValidateNewProject'
+        - $ref: '#/components/schemas/CreateNewProject'
         - $ref: '#/components/schemas/RequestTaskDetail'
         - $ref: '#/components/schemas/SubmitTaskChange'
         - $ref: '#/components/schemas/RequestFeaturePlan'
@@ -3568,3 +3576,183 @@ components:
         generatedAt:
           type: number
           description: Epoch milliseconds.
+
+    ProjectHosting:
+      type: string
+      enum: [local, github_private]
+    ProjectFolderMode:
+      type: string
+      enum: [create, existing]
+    NewProjectError:
+      type: string
+      enum:
+        [
+          denied,
+          invalid_request,
+          unsafe_path,
+          not_directory,
+          not_empty,
+          existing_available,
+          conflicting_project,
+          unwritable,
+          no_space,
+          unavailable,
+          preparation_failed,
+          audit_failed,
+          binding_failed,
+        ]
+    RequestNewProject:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: requestNewProject
+        requestId:
+          type: string
+    BrowseProjectDirectories:
+      description: Human-only directory metadata browser. No file contents. Saving a default uses the adapter settings namespace.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, purpose]
+      properties:
+        type:
+          const: browseProjectDirectories
+        requestId:
+          type: string
+        path:
+          type: string
+        purpose:
+          $ref: '#/components/schemas/ProjectDirectoryPurpose'
+    NewProjectOptions:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, proposals, defaultParent, errorCode]
+      properties:
+        type:
+          const: newProjectOptions
+        requestId:
+          type: string
+        proposals:
+          type: array
+          items:
+            type: string
+        defaultParent:
+          type: [string, 'null']
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/NewProjectError'
+            - type: 'null'
+    ProjectDirectories:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, parent, directories, errorCode]
+      properties:
+        type:
+          const: projectDirectories
+        requestId:
+          type: string
+        path:
+          type: [string, 'null']
+        parent:
+          type: [string, 'null']
+        directories:
+          type: array
+          items:
+            type: string
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/NewProjectError'
+            - type: 'null'
+
+    ValidateNewProject:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, name, parentPath, folderMode, hosting]
+      properties:
+        type:
+          const: validateNewProject
+        requestId:
+          type: string
+        name:
+          type: string
+          maxLength: 120
+        parentPath:
+          type: string
+        folderMode:
+          $ref: '#/components/schemas/ProjectFolderMode'
+        hosting:
+          $ref: '#/components/schemas/ProjectHosting'
+
+    CreateNewProject:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, name, parentPath, folderMode, hosting]
+      properties:
+        type:
+          const: createNewProject
+        requestId:
+          type: string
+        name:
+          type: string
+          maxLength: 120
+        parentPath:
+          type: string
+        folderMode:
+          $ref: '#/components/schemas/ProjectFolderMode'
+        hosting:
+          $ref: '#/components/schemas/ProjectHosting'
+
+    NewProjectValidation:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, projectId, hosting, status, errorCode]
+      properties:
+        type:
+          const: newProjectValidation
+        requestId:
+          type: string
+        path:
+          type: [string, 'null']
+        projectId:
+          type: [string, 'null']
+        hosting:
+          $ref: '#/components/schemas/ProjectHosting'
+        status:
+          $ref: '#/components/schemas/NewProjectValidationStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/NewProjectError'
+            - type: 'null'
+
+    NewProjectResult:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, projectId, hosting, status, errorCode]
+      properties:
+        type:
+          const: newProjectResult
+        requestId:
+          type: string
+        path:
+          type: [string, 'null']
+        projectId:
+          type: [string, 'null']
+        hosting:
+          $ref: '#/components/schemas/ProjectHosting'
+        status:
+          $ref: '#/components/schemas/NewProjectCreationStatus'
+        errorCode:
+          oneOf:
+            - $ref: '#/components/schemas/NewProjectError'
+            - type: 'null'
+
+    ProjectDirectoryPurpose:
+      type: string
+      enum: [browse, save_default]
+    NewProjectValidationStatus:
+      type: string
+      enum: [ready, rejected]
+    NewProjectCreationStatus:
+      type: string
+      enum: [created, rejected]

@@ -1,4 +1,8 @@
-import type { FeatureRow, ProjectSummaryItem } from '../../core/src/messages.js';
+import type {
+  FeaturePlanApprovalState,
+  FeatureRow,
+  ProjectSummaryItem,
+} from '../../core/src/messages.js';
 import type { ProjectConfig } from '../../core/src/project.js';
 import { readTaskInput } from './commands/taskFiles.js';
 import { FEATURE_IDEAS_DIRECTORY, PROJECT_SUMMARY_TEXT_LIMIT } from './constants.js';
@@ -11,6 +15,8 @@ export interface SummaryContext {
   risks: ProjectSummaryItem[];
   nextSteps: ProjectSummaryItem[];
   notices: string[];
+  ideas: string[];
+  approvals: { key: string; state: FeaturePlanApprovalState }[];
 }
 
 /** Reuse the Features sanitization boundary and bound display length. */
@@ -30,10 +36,18 @@ function ideaSection(source: string, heading: RegExp): string | null {
 
 /** Read the same bound specs as the plan panel. Missing artifacts stay explicit. */
 export function readSummaryContext(config: ProjectConfig, features: FeatureRow[]): SummaryContext {
-  const result: SummaryContext = { goals: [], risks: [], nextSteps: [], notices: [] };
+  const result: SummaryContext = {
+    goals: [],
+    risks: [],
+    nextSteps: [],
+    notices: [],
+    ideas: [],
+    approvals: [],
+  };
   for (const feature of features) {
     try {
       const plan = readFeaturePlan(config, feature.key);
+      result.approvals.push({ key: feature.key, state: plan.approvalState });
       result.goals.push({ key: feature.key, text: summaryText(plan.summary.goal), at: null });
       result.risks.push(
         ...plan.summary.risks.map((text, index) => ({
@@ -60,6 +74,7 @@ export function readSummaryContext(config: ProjectConfig, features: FeatureRow[]
     return result;
   }
   for (const idea of ideas.ideas) {
+    result.ideas.push(idea.key);
     try {
       const source = readTaskInput(
         config.repoRoot,

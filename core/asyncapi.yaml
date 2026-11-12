@@ -858,6 +858,7 @@ components:
           nextSteps,
           cost,
           notices,
+          workflow,
         ]
       properties:
         name:
@@ -900,6 +901,43 @@ components:
             type: string
         cost:
           $ref: '#/components/schemas/ProjectSummaryCost'
+        workflow:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowStage'
+
+    WorkflowStageId:
+      type: string
+      enum: [idea, requirements, plan, approval, development, qa, review, delivery]
+
+    WorkflowState:
+      type: string
+      enum: [workflow_active, workflow_human, workflow_blocked, workflow_done, workflow_empty]
+
+    WorkflowStage:
+      description: Server-projected work and evidenced completed stages, including exact task keys for Backlog filtering. Sessions are drawn only from the latest execution of an active task version. No prompts, paths or process ids.
+      type: object
+      additionalProperties: false
+      required: [id, label, state, taskKeys, featureKeys, agents]
+      properties:
+        id:
+          $ref: '#/components/schemas/WorkflowStageId'
+        label:
+          type: string
+        state:
+          $ref: '#/components/schemas/WorkflowState'
+        taskKeys:
+          type: array
+          items:
+            type: string
+        featureKeys:
+          type: array
+          items:
+            type: string
+        agents:
+          type: array
+          items:
+            type: string
 
     ProjectSummaryItem:
       type: object

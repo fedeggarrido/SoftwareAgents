@@ -1,5 +1,6 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { WorkflowStageId } from '../../core/src/messages.js';
 import { toMajorMinor } from './changelogData.js';
 import { AuditPanel } from './components/AuditPanel.js';
 import { BacklogPanel } from './components/BacklogPanel.js';
@@ -120,6 +121,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const panel = usePanelWindow(layoutReady);
   const [focusedTask, setFocusedTask] = useState<string | null>(null);
+  const [workflowStage, setWorkflowStage] = useState<WorkflowStageId | null>(null);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -468,6 +470,7 @@ function App() {
               alwaysShowOverlay={alwaysShowOverlay}
               agentHistory={agentHistory}
               onOpenBacklog={(taskKey) => {
+                setWorkflowStage(null);
                 setFocusedTask(taskKey ?? null);
                 panel.select('backlog');
               }}
@@ -585,7 +588,16 @@ function App() {
             hosted
             isOpen={panel.isOpen && panel.tab === 'summary'}
             onClose={panel.close}
-            onNavigate={panel.select}
+            onNavigate={(tab) => {
+              setWorkflowStage(null);
+              setFocusedTask(null);
+              panel.select(tab);
+            }}
+            onWorkflowStage={(stage) => {
+              setWorkflowStage(stage);
+              setFocusedTask(null);
+              panel.select('backlog');
+            }}
           />
           <FeaturesPanel
             hosted
@@ -600,6 +612,8 @@ function App() {
             onClose={panel.close}
             officeState={officeState}
             focusedTask={focusedTask}
+            workflowStage={workflowStage}
+            onClearWorkflowStage={() => setWorkflowStage(null)}
             onFocusAgent={(id) => {
               const os = getOfficeState();
               os.selectedAgentId = id;

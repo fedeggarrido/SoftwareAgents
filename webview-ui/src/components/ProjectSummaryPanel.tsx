@@ -1,24 +1,16 @@
-import { useEffect, useSyncExternalStore } from 'react';
-
-import type { ProjectSummary, ProjectSummaryItem } from '../../../core/src/messages.js';
-import { PROJECT_EMPTY_TEXT, PROJECT_SUMMARY_REQUEST_TIMEOUT_MS } from '../constants.js';
-import { useExecutorStore } from '../office/executorStore.js';
+import type {
+  ProjectSummary,
+  ProjectSummaryItem,
+  WorkflowStageId,
+} from '../../../core/src/messages.js';
+import { PROJECT_EMPTY_TEXT } from '../constants.js';
 import { featureCostLabel, featuresReasonText } from '../office/featuresStore.js';
 import type { PanelTab } from '../office/panelWindowState.js';
-import {
-  applyProjectSummary,
-  getProjectSummaryStore,
-  requestProjectSummary,
-  setProjectSummaryStore,
-  useProjectSummaryStore,
-} from '../office/projectSummaryStore.js';
-import { transport } from '../transport/index.js';
+import { useProjectSummary } from '../office/useProjectSummary.js';
+import { ProjectWorkflow } from './ProjectWorkflow.js';
 import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { PanelHeading } from './ui/PanelHeading.js';
-
-const subscribeConnection = (listener: () => void) => transport.onStateChange(listener);
-const connectionState = () => transport.state;
 
 function SummaryList({
   title,
@@ -167,56 +159,17 @@ export function ProjectSummaryPanel({
   isOpen,
   onClose,
   onNavigate,
+  onWorkflowStage,
   hosted = false,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (tab: PanelTab) => void;
+  onWorkflowStage: (id: WorkflowStageId) => void;
   hosted?: boolean;
 }) {
-  const executor = useExecutorStore();
-  const projectId = executor.needsSnapshot ? null : (executor.state?.projectId ?? null);
-  const connection = useSyncExternalStore(subscribeConnection, connectionState, connectionState);
-  const store = useProjectSummaryStore();
-  useEffect(() => {
-    if (!isOpen || !projectId || connection !== 'connected') {
-      setProjectSummaryStore({ phase: 'idle' });
-      return;
-    }
-    const unsubscribe = transport.onMessage((message) => {
-      if (message.type === 'projectSummarySnapshot')
-        setProjectSummaryStore(applyProjectSummary(getProjectSummaryStore(), message));
-    });
-    requestProjectSummary(transport, projectId);
-    return () => {
-      unsubscribe();
-      setProjectSummaryStore({ phase: 'idle' });
-    };
-  }, [isOpen, projectId, connection]);
-  useEffect(() => {
-    if (!isOpen || store.phase !== 'loading') return;
-    const timer = setTimeout(() => {
-      setProjectSummaryStore(
-        applyProjectSummary(getProjectSummaryStore(), {
-          type: 'projectSummarySnapshot',
-          projectId: store.projectId,
-          requestId: store.requestId,
-          status: 'read_error',
-          reason: 'unavailable',
-          summary: null,
-        }),
-      );
-    }, PROJECT_SUMMARY_REQUEST_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [isOpen, store]);
+  const { projectId, connection, store, snapshot, refresh } = useProjectSummary(isOpen);
   if (!isOpen) return null;
-  const snapshot =
-    connection === 'connected' && store.phase === 'settled' && store.projectId === projectId
-      ? store.snapshot
-      : null;
-  const refresh = () => {
-    if (projectId && connection === 'connected') requestProjectSummary(transport, projectId);
-  };
   return (
     <section
       role="region"
@@ -233,6 +186,9 @@ export function ProjectSummaryPanel({
           Actualizar
         </Button>
       </PanelHeading>
+      {snapshot?.summary && (
+        <ProjectWorkflow stages={snapshot.summary.workflow} onSelect={onWorkflowStage} />
+      )}
       {connection !== 'connected' ? (
         <p role="status">El resumen estará disponible al recuperar la conexión.</p>
       ) : !projectId ? (

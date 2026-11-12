@@ -46,7 +46,7 @@ function fixture(): ProjectSummarySource {
       events: [],
     },
     dependencies: [],
-    context: { goals: [], risks: [], nextSteps: [], notices: [] },
+    context: { goals: [], risks: [], nextSteps: [], notices: [], ideas: [], approvals: [] },
     audit: {
       status: 'empty',
       entries: [],
@@ -62,6 +62,7 @@ function task(feature: string, index: number, status: string, title = 'Crear rec
   return {
     key: `${feature}-T0${index}`,
     feature_key: feature,
+    version: 1,
     status,
     priority: 0,
     declaration: JSON.stringify({ title, description: 'PRIVATE_DESCRIPTION' }),
@@ -114,6 +115,9 @@ describe('project summary projection', () => {
       name: 'Pedidos',
       goals: [],
       features: [],
+      workflow: expect.arrayContaining([
+        expect.objectContaining({ id: 'idea', state: 'workflow_empty' }),
+      ]),
       milestones: [],
       deliveries: [],
       decisions: [],

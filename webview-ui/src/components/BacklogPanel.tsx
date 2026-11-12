@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import type { WorkflowStageId } from '../../../core/src/messages.js';
 import { PHASE_COLORS, PRIORITY_COLORS } from '../constants.js';
 import { backlogPulse, groupBacklog } from '../office/backlogGroups.js';
 import { backlogView } from '../office/backlogView.js';
@@ -10,6 +11,8 @@ import { knownText } from '../office/displayText.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { readableStateText } from '../office/statusPresentation.js';
 import { taskPrDescription, taskTitle } from '../office/taskDetailPresentation.js';
+import { useProjectSummary } from '../office/useProjectSummary.js';
+import { workflowBacklog } from '../office/workflowBacklog.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { StatusChip } from './StatusChip.js';
 import { TaskDetail } from './TaskDetail.js';
@@ -146,6 +149,8 @@ function Card({
 }
 
 interface BacklogPanelProps {
+  workflowStage: WorkflowStageId | null;
+  onClearWorkflowStage: () => void;
   focusedTask?: string | null;
   hosted?: boolean;
   isOpen: boolean;
@@ -162,8 +167,11 @@ export function BacklogPanel({
   officeState,
   hosted = false,
   focusedTask,
+  workflowStage = null,
+  onClearWorkflowStage,
 }: BacklogPanelProps) {
   const board = useBoard();
+  const summary = useProjectSummary(isOpen && workflowStage !== null);
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -172,6 +180,9 @@ export function BacklogPanel({
   useEffect(() => {
     if (isOpen && focusedTask) setSelectedTask(focusedTask);
   }, [isOpen, focusedTask]);
+  useEffect(() => {
+    if (isOpen && workflowStage) setSelectedTask(null);
+  }, [isOpen, workflowStage]);
   useEffect(() => {
     if (!isOpen) return;
     setNow(Date.now());
@@ -192,7 +203,13 @@ export function BacklogPanel({
 
   if (!isOpen) return null;
 
-  const items = board?.items ?? [];
+  const filtered = workflowBacklog(
+    board?.projectId === summary.projectId || !workflowStage ? (board?.items ?? []) : [],
+    summary.snapshot,
+    summary.projectId,
+    workflowStage,
+  );
+  const items = filtered.items;
   const groups = groupBacklog(items).filter((g) => g.items.length > 0);
   const pulse = backlogPulse(items.map((i) => i.phase));
   const view = backlogView(board);
@@ -228,6 +245,21 @@ export function BacklogPanel({
       aria-label="Trabajo"
     >
       <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
+      {workflowStage && (
+        <div className="workflow-backlog-filter" role="status">
+          <span>{filtered.stage ? `Etapa · ${filtered.stage.label}` : filtered.message}</span>
+          <Button onClick={onClearWorkflowStage}>Ver todo el trabajo</Button>
+          {summary.snapshot?.status === 'read_error' && (
+            <Button onClick={summary.refresh}>Reintentar</Button>
+          )}
+          {filtered.stage && items.length === 0 && (
+            <p>
+              Sin tareas en esta etapa. {filtered.stage.featureKeys.length}{' '}
+              {filtered.stage.featureKeys.length === 1 ? 'funcionalidad' : 'funcionalidades'}.
+            </p>
+          )}
+        </div>
+      )}
       <p>
         Consulta las tareas y sus decisiones pendientes. Abre una tarea para ver el detalle o pedir
         un cambio.
@@ -297,14 +329,14 @@ export function BacklogPanel({
             </div>
           )}
 
-          {board.items.length === 0 && (
+          {board.items.length === 0 && !workflowStage && (
             <p className="ui-info">
               {board.sources.workStore
                 ? 'Aún no hay tareas. Crea una idea y aprueba su plan para empezar.'
                 : 'Aún no hay tareas. Aparecerán cuando los agentes empiecen una ronda de trabajo.'}
             </p>
           )}
-          {board.summary && (
+          {board.summary && !workflowStage && (
             <div className="backlog-epics" data-testid="epic-progress">
               {Object.entries(board.summary.byEpic).map(([epic, count]) => (
                 <span key={epic} className="backlog-epic">
@@ -335,7 +367,7 @@ export function BacklogPanel({
                   <details
                     key={g.id}
                     className="flex flex-col gap-4"
-                    open={showDone}
+                    open={showDone || workflowStage !== null}
                     onToggle={(e) => setShowDone(e.currentTarget.open)}
                   >
                     <summary className="text-sm cursor-pointer">{heading}</summary>
@@ -356,7 +388,7 @@ export function BacklogPanel({
             })}
           </div>
 
-          {board.recent.length > 0 && (
+          {board.recent.length > 0 && !workflowStage && (
             <div className="border-t-2 border-border pt-6 flex flex-col gap-4">
               <div className="text-sm">Actividad reciente</div>
               {board.recent.slice(0, 6).map((e, i) => (

@@ -5,7 +5,7 @@ import type { MessageTransport } from '../../../core/src/transport.js';
 
 export type SummaryStore =
   | { phase: 'idle' }
-  | { phase: 'loading'; projectId: string; requestId: string }
+  | { phase: 'loading'; projectId: string; requestId: string; snapshot?: ProjectSummarySnapshot }
   | { phase: 'settled'; projectId: string; snapshot: ProjectSummarySnapshot };
 
 export function applyProjectSummary(
@@ -38,9 +38,10 @@ export function setProjectSummaryStore(next: SummaryStore): void {
 export function requestProjectSummary(
   sender: Pick<MessageTransport, 'send'>,
   projectId: string,
+  snapshot?: ProjectSummarySnapshot,
 ): void {
   const requestId = `summary-${++sequence}`;
-  setProjectSummaryStore({ phase: 'loading', projectId, requestId });
+  setProjectSummaryStore({ phase: 'loading', projectId, requestId, snapshot });
   sender.send({ type: 'requestProjectSummary', projectId, requestId });
 }
 

@@ -398,12 +398,15 @@ export async function readFeaturesSource(
     designs: read('technical_designs', 'feature_key'),
     tasks: read(
       'tasks',
-      'key, branch, feature_key, status, declaration, version, review_ref, priority, blocked_reason, updated_at',
+      'key, branch, feature_key, status, declaration, version, review_ref, priority, blocked_reason, updated_at, agent_role',
     ),
     runs: read('feature_runs', 'feature_key, state, updated_at'),
     decisions: read('human_decisions', 'key, task_key, escalation, decided_at'),
-    executions: read('executions', 'task_key, agent_role, task_version, started_at'),
-    events: read('domain_events', 'task_key, from_status, to_status, created_at'),
+    executions: read(
+      'executions',
+      'task_key, agent_role, task_version, started_at, session_id, tree_closed_at',
+    ),
+    events: read('domain_events', 'task_key, from_status, to_status, task_version, created_at'),
     ledger: db
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
       .get()

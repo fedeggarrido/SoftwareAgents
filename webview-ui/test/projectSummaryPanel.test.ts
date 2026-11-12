@@ -2,7 +2,12 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProjectSummary, ProjectSummarySnapshot } from '../../core/src/messages.js';
+import type {
+  ProjectSummary,
+  ProjectSummarySnapshot,
+  ServerMessage,
+} from '../../core/src/messages.js';
+import { PROJECT_SUMMARY_EVENT_DELAY_MS, PROJECT_SUMMARY_REFRESH_MS } from '../src/constants.js';
 import { emptyExecutorStore, setExecutorStore } from '../src/office/executorStore.js';
 import {
   applyProjectSummary,
@@ -16,6 +21,7 @@ const lifecycle = vi.hoisted(() => ({
   effects: [] as Array<() => void | (() => void)>,
   send: vi.fn(),
   connection: 'connected',
+  listeners: new Set<(message: ServerMessage) => void>(),
 }));
 vi.mock('../src/transport/index.js', () => ({
   transport: {
@@ -24,7 +30,10 @@ vi.mock('../src/transport/index.js', () => ({
       return lifecycle.connection;
     },
     onStateChange: () => () => {},
-    onMessage: () => () => {},
+    onMessage: (listener: (message: ServerMessage) => void) => {
+      lifecycle.listeners.add(listener);
+      return () => lifecycle.listeners.delete(listener);
+    },
   },
 }));
 vi.mock('react', async (original) => ({
@@ -39,6 +48,7 @@ const summary = (): ProjectSummary => ({
   name: 'Pedidos',
   goals: [],
   features: [],
+  workflow: [],
   milestones: [],
   deliveries: [],
   decisions: [],
@@ -77,9 +87,71 @@ afterEach(() => {
   lifecycle.connection = 'connected';
   lifecycle.effects = [];
   lifecycle.send.mockClear();
+  lifecycle.listeners.clear();
+  vi.useRealTimers();
 });
 
 describe('summary read lifecycle', () => {
+  it('refreshes through push events and reconciles file changes while retaining the current snapshot', async () => {
+    vi.useFakeTimers();
+    setExecutorStore({
+      ...emptyExecutorStore(),
+      state: {
+        type: 'executorState',
+        projectId: 'project',
+        executors: [],
+        sequence: 1,
+        canManage: false,
+        revision: 'one',
+        observedAt: 0,
+        configurationStatus: 'ready',
+      },
+    });
+    const hookPath = '../src/office/useProjectSummary.js';
+    const { useProjectSummary } = await import(hookPath);
+    useProjectSummary(true);
+    const cleanups = lifecycle.effects.map((effect) => effect());
+    const current = getProjectSummaryStore();
+    if (current.phase !== 'loading') throw new Error('Expected pending summary');
+    for (const listener of lifecycle.listeners)
+      listener(snapshot({ requestId: current.requestId }));
+    for (const listener of lifecycle.listeners)
+      listener({
+        type: 'featuresSnapshot',
+        projectId: 'other',
+        requestId: 'other',
+        status: 'empty',
+        reason: null,
+        features: [],
+      });
+    vi.advanceTimersByTime(PROJECT_SUMMARY_EVENT_DELAY_MS);
+    expect(lifecycle.send).toHaveBeenCalledTimes(1);
+    for (const listener of lifecycle.listeners)
+      listener({
+        type: 'featuresSnapshot',
+        projectId: 'project',
+        requestId: 'features',
+        status: 'empty',
+        reason: null,
+        features: [],
+      });
+    vi.advanceTimersByTime(PROJECT_SUMMARY_EVENT_DELAY_MS);
+    expect(lifecycle.send).toHaveBeenCalledTimes(2);
+    expect(getProjectSummaryStore()).toMatchObject({
+      phase: 'loading',
+      snapshot: { projectId: 'project' },
+    });
+    const pending = getProjectSummaryStore();
+    if (pending.phase !== 'loading') throw new Error('Expected refresh');
+    for (const listener of lifecycle.listeners)
+      listener(snapshot({ requestId: pending.requestId }));
+    vi.advanceTimersByTime(PROJECT_SUMMARY_REFRESH_MS);
+    expect(lifecycle.send).toHaveBeenCalledTimes(3);
+    for (const cleanup of cleanups) cleanup?.();
+    vi.advanceTimersByTime(PROJECT_SUMMARY_REFRESH_MS);
+    expect(lifecycle.send).toHaveBeenCalledTimes(3);
+    expect(lifecycle.listeners.size).toBe(0);
+  });
   it('rejects other Projects, old requests and responses arriving after timeout', () => {
     const state = loading();
     expect(applyProjectSummary(state, snapshot({ projectId: 'other' }))).toBe(state);

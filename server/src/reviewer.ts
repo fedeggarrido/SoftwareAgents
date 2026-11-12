@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import * as contract from '../../core/schemas/review-report.schema.json';
 import type { NewHumanDecision } from '../../core/src/humanDecision.js';
 import type { ProjectConfig } from '../../core/src/project.js';
-import type { ReviewReport } from '../../core/src/reviewReport.js';
+import type { ReviewPass, ReviewReport } from '../../core/src/reviewReport.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { type DeveloperRequest, developerRequest, isDeveloperTest } from './developer.js';
 import { evalGit } from './evalTasks.js';
@@ -18,7 +18,20 @@ import { hasCurrentApproval } from './taskRebaseHistory.js';
 import { isExecutedTest } from './testRoots.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
 
-const validateReport = compileSchema<ReviewReport>(contract);
+// Stored audit fields are runtime-owned. Models can only submit content fields.
+const { originalReport, runtimeNotes, passes, ...contentProperties } = contract.properties;
+const { downgradeReasons, ...findingProperties } = contentProperties.findings.items.properties;
+const modelContract = {
+  ...contract,
+  properties: {
+    ...contentProperties,
+    findings: {
+      ...contentProperties.findings,
+      items: { ...contentProperties.findings.items, properties: findingProperties },
+    },
+  },
+};
+const validateReport = compileSchema<ReviewReport>(modelContract);
 
 export interface ReviewerRequest extends DeveloperRequest {
   reviewRef: ReviewRef;
@@ -148,7 +161,11 @@ export function reviewerRequest(
   };
 }
 
-export function reviewerBrief(input: ReviewerRequest, errors: string[] = []): string {
+export function reviewerBrief(
+  input: ReviewerRequest,
+  errors: string[] = [],
+  pass: ReviewPass = 'single',
+): string {
   return JSON.stringify({
     ...input,
     taskTests: (input.changedTestFiles ?? input.files)
@@ -159,7 +176,16 @@ export function reviewerBrief(input: ReviewerRequest, errors: string[] = []): st
       })),
     testExecutionRule:
       'Request changes if any taskTests entry has executed=false. This flag is calculated by the runtime from test discovery configuration; do not infer or override it.',
-    contract,
+    contract: modelContract,
+    reviewPass: pass,
+    passRule: {
+      single: 'Review all thermos categories.',
+      bugs_security:
+        'Independently review the diff, prioritizing regressions and security. Include any supported blocking finding. The runtime may use this as the single review if the additional pass is unavailable.',
+      quality_structure:
+        'Independently review missed simplification, branching growth, boundaries, types, size and legibility. You have no access to the other pass. Trace each finding end to end.',
+    }[pass],
+    categoryRule: 'Set category to the thermos category of each finding.',
     evidenceRule:
       'Every blocker/major requires a line in a changed file and concrete evidence (reproduction, input and incorrect output, or failing test). Unsupported findings are downgraded by the runtime.',
     validationErrors: errors,

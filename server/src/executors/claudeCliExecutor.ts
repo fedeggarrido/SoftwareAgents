@@ -139,10 +139,8 @@ export class ClaudeCliExecutor implements Executor {
       req.taskData ?? { task: { key: req.taskKey, content: req.prompt } },
     );
     if (!Number.isFinite(req.timeoutMin) || req.timeoutMin <= 0) throw new Error('Invalid timeout');
-    if (
-      req.researchBudget &&
-      (!Number.isFinite(req.researchBudget.maxCostUsd) || req.researchBudget.maxCostUsd <= 0)
-    )
+    const costBudget = req.costBudget ?? req.researchBudget;
+    if (costBudget && (!Number.isFinite(costBudget.maxCostUsd) || costBudget.maxCostUsd <= 0))
       throw new Error('Invalid research budget');
     const sessionId = randomUUID();
     const containment: ContainmentContext = {
@@ -265,9 +263,7 @@ export class ClaudeCliExecutor implements Executor {
             '--disable-slash-commands',
             ...(req.model ? ['--model', req.model] : []),
             ...(req.effort ? ['--effort', req.effort] : []),
-            ...(req.researchBudget
-              ? ['--max-budget-usd', String(req.researchBudget.maxCostUsd)]
-              : []),
+            ...(costBudget ? ['--max-budget-usd', String(costBudget.maxCostUsd)] : []),
           ];
           const configEnvironment = claudeConfigEnvironment(options.configDir);
           const environment =

@@ -167,6 +167,72 @@ describe('ReviewReport contract', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('Reviewer via worker (fake CLIs)', () => {
+  it.each(['two-pass', 'second-quota'])(
+    'runs independent passes with an auditable outcome (%s)',
+    async (mode) => {
+      await prepare();
+      configure(['claude'], true);
+      const configFile = path.join(root, '.pixel-agents/config.json');
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      config.projects.test.telemetry = { prices: { 'review-model': { input: 1, output: 1 } } };
+      fs.writeFileSync(configFile, JSON.stringify(config));
+      const store = await storeFor();
+      try {
+        // Pin a measured Developer baseline. These entries belong exclusively to this disposable fixture.
+        const db = new DatabaseSync(path.join(repo, '.git/softwareagents/work.sqlite3'));
+        try {
+          for (const entry of store.listUsage().filter((entry) => entry.taskKey === task))
+            db.prepare(
+              'UPDATE usage_ledger SET body = ? WHERE project_id = ? AND execution_key = ?',
+            ).run(JSON.stringify({ ...entry, costUsd: 1 }), 'test', entry.executionId);
+        } finally {
+          db.close();
+        }
+        await review(mode);
+        const reports = store.getTask(task)!.review_reports!;
+        expect(reports).toHaveLength(1);
+        const report = reports[0].report;
+        const launchesData = fs
+          .readFileSync(launches, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(launchesData.map((launch) => launch.data.reviewPass)).toEqual([
+          'bugs_security',
+          'quality_structure',
+        ]);
+        expect(launchesData[1].data).not.toHaveProperty('passes');
+        expect(launchesData[1].args).toContain('--max-budget-usd');
+        expect(report.passes?.[0].originalReport.verdict).toBe('approve');
+        if (mode === 'two-pass') {
+          expect(report.passes).toHaveLength(2);
+          expect(report.verdict).toBe('request_changes');
+          expect(report.findings).toContainEqual(
+            expect.objectContaining({ category: 'types', severity: 'major' }),
+          );
+        } else {
+          expect(report.passes).toHaveLength(1);
+          expect(report.verdict).toBe('approve');
+          expect(report.runtimeNotes?.join(' ')).toContain('quota');
+        }
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it('records the single-pass fallback when cost cannot be measured', async () => {
+    await prepare();
+    await review();
+    const store = await storeFor();
+    try {
+      const report = store.getTask(task)!.review_reports![0].report;
+      expect(report.passes).toHaveLength(1);
+      expect(report.runtimeNotes?.join(' ')).toContain('cost cap');
+    } finally {
+      store.close();
+    }
+  });
   describe('human task rebase', () => {
     // Build the approved-task fixture separately; the rebase/rework assertions retain
     // their 90 s budget even on slow Windows hosts with real nested verifiers.

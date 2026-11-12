@@ -25,6 +25,8 @@ export interface ExecutionRequest {
   timeoutMin: number;
   /** Runtime-owned API-price allowance; a response may overshoot. Never task content. */
   researchBudget?: { maxCostUsd: number };
+  /** Runtime allowance for an additional review pass, enforced by the CLI and usage monitor. */
+  costBudget?: { maxCostUsd: number };
   /** Trusted runtime callback: durable supervisor registration before CLI launch. */
   registerProcess?: (pid: number) => void | Promise<void>;
   /** Persist CLI closure before releasing the registered supervisor root. */
@@ -42,6 +44,7 @@ export function snapshotExecutionRequest(req: ExecutionRequest): ExecutionReques
     agentSpec: req.agentSpec ? structuredClone(req.agentSpec) : undefined,
     taskData: req.taskData ? structuredClone(req.taskData) : undefined,
     researchBudget: req.researchBudget ? { ...req.researchBudget } : undefined,
+    costBudget: req.costBudget ? { ...req.costBudget } : undefined,
   };
 }
 

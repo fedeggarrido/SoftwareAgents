@@ -93,6 +93,21 @@ para lecturas puntuales.
   explícitos de Sessions, sin adivinarlas por actividad ni almacenar o mostrar
   prompts. Estas etiquetas visuales no son AgentSpecs ni permisos.
 
+- `reviewPasses.ts` y `workerReview.ts` (SA-155) usan `DagTask.size` para un pase
+  en S y dos independientes en M/L. Validación y downgrades preceden a la síntesis
+  por archivo, línea y categoría, conservando la mayor severidad y cada original
+  en `passes`. La segunda Execution reutiliza admisión, cuota, slots y catálogo.
+  Reserva el coste del primer pase dentro del 20 % del coste base observado de la
+  tarea, descontando pases adicionales anteriores y respetando budgets. Costes
+  desconocidos o admisión insuficiente quedan como fallback en `runtimeNotes`.
+  Claude recibe `--max-budget-usd` y el runtime cancela al alcanzar el límite
+  observado. La respuesta en curso puede excederlo, limitación del Executor actual.
+- `projectQualityLint.ts` (SA-155) añade lint a los scripts cambiados del Developer.
+  `prepareProject` crea manifiesto y Brain. El pase adicional usa configuración
+  aislada y conserva el ESLint del proyecto. No-double-cast y no-explicit-any son
+  errores, assertion-safety y max-lines (1000) son avisos. Se distribuyen los assets
+  `eslint-rules/` junto al CLI y ESLint/typescript-eslint como dependencias de runtime.
+
 ### Paneles (`webview-ui/src/components/`)
 
 - `FeaturePlanDialog.tsx` y `office/featurePlanController.ts` (SA-111) abren «Ver

@@ -39,6 +39,9 @@ function copyAgentTemplates() {
   fs.cpSync(path.join(__dirname, 'agents'), path.join(__dirname, 'dist', 'agents'), {
     recursive: true,
   });
+  fs.cpSync(path.join(__dirname, 'eslint-rules'), path.join(__dirname, 'dist', 'eslint-rules'), {
+    recursive: true,
+  });
 }
 
 /**
@@ -106,7 +109,7 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'dist/extension.js',
-    external: ['vscode'],
+    external: ['vscode', 'eslint/package.json'],
     define: versionDefine,
     logLevel: 'silent',
     plugins: [
@@ -153,7 +156,13 @@ async function buildCli() {
     sourcemap: !production,
     platform: 'node',
     outfile: 'dist/cli.js',
-    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors'],
+    external: [
+      'fastify',
+      '@fastify/websocket',
+      '@fastify/static',
+      '@fastify/cors',
+      'eslint/package.json',
+    ],
     define: versionDefine,
     logLevel: 'silent',
   });

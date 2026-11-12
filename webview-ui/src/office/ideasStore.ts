@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react';
 
 import type {
+  ExtractIdeaDocumentResult,
   IdeaAnswer,
+  IdeaDocumentError,
   IdeaErrorCode,
   IdeasSnapshot,
   PrepareProjectResult,
@@ -19,7 +21,13 @@ export interface IdeasStore {
   uncertain: boolean;
   preparationPending?: string;
   preparationResult?: PrepareProjectResult;
+  document?: IdeaDocumentState;
 }
+
+export type IdeaDocumentState =
+  | { phase: 'reading' | 'extracting'; requestId: string; projectId: string }
+  | { phase: 'ready'; result: ExtractIdeaDocumentResult }
+  | { phase: 'error'; errorCode: IdeaDocumentError };
 
 export const emptyIdeasStore = (): IdeasStore => ({
   requestId: null,
@@ -47,13 +55,21 @@ export function applyIdeasSnapshot(store: IdeasStore, message: IdeasSnapshot): I
           uncertain: !!store.pending,
           preparationPending: undefined,
           preparationResult: undefined,
+          document: undefined,
         }
       : {}),
   };
 }
 
 export function beginIdeaSubmit(store: IdeasStore, requestId: string): IdeasStore {
-  if (!store.snapshot?.canSubmit || !store.snapshot.projectId || store.pending || store.uncertain)
+  if (
+    !store.snapshot?.canSubmit ||
+    !store.snapshot.projectId ||
+    store.pending ||
+    store.uncertain ||
+    store.document?.phase === 'reading' ||
+    store.document?.phase === 'extracting'
+  )
     return store;
   return { ...store, pending: { requestId, projectId: store.snapshot.projectId }, result: null };
 }

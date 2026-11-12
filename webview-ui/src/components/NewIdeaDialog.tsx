@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { ideaDocumentErrorText } from '../../../core/src/ideaDocument.js';
 import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../../core/src/ideaInterview.js';
 import type { IdeaAnswer, IdeaAnswerChoice } from '../../../core/src/messages.js';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../../../core/src/projectPreparation.js';
 import { IDEA_TEXTAREA_ROWS } from '../constants.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
+import { sendIdeaDocument } from '../office/ideaDocument.js';
 import {
   getIdeasStore,
   ideaDialogState,
@@ -29,6 +31,7 @@ import { transport } from '../transport/index.js';
 import { IdeaCommand } from './IdeaCommand.js';
 import { IdeaNextSteps } from './IdeaNextSteps.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -53,7 +56,8 @@ export function NewIdeaDialog({
   const [copyFeedback, setCopyFeedback] = useState('');
   useEffect(() => {
     // A new dialog can compose another idea, but never replay an uncertain submission.
-    setIdeasStore({ ...getIdeasStore(), result: null });
+    setIdeasStore({ ...getIdeasStore(), result: null, document: undefined });
+    return () => setIdeasStore({ ...getIdeasStore(), document: undefined });
   }, []);
   const { store, connection } = useIdeasConnection(true);
   const currentProjectId = store.snapshot?.projectId ?? store.snapshot?.preparation?.id ?? null;
@@ -95,7 +99,20 @@ export function NewIdeaDialog({
       setConfirmDiscard(consult ? 'consult' : 'close');
     else finishClose(consult);
   };
-  const editable = state !== 'saving' && state !== 'saved';
+  const documentLoading =
+    store.document?.phase === 'reading' || store.document?.phase === 'extracting';
+  const editable = state !== 'saving' && state !== 'saved' && !documentLoading;
+  useEffect(() => {
+    const document = store.document;
+    if (document?.phase !== 'ready') return;
+    if (
+      !projectMismatch &&
+      document.result.projectId === currentProjectId &&
+      document.result.text !== null
+    )
+      setText(document.result.text);
+    setIdeasStore({ ...getIdeasStore(), document: undefined });
+  }, [store.document, currentProjectId, projectMismatch]);
   const canSave =
     !projectMismatch &&
     !!draftProjectId &&
@@ -297,6 +314,32 @@ export function NewIdeaDialog({
             </p>
             {step === 0 && (
               <>
+                <label htmlFor="new-idea-document">
+                  Adjuntar documento (PDF, MD o TXT, hasta 5 MB)
+                </label>
+                <input
+                  id="new-idea-document"
+                  type="file"
+                  accept=".pdf,.md,.txt"
+                  className="idea-document-input"
+                  disabled={!canSave || documentLoading}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file && canSave) void sendIdeaDocument(file, transport);
+                  }}
+                />
+                {documentLoading && <p role="status">Extrayendo texto del documento…</p>}
+                {store.document?.phase === 'error' && (
+                  <div role="alert">
+                    <StatusChip state="FAILED" />
+                    <p>{ideaDocumentErrorText(store.document.errorCode)}</p>
+                  </div>
+                )}
+                <p>
+                  Revisa y edita el texto antes de guardar. La idea y la entrevista admiten hasta 1
+                  MiB.
+                </p>
                 <label htmlFor="new-idea-text">Tu idea</label>
                 <textarea
                   id="new-idea-text"

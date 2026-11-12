@@ -16,6 +16,7 @@ export type ServerMessage =
   | FeatureApprovalResult
   | IdeasSnapshot
   | SubmitIdeaResult
+  | ExtractIdeaDocumentResult
   | PrepareProjectResult
   | FeaturesSnapshot
   | AuditLogSnapshot
@@ -66,6 +67,7 @@ export type ClientMessage =
   | ApproveFeaturePlan
   | RequestIdeas
   | SubmitIdea
+  | ExtractIdeaDocument
   | PrepareProject
   | RequestFeatures
   | RequestAuditLog
@@ -389,6 +391,25 @@ export interface SubmitIdeaResult {
 }
 
 export type IdeaSubmitStatus = 'saved' | 'rejected' | 'failed';
+
+export interface ExtractIdeaDocumentResult {
+  type: 'extractIdeaDocumentResult';
+  requestId: string;
+  projectId: string;
+  text: string | null;
+  errorCode: IdeaDocumentError | null;
+}
+
+export type IdeaDocumentError =
+  | 'denied'
+  | 'unsupported_adapter'
+  | 'unknown_project'
+  | 'invalid_request'
+  | 'unavailable'
+  | 'document_too_large'
+  | 'unsupported_type'
+  | 'corrupt_file'
+  | 'no_text';
 
 export interface PrepareProjectResult {
   type: 'prepareProjectResult';
@@ -1172,6 +1193,14 @@ export type IdeaQuestionId =
   | 'riesgos';
 
 export type IdeaAnswerChoice = 'answer' | 'decide';
+
+export interface ExtractIdeaDocument {
+  type: 'extractIdeaDocument';
+  requestId: string;
+  projectId: string;
+  name: string;
+  base64: string;
+}
 
 export interface PrepareProject {
   type: 'prepareProject';

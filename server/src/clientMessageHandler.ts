@@ -49,6 +49,7 @@ import { featureIngressActor } from './featureIngress.js';
 import { handleFeaturePlanMessage } from './featurePlan.js';
 import { readFeaturesView } from './featuresView.js';
 import { answerProjectDecision } from './humanDecisions.js';
+import { handleIdeaDocumentMessage } from './ideaDocument.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -174,6 +175,14 @@ export function handleClientMessage(
     case 'requestIdeas':
     case 'submitIdea':
       handleIdeaMessage(msg, send, ctx.privileged === true, ctx.ideasSupported !== false);
+      break;
+    case 'extractIdeaDocument':
+      void handleIdeaDocumentMessage(
+        msg,
+        send,
+        ctx.privileged === true,
+        ctx.ideasSupported !== false,
+      );
       break;
 
     case 'webviewReady':

@@ -24,10 +24,11 @@ import { rebaseFeatureTask } from '../taskRebase.js';
 import { runWorker, type WorkerOptions } from '../worker.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
+import { runFeatureIdeaCommand } from './featureIdea.js';
 import { taskPath } from './taskFiles.js';
 
 const USAGE =
-  'Usage: pixel-agents feature run <FEAT-ID> [--request <file.md>] [--json] | spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
+  'Usage: pixel-agents feature idea --from <file.pdf|md|txt> [--confirm] | run <FEAT-ID> [--request <file.md>] [--json] | spec <FEAT-ID> (--request <file.md> | --answers <file.md>) | design <FEAT-ID> [--answers <file.md>] | develop <FEAT-ID> [--task <KEY>] | review <FEAT-ID> [--task <KEY>] | qa <FEAT-ID> [--task <KEY>] | rebase <FEAT-ID> --task <KEY> | approve <FEAT-ID> | show <FEAT-ID> [--json]';
 
 export { featureIngressActor } from '../featureIngress.js';
 
@@ -111,6 +112,7 @@ export async function runFeatureCommand(
   log = console.log,
   workerOptions: Pick<WorkerOptions, 'binaryArgs' | 'probe'> = {},
 ): Promise<void> {
+  if (argv[0] === 'idea') return runFeatureIdeaCommand(argv, cwd, log);
   if (
     ['approve', 'rebase'].includes(argv[0]) ||
     (['spec', 'design'].includes(argv[0]) && argv.includes('--answers')) ||

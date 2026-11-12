@@ -43,7 +43,8 @@
     "dist/webview/",
     "icon.png",
     "agents/",
-    "dist/agents/"
+    "dist/agents/",
+    "dist/eslint-rules/"
   ],
   "contributes": {
     "commands": [
@@ -136,7 +137,6 @@
     "allure-commandline": "^2.38.1",
     "allure-playwright": "^3.7.1",
     "esbuild": "^0.28.0",
-    "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "husky": "^9.1.7",
@@ -147,8 +147,7 @@
     "prettier": "^3.8.1",
     "semver": "^7.8.5",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.54.0"
+    "typescript": "^5.9.3"
   },
   "lint-staged": {
     "adapters/vscode/**/*.ts": "eslint --fix",
@@ -163,7 +162,9 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.2.0",
-    "fastify": "^5.8.5"
+    "eslint": "^10.0.3",
+    "fastify": "^5.8.5",
+    "typescript-eslint": "^8.54.0"
   },
   "overrides": {
     "jsonpath-plus": "^10.4.0",

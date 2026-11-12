@@ -18,7 +18,20 @@
           "line": { "type": "integer", "minimum": 1 },
           "evidence": { "type": "string", "maxLength": 4000 },
           "summary": { "type": "string", "minLength": 1, "pattern": "\\S" },
-          "suggestion": { "type": "string", "minLength": 1, "pattern": "\\S" }
+          "suggestion": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "category": {
+            "enum": [
+              "regression",
+              "security",
+              "simplification",
+              "branching",
+              "boundaries",
+              "types",
+              "size",
+              "legibility"
+            ]
+          },
+          "downgradeReasons": { "type": "array", "items": { "type": "string" } }
         }
       }
     },
@@ -31,6 +44,24 @@
         "properties": {
           "ac": { "type": "string", "minLength": 1 },
           "status": { "enum": ["covered", "missing", "partial"] }
+        }
+      }
+    },
+    "runtimeNotes": { "type": "array", "items": { "type": "string" } },
+    "originalReport": { "$ref": "#" },
+    "passes": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pass", "executionId", "executor", "originalReport", "report"],
+        "properties": {
+          "pass": { "enum": ["single", "bugs_security", "quality_structure"] },
+          "executionId": { "type": "string", "minLength": 1 },
+          "executor": { "enum": ["claude", "codex"] },
+          "originalReport": { "$ref": "#" },
+          "report": { "$ref": "#" }
         }
       }
     }

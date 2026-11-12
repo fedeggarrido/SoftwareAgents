@@ -360,6 +360,12 @@ export interface TierInputs {
   /** Internal cascade attempt: exact tier, no quota downgrade or executor fallback. */
   cascadeTier?: ModelTier;
 }
+
+/** Canonical replacement of missing estimates, shared by tier selection and review policy. */
+export function effectiveWorkInputs(input: TierInputs, rule?: TierRule) {
+  if (input.workType && input.size) return { workType: input.workType, size: input.size };
+  return rule?.fallback ?? { workType: 'implementation' as const, size: 'M' as const };
+}
 export interface TierSelection {
   tier: ModelTier | null;
   requestedTier: ModelTier | null;
@@ -396,7 +402,7 @@ export function initialModelTier(
   const fallback = !input.workType || !input.size;
   if (base === undefined)
     throw new ModelTierConfigError(`modelTiers rule: missing capabilityClass ${capability}`);
-  const effective = fallback ? (rule.fallback ?? { workType: 'implementation', size: 'M' }) : input;
+  const effective = effectiveWorkInputs(input, rule);
   const score =
     base + rule.workTypeWeights[effective.workType!] + rule.sizeWeights[effective.size!];
   const requested =

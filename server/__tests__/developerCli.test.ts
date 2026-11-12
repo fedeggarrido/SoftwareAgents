@@ -381,7 +381,7 @@ describe('Developer diff guard', () => {
         base,
         { failures: [], autoFix: () => {} },
       ),
-    ).toEqual(['pass', 'pass', 'pass', 'pass', 'pass']);
+    ).toEqual(['pass', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
     expect(fs.readFileSync(path.join(directory, file), 'utf8')).toBe(
       "import a from 'a';\nimport z from 'z';\nexport const answer = 1;\n",
     );

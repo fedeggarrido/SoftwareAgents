@@ -4,20 +4,15 @@ import { execFileSync } from 'child_process';
 import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parse } from 'yaml';
 
 import * as agentSchema from '../../core/schemas/agent-spec.schema.json';
 import type { AgentSpec } from '../../core/src/agentSpec.js';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { CascadeVerifier, ModelTier } from '../../core/src/modelTier.js';
 import type { ProjectConfig } from '../../core/src/project.js';
+import type { ReviewReport } from '../../core/src/reviewReport.js';
 import type { TestReport } from '../../core/src/testReport.js';
-import {
-  compileAgent,
-  executorSupportsRole,
-  ROLE_PROFILES,
-  TOOL_POLICY_VERSION,
-} from './agentCompiler.js';
+import { compileAgent, executorSupportsRole, TOOL_POLICY_VERSION } from './agentCompiler.js';
 import { extractJsonObject } from './agentOutput.js';
 import {
   architectArtifacts,
@@ -44,6 +39,7 @@ import {
   EXECUTOR_TRANSIENT_MAX_BACKOFF_MS,
   EXECUTOR_TRANSIENT_RETRIES,
   REVIEW_MAX_REWORK_ROUNDS,
+  REVIEW_QUALITY_PASS_MARKER,
   VALIDATION_AUDIT_MAX_ERROR_CHARS,
   VALIDATION_AUDIT_MAX_ERRORS,
   VERIFIER_STYLE_RETRIES,
@@ -133,7 +129,7 @@ import {
   validateTestReport,
 } from './qa.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
-import { type MachineQuotaPolicy, type QuotaDecision, quotaGate } from './quotaGate.js';
+import { type QuotaDecision, quotaGate } from './quotaGate.js';
 import {
   guardRequirementsWrites,
   nextRequirementsVersion,
@@ -160,6 +156,7 @@ import {
   reviewerRequest,
   validateReview,
 } from './reviewer.js';
+import { ReviewCycle, reviewPassAllowance, reviewPassSelection } from './reviewPasses.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { taskModelInputs } from './taskModelInputs.js';
@@ -180,6 +177,20 @@ import {
 } from './verifierInfrastructure.js';
 import { WorkerLifecycle } from './workerLifecycle.js';
 import { clearWorkerOAuthLock } from './workerOAuthLock.js';
+import { persistWorkerReview } from './workerReview.js';
+import {
+  acquireTaskLock,
+  failureDiagnostic,
+  legacyMachinePolicy,
+  loadWorkerAgentSpec,
+  workerCommitSubject,
+} from './workerSupport.js';
+export {
+  acquireTaskLock,
+  loadWorkerAgentSpec,
+  parseWorkerArgs,
+  workerCommitSubject,
+} from './workerSupport.js';
 import { publishWorkerResult } from './workerPublication.js';
 import { openWorkStore } from './workstore/SqliteWorkStore.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -189,58 +200,6 @@ export interface WorkerArgs {
   brief?: string;
   executor?: 'claude' | 'codex';
   selectExecutor?: boolean;
-}
-
-/** Use the brief heading as written, with the task key only in the commit scope. */
-export function workerCommitSubject(task: string, brief: string): string {
-  const heading = (brief.split(/\r?\n/).find((line) => line.trim()) ?? '')
-    .trim()
-    .replace(/^#+\s*/, '')
-    .replace(/[\x00-\x1f\x7f]/g, ' ');
-  const summary = heading
-    .replace(new RegExp(`^${task}(?=\\s|[·:—–-]|$)\\s*[·:—–-]?\\s*`, 'i'), '')
-    .trim()
-    .slice(0, 100);
-  return `feat(${task}): ${summary || 'implementar tarea supervisada'}`;
-}
-
-export function parseWorkerArgs(argv: string[]): WorkerArgs {
-  if (argv[0] !== 'run')
-    throw new CliUsageError(
-      'Usage: pixel-agents worker run --task SA-### [--executor claude|codex] [--brief <file>]',
-    );
-  const values: Record<string, string> = {};
-  let selection = false;
-  for (let i = 1; i < argv.length; i += 2) {
-    const key = argv[i];
-    if (key === '--select-executor' && !selection) {
-      selection = true;
-      i--;
-      continue;
-    }
-    const value = argv[i + 1];
-    if (
-      !['--task', '--brief', '--executor'].includes(key) ||
-      !value ||
-      value.startsWith('--') ||
-      values[key]
-    )
-      throw new CliUsageError('Expected unique --task, --brief and --executor values');
-    values[key] = value;
-  }
-  if (
-    !/^SA-\d{3,}$/.test(values['--task'] ?? '') ||
-    (values['--executor'] && !['claude', 'codex'].includes(values['--executor']))
-  )
-    throw new CliUsageError(
-      'Expected --task SA-###, optional --executor claude|codex and --brief <file>',
-    );
-  return {
-    task: values['--task'],
-    ...(values['--brief'] ? { brief: values['--brief'] } : {}),
-    ...(values['--executor'] ? { executor: values['--executor'] as 'claude' | 'codex' } : {}),
-    ...(selection ? { selectExecutor: true } : {}),
-  };
 }
 
 function git(cwd: string, args: string[]): string {
@@ -267,30 +226,6 @@ function requireGitIdentity(cwd: string): void {
       'worker run requires valid Git author and committer identity; configure it before launching',
     );
   }
-}
-
-/** Fail closed even for dead owners: an executor child may still be alive.
- * The operator verifies both processes before removing a stale lock. */
-export function acquireTaskLock(commonDirectory: string, task: string): () => void {
-  if (!/^SA-\d{3,}$/.test(task)) throw new Error('Invalid task key');
-  const file = resolveInside(commonDirectory, `softwareagents/locks/${task}.lock`);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  let fd: number;
-  try {
-    fd = fs.openSync(file, 'wx', 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    throw new Error(
-      `Task locked: ${file}. Verify owner PID and executor child have stopped before removing it.`,
-    );
-  }
-  try {
-    fs.writeFileSync(fd, String(process.pid));
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  return () => fs.unlinkSync(file);
 }
 
 export interface WorkerOptions {
@@ -324,25 +259,7 @@ export interface WorkerOptions {
   };
 }
 
-/** Manual runs without a quota policy keep conservative defaults (SA-036). */
-function legacyMachinePolicy(snapshot: SelectionSnapshot, executor: 'claude' | 'codex') {
-  snapshot.machinePolicy ??= { quotaThresholds: {}, maxConcurrent: {} };
-  snapshot.machinePolicy.quotaThresholds[executor] ??= 0;
-  snapshot.machinePolicy.maxConcurrent[executor] ??= 1;
-  return snapshot.machinePolicy as MachineQuotaPolicy;
-}
-
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-
-export function loadWorkerAgentSpec(file?: string, role = 'developer'): AgentSpec {
-  if (!Object.hasOwn(ROLE_PROFILES, role)) throw new CliUsageError('Unsupported task role');
-  const template = path.join(__dirname, `agents/templates/${role}.yaml`);
-  const source = path.resolve(__dirname, `../../agents/templates/${role}.yaml`);
-  return validateSchema(
-    compileSchema<AgentSpec>(agentSchema),
-    parse(fs.readFileSync(file ?? (fs.existsSync(template) ? template : source), 'utf8')),
-  );
-}
 
 export interface WorkerResult {
   branch: string;
@@ -358,28 +275,6 @@ export interface WorkerResult {
   blockedCause?: ExecutionBlock;
   evaluationSuccess?: boolean;
   evaluationVerifierFailed?: boolean;
-}
-
-/** Only fixed categories and a numeric exit code cross into Task/audit storage. */
-function failureDiagnostic(detail: string, exitCode?: number): string {
-  const category = /policy violation|containment/i.test(detail)
-    ? 'containment'
-    : /timed? ?out|timeout/i.test(detail)
-      ? 'timeout'
-      : detail.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)
-        ? 'oauth_refresh_contention'
-        : /auth|not logged in|invalid_api_key/i.test(detail)
-          ? 'auth'
-          : /spawn|ENOENT|EACCES|launch process/i.test(detail)
-            ? 'spawn'
-            : /cancel|interrupt/i.test(detail)
-              ? 'cancelled'
-              : /lease/i.test(detail)
-                ? 'lease'
-                : /worktree|git/i.test(detail)
-                  ? 'workspace'
-                  : 'executor';
-  return `category=${category}; exit_code=${Number.isSafeInteger(exitCode) ? exitCode : 'unknown'}`;
 }
 
 class WorkerExecutionError extends Error {}
@@ -922,6 +817,34 @@ async function runWorkerExecution(
   let designFiles: Map<string, string> | undefined;
   let designContext: Record<string, string | null> = {};
   let requirementsBefore: Map<string, string> | undefined;
+  const reviewCycle =
+    options.reviewer && !options.qa
+      ? new ReviewCycle(
+          reviewPassSelection({ workType: 'review', size: options.reviewer.task.size }, tierRule),
+        )
+      : undefined;
+  if (reviewCycle) {
+    taskData.task.brief = reviewerBrief(options.reviewer!, [], reviewCycle.pass);
+    compiled = compileAgent(spec, role, taskData);
+  }
+  const finishReview = async (report: ReviewReport): Promise<WorkerResult> => {
+    const binding = reviewCycle!.passes.at(-1)!;
+    const capped = await persistWorkerReview(
+      options.reviewer!,
+      config,
+      workStore!,
+      lifecycle!,
+      report,
+      binding,
+      requirementsBefore!,
+      taskData,
+      audit,
+    );
+    telemetryStatus = capped ? 'require_human' : 'ok';
+    if (capped) process.exitCode = 3;
+    log(`${args.task}: ${report.verdict} -> ${workStore!.getTask(args.task)!.status}`);
+    return { branch: tree.branch, commit: null, stat: '' };
+  };
   const featureDoc = options.requirements
     ? requirementsDocPath(config.project.brain.path, options.requirements.key)
     : undefined;
@@ -1078,7 +1001,11 @@ async function runWorkerExecution(
           undefined,
           workStore.listExecutions().filter((execution) => execution.task_key === args.task).length,
         );
-        if (reason) throw new UsageBudgetExceeded(reason);
+        if (reason) {
+          if (reviewCycle?.secondPass)
+            return await finishReview(reviewCycle.fallback(`operator budget ${reason}`));
+          throw new UsageBudgetExceeded(reason);
+        }
       }
       const inputs: TierInputs =
         verifier && levels.length ? { cascadeTier: levels[tierIndex] } : normalInputs;
@@ -1254,6 +1181,8 @@ async function runWorkerExecution(
       slot = admission?.slot;
       if (selection) log(selection.reason);
       const block = tierAdmission ? tierAdmission.selection.block : legacyBlock;
+      if (reviewCycle?.secondPass && (block || admissionGate.status === 'wait' || !slot))
+        return await finishReview(reviewCycle.fallback(`admission: ${admissionGate.reason}`));
       if (block && !slot) return await escalate(block, admissionGate, scope, workStore);
       if (admissionGate.status === 'wait' || !slot) {
         log(admissionGate.reason);
@@ -1267,6 +1196,21 @@ async function runWorkerExecution(
           quotaDecision: admissionGate,
           blockedCause: cause,
         };
+      }
+      if (reviewCycle?.secondPass) {
+        const first = workStore!.getExecution(reviewCycle.passes[0].executionId)!;
+        const model = tierSelection?.choice?.model ?? selection?.choice?.model;
+        if (
+          selectedExecutor !== 'claude' ||
+          selectedExecutor !== first.executor ||
+          !model ||
+          model !== first.model_id
+        )
+          return await finishReview(
+            reviewCycle.fallback(
+              'cost estimate cannot be reused for a different or unbound executor/model',
+            ),
+          );
       }
       // Admitted: any availability block for this scope no longer holds (SA-090).
       try {
@@ -1311,9 +1255,12 @@ async function runWorkerExecution(
           detail: JSON.stringify(reviewSelection),
         });
       const selectionReason = `${options.reviewer ? `${role}: excluded codex: code_execution_not_mediated; ` : ''}${reviewSelection ? `${options.qa ? 'QA' : 'Reviewer'} ${reviewSelection.outcome}; developer=${reviewSelection.developer}; ` : ''}${tierSelection?.reason ?? selection?.reason ?? `Explicit worker: ${selectedExecutor}`}`;
-      const tracedSelectionReason = quotaFallbackFrom
+      const selectionTrace = quotaFallbackFrom
         ? `quota fallback from ${quotaFallbackFrom}; ${selectionReason}`
         : selectionReason;
+      const tracedSelectionReason = reviewCycle?.secondPass
+        ? `${REVIEW_QUALITY_PASS_MARKER}; ${selectionTrace}`
+        : selectionTrace;
       if (quotaFallbackFrom) audit('quota_fallback_selected', { detail: tracedSelectionReason });
       if (tierSelection && reviewSelection) tierSelection.reason = tracedSelectionReason;
       if (selection && reviewSelection) selection.reason = selectionReason;
@@ -1601,7 +1548,10 @@ async function runWorkerExecution(
                 (execution) => execution.task_key === args.task && execution.key !== executionId,
               ).length,
           );
-          if (reason) throw new UsageBudgetExceeded(reason);
+          if (reason) {
+            if (reviewCycle?.secondPass) return `operator budget ${reason}`;
+            throw new UsageBudgetExceeded(reason);
+          }
         }
         const blocked = authorityBlock();
         if (blocked) return blocked;
@@ -1651,7 +1601,13 @@ async function runWorkerExecution(
             verdict ??
             `${selectedExecutor}: runtime admission is busy at spawn; inspect ${executorSlotsDirectory(selectedExecutor)}`;
       }
-      if (invalidated) return invalidatedResult(invalidated);
+      if (invalidated) {
+        if (reviewCycle?.secondPass) {
+          await workStore!.closeExecution(executionId, lifecycle!.owner);
+          return await finishReview(reviewCycle.fallback(`spawn admission: ${invalidated}`));
+        }
+        return invalidatedResult(invalidated);
+      }
       slot.markLaunching('registered_wrapper');
       telemetry.phase('execution');
       options.evaluation?.settled(undefined, false);
@@ -1687,6 +1643,7 @@ async function runWorkerExecution(
           : {}),
         worktreePath: tree.path,
         timeoutMin: options.evaluation?.timeoutMin ?? 30,
+        ...(reviewCycle?.secondPass ? { costBudget: reviewCycle.allowance } : {}),
         registerProcess: async (pid) => {
           lifecycle?.assertOwned();
           slot!.setExecutionProcess(pid);
@@ -1725,7 +1682,14 @@ async function runWorkerExecution(
               event.resultSummary.includes(CLAUDE_OAUTH_REFRESH_CONTENTION)))
         )
           oauthRefreshContention = true;
-        if (event.type === 'telemetry') telemetry.observe(event.observation);
+        if (event.type === 'telemetry') {
+          telemetry.observe(event.observation);
+          if (
+            event.observation.kind === 'usage' &&
+            reviewCycle?.observeCost(telemetry.usageAttributes, config.operator.telemetry?.prices)
+          )
+            handle.cancel();
+        }
         if (
           !options.evaluation &&
           event.type === 'rateLimit' &&
@@ -1797,6 +1761,9 @@ async function runWorkerExecution(
         await workStore!.closeExecution(executionId, lifecycle.owner);
       stopBudgetWatch();
       await persistUsage();
+      if (slotFailure) throw slotFailure;
+      if (budgetExceeded && executionFinished && reviewCycle?.secondPass)
+        return await finishReview(reviewCycle.fallback('operator execution-time budget reached'));
       if (budgetExceeded && executionFinished) throw new UsageBudgetExceeded('execution_time');
       if (
         oauthRefreshContention &&
@@ -1806,6 +1773,27 @@ async function runWorkerExecution(
         executionDiagnostic = failureDiagnostic(CLAUDE_OAUTH_REFRESH_CONTENTION, exitCode);
       if (options.requirements || options.architect || options.reviewer)
         guardRequirementsWrites(tree.path, requirementsBefore!);
+      if (
+        reviewCycle?.secondPass &&
+        !interrupted &&
+        executionFinished &&
+        (runtimeQuota || exitCode !== 0) &&
+        !executionDiagnostic?.includes('category=containment;')
+      ) {
+        if (runtimeQuota?.status === 'wait') {
+          const resetsAt = runtimeQuota.resetsAt;
+          withMachineAdmission(`${executionId}-quota`, () =>
+            recordExecutorQuota(selectedExecutor, resetsAt!, nowSeconds()),
+          );
+        }
+        return await finishReview(
+          reviewCycle.fallback(
+            runtimeQuota
+              ? 'quota rejected during second pass'
+              : 'second pass failed or reached its cost allowance',
+          ),
+        );
+      }
       if (environmentBlocked && !executionDiagnostic?.includes('category=containment;'))
         throw new VerifierInfrastructureError(
           'agent reported an environment blocker; operator retry required',
@@ -1879,7 +1867,6 @@ async function runWorkerExecution(
         withMachineAdmission(`${executionId}-quota-success`, () =>
           recordExecutorQuotaSuccess(selectedExecutor, nowSeconds()),
         );
-      if (slotFailure) throw slotFailure;
       if (
         !interrupted &&
         executionFinished &&
@@ -2028,57 +2015,45 @@ async function runWorkerExecution(
               );
               return { branch: tree.branch, commit: null, stat: '' };
             } else if (options.reviewer) {
-              const report = validateReview(requirementsOutput, options.reviewer);
-              const rounds = reviewReworkRounds(workStore!.getTask(args.task)!);
-              const capped =
-                report.verdict === 'request_changes' && rounds >= REVIEW_MAX_REWORK_ROUNDS;
-              const review = {
-                execution_id: executionId,
-                review_ref: options.reviewer.reviewRef,
-                developer_executor: options.reviewer.developerExecutor,
-                reviewer_executor: selectedExecutor,
-                report,
-              };
-              await lifecycle!.completeReview(() =>
-                workStore!.completeReview(
-                  args.task,
-                  lifecycle!.owner,
-                  review,
-                  () => {
-                    guardRequirementsWrites(tree.path, requirementsBefore!);
-                    if (
-                      JSON.stringify(
-                        reviewerRequest(
-                          workStore!,
-                          config,
-                          options.reviewer!.key,
-                          args.task,
-                          lifecycle!.owner,
-                        ),
-                      ) !== JSON.stringify(options.reviewer)
+              const validated = validateReview(requirementsOutput, options.reviewer);
+              reviewCycle!.accept(validated, requirementsOutput, executionId, selectedExecutor);
+              audit('review_pass_validated', {
+                detail: JSON.stringify(reviewCycle!.passes.at(-1)),
+              });
+              if (reviewCycle!.secondPass) {
+                const allowance = reviewPassAllowance(
+                  workStore!.listUsage(),
+                  executionId,
+                  config.operator.budgets,
+                  workStore!
+                    .listExecutions()
+                    .filter((execution) => execution.task_key === args.task).length,
+                  workStore!
+                    .listExecutions()
+                    .filter(
+                      (execution) =>
+                        execution.task_key === args.task &&
+                        execution.selection_reason?.startsWith(REVIEW_QUALITY_PASS_MARKER),
                     )
-                      throw new Error('Reviewer SHA/context changed before report persistence');
-                    audit('review_report_pending', { detail: JSON.stringify(review) });
-                  },
-                  capped ? reviewerDecision(args.task, 'rework_limit') : undefined,
-                ),
-              );
-              audit('review_report_persisted', { detail: JSON.stringify(review) });
-              proposeLearnings(
-                config.repoRoot,
-                { ...taskData.learningScope, role: options.reviewer.task.agentRole },
-                args.task,
-                executionId,
-                report,
-                workStore!.listFindingDecisions(),
-                taskData,
-              );
-              if (options.reviewer.task.type === 'doc' && report.verdict === 'approve')
-                audit('qa_not_applicable', { detail: 'QA no aplicable: tarea doc' });
-              telemetryStatus = capped ? 'require_human' : 'ok';
-              if (capped) process.exitCode = 3;
-              log(`${args.task}: ${report.verdict} → ${workStore!.getTask(args.task)!.status}`);
-              return { branch: tree.branch, commit: null, stat: '' };
+                    .map((execution) => execution.key),
+                );
+                if ('reason' in allowance)
+                  return await finishReview(reviewCycle!.fallback(allowance.reason));
+                reviewCycle!.allowance = allowance;
+                taskData.task.brief = reviewerBrief(options.reviewer, [], reviewCycle!.pass);
+                compiled = compileAgent(spec, role, taskData);
+                requirementsAttempt = 0;
+                await telemetry.finish('ok');
+                slot!.release();
+                slot = undefined;
+                executionId = randomUUID();
+                handle = undefined;
+                eventsStarted = false;
+                executionFinished = false;
+                telemetry = undefined;
+                continue;
+              }
+              return await finishReview(reviewCycle!.report());
             } else if (options.architect) {
               designProposal = validateArchitect(requirementsOutput, options.architect.spec, {
                 cwd: tree.path,
@@ -2119,11 +2094,17 @@ async function runWorkerExecution(
                   .map((e) => e.slice(0, VALIDATION_AUDIT_MAX_ERROR_CHARS)),
               },
             );
+            if (reviewCycle?.secondPass)
+              return await finishReview(
+                reviewCycle.fallback(
+                  'second pass returned an invalid report; retry would exceed the reserved cost',
+                ),
+              );
             if (requirementsAttempt++ === 0) {
               taskData.task.brief = options.qa
                 ? qaBrief(options.reviewer!, qaEvidence!, error.errors, qaRequestsUsed)
                 : options.reviewer
-                  ? reviewerBrief(options.reviewer, error.errors)
+                  ? reviewerBrief(options.reviewer, error.errors, reviewCycle?.pass)
                   : options.architect
                     ? architectBrief(options.architect, designContext, error.errors)
                     : requirementsBrief(options.requirements!, error.errors);

@@ -26,6 +26,7 @@ import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
 import { featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
+import { projectQualityLintCommand } from './projectQualityLint.js';
 import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { approvedTaskDescription } from './taskChangeDecisions.js';
@@ -679,7 +680,7 @@ export function developerStyleCommands(
           },
         ]
       : []),
-    ...(scripts.length
+    ...(scripts.length && (eslintConfig || hasNestedConfig)
       ? [
           {
             argv: [
@@ -695,6 +696,7 @@ export function developerStyleCommands(
           },
         ]
       : []),
+    ...projectQualityLintCommand(scripts),
   ];
 }
 

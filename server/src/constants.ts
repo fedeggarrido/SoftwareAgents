@@ -434,3 +434,7 @@ export const OFFICE_BOOTSTRAP_TTL_MS = 60_000;
 export const OFFICE_BOOTSTRAP_BYTES = 32;
 export const OFFICE_BOOTSTRAP_RATE_LIMIT = 20;
 export const OFFICE_BOOTSTRAP_RATE_WINDOW_MS = 60_000;
+/** SA-155 additional managed-project lint and independent review allowance. */
+export const PROJECT_QUALITY_LINT_CONFIG = 'eslint-rules/managed-project.config.mjs';
+export const REVIEW_EXTRA_COST_RATIO = 0.2;
+export const REVIEW_QUALITY_PASS_MARKER = 'review_pass=quality_structure';

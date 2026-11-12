@@ -12,6 +12,7 @@ const paths = {
   more: 'M2 7h2v2H2zm5 0h2v2H7zm5 0h2v2h-2z',
   agent: 'M5 2h6v6H5zm2 2v2h2V4zM3 10h10v4h-2v-2H5v2H3z',
   attention: 'M7 1h2v9H7zm0 11h2v2H7z',
+  recenter: 'M1 1h5v2H3v3H1zm9 0h5v5h-2V3h-3zM1 10h2v3h3v2H1zm12 0h2v5h-5v-2h3zM6 6h4v4H6z',
 } as const;
 
 export type DockIconName = keyof typeof paths;

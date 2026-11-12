@@ -262,9 +262,9 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/hooks.spec.ts:190` — the hooks checkbox reflects install state and its click is the consent grant (Standalone / hooks consent)
 - `e2e/standalone/multi-server-hooks.spec.ts:39` — extension and standalone both stay hook-driven without cross-contamination (Standalone / multi-server hooks)
 - `e2e/standalone/project-summary.spec.ts:80` — shows the app, real work and next steps through the office window without writes (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:107` — denies unprivileged access without project details (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:125` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:192` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
+- `e2e/standalone/project-summary.spec.ts:106` — denies unprivileged access without project details (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:124` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:197` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
 - `e2e/standalone/task-detail.spec.ts:93` — opens within Trabajo and requires a second confirmation after listing the impact (Standalone / task detail)
 - `e2e/standalone/task-detail.spec.ts:121` — read-only access explains the change path and cannot submit (Standalone / task detail)
 - `e2e/standalone/task-detail.spec.ts:144` — records a request while preserving the active lease (Standalone / task detail › running work)
@@ -300,8 +300,8 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 
 ### `@area:design` (2 tests)
 
-- `e2e/standalone/design-guards.spec.ts:44` — every screen meets the design rules at desktop (Design guards (SA-151))
-- `e2e/standalone/design-guards.spec.ts:44` — every screen meets the design rules at mobile (Design guards (SA-151))
+- `e2e/standalone/design-guards.spec.ts:45` — every screen meets the design rules at desktop (Design guards (SA-151))
+- `e2e/standalone/design-guards.spec.ts:45` — every screen meets the design rules at mobile (Design guards (SA-151))
 
 ### `@area:pets` (3 tests)
 

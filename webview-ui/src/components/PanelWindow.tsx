@@ -18,8 +18,6 @@ interface PanelWindowProps {
   tab: PanelTab;
   rect: PanelRect | null;
   mobile: boolean;
-  meetingUnread?: boolean;
-  onSelect: (tab: PanelTab) => void;
   onRectChange: (rect: PanelRect) => void;
   onReset: () => void;
   onClose: () => void;
@@ -31,13 +29,12 @@ export function PanelWindow({
   tab,
   rect,
   mobile,
-  meetingUnread = false,
-  onSelect,
   onRectChange,
   onReset,
   onClose,
   children,
 }: PanelWindowProps) {
+  const label = PANEL_TABS.find((entry) => entry.id === tab)?.label;
   const titleRef = useRef<HTMLDivElement>(null);
   const windowRef = useRef<HTMLElement>(null);
   const gesture = useRef<{
@@ -140,9 +137,7 @@ export function PanelWindow({
         onPointerCancel={end}
         onLostPointerCapture={end}
       >
-        <span className="min-w-0 flex-1">
-          {PANEL_TABS.find((entry) => entry.id === tab)?.label}
-        </span>
+        <span className="min-w-0 flex-1">{label}</span>
         <Button size="sm" variant="ghost" onClick={onReset}>
           Restablecer posición
         </Button>
@@ -150,47 +145,7 @@ export function PanelWindow({
           ✕
         </Button>
       </div>
-      <div className="panel-window-tabs" role="tablist" aria-label="Secciones de la oficina">
-        {PANEL_TABS.map((entry, index) => (
-          <button
-            key={entry.id}
-            id={`office-tab-${entry.id}`}
-            role="tab"
-            aria-label={entry.label}
-            type="button"
-            aria-selected={tab === entry.id}
-            aria-controls="office-panel-content"
-            tabIndex={tab === entry.id ? 0 : -1}
-            onClick={() => onSelect(entry.id)}
-            onKeyDown={(event) => {
-              let next: number;
-              if (event.key === 'ArrowRight') next = (index + 1) % PANEL_TABS.length;
-              else if (event.key === 'ArrowLeft')
-                next = (index + PANEL_TABS.length - 1) % PANEL_TABS.length;
-              else if (event.key === 'Home') next = 0;
-              else if (event.key === 'End') next = PANEL_TABS.length - 1;
-              else return;
-              event.preventDefault();
-              onSelect(PANEL_TABS[next].id);
-              document.getElementById(`office-tab-${PANEL_TABS[next].id}`)?.focus();
-            }}
-          >
-            {entry.label}
-            {entry.id === 'meeting' && meetingUnread && (
-              <span className="ml-4 text-text" role="status" aria-label="Nueva actividad">
-                ●
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-      <div
-        id="office-panel-content"
-        role="tabpanel"
-        aria-labelledby={`office-tab-${tab}`}
-        className="panel-window-content"
-        tabIndex={0}
-      >
+      <div id="office-panel-content" data-panel={tab} className="panel-window-content" tabIndex={0}>
         {children}
       </div>
       {!mobile &&

@@ -30,7 +30,7 @@ const panelPaths = {
 };
 
 it.each(PANEL_TABS)(
-  '$label uses the window title and close, with a tab-labelled panel',
+  '$label uses the window title and close, with the dock as the only navigation',
   async ({ id, label }) => {
     setBoardState({
       type: 'boardState',
@@ -93,15 +93,16 @@ it.each(PANEL_TABS)(
         tab: id,
         rect: null,
         mobile: true,
-        onSelect: vi.fn(),
         onRectChange: vi.fn(),
         onReset: vi.fn(),
         onClose: vi.fn(),
         children: child,
       }),
     );
-    expect(html).toContain(`role="tabpanel" aria-labelledby="office-tab-${id}"`);
-    expect(html).toContain(`id="office-tab-${id}" role="tab" aria-label="${label}"`);
+    // The dock is the only panel navigation; the window carries no duplicate tabs.
+    expect(html).toContain(`data-panel="${id}"`);
+    expect(html).toContain(`<span class="min-w-0 flex-1">${label}</span>`);
+    expect(html).not.toContain('role="tab"');
     expect(html.match(/aria-label="Cerrar ventana"/g)).toHaveLength(1);
     if (id === 'backlog') expect(content).toContain('Te necesitan');
     if (id === 'features') expect(content).toContain('Actualizar');

@@ -98,10 +98,9 @@ test.describe('Standalone / project summary', () => {
     await expect(panel.locator('input,textarea,select')).toHaveCount(0);
     expect(fs.readFileSync(file)).toEqual(before);
     await panel.getByRole('button', { name: 'Ver decisiones', exact: true }).click();
-    await expect(page.getByRole('tab', { name: 'Decisiones', exact: true })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    await expect(
+      page.locator('.bottom-toolbar').getByRole('button', { name: 'Decisiones', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('denies unprivileged access without project details @area:standalone', async ({
@@ -157,7 +156,13 @@ test.describe('Standalone / project summary', () => {
       await expect(backlog.getByTestId('backlog-card')).toContainText('FEAT-001-T02');
       await backlog.getByRole('button', { name: 'Ver todo el trabajo', exact: true }).click();
       await expect(backlog.getByTestId('backlog-card')).toHaveCount(3);
-      await page.getByRole('tab', { name: 'Proyecto', exact: true }).click();
+      const project = page.locator('.bottom-toolbar').getByRole('button', {
+        name: 'Proyecto',
+        exact: true,
+      });
+      if (!(await project.isVisible()))
+        await page.getByRole('button', { name: 'Más', exact: true }).click();
+      await project.click();
     }
     await workflow.locator('summary').click();
     const db = new DatabaseSync(

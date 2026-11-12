@@ -45,12 +45,14 @@ export function connectionCopy(state: TransportState, status = current, now = Da
         : `${OFFICE_OFFLINE_TEXT} ${OFFICE_OFFLINE_HELP}`;
   if (state === 'connecting')
     return { label: 'Conectando con la oficina…', explanation: OFFICE_HANDSHAKE_TEXT };
+  // Every phase of a retry is visible: in progress, failed attempt N and the countdown.
+  const failed = status.attempt ? ` · intento ${status.attempt} sin respuesta` : '';
   const retry =
     status.retryAt === null
       ? status.attempt
-        ? ' · reconectando…'
+        ? ' · reintentando ahora…'
         : ''
-      : ` · reintentando en ${Math.max(0, Math.ceil((status.retryAt - now) / RELATIVE_SECOND_MS))} s`;
+      : `${failed} · reintentando en ${Math.max(0, Math.ceil((status.retryAt - now) / RELATIVE_SECOND_MS))} s`;
   return {
     label: `Sin conexión${retry}`,
     explanation,

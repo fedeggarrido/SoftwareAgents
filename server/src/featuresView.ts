@@ -1,3 +1,5 @@
+import type { DatabaseSync } from 'node:sqlite';
+
 import type {
   FeatureGate,
   FeatureRow,
@@ -15,7 +17,7 @@ import {
   openReadOnlyWorkStore,
   readMainAncestors,
 } from './workstore/readOnlyWorkStore.js';
-import { monitoredZones, type ZonesReport, type ZoneTask } from './zonesCheck.js';
+import { monitoredZones, type ZonesReport } from './zonesCheck.js';
 
 type Row = Record<string, unknown>;
 export interface FeaturesSource {
@@ -80,9 +82,11 @@ function display(value: unknown): string | null {
   );
 }
 
+export { display as featureDisplayText };
+
 /** Pure projection: only explicitly named display fields can escape. */
 export function projectFeatures(source: FeaturesSource): FeatureRow[] {
-  const entries = (source.ledger ?? []).map(ledgerEntry);
+  const entries = (source.ledger ?? []).map(featureUsageEntry);
   const ready = new Set(
     source.runs
       .filter((row) => {
@@ -359,33 +363,7 @@ export async function readFeaturesView(
     if (typeof projectId !== 'string' || !projectId) return invalid();
     db = openReadOnlyWorkStore(root);
     db.exec('BEGIN');
-    const read = (table: string, columns: string) =>
-      db!.prepare(`SELECT ${columns} FROM ${table} WHERE project_id = ?`).all(projectId);
-    const zoneTasks = read(
-      'tasks',
-      'key, branch, feature_key, declaration',
-    ) as unknown as ZoneTask[];
-    const zones = await monitoredZones(root, zoneTasks);
-    const features = projectFeatures({
-      wip: readConfig().projects[projectId]?.wip,
-      zones,
-      features: read('features', 'key, title, status, updated_at'),
-      designs: read('technical_designs', 'feature_key'),
-      tasks: read(
-        'tasks',
-        'key, branch, feature_key, status, declaration, version, review_ref, updated_at',
-      ),
-      runs: read('feature_runs', 'feature_key, state, updated_at'),
-      decisions: read('human_decisions', 'task_key, escalation, decided_at'),
-      executions: read('executions', 'task_key, agent_role, task_version, started_at'),
-      events: read('domain_events', 'task_key, from_status, to_status, created_at'),
-      ledger: db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
-        .get()
-        ? read('usage_ledger', 'body')
-        : [],
-      mainAncestors: readMainAncestors(root),
-    });
+    const features = projectFeatures(await readFeaturesSource(db, root, projectId));
     return { status: features.length ? 'ok' : 'empty', reason: null, features };
   } catch (error) {
     return {
@@ -398,11 +376,48 @@ export async function readFeaturesView(
   }
 }
 
+/** Shared input reader. The caller owns the read-only transaction. */
+export async function readFeaturesSource(
+  db: DatabaseSync,
+  root: string,
+  projectId: string,
+): Promise<FeaturesSource> {
+  const read = (table: string, columns: string) =>
+    db.prepare(`SELECT ${columns} FROM ${table} WHERE project_id = ?`).all(projectId);
+  const zoneTasks = read('tasks', 'key, branch, feature_key, declaration').map((row) => ({
+    key: text(row.key),
+    branch: optional(row.branch),
+    feature_key: optional(row.feature_key),
+    declaration: optional(row.declaration),
+  }));
+  const zones = await monitoredZones(root, zoneTasks);
+  return {
+    wip: readConfig().projects[projectId]?.wip,
+    zones,
+    features: read('features', 'key, title, status, updated_at'),
+    designs: read('technical_designs', 'feature_key'),
+    tasks: read(
+      'tasks',
+      'key, branch, feature_key, status, declaration, version, review_ref, priority, blocked_reason, updated_at',
+    ),
+    runs: read('feature_runs', 'feature_key, state, updated_at'),
+    decisions: read('human_decisions', 'key, task_key, escalation, decided_at'),
+    executions: read('executions', 'task_key, agent_role, task_version, started_at'),
+    events: read('domain_events', 'task_key, from_status, to_status, created_at'),
+    ledger: db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'usage_ledger'")
+      .get()
+      ? read('usage_ledger', 'body')
+      : [],
+    mainAncestors: readMainAncestors(root),
+  };
+}
+
 function finite(value: number | null): number | null {
   return value !== null && Number.isFinite(value) ? value : null;
 }
 
-function ledgerEntry(row: Row): UsageEntry {
+export function featureUsageEntry(row: Row): UsageEntry {
   if (typeof row.body !== 'string') return invalid();
   const body = object(row.body);
   const counter = (field: string): number | null => {
@@ -430,7 +445,7 @@ function ledgerEntry(row: Row): UsageEntry {
     executor: '',
     model: '',
     tier: null,
-    outputTokens: null,
+    outputTokens: absent(body.outputTokens) ? null : counter('outputTokens'),
     cacheCreateTokens: null,
     cacheHitRate: null,
     quotaBefore: null,

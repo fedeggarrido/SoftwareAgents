@@ -111,6 +111,7 @@ components:
         - $ref: '#/components/schemas/ExtractIdeaDocumentResult'
         - $ref: '#/components/schemas/PrepareProjectResult'
         - $ref: '#/components/schemas/FeaturesSnapshot'
+        - $ref: '#/components/schemas/ProjectSummarySnapshot'
         - $ref: '#/components/schemas/AuditLogSnapshot'
         # Provider capabilities
         - $ref: '#/components/schemas/ProviderCapabilities'
@@ -177,6 +178,7 @@ components:
         - $ref: '#/components/schemas/ExtractIdeaDocument'
         - $ref: '#/components/schemas/PrepareProject'
         - $ref: '#/components/schemas/RequestFeatures'
+        - $ref: '#/components/schemas/RequestProjectSummary'
         - $ref: '#/components/schemas/RequestAuditLog'
         - $ref: '#/components/schemas/WebviewReady'
         - $ref: '#/components/schemas/LaunchAgent'
@@ -803,6 +805,172 @@ components:
           pattern: '^FEAT-\d{3}$'
         command:
           type: string
+
+    RequestProjectSummary:
+      description: Read-only server composition of the bound Project, WorkStore, ideas, specs and audit. Requires existing connection privilege.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId]
+      properties:
+        type:
+          const: requestProjectSummary
+        projectId:
+          type: string
+        requestId:
+          type: string
+
+    ProjectSummarySnapshot:
+      description: Correlated point-to-point summary. Errors carry null summary and fixed reasons. Text is sanitized and rendered literally. Reads never mutate or launch work.
+      type: object
+      additionalProperties: false
+      required: [type, projectId, requestId, status, reason, summary]
+      properties:
+        type:
+          const: projectSummarySnapshot
+        projectId:
+          type: string
+        requestId:
+          type: string
+        status:
+          $ref: '#/components/schemas/FeaturesStatus'
+        reason:
+          oneOf:
+            - $ref: '#/components/schemas/FeaturesReadError'
+            - type: 'null'
+        summary:
+          oneOf:
+            - $ref: '#/components/schemas/ProjectSummary'
+            - type: 'null'
+
+    ProjectSummary:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          name,
+          goals,
+          features,
+          milestones,
+          deliveries,
+          decisions,
+          risks,
+          blockers,
+          nextSteps,
+          cost,
+          notices,
+        ]
+      properties:
+        name:
+          type: string
+        goals:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        features:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryFeature'
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        decisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        risks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        nextSteps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectSummaryItem'
+        notices:
+          type: array
+          items:
+            type: string
+        cost:
+          $ref: '#/components/schemas/ProjectSummaryCost'
+
+    ProjectSummaryItem:
+      type: object
+      additionalProperties: false
+      required: [key, text, at]
+      properties:
+        key:
+          type: string
+        text:
+          type: string
+        at:
+          type: [string, 'null']
+
+    ProjectSummaryFeature:
+      type: object
+      additionalProperties: false
+      required: [key, title, state, done, inProgress, pending, cancelled, total]
+      properties:
+        key:
+          type: string
+        title:
+          type: [string, 'null']
+        state:
+          $ref: '#/components/schemas/ProjectSummaryState'
+        done:
+          type: integer
+          minimum: 0
+        inProgress:
+          type: integer
+          minimum: 0
+        pending:
+          type: integer
+          minimum: 0
+        cancelled:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+
+    ProjectSummaryState:
+      type: string
+      enum: [summary_done, summary_in_progress, summary_pending]
+
+    ProjectSummaryCost:
+      description: Persisted execution ledger across the selected Project, including unassigned entries. With no ledger entries, use retained telemetry counters without recalculating prices or adding overlapping sources. Null means unknown and known zero is preserved.
+      type: object
+      additionalProperties: false
+      required: [source, executions, costKnown, costUsd, inputTokens, outputTokens, tokenKnown]
+      properties:
+        source:
+          $ref: '#/components/schemas/ProjectSummaryCostSource'
+        executions:
+          type: integer
+          minimum: 0
+        costKnown:
+          type: integer
+          minimum: 0
+        costUsd:
+          type: [number, 'null']
+        inputTokens:
+          type: [number, 'null']
+        outputTokens:
+          type: [number, 'null']
+        tokenKnown:
+          type: [integer, 'null']
+          minimum: 0
+
+    ProjectSummaryCostSource:
+      type: string
+      enum: [none, ledger, retained_telemetry]
 
     RequestFeatures:
       description: Read-only WorkStore projection; same existing connection privilege and bound-Project guard as requestAuditLog. No new authority or mutation.

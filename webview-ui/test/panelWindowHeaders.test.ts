@@ -21,6 +21,7 @@ vi.mock('../src/transport/index.js', () => ({
 // Dynamic paths keep TSX outside the DOM-free test project's dependency graph.
 const windowPath = '../src/components/PanelWindow.js';
 const panelPaths = {
+  summary: ['../src/components/ProjectSummaryPanel.js', 'ProjectSummaryPanel'],
   backlog: ['../src/components/BacklogPanel.js', 'BacklogPanel'],
   decisions: ['../src/components/DecisionsPanel.js', 'DecisionsPanel'],
   audit: ['../src/components/AuditPanel.js', 'AuditPanel'],
@@ -77,6 +78,7 @@ it.each(PANEL_TABS)(
       isOpen: true,
       onClose: vi.fn(),
       onFocusAgent: vi.fn(),
+      onNavigate: vi.fn(),
       officeState: { characters: new Map() },
     });
     const content = renderToStaticMarkup(child);

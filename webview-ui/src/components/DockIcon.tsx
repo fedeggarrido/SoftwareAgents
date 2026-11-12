@@ -1,6 +1,7 @@
 import { DOCK_ICON_SIZE_PX } from '../constants.js';
 
 const paths = {
+  summary: 'M1 2h14v12H1zm2 2v8h10V4zM4 5h8v2H4zm0 4h3v2H4zm5 0h3v2H9z',
   idea: 'M7 2h2v5h5v2H9v5H7V9H2V7h5z',
   backlog: 'M2 2h12v12H2zm2 2v8h8V4zM5 5h2v2H5zm3 0h3v2H8zM5 9h2v2H5zm3 0h3v2H8z',
   decisions: 'M2 2h12v10H9l-3 3v-3H2zm2 2v6h3v2l2-2h3V4zM7 5h2v2H7zm0 3h2v1H7z',

@@ -746,6 +746,16 @@
   }
 }
 
+/* Above the dock band: a wider dock must never sit under the label. */
+.version-label {
+  bottom: calc(var(--dock-bottom) + var(--dock-mobile-height) + var(--space-2));
+}
+.version-hint {
+  bottom: calc(
+    var(--dock-bottom) + var(--dock-mobile-height) + var(--space-2) + var(--dock-touch-target)
+  );
+}
+
 @media (max-width: 480px) {
   .version-label {
     display: none;

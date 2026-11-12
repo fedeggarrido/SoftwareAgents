@@ -84,7 +84,7 @@ export function VersionIndicator({
       {!showUpdateNotice && labelHovered && (
         <div
           onClick={handleOpenChangelog}
-          className="absolute bottom-42 right-28 layer-notices pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
+          className="version-hint absolute right-28 layer-notices pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
         >
           Ver novedades!
         </div>
@@ -94,7 +94,7 @@ export function VersionIndicator({
         onMouseEnter={() => setLabelHovered(true)}
         onMouseLeave={() => setLabelHovered(false)}
         onClick={handleOpenChangelog}
-        className="version-label absolute bottom-8 right-28 layer-notices text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
+        className="version-label absolute right-28 layer-notices text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
       >
         {currentVersion === 'demo' ? 'versión: demo' : `v${currentVersion}`}
       </div>

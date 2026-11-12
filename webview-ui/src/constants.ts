@@ -489,6 +489,8 @@ export const PANEL_TABS = [
 ] as const;
 
 export const PROJECT_SUMMARY_REQUEST_TIMEOUT_MS = 15_000;
+export const PROJECT_SUMMARY_REFRESH_MS = 5_000;
+export const PROJECT_SUMMARY_EVENT_DELAY_MS = 150;
 
 export const AGENT_HISTORY_LIMIT = 10;
 export const AGENT_CARD_WIDTH_PX = 380;
@@ -630,6 +632,11 @@ export interface StatusDefinition {
 }
 /** Protocol and domain states share the same Spanish presentation. */
 export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
+  workflow_active: { label: 'Activo', icon: 'play', tone: 'active' },
+  workflow_human: { label: 'Esperando al humano', icon: 'attention', tone: 'attention' },
+  workflow_blocked: { label: 'Bloqueado', icon: 'stop', tone: 'error' },
+  workflow_done: { label: 'Hecho', icon: 'check', tone: 'success' },
+  workflow_empty: { label: 'Sin trabajo', icon: 'minus', tone: 'muted' },
   summary_done: { label: 'Hecha', icon: 'check', tone: 'success' },
   summary_in_progress: { label: 'En curso', icon: 'play', tone: 'active' },
   summary_pending: { label: 'Pendiente', icon: 'clock', tone: 'muted' },

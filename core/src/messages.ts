@@ -519,6 +519,7 @@ export interface ProjectSummary {
   nextSteps: ProjectSummaryItem[];
   notices: string[];
   cost: ProjectSummaryCost;
+  workflow: WorkflowStage[];
 }
 
 export interface ProjectSummaryItem {
@@ -551,6 +552,21 @@ export interface ProjectSummaryCost {
 }
 
 export type ProjectSummaryCostSource = 'none' | 'ledger' | 'retained_telemetry';
+
+export interface WorkflowStage {
+  id: WorkflowStageId;
+  label: string;
+  state: WorkflowState;
+  taskKeys: string[];
+  featureKeys: string[];
+  agents: string[];
+}
+
+export type WorkflowStageId =
+  'idea' | 'requirements' | 'plan' | 'approval' | 'development' | 'qa' | 'review' | 'delivery';
+
+export type WorkflowState =
+  'workflow_active' | 'workflow_human' | 'workflow_blocked' | 'workflow_done' | 'workflow_empty';
 
 export interface AuditLogSnapshot {
   type: 'auditLog';

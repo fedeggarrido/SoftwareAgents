@@ -25,6 +25,7 @@ import {
 } from './featuresView.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { readSummaryContext, type SummaryContext, summaryText } from './projectSummaryContext.js';
+import { projectWorkflow } from './projectWorkflow.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
 import { taskDecisionText } from './taskChangeDecisions.js';
 import { taskDeclarationText } from './taskDetailProjection.js';
@@ -71,8 +72,10 @@ function recent(items: ProjectSummaryItem[]): ProjectSummaryItem[] {
 }
 
 /** All product meaning and ordering are projected here, before the transport boundary. */
-export function projectSummary(source: ProjectSummarySource): ProjectSummary {
-  const features = projectFeatures(source.work);
+export function projectSummary(
+  source: ProjectSummarySource,
+  features = projectFeatures(source.work),
+): ProjectSummary {
   const tasks = source.work.tasks.map((row) => {
     const key = text(row.key);
     const status = text(row.status);
@@ -250,6 +253,7 @@ export function projectSummary(source: ProjectSummarySource): ProjectSummary {
       tokenKnown: usage.tokenCoverage,
     },
     notices,
+    workflow: projectWorkflow(source.work, features, source.context, decisions),
   };
 }
 
@@ -284,13 +288,16 @@ export async function readProjectSummary(
     }
     const features = projectFeatures(work);
     const context = readSummaryContext(config, features);
-    const summary = projectSummary({
-      name: config.project.name,
-      work,
-      dependencies,
-      context,
-      audit: await readAuditView(projectId),
-    });
+    const summary = projectSummary(
+      {
+        name: config.project.name,
+        work,
+        dependencies,
+        context,
+        audit: await readAuditView(projectId),
+      },
+      features,
+    );
     // Retained telemetry is an alternative source when the ledger has no records.
     // Never add the two histories or reprice old consumption using current tariffs.
     if (summary.cost.source === 'none') {

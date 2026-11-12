@@ -129,6 +129,16 @@ para lecturas puntuales.
   explícita y valores desconocidos. Si falta el ledger, muestra la telemetría
   conservada, sin sumar fuentes ni recalcular precios. Los artefactos ilegibles se
   señalan. El panel permite actualizar y abrir los paneles existentes.
+  SA-148 añade el flujo desplegable de ocho etapas dentro de «Proyecto». `projectWorkflow.ts`
+  aplica una política única a Features, tareas, aprobaciones, ideas y decisiones
+  de las mismas lecturas del resumen. Cada nodo muestra estado con icono y texto,
+  contadores y Sessions registradas en ejecuciones activas. Conserva las etapas
+  terminadas cuando hay evidencia en los estados y transiciones canónicos.
+  Abre «Trabajo» con las
+  claves de tareas de esa etapa y conserva su agrupación existente. Los eventos
+  del Project refrescan el snapshot correlacionado, con reconciliación periódica
+  para cambios de artefactos. El diagrama se adapta al ancho de la ventana y usa
+  indicadores estáticos, también con movimiento reducido.
 
 - `FeaturePlanDialog.tsx` y `office/featurePlanController.ts` (SA-111) abren «Ver
   plan» desde FeaturesPanel. Siete secciones de texto literal y aprobación con

@@ -90,7 +90,7 @@ test.describe('Standalone / project summary', () => {
       panel.getByText('Consultar los pedidos de la tienda', { exact: true }),
     ).toBeVisible();
     await expect(panel.getByText('1 hecha · 1 en curso · 1 pendiente')).toBeVisible();
-    await expect(panel.locator('.status-chip')).toContainText('En curso');
+    await expect(panel.locator('.project-summary-features .status-chip')).toContainText('En curso');
     await expect(panel.getByText('Sin datos de coste o consumo registrados.')).toBeVisible();
     await expect(panel.getByText('Preparada para empezar · Consultar recibos')).toBeVisible();
     await panel.getByRole('button', { name: 'Actualizar', exact: true }).click();
@@ -122,6 +122,71 @@ test.describe('Standalone / project summary', () => {
     }
   });
 
+  test('filters Trabajo from the live workflow at 390, 1024 and 1440 px @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.getByRole('button', { name: 'Proyecto', exact: true }).click();
+    const workflow = page.getByRole('region', {
+      name: 'Flujo de trabajo del proyecto',
+      exact: true,
+    });
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await workflow.locator('summary').click();
+      const qa = workflow.getByRole('button', { name: 'Ver QA en Trabajo', exact: true });
+      await expect(qa).toContainText('Activo');
+      await expect(qa).toContainText('1 tarea');
+      expect(await workflow.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+        true,
+      );
+      expect(
+        await qa.evaluate((element) => element.getBoundingClientRect().height),
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        await qa
+          .locator('.status-chip')
+          .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+      ).toBeGreaterThanOrEqual(14);
+      expect(await qa.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
+      await qa.click();
+      const backlog = page.getByRole('region', { name: 'Trabajo', exact: true });
+      await expect(backlog.getByText('Etapa · QA', { exact: true })).toBeVisible();
+      await expect(backlog.getByTestId('backlog-card')).toHaveCount(1);
+      await expect(backlog.getByTestId('backlog-card')).toContainText('FEAT-001-T02');
+      await backlog.getByRole('button', { name: 'Ver todo el trabajo', exact: true }).click();
+      await expect(backlog.getByTestId('backlog-card')).toHaveCount(3);
+      await page.getByRole('tab', { name: 'Proyecto', exact: true }).click();
+    }
+    await workflow.locator('summary').click();
+    const db = new DatabaseSync(
+      path.join(standalone.workspaceDir, '.git/softwareagents/work.sqlite3'),
+    );
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      db.prepare(
+        "UPDATE tasks SET status = 'DONE', version = 2, updated_at = ? WHERE project_id = 'summary-e2e' AND key = 'FEAT-001-T02'",
+      ).run(new Date().toISOString());
+      db.prepare(
+        "INSERT INTO domain_events(project_id,task_key,type,from_status,to_status,task_version,attempt,reason,actor,created_at) VALUES ('summary-e2e','FEAT-001-T02','TASK_TRANSITIONED','QA','DONE',2,0,'fixture','human',?)",
+      ).run(new Date().toISOString());
+      db.exec('COMMIT');
+    } finally {
+      db.close();
+    }
+    await expect(
+      workflow.getByRole('button', { name: 'Ver QA en Trabajo', exact: true }),
+    ).toContainText('Hecho');
+    await expect(
+      workflow.getByRole('button', { name: 'Ver Entrega en Trabajo', exact: true }),
+    ).toContainText('Hecho');
+    await workflow.getByRole('button', { name: 'Ver Idea en Trabajo', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Trabajo', exact: true })).toContainText(
+      'Sin tareas en esta etapa.',
+    );
+  });
+
   test.describe('empty project on mobile', () => {
     test.use({ summarySeed: 'empty' });
     test('explains how to start from the mobile dock @area:standalone', async ({
@@ -138,7 +203,10 @@ test.describe('Standalone / project summary', () => {
           /Crea una Nueva idea desde la barra de la oficina para definir qué construir/,
         ),
       ).toBeVisible();
-      await expect(panel.locator('.status-chip')).toHaveCount(0);
+      await expect(panel.locator('.project-workflow .status-chip')).toHaveCount(8);
+      await expect(panel.locator('.project-workflow .status-chip')).toHaveText(
+        Array(8).fill('Sin trabajo'),
+      );
       await expect(panel).not.toContainText('USD');
     });
   });

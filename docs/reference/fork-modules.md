@@ -120,6 +120,16 @@ para lecturas puntuales.
 
 ### Paneles (`webview-ui/src/components/`)
 
+- `ProjectSummaryPanel.tsx` (SA-145) abre «Proyecto» desde la barra y la ventana
+  de la oficina. `projectSummary.ts` compone una única proyección de solo lectura
+  con el manifiesto, Features/WorkStore, planes vinculados, ideas y auditoría.
+  Muestra objetivos, progreso por funcionalidad, hitos, trabajo terminado,
+  decisiones, riesgos, bloqueos y siguientes tareas con dependencias satisfechas.
+  El consumo usa contadores y costes persistidos del ledger, con cobertura
+  explícita y valores desconocidos. Si falta el ledger, muestra la telemetría
+  conservada, sin sumar fuentes ni recalcular precios. Los artefactos ilegibles se
+  señalan. El panel permite actualizar y abrir los paneles existentes.
+
 - `FeaturePlanDialog.tsx` y `office/featurePlanController.ts` (SA-111) abren «Ver
   plan» desde FeaturesPanel. Siete secciones de texto literal y aprobación con
   revisión explícita. Sin privilegio muestran el mensaje de solo lectura. Doble clic bloqueado,

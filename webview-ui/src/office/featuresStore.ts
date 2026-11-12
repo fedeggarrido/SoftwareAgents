@@ -76,7 +76,9 @@ function usdLabel(value: number | null): string {
   return `${value.toFixed(2)} USD`;
 }
 
-export function featureCostLabel(cost: FeatureCost): string {
+export function featureCostLabel(
+  cost: Pick<FeatureCost, 'costUsd' | 'costKnown' | 'executions'>,
+): string {
   const label = usdLabel(cost.costUsd);
   return label !== 'sin datos' && cost.costKnown > 0 && cost.costKnown < cost.executions
     ? `${label} (parcial)`

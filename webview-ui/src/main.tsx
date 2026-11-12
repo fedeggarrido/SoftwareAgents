@@ -1,5 +1,6 @@
 import './index.css';
 import './components/NewIdeaDialog.css';
+import './components/ProjectSummaryPanel.css';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

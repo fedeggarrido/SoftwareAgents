@@ -365,13 +365,13 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await page.setViewportSize({ width: 768, height: 844 });
         await sheet.waitFor({ state: 'detached' });
         expect(await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').count()).toBe(
-          4,
+          5,
         );
         await page.setViewportSize({ width, height: 844 });
       } else {
         expect(
           await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').allTextContents(),
-        ).toEqual(['Trabajo', 'Decisiones', 'Funcionalidades', 'Auditoría']);
+        ).toEqual(['Trabajo', 'Decisiones', 'Proyecto', 'Funcionalidades', 'Auditoría']);
         for (const button of await dock.getByRole('button').all()) {
           expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         }

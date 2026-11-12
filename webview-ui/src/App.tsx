@@ -17,6 +17,7 @@ import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
+import { ProjectSummaryPanel } from './components/ProjectSummaryPanel.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
@@ -580,6 +581,12 @@ function App() {
           onClose={panel.close}
         >
           <AuditPanel hosted isOpen={panel.isOpen && panel.tab === 'audit'} onClose={panel.close} />
+          <ProjectSummaryPanel
+            hosted
+            isOpen={panel.isOpen && panel.tab === 'summary'}
+            onClose={panel.close}
+            onNavigate={panel.select}
+          />
           <FeaturesPanel
             hosted
             isOpen={panel.isOpen && panel.tab === 'features'}

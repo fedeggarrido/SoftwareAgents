@@ -19,6 +19,7 @@ export type ServerMessage =
   | ExtractIdeaDocumentResult
   | PrepareProjectResult
   | FeaturesSnapshot
+  | ProjectSummarySnapshot
   | AuditLogSnapshot
   | ProviderCapabilities
   | AgentCreated
@@ -70,6 +71,7 @@ export type ClientMessage =
   | ExtractIdeaDocument
   | PrepareProject
   | RequestFeatures
+  | RequestProjectSummary
   | RequestAuditLog
   | WebviewReady
   | LaunchAgent
@@ -495,6 +497,60 @@ export interface FeatureCost {
   costPerDoneTaskUsd: number | null;
   cacheHitRate: number | null;
 }
+
+export interface ProjectSummarySnapshot {
+  type: 'projectSummarySnapshot';
+  projectId: string;
+  requestId: string;
+  status: FeaturesStatus;
+  reason: FeaturesReadError | null;
+  summary: ProjectSummary | null;
+}
+
+export interface ProjectSummary {
+  name: string;
+  goals: ProjectSummaryItem[];
+  features: ProjectSummaryFeature[];
+  milestones: ProjectSummaryItem[];
+  deliveries: ProjectSummaryItem[];
+  decisions: ProjectSummaryItem[];
+  risks: ProjectSummaryItem[];
+  blockers: ProjectSummaryItem[];
+  nextSteps: ProjectSummaryItem[];
+  notices: string[];
+  cost: ProjectSummaryCost;
+}
+
+export interface ProjectSummaryItem {
+  key: string;
+  text: string;
+  at: string | null;
+}
+
+export interface ProjectSummaryFeature {
+  key: string;
+  title: string | null;
+  state: ProjectSummaryState;
+  done: number;
+  inProgress: number;
+  pending: number;
+  cancelled: number;
+  total: number;
+}
+
+export type ProjectSummaryState = 'summary_done' | 'summary_in_progress' | 'summary_pending';
+
+export interface ProjectSummaryCost {
+  source: ProjectSummaryCostSource;
+  executions: number;
+  costKnown: number;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  tokenKnown: number | null;
+}
+
+export type ProjectSummaryCostSource = 'none' | 'ledger' | 'retained_telemetry';
 
 export interface AuditLogSnapshot {
   type: 'auditLog';
@@ -1210,6 +1266,12 @@ export interface PrepareProject {
 
 export interface RequestFeatures {
   type: 'requestFeatures';
+  projectId: string;
+  requestId: string;
+}
+
+export interface RequestProjectSummary {
+  type: 'requestProjectSummary';
   projectId: string;
   requestId: string;
 }

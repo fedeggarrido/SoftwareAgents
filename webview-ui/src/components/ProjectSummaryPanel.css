@@ -1,0 +1,47 @@
+.project-summary {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+  overflow-wrap: anywhere;
+}
+
+.project-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-block: var(--space-4);
+}
+
+.project-summary h2,
+.project-summary h3 {
+  font-family: var(--font-pixel);
+  margin: 0 0 var(--space-2);
+}
+
+.project-summary h2 {
+  font-size: var(--window-title-size);
+}
+
+.project-summary h3 {
+  font-size: var(--dock-label-size);
+}
+
+.project-summary ul {
+  padding-inline-start: var(--space-4);
+}
+
+.project-summary li + li {
+  margin-top: var(--space-2);
+}
+
+.project-summary time {
+  display: block;
+  color: var(--color-text-muted);
+}
+
+.project-summary-features > li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

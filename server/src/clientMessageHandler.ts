@@ -54,6 +54,7 @@ import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { handlePrepareProjectMessage } from './projectPreparation.js';
+import { handleProjectSummaryMessage } from './projectSummary.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -235,6 +236,10 @@ export function handleClientMessage(
         .catch(() => reply('read_error'));
       break;
     }
+
+    case 'requestProjectSummary':
+      void handleProjectSummaryMessage(msg, send, ctx.privileged === true);
+      break;
 
     case 'requestFeatures': {
       if (typeof msg.projectId !== 'string' || typeof msg.requestId !== 'string') break;

@@ -71,6 +71,7 @@ it('groups primary, panel segments and secondary controls in keyboard order', as
     'Nueva idea',
     'Trabajo',
     'Decisiones',
+    'Proyecto',
     'Funcionalidades',
     'Auditoría',
     'Editar oficina',
@@ -99,7 +100,7 @@ it('retains the VS Code launcher as a secondary icon without adding an accent ac
   }
 });
 
-it.each(['backlog', 'decisions', 'features', 'audit', 'meeting', null])(
+it.each(['backlog', 'decisions', 'summary', 'features', 'audit', 'meeting', null])(
   'derives the pressed segment from the shared window tab %s',
   async (activePanel) => {
     const { BottomToolbar } = await import(toolbarPath);
@@ -110,6 +111,7 @@ it.each(['backlog', 'decisions', 'features', 'audit', 'meeting', null])(
     const labels: Record<string, string> = {
       backlog: 'Trabajo',
       decisions: 'Decisiones',
+      summary: 'Proyecto',
       features: 'Funcionalidades',
       audit: 'Auditoría',
     };
@@ -162,7 +164,7 @@ it.each([320, 390, 767, 768])('uses four mobile slots below 768px at %spx', asyn
   const { BottomToolbar } = await import(toolbarPath);
   vi.stubGlobal('window', { innerWidth });
   const html = renderToStaticMarkup(createElement(BottomToolbar, props));
-  expect(html.match(/<button\b/g)).toHaveLength(innerWidth < 768 ? 4 : 7);
+  expect(html.match(/<button\b/g)).toHaveLength(innerWidth < 768 ? 4 : 8);
   if (innerWidth < 768) {
     expect(html).toContain('aria-controls="dock-more-sheet"');
     expect(html).toContain('aria-expanded="false"');

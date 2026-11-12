@@ -480,12 +480,15 @@ export const PANEL_WINDOW_Z_INDEX = UI_LAYERS.panel;
 export const MODAL_Z_INDEX = UI_LAYERS.modal;
 export const OFFICE_HELP_Z_INDEX = UI_LAYERS.notices;
 export const PANEL_TABS = [
+  { id: 'summary', label: 'Proyecto' },
   { id: 'backlog', label: 'Trabajo' },
   { id: 'decisions', label: 'Decisiones' },
   { id: 'audit', label: 'Auditoría' },
   { id: 'features', label: 'Funcionalidades' },
   { id: 'meeting', label: 'Reuniones' },
 ] as const;
+
+export const PROJECT_SUMMARY_REQUEST_TIMEOUT_MS = 15_000;
 
 export const AGENT_HISTORY_LIMIT = 10;
 export const AGENT_CARD_WIDTH_PX = 380;
@@ -627,6 +630,9 @@ export interface StatusDefinition {
 }
 /** Protocol and domain states share the same Spanish presentation. */
 export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
+  summary_done: { label: 'Hecha', icon: 'check', tone: 'success' },
+  summary_in_progress: { label: 'En curso', icon: 'play', tone: 'active' },
+  summary_pending: { label: 'Pendiente', icon: 'clock', tone: 'muted' },
   DRAFT: { label: 'Borrador', icon: 'minus', tone: 'muted' },
   QUEUED: { label: 'En cola', icon: 'clock', tone: 'muted' },
   LEASED: { label: 'Reservada', icon: 'clock', tone: 'active' },

@@ -440,3 +440,37 @@ export const OFFICE_BOOTSTRAP_RATE_WINDOW_MS = 60_000;
 export const PROJECT_QUALITY_LINT_CONFIG = 'eslint-rules/managed-project.config.mjs';
 export const REVIEW_EXTRA_COST_RATIO = 0.2;
 export const REVIEW_QUALITY_PASS_MARKER = 'review_pass=quality_structure';
+// Project summary read-only projection (SA-145).
+export const PROJECT_SUMMARY_RECENT_LIMIT = 5;
+export const PROJECT_SUMMARY_TEXT_LIMIT = 480;
+export const PROJECT_SUMMARY_ACTIVE_TASK_STATES: readonly string[] = [
+  'LEASED',
+  'RUNNING',
+  'REVIEW',
+  'QA',
+];
+export const PROJECT_SUMMARY_GATE_LABELS: Readonly<Record<string, string>> = {
+  spec_approval: 'Aprobar los requisitos',
+  requirements_questions: 'Responder las preguntas de requisitos',
+  design_questions: 'Responder las preguntas de diseño',
+  human_decision: 'Resolver la decisión pendiente',
+  waiting_human: 'Responder para continuar',
+  quota: 'Esperar a que haya cuota disponible',
+  qa_not_tested: 'Completar las pruebas pendientes',
+  zone_overlap: 'Resolver los cambios en conflicto',
+};
+export const PROJECT_SUMMARY_BLOCK_LABELS: Readonly<Record<string, string>> = {
+  BLOCKED: 'Trabajo bloqueado',
+  WAITING_HUMAN: 'Esperando tu decisión',
+  WAITING_QUOTA: 'Esperando cuota',
+  FAILED_RETRYABLE: 'Reintento pendiente',
+  FAILED_FINAL: 'Trabajo fallido que necesita revisión',
+};
+export const PROJECT_SUMMARY_DECISION_LABELS: Readonly<Record<string, string>> = {
+  'feature-design': 'Aclarar el diseño antes de continuar',
+  'feature-review': 'Revisar los cambios antes de continuar',
+  'design-review': 'Revisar el diseño visual',
+  'pr-cleanup': 'Revisar la limpieza del trabajo integrado',
+  'usage-budget': 'Revisar el presupuesto agotado',
+  'executor-availability': 'Revisar la disponibilidad de los ejecutores',
+};

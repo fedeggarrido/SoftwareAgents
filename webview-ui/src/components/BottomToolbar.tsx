@@ -153,6 +153,7 @@ export function BottomToolbar({
   const panels = [
     { id: 'backlog', label: 'Trabajo', title: 'Backlog de la empresa de agentes' },
     { id: 'decisions', label: 'Decisiones', title: 'Decisiones del propietario' },
+    { id: 'summary', label: 'Proyecto', title: 'Resumen del proyecto que se está construyendo' },
     { id: 'features', label: 'Funcionalidades', title: 'Features de solo lectura' },
     { id: 'audit', label: 'Auditoría', title: 'Auditoría de solo lectura' },
   ] as const;

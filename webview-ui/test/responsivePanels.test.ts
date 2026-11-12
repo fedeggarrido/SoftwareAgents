@@ -91,11 +91,39 @@ async function expectAccessHelpClear(page: Page) {
   expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 }
 
+/** The dock is the only panel navigation: the window shows one labelled region. */
+function activePanel(page: Page, name: string) {
+  return page
+    .locator('#office-panel-content')
+    .filter({ has: page.getByRole('region', { name, exact: true }) });
+}
+
+/** Panels open from the dock (or its «Más» sheet on mobile); meetings from the HUD. */
+async function openPanel(page: Page, name: string) {
+  if (name === 'Reuniones') {
+    await page
+      .getByTestId('company-hud')
+      .getByRole('button', { name: /Reuniones/ })
+      .click();
+    return;
+  }
+  const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
+  const direct = dock.getByRole('button', { name, exact: true });
+  if (await direct.count()) await direct.click();
+  else {
+    await dock.getByRole('button', { name: 'Más', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'Más opciones', exact: true })
+      .getByRole('button', { name, exact: true })
+      .click();
+  }
+  await activePanel(page, name).waitFor();
+}
+
 async function expectWindowOwnsHeading(page: Page, name: string) {
-  const panel = page.getByRole('tabpanel', { name, exact: true });
+  const panel = activePanel(page, name);
   expect(await panel.count()).toBe(1);
-  const tab = page.getByRole('tab', { name, exact: true });
-  expect(await panel.getAttribute('aria-labelledby')).toBe(await tab.getAttribute('id'));
+  expect(await page.getByRole('tab').count()).toBe(0);
   expect(await panel.locator('h2').count()).toBe(0);
   expect(await panel.getByRole('button', { name: /cerrar|✕/i }).count()).toBe(0);
   expect(await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).count()).toBe(1);
@@ -272,7 +300,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await notice.waitFor();
       expect(await notice.count()).toBe(1);
       expect(await page.locator('.office-connection-help').count()).toBe(1);
-      expect(await notice.textContent()).toContain('Sin conexión · reintentando en');
+      expect(await notice.textContent()).toMatch(
+        /^Sin conexión · intento \d+ sin respuesta · reintentando en \d+ s/,
+      );
       expect(await notice.locator('details').getAttribute('open')).toBeNull();
       const noticeBox = (await notice.boundingBox())!;
       const hudBox = (await page.getByTestId('company-hud').boundingBox())!;
@@ -317,11 +347,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await more.evaluate(isFocusedElement)).toBe(true);
         await more.click();
         await sheet.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
-        await page.getByRole('tab', { name: 'Funcionalidades', selected: true }).waitFor();
+        await activePanel(page, 'Funcionalidades').waitFor();
         expect(await sheet.count()).toBe(0);
         await more.click();
         await sheet.getByRole('button', { name: 'Auditoría', exact: true }).click();
-        await page.getByRole('tab', { name: 'Auditoría', selected: true }).waitFor();
+        await activePanel(page, 'Auditoría').waitFor();
         await page.keyboard.press('Escape');
         await more.click();
         await sheet.getByRole('button', { name: 'Editar oficina', exact: true }).click();
@@ -388,7 +418,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await windowPanel.waitFor();
       const panelBox = (await windowPanel.boundingBox())!;
       expect(await canvas.boundingBox()).toEqual(officeBox);
-      expect(await page.getByRole('tab', { selected: true }).textContent()).toBe('Trabajo');
+      expect(await activePanel(page, 'Trabajo').count()).toBe(1);
       expect(await page.getByTestId('backlog-panel').count()).toBe(1);
       if (width === 390) {
         expect(panelBox.x).toBe(0);
@@ -465,11 +495,10 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
         ),
       ).toContain('slashed-zero');
-      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Reuniones', 'Trabajo']) {
-        await page.getByRole('tab', { name, exact: true }).click();
+      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Trabajo']) {
+        await openPanel(page, name);
         expect(await windowPanel.count()).toBe(1);
-        expect(await page.getByRole('tabpanel').count()).toBe(1);
-        expect(await page.getByRole('tab', { selected: true }).textContent()).toBe(name);
+        expect(await activePanel(page, name).count()).toBe(1);
         const labels: Record<string, string> = {
           Trabajo: 'Trabajo',
           Decisiones: 'Decisiones',
@@ -520,10 +549,10 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       };
       // A new meeting opens a closed window, without stealing another open tab.
       await sendMeeting('meeting-1');
-      await page.getByRole('tab', { name: 'Reuniones', selected: true }).waitFor();
+      await activePanel(page, 'Reuniones').waitFor();
       await expectWindowOwnsHeading(page, 'Reuniones');
       const meetingDetails = page
-        .getByRole('tabpanel')
+        .getByTestId('panel-window')
         .getByRole('button', { name: /Ocultar detalles/ });
       await meetingDetails.click();
       expect(
@@ -534,29 +563,29 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.keyboard.press('Escape');
       await backlog.click();
       await sendMeeting('meeting-2');
-      const meetingTab = page.getByRole('tab', { name: 'Reuniones', exact: true });
       const meetingHud = page.getByTestId('company-hud').getByRole('button', { name: /Reuniones/ });
-      await meetingTab.getByRole('status', { name: 'Nueva actividad' }).waitFor();
-      expect(await page.getByRole('tab', { name: 'Trabajo', selected: true }).count()).toBe(1);
+      await meetingHud.getByRole('status', { name: 'Nueva actividad' }).waitFor();
+      expect(await activePanel(page, 'Trabajo').count()).toBe(1);
       expect(await meetingHud.getByRole('status', { name: 'Nueva actividad' }).isVisible()).toBe(
         true,
       );
       await sendMeeting('meeting-2');
-      expect(await meetingTab.getByRole('status').count()).toBe(1);
+      expect(await meetingHud.getByRole('status').count()).toBe(1);
       // The mobile sheet covers the HUD and dock until dismissed.
       if (width === 390) await page.keyboard.press('Escape');
       await meetingHud.click();
-      await page.getByRole('tab', { name: 'Reuniones', selected: true }).waitFor();
-      expect(await meetingTab.getByRole('status').count()).toBe(0);
+      await activePanel(page, 'Reuniones').waitFor();
       expect(await meetingHud.getByRole('status').count()).toBe(0);
       if (width !== 390) {
         await meetingHud.click();
         expect(await windowPanel.count()).toBe(1);
       }
-      await page.getByRole('tab', { name: 'Trabajo', exact: true }).click();
+      await openPanel(page, 'Trabajo');
       await sendMeeting('meeting-3');
-      await meetingTab.getByRole('status').waitFor();
-      await meetingTab.click();
+      await meetingHud.getByRole('status').waitFor();
+      // On mobile the full-screen window covers the HUD: close it first.
+      if (width === 390) await page.keyboard.press('Escape');
+      await meetingHud.click();
       expect(await meetingHud.getByRole('status').count()).toBe(0);
       // Both HUD counts remain stable shortcuts to the same named section.
       const decisions = [
@@ -586,7 +615,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await decisionHud.click();
       expect(await decisionHud.textContent()).toContain('Decisiones');
       expect(await decisionHud.locator('.ui-counter').textContent()).toBe('· 2');
-      await page.getByRole('tab', { name: 'Decisiones', selected: true }).waitFor();
+      await activePanel(page, 'Decisiones').waitFor();
       const badge = dock.getByRole('status', { name: '2 decisiones pendientes' });
       expect(await badge.textContent()).toBe('2');
       expect(await badge.locator('svg').count()).toBe(1);
@@ -599,7 +628,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await work.getAttribute('title')).toContain('Estado de PR:');
       expect(await page.getByTestId('dock-pr-status').count()).toBe(0);
       await work.click();
-      await page.getByRole('tab', { name: 'Trabajo', selected: true }).waitFor();
+      await activePanel(page, 'Trabajo').waitFor();
       expect(await work.getAttribute('aria-pressed')).toBe('true');
       await work.click();
       expect(await windowPanel.count()).toBe(0);
@@ -633,7 +662,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
       await card.waitFor();
       await card.getByRole('button', { name: 'Ver en Trabajo', exact: true }).click();
-      await page.getByRole('tab', { name: 'Trabajo', selected: true }).waitFor();
+      await activePanel(page, 'Trabajo').waitFor();
       expect(await card.count()).toBe(0);
       await page.keyboard.press('Escape');
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(null)');
@@ -641,7 +670,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.waitForTimeout(50);
       if (width === 390) {
         await backlog.tap();
-        await page.getByRole('tab', { name: 'Funcionalidades', exact: true }).tap();
+        await openPanel(page, 'Funcionalidades');
         await page.getByRole('button', { name: 'Ver plan', exact: true }).tap();
         await page.getByRole('dialog', { name: 'Plan de funcionalidad', exact: true }).waitFor();
         await expectModalFocus(page, 'Plan de funcionalidad');

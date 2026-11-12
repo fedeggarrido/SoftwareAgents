@@ -223,22 +223,6 @@
   outline: var(--window-border) solid var(--color-text);
   outline-offset: var(--window-focus-offset);
 }
-.panel-window-tabs {
-  display: flex;
-  flex-shrink: 0;
-  overflow-x: auto;
-  border-bottom: var(--window-border) solid var(--color-border);
-}
-.panel-window-tabs button {
-  flex-shrink: 0;
-  padding: var(--panel-gap);
-  font-size: var(--window-title-size);
-  cursor: pointer;
-}
-.panel-window-tabs [aria-selected='true'] {
-  background: var(--color-active-bg);
-  color: var(--color-text);
-}
 .panel-window-content {
   flex: 1;
   min-height: 0;

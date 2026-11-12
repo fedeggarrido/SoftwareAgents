@@ -50,7 +50,10 @@ describe('office connection copy', () => {
       10_000,
     );
     expect(copy.label).toContain('reintentando');
-    expect(copy.label).toBe('Sin conexión · reintentando en 5 s');
+    expect(copy.label).toBe('Sin conexión · intento 3 sin respuesta · reintentando en 5 s');
+    expect(
+      connectionCopy('reconnecting', { cause: 'unavailable', attempt: 4, retryAt: null }).label,
+    ).toBe('Sin conexión · reintentando ahora…');
     expect(copy.explanation).toContain('La oficina está cerrada en tu ordenador');
     expect(copy.explanation).toContain('Abre Pixel Agents');
     expect(copy.explanation).not.toContain('terminal');

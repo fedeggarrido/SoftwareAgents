@@ -577,8 +577,6 @@ function App() {
           tab={panel.tab}
           rect={panel.rect}
           mobile={panel.mobile}
-          meetingUnread={panel.meetingUnread}
-          onSelect={panel.select}
           onRectChange={panel.setRect}
           onReset={panel.reset}
           onClose={panel.close}

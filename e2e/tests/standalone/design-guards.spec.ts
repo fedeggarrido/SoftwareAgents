@@ -23,7 +23,8 @@ const VIEWPORTS = {
   mobile: { width: 375, height: 812 },
 } as const;
 type ViewportName = keyof typeof VIEWPORTS;
-const WINDOW_TABS = ['Trabajo', 'Decisiones', 'Auditoría', 'Funcionalidades', 'Reuniones'];
+// The dock is the only panel navigation (no duplicate tabs inside the window).
+const WINDOW_PANELS = ['Decisiones', 'Auditoría', 'Funcionalidades'];
 const CONNECTION_TIMEOUT_MS = 15_000;
 
 async function dockButton(page: Page, viewport: ViewportName, name: string) {
@@ -88,9 +89,11 @@ test.describe('Design guards (SA-151)', () => {
       await check('office');
 
       await dockButton(page, viewport, 'Trabajo');
-      for (const tab of WINDOW_TABS) {
-        await page.getByRole('tab', { name: tab, exact: true }).click();
-        await check(`window-${tab}`);
+      await check('window-Trabajo');
+      expect(await page.getByRole('tab').count()).toBe(0);
+      for (const panel of WINDOW_PANELS) {
+        await dockButton(page, viewport, panel);
+        await check(`window-${panel}`);
       }
       if (viewport === 'mobile') {
         // Layers: the sheet's close button is reachable and «Más» opens above the window.

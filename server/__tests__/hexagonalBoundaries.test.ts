@@ -50,6 +50,11 @@ describe('SA-158 hexagonal-boundaries', () => {
         filename: inHex('src/composition/main.ts'),
         options,
       },
+      {
+        code: "import { greeting } from '../domain';",
+        filename: inHex('src/application/greet.ts'),
+        options,
+      },
       // Projects without the hexagonal marker are never touched.
       {
         code: "import { db } from '../adapters/out/db.js';",
@@ -85,6 +90,18 @@ describe('SA-158 hexagonal-boundaries', () => {
       {
         code: 'const mod = await import(name);',
         filename: inHex('src/application/greet.ts'),
+        options,
+        errors: [{ messageId: 'boundary' }],
+      },
+      {
+        code: "const db = module.require('../adapters/out/db.cjs');",
+        filename: inHex('src/domain/order.ts'),
+        options,
+        errors: [{ messageId: 'boundary' }],
+      },
+      {
+        code: `const db = require(${JSON.stringify(inHex('src/adapters/out/db.cjs'))});`,
+        filename: inHex('src/adapters/in/cli.ts'),
         options,
         errors: [{ messageId: 'boundary' }],
       },

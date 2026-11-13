@@ -430,6 +430,7 @@ describe('Tech Lead stack proposal', () => {
       'brain',
       'FEAT-001',
       {
+        architecture: { kind: 'hexagonal' as const },
         components: ['Dominio', 'Adaptadores'],
         risks: [],
         body: 'Diseño hexagonal',

@@ -6,7 +6,7 @@ import { TASK_CLI_INPUT_BYTES } from './constants.js';
 import { withoutOperatorToken } from './featureIngress.js';
 import { HEXAGONAL_MARKER } from './projectArchitectureConstants.js';
 import { projectQualityLintCommand } from './projectQualityLint.js';
-import { type VerifierFailure,verifierFailure } from './verifierFeedback.js';
+import { type VerifierFailure, verifierFailure } from './verifierFeedback.js';
 
 /** Recheck the reviewed SHA with the same isolated verifier, never a project's executable config. */
 export function projectBoundaryFailures(root: string, files: string[]): VerifierFailure[] {

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 
 import type { ProjectConfig } from '../../core/src/project.js';
 import { architectContext, type ArchitectRequest, architectTaskKey } from './architect.js';
-import { requireArchitectureDecision } from './architectureDecisions.js';
+import { architectureAnswer, requireArchitectureDecision } from './architectureDecisions.js';
 import { CliUsageError } from './cliErrors.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { withoutOperatorToken } from './featureIngress.js';
@@ -87,5 +87,6 @@ export function architectureContext(
   return {
     ...architectContext(cwd, config.project.brain.path),
     'STACK.md': requireProjectStack(store, input.key),
+    ARCHITECTURE_DECISION: architectureAnswer(store, input.key),
   };
 }

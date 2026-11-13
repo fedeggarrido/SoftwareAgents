@@ -48,8 +48,11 @@ const validateBinding = compileSchema<ArchitectureBinding>({
   properties: { choice: architectureChoiceContract.oneOf[1], specSha: text, adrPath: text },
 });
 
+/** The human approves the architecture itself, so wording and key order never re-open it. */
 function contextKey(key: string, binding: ArchitectureBinding): string {
-  const hash = createHash('sha256').update(JSON.stringify(binding)).digest('hex');
+  const { name, alternatives } = binding.choice;
+  const canonical = [name.trim(), [...alternatives].map((entry) => entry.trim()).sort()];
+  const hash = createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
   return `${ARCHITECTURE_DECISION_PREFIX}${key}/${binding.specSha}/${hash}`;
 }
 
@@ -132,6 +135,24 @@ export function requireArchitectureChoice(
       'El humano eligió arquitectura hexagonal. Rehaz el diseño desde la plantilla.',
     ]);
   return architectureAdr(binding, decision);
+}
+
+/** Resumed Architect runs see the human answer and the exact proposal it applies to. */
+export function architectureAnswer(
+  store: Pick<WorkStore, 'getFeature' | 'listDecisions'>,
+  key: string,
+): string | null {
+  const prefix = `${ARCHITECTURE_DECISION_PREFIX}${key}/${store.getFeature(key)?.git_sha}/`;
+  const decision = store
+    .listDecisions()
+    .filter((entry) => entry.context.startsWith(prefix) && entry.status === 'answered')
+    .at(-1);
+  if (!decision) return null;
+  return decision.answer === 'alternative'
+    ? `El humano aceptó esta arquitectura. Declárala con el mismo name y alternatives:
+
+${decision.context}`
+    : 'El humano eligió mantener la arquitectura hexagonal. Declara architecture.kind=hexagonal.';
 }
 
 /** Same gate for CLI, orchestrator and direct worker calls, before any execution. */

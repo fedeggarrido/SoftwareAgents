@@ -30,7 +30,7 @@ export interface ArchitectRequest {
 }
 
 export interface ArchitectProposal {
-  architecture?: ArchitectureChoice;
+  architecture: ArchitectureChoice;
   components: string[];
   risks: string[];
   body: string;
@@ -42,7 +42,7 @@ const text = { type: 'string', minLength: 1, pattern: '\\S' };
 export const architectContract = {
   type: 'object',
   additionalProperties: false,
-  required: ['components', 'risks', 'body', 'dag'],
+  required: ['architecture', 'components', 'risks', 'body', 'dag'],
   properties: {
     architecture: architectureChoiceContract,
     components: { type: 'array', minItems: 1, uniqueItems: true, items: text },
@@ -119,7 +119,7 @@ export function validateArchitect(
   }
   const proposal = validateSchema(validateProposal, value);
   if (
-    proposal.architecture?.kind === 'alternative' &&
+    proposal.architecture.kind === 'alternative' &&
     !proposal.architecture.alternatives.some((alternative) => /hexagonal/i.test(alternative))
   )
     throw new SchemaValidationError([
@@ -129,7 +129,7 @@ export function validateArchitect(
   const errors = analyzeTaskDag(dag, spec).issues.map((issue) => JSON.stringify(issue));
   dag.tasks.forEach((task) => {
     if (
-      proposal.architecture?.kind === 'hexagonal' &&
+      proposal.architecture.kind === 'hexagonal' &&
       !/\b(domain|application|adapters\/(in|out)|composition)\b/.test(task.title)
     )
       errors.push(`${task.key}: el título debe nombrar la capa hexagonal`);
@@ -158,7 +158,7 @@ export async function architectArtifacts(
 ): Promise<Map<string, string>> {
   const paths = architectPaths(brain, key);
   const alternative =
-    proposal.architecture?.kind === 'alternative' ? proposal.architecture : undefined;
+    proposal.architecture.kind === 'alternative' ? proposal.architecture : undefined;
   const adrPaths = await reserveAdrPaths(
     cwd,
     brain,

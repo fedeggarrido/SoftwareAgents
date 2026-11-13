@@ -110,12 +110,15 @@ export default {
         const alias = Object.keys(config.aliases)
           .sort((a, b) => b.length - a.length)
           .find((prefix) => dependency.startsWith(prefix));
+        const local = dependency.startsWith('file:') ? fileURLToPath(dependency) : dependency;
         const resolved = alias
           ? path.resolve(root, config.aliases[alias], dependency.slice(alias.length))
-          : dependency.startsWith('.')
-            ? path.resolve(path.dirname(context.filename), dependency)
+          : local.startsWith('.') || path.isAbsolute(local) || path.win32.isAbsolute(local)
+            ? path.resolve(path.dirname(context.filename), local)
             : null;
-        target = resolved ? layerOf(portable(path.relative(root, resolved))) : 'package';
+        // Directory imports resolve to their index file inside the same folder.
+        const relative = resolved && portable(path.relative(root, resolved));
+        target = relative ? (layerOf(relative) ?? layerOf(`${relative}/index`)) : 'package';
         if (target && allowed[layer].includes(target)) return;
         if (target === 'package' && (layer === 'composition' || layer === 'in' || layer === 'out'))
           return;
@@ -150,7 +153,12 @@ export default {
         check(node, node.source);
       },
       CallExpression(node) {
-        if (node.callee.type === 'Identifier' && node.callee.name === 'require')
+        // require() and module.require() / x.require() load modules the same way.
+        const callee =
+          node.callee.type === 'MemberExpression' && !node.callee.computed
+            ? node.callee.property
+            : node.callee;
+        if (callee.type === 'Identifier' && callee.name === 'require')
           check(node, node.arguments[0]);
       },
       TSImportEqualsDeclaration(node) {

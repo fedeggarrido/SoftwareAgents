@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { HumanDecision, NewHumanDecision } from '../../core/src/humanDecision.js';
 import {
+  architectureAnswer,
   assertArchitectureAnswer,
   openArchitectureAlternative,
   requireArchitectureChoice,
@@ -75,6 +76,25 @@ describe('SA-158 architecture alternative', () => {
     const adr = requireArchitectureChoice(store, 'FEAT-001', choice, ADR);
     expect(adr).toContain('Aceptado por el humano');
     expect(adr).toContain('Monolito en capas');
+  });
+
+  it('keeps the human answer when the architect rewords or reorders the same proposal', async () => {
+    const { store, decisions } = fakeStore();
+    await openArchitectureAlternative(store, 'FEAT-001', proposalError());
+    Object.assign(decisions[0], {
+      status: 'answered',
+      answer: 'alternative',
+      answeredBy: 'operator',
+      answeredAt: '2026-11-13T00:00:00Z',
+    });
+    expect(architectureAnswer(store, 'FEAT-001')).toContain('Monolito en capas');
+    const reworded = {
+      alternatives: [...choice.alternatives].reverse(),
+      rationale: 'Otra redacción',
+      name: choice.name,
+      kind: choice.kind,
+    };
+    expect(requireArchitectureChoice(store, 'FEAT-001', reworded, ADR)).toContain('Aceptado');
   });
 
   it('sends the architect back to hexagonal when the human keeps the template', async () => {

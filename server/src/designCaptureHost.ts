@@ -204,17 +204,17 @@ export async function captureInHost(
             await page.getByTestId('company-hud').waitFor({ timeout: CAPTURE_WAIT_MS });
             const openSection = async () => {
               if (!(view in VIEW_LABELS)) return;
-              // All sections now live in one window. Open it through its dock entry,
-              // then navigate using the same tabs as the operator.
-              await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
+              // The dock is the only panel navigation (no window tabs). On narrow
+              // viewports the section may live in the «Más» sheet, as for the operator.
+              const label = VIEW_LABELS[view as keyof typeof VIEW_LABELS];
+              const entry = page
+                .getByRole('navigation', { name: 'Controles de la oficina' })
+                .getByRole('button', { name: label, exact: true });
+              if (!(await entry.isVisible()))
+                await page.getByRole('button', { name: 'Más', exact: true }).click();
+              await page.getByRole('button', { name: label, exact: true }).first().click();
               const window = page.getByTestId('panel-window');
               await window.waitFor({ timeout: CAPTURE_WAIT_MS });
-              await page
-                .getByRole('tab', {
-                  name: VIEW_LABELS[view as keyof typeof VIEW_LABELS],
-                  exact: true,
-                })
-                .click();
               const panel = window.getByTestId(`${view}-panel`);
               await panel.waitFor({ timeout: CAPTURE_WAIT_MS });
               if (fixture === 'populated')

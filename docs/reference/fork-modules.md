@@ -29,6 +29,15 @@ para lecturas puntuales.
   tendencias. Compara dos o tres stacks completos y sus costes, madurez, encaje,
   aprendizaje, riesgos y ecosistema. Los precios y las cifras requieren fragmentos
   literales verificados, con moneda y unidades, o muestran «sin dato verificado».
+- Arquitectura hexagonal por defecto (SA-158): `projectArchitectureTemplate.ts` y
+  `pixel-agents project scaffold FEAT-### --confirm` crean domain, application,
+  adapters/in, adapters/out y composition tras aceptar el stack, sin sobrescribir
+  archivos; el marcador `.softwareagents/hexagonal.json` se escribe el último y activa
+  la regla `eslint-rules/hexagonal-boundaries.mjs` (política en `hexagonal-policy.json`).
+  `projectBoundaryReview.ts` revalida el SHA revisado y `reviewPasses.ts` convierte
+  cada violación de capas en hallazgo mayor que bloquea la aprobación. Si Architect
+  propone otra arquitectura, `architectureDecisions.ts` abre una decisión humana con
+  el ADR propuesto; el diseño queda bloqueado hasta que el humano responda.
 - `projectStack.ts` guarda la propuesta y bibliografía en el esquema Human Decision.
   La decisión bloquea la tarea de Architect y conserva el SHA de los requisitos.
   `humanDecisions.ts` proyecta la opción humana elegida como ADR «Aceptado».

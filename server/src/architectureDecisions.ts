@@ -76,7 +76,11 @@ export function architectureAdr(binding: ArchitectureBinding, decision?: HumanDe
 
 /** Run after the worker released its lease; the proposed ADR is reviewable in Decisions.
  * The accepted ADR is published atomically with TechnicalDesign through architectArtifacts. */
-export async function openArchitectureAlternative(store: WorkStore, key: string, error: string) {
+export async function openArchitectureAlternative(
+  store: Pick<WorkStore, 'getFeature' | 'openOrJoinIdleDecision'>,
+  key: string,
+  error: string,
+) {
   const value: unknown = JSON.parse(error.slice(ARCHITECTURE_PROPOSAL_ERROR.length));
   const binding = validateSchema(validateBinding, value);
   if (store.getFeature(key)?.git_sha !== binding.specSha)
@@ -111,7 +115,7 @@ export async function openArchitectureAlternative(store: WorkStore, key: string,
 }
 
 export function requireArchitectureChoice(
-  store: WorkStore,
+  store: Pick<WorkStore, 'getFeature' | 'listDecisions'>,
   key: string,
   choice: ArchitectureBinding['choice'],
   adrPath: string,

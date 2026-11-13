@@ -20,6 +20,7 @@ import { readSummaryContext } from '../src/projectSummaryContext.js';
 import { otlpSpan, telemetryDirectory, type TelemetrySpan } from '../src/telemetry.js';
 import * as telemetryCommand from '../src/telemetryCommand.js';
 import { runMigrations } from '../src/workstore/migrations.js';
+import { stackProposal, stackSource } from './helpers/stackProposal.js';
 
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
@@ -108,11 +109,55 @@ function repository() {
   return root;
 }
 
+function stackDecisionFixture(sha: string): HumanDecision {
+  return {
+    id: 'stack',
+    context: 'project-stack/FEAT-001',
+    requestedBy: 'tech-lead',
+    blocks: ['FEAT-001-DESIGN'],
+    options: [{ id: 'python', label: 'Python', benefit: 'Encaje', cost: 'Coste', risk: 'Riesgo' }],
+    recommendation: 'typescript',
+    disagreement: [],
+    impact: 'Bloquea diseño',
+    urgency: 'medium',
+    status: 'open',
+    answeredBy: null,
+    answeredAt: null,
+    projectStack: {
+      feature: 'FEAT-001',
+      specSha: sha,
+      adrPath: 'brain/adr/0001-stack-tecnologico.md',
+      proposal: stackProposal(),
+      bibliography: [stackSource()],
+    },
+  };
+}
+
 describe('project summary projection', () => {
+  it('shows the human-selected stack and its reason while omitting pending or stale choices', () => {
+    const data = fixture();
+    const sha = 'a'.repeat(40);
+    data.work.features = [{ key: 'FEAT-001', status: 'approved', git_sha: sha }];
+    const decision = stackDecisionFixture(sha);
+    data.work.decisions = [{ escalation: JSON.stringify(decision) }];
+    expect(projectSummary(data).stack).toEqual([]);
+    decision.status = 'answered';
+    decision.answer = 'python';
+    decision.answeredBy = 'fede';
+    decision.answeredAt = new Date().toISOString();
+    data.work.decisions = [{ escalation: JSON.stringify(decision) }];
+    expect(projectSummary(data).stack).toMatchObject([
+      { name: 'Stack Python', why: 'Inferencia · Encaja con los requisitos de despliegue local.' },
+    ]);
+    expect(JSON.stringify(projectSummary(data).stack)).not.toContain('bibliography');
+    data.work.features[0].git_sha = 'b'.repeat(40);
+    expect(projectSummary(data).stack).toEqual([]);
+  });
   it('keeps a new project empty with explicit unknown cost and no generated facts', () => {
     const result = projectSummary(fixture());
     expect(result).toEqual({
       name: 'Pedidos',
+      stack: [],
       goals: [],
       features: [],
       workflow: expect.arrayContaining([
@@ -359,6 +404,47 @@ describe('project summary projection', () => {
 });
 
 describe('project summary canonical readers', () => {
+  it('reads the chosen stack through the real read-only WorkStore projection with its SHA', async () => {
+    const root = repository();
+    const sha = 'a'.repeat(40);
+    const decision = stackDecisionFixture(sha);
+    decision.status = 'answered';
+    decision.answer = 'python';
+    decision.answeredBy = 'fede';
+    decision.answeredAt = new Date().toISOString();
+    const file = path.join(root, '.git/softwareagents/work.sqlite3');
+    const db = new DatabaseSync(file);
+    try {
+      runMigrations(db);
+      db.prepare('INSERT INTO projects (project_id, created_at) VALUES (?, ?)').run(
+        'summary-test',
+        decision.answeredAt,
+      );
+      db.prepare(
+        'INSERT INTO features (project_id, key, doc_path, git_sha, status, title) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('summary-test', 'FEAT-001', 'brain/features/FEAT-001.yaml', sha, 'approved', 'Pedidos');
+      db.prepare(
+        'INSERT INTO human_decisions (project_id, key, question, answer, actor, decided_at, escalation, previous_states) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        'summary-test',
+        decision.id,
+        decision.context,
+        decision.answer,
+        'fede',
+        decision.answeredAt,
+        JSON.stringify(decision),
+        '{}',
+      );
+    } finally {
+      db.close();
+    }
+    const before = fs.readFileSync(file);
+    expect(await readProjectSummary(root, 'summary-test')).toMatchObject({
+      status: 'ok',
+      summary: { stack: [{ name: 'Stack Python', components: expect.any(Array) }] },
+    });
+    expect(fs.readFileSync(file)).toEqual(before);
+  });
   it('reuses the bound plan reader for goals, declared risks and pending approval', () => {
     const root = repository();
     const config = loadProjectConfig(root)!;

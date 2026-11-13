@@ -638,6 +638,7 @@ export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
   workflow_done: { label: 'Hecho', icon: 'check', tone: 'success' },
   workflow_empty: { label: 'Sin trabajo', icon: 'minus', tone: 'muted' },
   summary_done: { label: 'Hecha', icon: 'check', tone: 'success' },
+  stack_accepted: { label: 'Aceptado', icon: 'check', tone: 'success' },
   summary_in_progress: { label: 'En curso', icon: 'play', tone: 'active' },
   summary_pending: { label: 'Pendiente', icon: 'clock', tone: 'muted' },
   DRAFT: { label: 'Borrador', icon: 'minus', tone: 'muted' },

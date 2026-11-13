@@ -394,7 +394,7 @@ export async function readFeaturesSource(
   return {
     wip: readConfig().projects[projectId]?.wip,
     zones,
-    features: read('features', 'key, title, status, updated_at'),
+    features: read('features', 'key, title, status, git_sha, updated_at'),
     designs: read('technical_designs', 'feature_key'),
     tasks: read(
       'tasks',

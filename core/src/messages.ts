@@ -623,6 +623,7 @@ export interface ProjectSummarySnapshot {
 }
 
 export interface ProjectSummary {
+  stack?: ProjectStackSummary[];
   name: string;
   goals: ProjectSummaryItem[];
   features: ProjectSummaryFeature[];
@@ -635,6 +636,20 @@ export interface ProjectSummary {
   notices: string[];
   cost: ProjectSummaryCost;
   workflow: WorkflowStage[];
+}
+
+export interface ProjectStackSummary {
+  feature: string;
+  name: string;
+  why: string;
+  risks: string;
+  compatibility: string;
+  components: ProjectStackComponent[];
+}
+
+export interface ProjectStackComponent {
+  label: string;
+  value: string;
 }
 
 export interface ProjectSummaryItem {

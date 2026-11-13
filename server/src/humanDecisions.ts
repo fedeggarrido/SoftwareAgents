@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
 
-import type { AutonomyLevel } from '../../core/src/project.js';
+import type { AutonomyLevel, ProjectConfig } from '../../core/src/project.js';
 import { AuditLog } from './auditLog.js';
+import { featureIngressActor } from './featureIngress.js';
 import { evaluatePolicy, type PolicyAction, type PolicyActor } from './policy.js';
+import { loadProjectConfig } from './projectConfig.js';
+import { materializeStackAdr } from './projectStack.js';
 import { assertTaskChangeAnswer } from './taskChangeDecisions.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
@@ -11,6 +14,7 @@ export class HumanDecisions {
   constructor(
     private readonly store: WorkStore,
     private readonly audit = new AuditLog(),
+    private readonly project?: ProjectConfig,
   ) {}
 
   async answer(
@@ -71,6 +75,17 @@ export class HumanDecisions {
       append('rejected');
       throw new Error('Authenticated operator token required');
     }
+    const stack = this.store.listDecisions().find((decision) => decision.id === id)?.projectStack;
+    // Choosing the stack unblocks the Architect: only a human may answer, never a managed agent.
+    if (stack && featureIngressActor() !== 'human') {
+      append('rejected');
+      throw new Error('Stack decisions require the human operator');
+    }
+    const config = stack ? (this.project ?? loadProjectConfig(process.cwd())) : undefined;
+    if (stack && config?.project.id !== this.store.projectId)
+      throw new Error('Stack decision requires its bound Project');
+    if (stack && this.store.getFeature(stack.feature)?.git_sha !== stack.specSha)
+      throw new Error('Stack decision requirements changed');
     let decision;
     try {
       decision = await (reconcile
@@ -83,10 +98,13 @@ export class HumanDecisions {
     // A durable intent is not success. Only append confirmation after SQLite COMMIT.
     // Failure here must never produce a rejected record for an already committed answer.
     try {
+      if (config) materializeStackAdr(config, decision, this.store);
       append('answered');
     } catch (cause) {
       throw new Error(
-        'Decision committed; audit confirmation pending. Inspect WorkStore before retrying.',
+        config
+          ? 'Decision committed; ADR or audit confirmation pending. Inspect WorkStore before retrying.'
+          : 'Decision committed; audit confirmation pending. Inspect WorkStore before retrying.',
         { cause },
       );
     }
@@ -144,7 +162,14 @@ export async function answerProjectDecision(
   const store = await openWorkStore({ repositoryPath, projectId });
   try {
     if (!store.listDecisions().some((d) => d.id === id)) return '';
-    await new HumanDecisions(store).answer(id, answer, privileged, 'operator', level);
+    const config = loadProjectConfig(repositoryPath);
+    await new HumanDecisions(store, undefined, config ?? undefined).answer(
+      id,
+      answer,
+      privileged,
+      'operator',
+      level,
+    );
     return `${id}: respuesta guardada; tareas restauradas. La acción requiere revisión explícita.`;
   } finally {
     store.close();

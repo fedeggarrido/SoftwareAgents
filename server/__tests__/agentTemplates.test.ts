@@ -19,6 +19,7 @@ const roles = [
   { id: 'product-designer', profile: 'read_only', outputs: ['DesignReport'] },
   { id: 'researcher', profile: 'read_only', outputs: ['ResearchReport'] },
   { id: 'web-scout', profile: 'read_only', outputs: ['WebScoutCandidates'] },
+  { id: 'tech-lead', profile: 'read_only', outputs: ['StackProposal'] },
 ] as const;
 
 describe('platform AgentSpec templates', () => {
@@ -37,7 +38,7 @@ describe('platform AgentSpec templates', () => {
       expect(spec.outputs).toEqual(outputs);
       // Advisory roles (designer, researcher) cannot merge or touch the repo; they only
       // escalate permission expansion (and the designer, art direction).
-      const advisory = ['product-designer', 'researcher', 'web-scout'].includes(id);
+      const advisory = ['product-designer', 'researcher', 'web-scout', 'tech-lead'].includes(id);
       expect(spec.escalation.humanRequired).toEqual(
         expect.arrayContaining(
           advisory

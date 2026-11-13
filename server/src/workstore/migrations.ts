@@ -221,6 +221,19 @@ const migrations = [
     BEGIN UPDATE tasks SET ci_restore_status = NULL, ci_restore_blocked_reason = NULL
       WHERE project_id = NEW.project_id AND key = NEW.key; END;`,
   `ALTER TABLE features ADD COLUMN approved_plan_revision TEXT;`,
+  `ALTER TABLE adr_reservations RENAME TO adr_reservations_legacy;
+  CREATE TABLE adr_reservations (
+    project_id TEXT NOT NULL, feature_key TEXT NOT NULL,
+    purpose TEXT NOT NULL CHECK(purpose IN ('architecture','stack')),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+    number INTEGER NOT NULL CHECK(number BETWEEN 1 AND 9999),
+    PRIMARY KEY(project_id, feature_key, purpose, ordinal),
+    UNIQUE(project_id, number),
+    FOREIGN KEY(project_id, feature_key) REFERENCES features(project_id, key)
+  ) STRICT;
+  INSERT INTO adr_reservations SELECT project_id, feature_key, 'architecture', ordinal, number
+    FROM adr_reservations_legacy;
+  DROP TABLE adr_reservations_legacy;`,
 ] as const;
 
 /** Acquire the writer lock before reading the version, including on simultaneous first opens. */

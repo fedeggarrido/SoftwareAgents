@@ -201,7 +201,7 @@ export class ClaudeCliExecutor implements Executor {
           fs.writeFileSync(
             settings,
             JSON.stringify({
-              ...(['web-scout', 'researcher'].includes(req.role)
+              ...(['web-scout', 'researcher', 'tech-lead'].includes(req.role)
                 ? {
                     claudeMdExcludes: ['**'],
                     autoMemoryEnabled: false,
@@ -232,7 +232,9 @@ export class ClaudeCliExecutor implements Executor {
           const args = [
             ...(options.binaryArgs ?? []),
             // Keep subscription OAuth: --bare would require an API key.
-            ...(['web-scout', 'researcher'].includes(req.role) ? ['--no-session-persistence'] : []),
+            ...(['web-scout', 'researcher', 'tech-lead'].includes(req.role)
+              ? ['--no-session-persistence']
+              : []),
             ...(req.role === 'web-scout' ? ['--max-turns', String(WEB_SCOUT_MAX_TURNS)] : []),
             '-p',
             '--output-format',
@@ -253,7 +255,7 @@ export class ClaudeCliExecutor implements Executor {
             tools,
             '--disallowedTools',
             compiled.claude.disallowedTools.join(','),
-            ['web-scout', 'researcher'].includes(req.role)
+            ['web-scout', 'researcher', 'tech-lead'].includes(req.role)
               ? '--system-prompt'
               : '--append-system-prompt',
             compiled.claude.appendSystemPrompt,
@@ -401,6 +403,8 @@ export class ClaudeCliExecutor implements Executor {
                     : [];
                   if (req.role === 'web-scout' && tools.some((tool) => tool !== 'WebSearch'))
                     violate('Web scout exposed tools outside WebSearch');
+                  else if (req.role === 'tech-lead' && tools.length)
+                    violate('Tech Lead exposed tools outside quarantine');
                   else if (web.some((tool) => !compiled.claude.allowedTools.includes(String(tool))))
                     violate(`Claude exposed ${web.join(', ')}; slice profiles have no web access`);
                   else if (mcp.length || servers.length)
@@ -428,6 +432,8 @@ export class ClaudeCliExecutor implements Executor {
                     if (content.type === 'tool_use') {
                       if (req.role === 'web-scout' && content.name !== 'WebSearch')
                         violate('Web scout used tools outside WebSearch');
+                      else if (req.role === 'tech-lead')
+                        violate('Tech Lead used tools outside quarantine');
                       else if (
                         CLAUDE_WEB_TOOLS.includes(content.name) &&
                         !compiled.claude.allowedTools.includes(content.name)

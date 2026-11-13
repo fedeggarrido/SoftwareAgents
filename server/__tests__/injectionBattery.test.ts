@@ -107,7 +107,8 @@ for (const attack of cases) {
         attack.payload,
       );
       for (const role of Object.keys(ROLE_PROFILES)) {
-        if (role === 'researcher') {
+        // Quarantine readers (Researcher, Tech Lead) receive tainted data with zero tools.
+        if (role === 'researcher' || role === 'tech-lead') {
           expect(
             compileAgent(template(role), role, { task, outputSchema: EXTERNAL_HANDOFF_SCHEMA })
               .claude.allowedTools,

@@ -17,7 +17,6 @@ import { extractJsonObject } from './agentOutput.js';
 import {
   architectArtifacts,
   architectBrief,
-  architectContext,
   architectPaths,
   type ArchitectProposal,
   type ArchitectRequest,
@@ -26,10 +25,16 @@ import {
   validateArchitect,
   writeArchitectArtifacts,
 } from './architect.js';
+import {
+  architectureContext,
+  prepareArchitectureTask,
+  prepareArchitectureWorktree,
+  restoreArchitectureWorktree,
+} from './architecturePolicy.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
 import { validateChangeZone } from './changeZones.js';
 import { CliUsageError } from './cliErrors.js';
-import { readTaskInput, taskPath } from './commands/taskFiles.js';
+import { taskPath } from './commands/taskFiles.js';
 import { readConfig } from './configPersistence.js';
 import {
   CLAUDE_OAUTH_REFRESH_CONTENTION,
@@ -374,13 +379,7 @@ export async function runWorker(
         throw new Error('Developer max_attempts exhausted; FAILED_FINAL requires human review');
       }
     }
-    if (options.architect) {
-      const existing = store.getTask(args.task);
-      if (existing && (existing.agent_role !== 'architect' || existing.type !== 'architecture'))
-        throw new CliUsageError('Design task belongs to another workflow');
-      if (!existing)
-        store.createTask({ key: args.task, type: 'architecture', agent_role: 'architect' });
-    }
+    if (options.architect) prepareArchitectureTask(store, options.architect.key);
     if (options.requirements) {
       const existing = store.getTask(args.task);
       if (existing && (existing.agent_role !== 'requirements-analyst' || existing.type !== 'docs'))
@@ -1372,6 +1371,8 @@ async function runWorkerExecution(
         audit('developer_retry_reset');
       }
       retryPrepared = true;
+      if (options.architect)
+        prepareArchitectureWorktree(workStore!, config, options.architect.key, tree.path);
       if (!correctionPending && git(tree.path, ['status', '--porcelain', '--untracked-files=all']))
         throw new Error('Existing task worktree is dirty; review it before retrying');
       startingHead ??= git(tree.path, ['rev-parse', 'HEAD']);
@@ -1412,20 +1413,7 @@ async function runWorkerExecution(
         throw new Error('Feature SHA changed before Requirements revision');
       if (options.architect) {
         const input = options.architect;
-        const approved = workStore!.getFeature(input.key);
-        if (
-          approved?.status !== 'approved' ||
-          approved.git_sha !== input.gitSha ||
-          base !== input.gitSha
-        )
-          throw new Error('Approved FeatureSpec SHA changed before Architect launch');
-        const relative = requirementsDocPath(config.project.brain.path, input.key);
-        if (
-          git(tree.path, ['show', input.gitSha + ':' + relative]) !==
-          readTaskInput(tree.path, relative).trim()
-        )
-          throw new Error('Approved FeatureSpec file changed before Architect launch');
-        designContext = architectContext(tree.path, config.project.brain.path);
+        designContext = architectureContext(workStore!, config, input, tree.path, base);
         taskData.brainContents = Object.fromEntries(
           Object.entries(designContext).filter(
             (entry): entry is [string, string] => entry[1] !== null,
@@ -2770,6 +2758,8 @@ async function runWorkerExecution(
           qaSession?.dispose();
         } finally {
           options.evaluation?.settled(telemetry?.rootSpan, confirmed);
+          if (options.architect && workStore)
+            restoreArchitectureWorktree(workStore, config, options.architect.key);
         }
       }
     }

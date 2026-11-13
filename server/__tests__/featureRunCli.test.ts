@@ -68,6 +68,16 @@ vi.mock('../src/workstore/processRecovery.js', async (original) => {
     },
   };
 });
+// Stack discovery is exercised with mocked models in techLead.test.ts.
+vi.mock('../src/techLeadRuntime.js', () => ({ ensureProjectStack: vi.fn() }));
+vi.mock('../src/projectStack.js', async (original) => ({
+  ...(await original<typeof import('../src/projectStack.js')>()),
+  requireProjectStack: () => 'fixture stack',
+}));
+vi.mock('../src/architecturePolicy.js', async (original) => ({
+  ...(await original<typeof import('../src/architecturePolicy.js')>()),
+  prepareArchitectureWorktree: () => {},
+}));
 vi.mock('os', async (original) => ({
   ...(await original<typeof import('os')>()),
   homedir: () => process.env.HOME!,

@@ -38,6 +38,7 @@ import {
   isVerifierInfrastructureFailure,
   VERIFIER_INFRASTRUCTURE_PREFIX,
 } from '../verifierInfrastructure.js';
+import { reserveAdrNumbers } from './adrReservations.js';
 import { DEFAULT_LEASE_TTL_MS, LEASE_SWEEP_INTERVAL_MS, leaseDeadline } from './leasePolicy.js';
 import { runMigrations } from './migrations.js';
 import { processStartIdentity, terminateExecutionTree } from './processRecovery.js';
@@ -1339,37 +1340,15 @@ class SqliteWorkStore implements WorkStore {
       )
       .get(this.projectId, key) as unknown as DesignRecord | undefined;
   }
-  reserveAdrNumbers(featureKey: string, count: number, minimum: number): Promise<number[]> {
-    if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(minimum) || minimum < 0)
-      throw new Error('Invalid ADR reservation');
-    return this.write(() => {
-      const reserved = this.db
-        .prepare(
-          'SELECT number FROM adr_reservations WHERE project_id = ? AND feature_key = ? ORDER BY ordinal',
-        )
-        .all(this.projectId, featureKey)
-        .map((row) => Number(row.number));
-      let number = Math.max(
-        minimum,
-        Number(
-          this.db
-            .prepare(
-              'SELECT coalesce(max(number), 0) AS number FROM adr_reservations WHERE project_id = ?',
-            )
-            .get(this.projectId)!.number,
-        ),
-      );
-      for (let ordinal = reserved.length; ordinal < count; ordinal++) {
-        if (++number > 9999) throw new Error('ADR numbering exhausted');
-        this.db
-          .prepare(
-            'INSERT INTO adr_reservations (project_id, feature_key, ordinal, number) VALUES (?, ?, ?, ?)',
-          )
-          .run(this.projectId, featureKey, ordinal, number);
-        reserved.push(number);
-      }
-      return reserved.slice(0, count);
-    });
+  reserveAdrNumbers(
+    featureKey: string,
+    count: number,
+    minimum: number,
+    purpose: 'architecture' | 'stack' = 'architecture',
+  ): Promise<number[]> {
+    return this.write(() =>
+      reserveAdrNumbers(this.db, this.projectId, featureKey, count, minimum, purpose),
+    );
   }
   approveFeature(
     key: string,

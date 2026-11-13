@@ -18,6 +18,7 @@ import { handleFeaturePlanMessage, readFeaturePlan } from '../src/featurePlan.js
 import { HumanDecisions } from '../src/humanDecisions.js';
 import { loadProjectConfig } from '../src/projectConfig.js';
 import { readRequirements, requirementsDocPath } from '../src/requirements.js';
+import { ensureProjectStack } from '../src/techLeadRuntime.js';
 import * as workStoreModule from '../src/workstore/SqliteWorkStore.js';
 import { openWorkStore } from '../src/workstore/SqliteWorkStore.js';
 import { operatorToken } from './helpers/operatorToken.js';
@@ -26,6 +27,8 @@ import { readyProbeFor } from './helpers/readyProbe.js';
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
 vi.setConfig({ testTimeout: 90_000 });
 
+// Stack discovery is exercised with mocked models in techLead.test.ts.
+vi.mock('../src/techLeadRuntime.js', () => ({ ensureProjectStack: vi.fn() }));
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
@@ -231,6 +234,11 @@ describe.skipIf(process.platform !== 'win32')('Requirements CLI via worker (fake
     expect(send.mock.calls.slice(-3).every(([reply]) => reply.status === 'approved')).toBe(true);
     const approvals = append.mock.calls.filter(([entry]) => entry.action === 'approve_featurespec');
     expect(approvals.map(([entry]) => entry.outcome.status)).toEqual(['pending', 'approved']);
+    expect(ensureProjectStack).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'FEAT-001',
+    );
     expect(approvals[0][0]).toMatchObject({ actorType: 'human', actorId: 'operator' });
     expect(JSON.stringify(approvals)).not.toContain('Inspect audit events');
     expect(readFeaturePlan(config, 'FEAT-001')).toMatchObject({

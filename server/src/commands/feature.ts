@@ -21,6 +21,7 @@ import {
 import { lastReviewFailure } from '../reviewAttempts.js';
 import { reviewerRequest } from '../reviewer.js';
 import { rebaseFeatureTask } from '../taskRebase.js';
+import { ensureProjectStack } from '../techLeadRuntime.js';
 import { runWorker, type WorkerOptions } from '../worker.js';
 import { openWorkStore } from '../workstore/SqliteWorkStore.js';
 import type { WorkStore } from '../workstore/WorkStore.js';
@@ -40,6 +41,7 @@ export async function approveFeature(
   actor: PolicyActor,
   audit = new AuditLog(),
   reviewed?: { gitSha: string; revision: string },
+  onApproved?: () => void,
 ) {
   actor = featureIngressActor(actor);
   const policy = evaluatePolicy('approve_featurespec', actor, config.operator.autonomyLevel);
@@ -87,13 +89,31 @@ export async function approveFeature(
     append('rejected');
     throw error;
   }
-  if (!intentRecorded) return; // Idempotent replay: nothing transitioned.
   // A committed approval remains committed if confirmation logging fails.
+  if (intentRecorded) {
+    try {
+      append('approved');
+    } catch (cause) {
+      console.warn('[feature] Approval committed but audit confirmation failed');
+      throw new FeatureApprovedAuditPending(cause);
+    }
+  }
+  // WS acknowledges the durable approval before the role's model calls can take time.
+  onApproved?.();
   try {
-    append('approved');
+    await ensureProjectStack(store, config, key);
   } catch (cause) {
-    console.warn('[feature] Approval committed but audit confirmation failed');
-    throw new FeatureApprovedAuditPending(cause);
+    throw new FeatureStackPending(cause);
+  }
+}
+
+export class FeatureStackPending extends Error {
+  override name = 'FeatureStackPending';
+  constructor(cause: unknown) {
+    super(
+      'Requisitos aprobados; stack pendiente. Reanuda feature design tras revisar el Tech Lead.',
+      { cause },
+    );
   }
 }
 
@@ -260,6 +280,7 @@ export async function runFeatureCommand(
         log(`${key}: design already registered (${store.getDesign(key)!.git_sha})`);
         return;
       }
+      await ensureProjectStack(store, config, key, { probe: workerOptions.probe });
       const taskKey = architectTaskKey(key);
       const decisions = store
         .listDecisions()

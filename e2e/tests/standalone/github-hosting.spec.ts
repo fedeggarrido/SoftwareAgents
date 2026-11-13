@@ -11,7 +11,10 @@ test.describe('Standalone / GitHub hosting', () => {
     test(`configures GitHub through an isolated fake gh and handles ${mode} @area:standalone`, async ({
       page,
     }) => {
-      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'sa146-e2e-'));
+      // Canonical path: Windows runners hand out 8.3 short temp names.
+      const temporary = fs.realpathSync.native(
+        fs.mkdtempSync(path.join(os.tmpdir(), 'sa146-e2e-')),
+      );
       let session: StandaloneSession | undefined;
       try {
         const home = path.join(temporary, 'home');

@@ -23,7 +23,12 @@ export const UI_RULES = [
   'Motion only with purpose: 100–300 ms (--duration-fast/base/slow), easing --ease-out, transform and opacity, CSS first, hover effects only under (hover: hover), never `transition: all`, `scale(0)` or ease-in on UI; respect prefers-reduced-motion. No filler copy, lorem ipsum, invented numbers or jargon in the Spanish UI.',
 ].join('\n');
 
-const QUALITY_ROLES: ReadonlySet<string> = new Set(['developer', 'reviewer', 'qa-author']);
+const QUALITY_ROLES: ReadonlySet<string> = new Set([
+  'developer',
+  'reviewer',
+  'qa-author',
+  'tech-lead',
+]);
 const UI_ZONE = /(^|\/)webview-ui\/|\.(tsx|css)$/;
 
 /** Change zones of a task payload, read defensively because task data is untrusted JSON. */

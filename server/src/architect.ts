@@ -6,9 +6,11 @@ import { stringify } from 'yaml';
 import * as dagContract from '../../core/schemas/task-dag.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { TaskDag } from '../../core/src/taskDag.js';
+import { reserveAdrPaths } from './adrPaths.js';
 import { validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskDirectory, taskPath } from './commands/taskFiles.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
+import { stackAdr, stackDecision } from './projectStack.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { analyzeTaskDag, parseTaskDag, parseTechnicalDesign } from './taskDag.js';
 import type { WorkStore } from './workstore/WorkStore.js';
@@ -133,24 +135,25 @@ export async function architectArtifacts(
   store: WorkStore,
 ): Promise<Map<string, string>> {
   const paths = architectPaths(brain, key);
-  const adrDir = taskPath(cwd, path.join(brain, 'adr'));
-  const minimum = fs.existsSync(adrDir)
-    ? Math.max(0, ...fs.readdirSync(adrDir).map((file) => Number(/^(\d{4})-/.exec(file)?.[1] ?? 0)))
-    : 0;
-  const numbers = await store.reserveAdrNumbers(key, proposal.adrs?.length ?? 0, minimum);
+  const adrPaths = await reserveAdrPaths(
+    cwd,
+    brain,
+    key,
+    (proposal.adrs ?? []).map((adr) => adr.title),
+    store,
+  );
   const files = new Map<string, string>();
   const adrs: string[] = [];
   for (const [index, adr] of (proposal.adrs ?? []).entries()) {
-    const id = String(numbers[index]).padStart(4, '0');
-    const slug =
-      adr.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 60) || 'decision';
-    const relative = path.join(brain, 'adr', `${id}-${slug}.md`).replaceAll('\\', '/');
+    const relative = adrPaths[index];
+    const id = path.basename(relative).slice(0, 4);
     files.set(relative, `# ADR-${id}: ${adr.title}\n\n${adr.body}\n`);
     adrs.push(`ADR-${id}`);
+  }
+  const stack = stackDecision(store, key);
+  if (stack?.status === 'answered' && stack.projectStack) {
+    files.set(stack.projectStack.adrPath, stackAdr(stack));
+    adrs.push(`ADR-${path.basename(stack.projectStack.adrPath).slice(0, 4)}`);
   }
   const metadata = parseTechnicalDesign({
     apiVersion: 'softwareagents.io/v1alpha1',
@@ -170,7 +173,10 @@ export async function architectArtifacts(
   for (const [relative, content] of files) {
     if (Buffer.byteLength(content) > TASK_CLI_INPUT_BYTES)
       throw new SchemaValidationError(['Serialized Architect artifact exceeds 1 MiB limit']);
-    if (fs.existsSync(taskPath(cwd, relative)))
+    if (
+      fs.existsSync(taskPath(cwd, relative)) &&
+      !(relative === stack?.projectStack?.adrPath && readTaskInput(cwd, relative) === content)
+    )
       throw new Error('Unregistered Architect artifact already exists');
   }
   return files;
@@ -178,6 +184,8 @@ export async function architectArtifacts(
 
 export function writeArchitectArtifacts(cwd: string, files: Map<string, string>): void {
   for (const [relative, content] of files) {
+    if (fs.existsSync(taskPath(cwd, relative)) && readTaskInput(cwd, relative) === content)
+      continue;
     taskDirectory(cwd, path.dirname(relative));
     fs.writeFileSync(taskPath(cwd, relative), content, { flag: 'wx', mode: 0o600 });
   }

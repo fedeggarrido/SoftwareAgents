@@ -128,6 +128,350 @@
           }
         }
       }
+    },
+    "projectStack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feature",
+        "specSha",
+        "adrPath",
+        "proposal",
+        "bibliography"
+      ],
+      "properties": {
+        "feature": {
+          "type": "string",
+          "pattern": "^FEAT-\\d{3}$"
+        },
+        "specSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40,64}$"
+        },
+        "adrPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "proposal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "alternatives",
+            "recommendation",
+            "why",
+            "losses"
+          ],
+          "properties": {
+            "alternatives": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "stack",
+                  "comparison",
+                  "hexagonal"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,39}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "pattern": "^[^0-9\\r\\n]+$"
+                  },
+                  "stack": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "language",
+                      "framework",
+                      "data",
+                      "hosting",
+                      "testing",
+                      "ci"
+                    ],
+                    "properties": {
+                      "language": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "framework": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "data": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "hosting": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "testing": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "ci": {
+                        "$ref": "#/definitions/StackClaim"
+                      }
+                    }
+                  },
+                  "comparison": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "fit",
+                      "maturity",
+                      "cost",
+                      "learningCurve",
+                      "risks",
+                      "ecosystem"
+                    ],
+                    "properties": {
+                      "fit": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "maturity": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "cost": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "learningCurve": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "risks": {
+                        "$ref": "#/definitions/StackClaim"
+                      },
+                      "ecosystem": {
+                        "$ref": "#/definitions/StackClaim"
+                      }
+                    }
+                  },
+                  "hexagonal": {
+                    "$ref": "#/definitions/StackClaim"
+                  }
+                }
+              }
+            },
+            "recommendation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "why": {
+              "$ref": "#/definitions/StackClaim"
+            },
+            "losses": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "alternative",
+                  "detail"
+                ],
+                "properties": {
+                  "alternative": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "detail": {
+                    "$ref": "#/definitions/StackClaim"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "bibliography": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/StackSource"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "StackClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "sources",
+        "quotes"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "pattern": "\\S"
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 12,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "quotes": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sourceId",
+              "text"
+            ],
+            "properties": {
+              "sourceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300,
+                "pattern": "\\S"
+              }
+            }
+          }
+        }
+      }
+    },
+    "StackSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "adapter",
+        "title",
+        "retrievedAt",
+        "kind",
+        "excerpt",
+        "language",
+        "contentHash"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {}
+          }
+        },
+        {
+          "required": [
+            "citation"
+          ],
+          "properties": {
+            "citation": {}
+          }
+        }
+      ],
+      "properties": {
+        "provenance": {
+          "const": "untrusted-external"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 4096
+        },
+        "citation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "publishedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "retrievedAt": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "thread",
+            "book",
+            "article",
+            "paper",
+            "podcast",
+            "web"
+          ]
+        },
+        "excerpt": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "votes": {
+              "type": "number"
+            },
+            "views": {
+              "type": "number",
+              "minimum": 0
+            },
+            "citations": {
+              "type": "number",
+              "minimum": 0
+            },
+            "authorReputation": {
+              "type": "number"
+            }
+          }
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
     }
   }
 }

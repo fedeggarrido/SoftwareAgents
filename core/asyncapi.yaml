@@ -873,6 +873,11 @@ components:
           workflow,
         ]
       properties:
+        stack:
+          description: Accepted human stack choices. Optional for compatibility with earlier summaries.
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectStackSummary'
         name:
           type: string
         goals:
@@ -917,6 +922,36 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkflowStage'
+
+    ProjectStackSummary:
+      type: object
+      additionalProperties: false
+      required: [feature, name, why, components, risks, compatibility]
+      properties:
+        feature:
+          type: string
+        name:
+          type: string
+        why:
+          type: string
+        risks:
+          type: string
+        compatibility:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectStackComponent'
+
+    ProjectStackComponent:
+      type: object
+      additionalProperties: false
+      required: [label, value]
+      properties:
+        label:
+          type: string
+        value:
+          type: string
 
     WorkflowStageId:
       type: string

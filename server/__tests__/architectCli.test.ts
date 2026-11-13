@@ -18,6 +18,16 @@ import { readyProbeFor } from './helpers/readyProbe.js';
 // These tests spawn real processes and Git; on Windows they take ~10 s each.
 vi.setConfig({ testTimeout: 90_000 });
 
+// Stack discovery is exercised with mocked models in techLead.test.ts.
+vi.mock('../src/techLeadRuntime.js', () => ({ ensureProjectStack: vi.fn() }));
+vi.mock('../src/projectStack.js', async (original) => ({
+  ...(await original<typeof import('../src/projectStack.js')>()),
+  requireProjectStack: () => 'fixture stack',
+}));
+vi.mock('../src/architecturePolicy.js', async (original) => ({
+  ...(await original<typeof import('../src/architecturePolicy.js')>()),
+  prepareArchitectureWorktree: () => {},
+}));
 vi.mock('os', async (original) => {
   const actual = await original<typeof import('os')>();
   return { ...actual, homedir: vi.fn(() => process.env.HOME ?? actual.homedir()) };
@@ -451,6 +461,8 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           'VISION.md': null,
           'RULES.md': 'Project rules',
           'CONSTRAINTS.md': null,
+          // SA-156: the accepted stack reaches the Architect as context.
+          'STACK.md': 'fixture stack',
         });
         expect(launchLog()[0].data.approvedGitSha).toBe(feature.git_sha);
         const args = launchLog()[0].args as string[];

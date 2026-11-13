@@ -381,7 +381,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(second.getTask('task')).toMatchObject({ project_id: 'a', version: 1, attempt: 0 });
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 21 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 22 }]);
       expect(db.prepare('PRAGMA journal_mode').get()?.journal_mode).toBe('wal');
       expect(db.prepare('SELECT name FROM sqlite_master WHERE type = ?').all('table')).toHaveLength(
         16,
@@ -1021,7 +1021,7 @@ describe('WorkStore (real SQLite)', () => {
     expect(store.getProject().project_id).toBe('a');
     const db = await inspect();
     try {
-      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 21 }]);
+      expect(db.prepare('SELECT version FROM schema_version').all()).toEqual([{ version: 22 }]);
     } finally {
       db.close();
     }

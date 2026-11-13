@@ -21,12 +21,13 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
     try {
       db.exec(`CREATE TABLE schema_version (singleton INTEGER PRIMARY KEY, version INTEGER);
         INSERT INTO schema_version VALUES (1, 14);
-        CREATE TABLE features (project_id TEXT, key TEXT, doc_path TEXT, git_sha TEXT, status TEXT);
+        CREATE TABLE features (project_id TEXT, key TEXT, doc_path TEXT, git_sha TEXT, status TEXT, PRIMARY KEY(project_id, key));
         INSERT INTO features VALUES ('p', 'FEAT-001', 'feature.yaml', 'sha', 'approved');
         CREATE TABLE feature_runs (project_id TEXT, feature_key TEXT, owner TEXT, pid INTEGER, state TEXT, pid_started_at TEXT);
         INSERT INTO feature_runs VALUES ('p', 'FEAT-001', NULL, NULL, '{}', NULL);
         CREATE TABLE tasks (project_id TEXT, key TEXT, status TEXT, PRIMARY KEY(project_id, key));
         CREATE TABLE human_decisions (project_id TEXT, key TEXT, previous_states TEXT);
+        CREATE TABLE adr_reservations (project_id TEXT, feature_key TEXT, ordinal INTEGER, number INTEGER);
         CREATE TABLE domain_events (id INTEGER, project_id TEXT, task_key TEXT, type TEXT, from_status TEXT, to_status TEXT, task_version INTEGER, attempt INTEGER, reason TEXT, actor TEXT, created_at TEXT);
         CREATE TRIGGER domain_events_no_update BEFORE UPDATE ON domain_events BEGIN SELECT 1; END;
         CREATE TRIGGER domain_events_no_delete BEFORE DELETE ON domain_events BEGIN SELECT 1; END;`);
@@ -46,7 +47,7 @@ describe('FEAT-002 AC-001/AC-008 persisted feature metadata', () => {
         updated_at: null,
       });
       runMigrations(db);
-      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(21);
+      expect(db.prepare('SELECT version FROM schema_version').get()?.version).toBe(22);
     } finally {
       db.close();
     }

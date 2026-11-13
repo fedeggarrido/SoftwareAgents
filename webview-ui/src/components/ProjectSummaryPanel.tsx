@@ -68,6 +68,32 @@ export function ProjectSummaryContent({ summary }: { summary: ProjectSummary }) 
         items={summary.decisions}
         empty="Sin decisiones pendientes registradas."
       />
+      <section aria-label="Stack del proyecto">
+        <h3>Stack del proyecto</h3>
+        {summary.stack?.length ? (
+          summary.stack.map((stack) => (
+            <div key={stack.feature}>
+              <h4>
+                {stack.name} · {stack.feature}
+              </h4>
+              <StatusChip state="stack_accepted" />
+              <p>{stack.why}</p>
+              <dl>
+                {stack.components.map((component) => (
+                  <div key={component.label}>
+                    <dt>{component.label}</dt>
+                    <dd>{component.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p>{stack.compatibility}</p>
+              <p>Riesgos · {stack.risks}</p>
+            </div>
+          ))
+        ) : (
+          <p>El stack aparecerá cuando respondas su decisión en Decisiones.</p>
+        )}
+      </section>
       <section aria-label="Progreso por funcionalidad">
         <h3>Progreso por funcionalidad</h3>
         {summary.features.length ? (

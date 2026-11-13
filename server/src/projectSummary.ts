@@ -16,6 +16,7 @@ import {
   PROJECT_SUMMARY_DECISION_LABELS,
   PROJECT_SUMMARY_GATE_LABELS,
   PROJECT_SUMMARY_RECENT_LIMIT,
+  STACK_COMPONENTS,
 } from './constants.js';
 import {
   type FeaturesSource,
@@ -95,10 +96,10 @@ export function projectSummary(
       blocked: summaryText(nullableText(row.blocked_reason) ?? ''),
     };
   });
-  const decisions = source.work.decisions
+  const allDecisions = source.work.decisions
     .filter((row) => row.escalation !== null && row.escalation !== undefined)
-    .map((row) => validateSchema(validateDecision, JSON.parse(text(row.escalation))))
-    .filter((decision) => decision.status !== 'answered');
+    .map((row) => validateSchema(validateDecision, JSON.parse(text(row.escalation))));
+  const decisions = allDecisions.filter((decision) => decision.status !== 'answered');
   const decisionItems = decisions.map((decision) => {
     const label = PROJECT_SUMMARY_DECISION_LABELS[decision.context.split('/')[0]];
     const affected = decision.blocks.map(
@@ -175,6 +176,34 @@ export function projectSummary(
     notices.push('El historial de auditoría contiene entradas ilegibles.');
   return {
     name: summaryText(source.name),
+    stack: allDecisions.flatMap((decision) => {
+      const binding = decision.projectStack;
+      if (
+        !binding ||
+        decision.status !== 'answered' ||
+        !decision.answeredBy ||
+        !source.work.features.some(
+          (feature) => feature.key === binding.feature && feature.git_sha === binding.specSha,
+        )
+      )
+        return [];
+      const chosen = binding.proposal.alternatives.find((option) => option.id === decision.answer);
+      if (!chosen) return [];
+      return [
+        {
+          feature: binding.feature,
+          name: summaryText(chosen.name),
+          why: summaryText(chosen.comparison.fit.text),
+          risks: summaryText(chosen.comparison.risks.text),
+          compatibility: summaryText(chosen.hexagonal.text),
+          components: Object.entries(STACK_COMPONENTS).map(([key, label]) => ({
+            label,
+            // SAFETY: the label catalog enumerates every StackComponent key.
+            value: summaryText(chosen.stack[key as keyof typeof STACK_COMPONENTS].text),
+          })),
+        },
+      ];
+    }),
     goals: source.context.goals,
     features: features.map((feature) => {
       const work = tasks.filter((task) => task.feature === feature.key && task.dag);

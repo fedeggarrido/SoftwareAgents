@@ -123,15 +123,24 @@ export async function handleFeaturePlanMessage(
     });
     try {
       const { approveFeature } = await import('./commands/feature.js');
-      await approveFeature(store, config, msg.key, 'human', undefined, {
-        gitSha: plan.specSha,
-        revision: plan.revision,
-      });
-      reply(null);
+      await approveFeature(
+        store,
+        config,
+        msg.key,
+        'human',
+        undefined,
+        {
+          gitSha: plan.specSha,
+          revision: plan.revision,
+        },
+        () => reply(null),
+      );
     } finally {
       store.close();
     }
   } catch (error) {
+    // The durable approval has already been acknowledged. The role retains its own retry state.
+    if (error instanceof Error && error.name === 'FeatureStackPending') return;
     // The approval is durable; only its confirmation entry failed.
     if ((error as Error).name === 'FeatureApprovedAuditPending') return reply(null);
     reply(

@@ -17,6 +17,36 @@ para lecturas puntuales.
 
 ### Runtime (`server/src/`)
 
+- `techLeadRuntime.ts`, `techLeadResearch.ts`, `techLeadExecution.ts` y `techLead.ts`
+  (SA-156) ejecutan el Tech Lead tras aprobar requisitos. Reutilizan web-scout,
+  Researcher, adapters, validación de citas y presupuesto de Research. Cada llamada
+  pasa por admisión de modelo/cuota/slots del Operator y registra ejecución y consumo.
+  El scout recibe una consulta pública fija. Idea, requisitos, manifiesto,
+  restricciones y evidencia entran al bloque JSON no confiable del compilador.
+  Tech Lead recibe la síntesis y extractos acotados con los mismos IDs y citas
+  verificadas. La bibliografía original se conserva con la decisión humana.
+  Tech Lead usa Claude sin herramientas, con QUALITY_RULES y la regla de justificar
+  tendencias. Compara dos o tres stacks completos y sus costes, madurez, encaje,
+  aprendizaje, riesgos y ecosistema. Los precios y las cifras requieren fragmentos
+  literales verificados, con moneda y unidades, o muestran «sin dato verificado».
+- `projectStack.ts` guarda la propuesta y bibliografía en el esquema Human Decision.
+  La decisión bloquea la tarea de Architect y conserva el SHA de los requisitos.
+  `humanDecisions.ts` proyecta la opción humana elegida como ADR «Aceptado».
+  Antes de responder, el ADR tiene estado «Propuesto». Ambos viven en `brain/adr`
+  de la rama de requisitos vinculada. La proyección se escribe mediante rename
+  atómico y se recupera desde la decisión durable después de un fallo.
+  `architecturePolicy.ts` exige una respuesta humana antes de lanzar Architect,
+  comprueba el gate antes de reservar su lease, slot o ejecución,
+  entrega solo el handoff acotado de Research sin citas ni bibliografía,
+  consume únicamente su ADR derivado exacto y lo incorpora a la publicación
+  existente del diseño. `adrPaths.ts` comparte numeración y ubicación con Architect.
+  La migración de reservas conserva las reservas históricas como `architecture`
+  y distingue las de `stack` bajo la misma unicidad por proyecto.
+  La arquitectura hexagonal se declara compatible, con implementación en SA-158.
+  Los proyectos con diseño registrado conservan su flujo al repetir la aprobación.
+  La aprobación WS se confirma al quedar persistida y la investigación continúa
+  con su propio estado de reintento mientras la petición mantiene abierto el WorkStore.
+
 - `githubHosting.ts` y `githubCommand.ts` (SA-146) crean el alojamiento desde Nuevo
   proyecto y el panel Proyecto. GitHub CLI aporta cuenta y organizaciones sin
   transferir credenciales a la UI. Confirmación humana de un solo uso, visibilidad
@@ -126,6 +156,12 @@ para lecturas puntuales.
   `eslint-rules/` junto al CLI y ESLint/typescript-eslint como dependencias de runtime.
 
 ### Paneles (`webview-ui/src/components/`)
+
+- `ProjectSummaryPanel.tsx` (SA-156) incluye «Stack del proyecto» dentro de Proyecto.
+  Presenta la opción humana, componentes, motivo, riesgos y compatibilidad hexagonal
+  con StatusChip «Aceptado». La proyección valida el SHA y mantiene el texto literal
+  y saneado. El campo opcional `ProjectSummary.stack` conserva compatibilidad con
+  snapshots anteriores y la sección permite consultar el stack en solo lectura.
 
 - `NewProjectDialog.tsx` y `office/newProjectWizard.ts` (SA-157) abren «Nuevo
   proyecto» desde Ajustes. `newProject.ts` comprueba ingreso humano y privilegio

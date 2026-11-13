@@ -36,6 +36,25 @@ export const WEB_SCOUT_SPEC: AgentSpec = {
   outputs: ['WebScoutCandidates'],
 };
 
+/** Tool-free proposal role. Only a Human Decision can accept its recommendation. */
+export const TECH_LEAD_SPEC: AgentSpec = {
+  ...RESEARCHER_SPEC,
+  metadata: {
+    ...RESEARCHER_SPEC.metadata,
+    id: 'tech-lead',
+    displayName: 'Tech Lead',
+    department: 'engineering',
+  },
+  identity: {
+    role: 'tech-lead',
+    mission: 'Proponer alternativas de stack justificadas con evidencia para la decisión humana.',
+    principles: ['No recomendar lo de moda sin justificarlo', 'Arquitectura hexagonal por defecto'],
+    antiPatterns: ['Cifras sin fuente', 'Decidir por el operador'],
+  },
+  outputs: ['StackProposal'],
+  modelPolicy: { capabilityClass: 'high_reasoning', fallbackAllowed: false },
+};
+
 /** Phase 1 visual review has the same read-only ceiling as code review. */
 export const PRODUCT_DESIGNER_SPEC: AgentSpec = {
   apiVersion: 'softwareagents.io/v1alpha1',

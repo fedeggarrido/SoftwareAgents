@@ -7,6 +7,7 @@ export interface HumanDecisionOption {
   risk: string;
 }
 export interface HumanDecision {
+  projectStack?: import('./projectStack.js').ProjectStackDecision;
   id: string;
   context: string;
   options: HumanDecisionOption[];

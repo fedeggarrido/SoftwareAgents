@@ -182,6 +182,34 @@ describe('summary read lifecycle', () => {
 });
 
 describe('project summary panel', () => {
+  it('shows the accepted project stack and reasons as read-only escaped content', async () => {
+    const { ProjectSummaryContent } = await import(panelPath);
+    const data = summary();
+    data.stack = [
+      {
+        feature: 'FEAT-001',
+        name: 'TypeScript y PostgreSQL',
+        why: 'Permite el despliegue local requerido.',
+        risks: 'Requiere formación del equipo.',
+        compatibility: 'Dominio independiente con puertos y adaptadores.',
+        components: [
+          { label: 'Framework', value: '<script>Node</script>' },
+          { label: 'Coste', value: 'sin dato verificado' },
+        ],
+      },
+    ];
+    const html = renderToStaticMarkup(createElement(ProjectSummaryContent, { summary: data }));
+    expect(html).toContain('aria-label="Stack del proyecto"');
+    expect(html).toContain('TypeScript y PostgreSQL');
+    expect(html).toContain('Permite el despliegue local requerido.');
+    expect(html).toContain('Aceptado');
+    expect(html).toContain('<svg');
+    expect(html).toContain('&lt;script&gt;Node&lt;/script&gt;');
+    expect(html).not.toMatch(/<script>|<button|<input|<select|<textarea/);
+    expect(
+      renderToStaticMarkup(createElement(ProjectSummaryContent, { summary: summary() })),
+    ).toContain('El stack aparecerá cuando respondas su decisión');
+  });
   it('explains a new project and where its data will appear without fake numbers or write actions', async () => {
     const { ProjectSummaryPanel } = await import(panelPath);
     const html = renderToStaticMarkup(

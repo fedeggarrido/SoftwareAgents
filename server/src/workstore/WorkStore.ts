@@ -298,7 +298,12 @@ export interface WorkStore {
   listFeatures(): FeatureRecord[];
   getDesign(key: string): DesignRecord | undefined;
   /** Durable per-Feature reservations, unique throughout the Project, including failed materialization. */
-  reserveAdrNumbers(featureKey: string, count: number, minimum: number): Promise<number[]>;
+  reserveAdrNumbers(
+    featureKey: string,
+    count: number,
+    minimum: number,
+    purpose?: 'architecture' | 'stack',
+  ): Promise<number[]>;
   /** Human gate: compare-and-set the reviewed revision and check pending decisions atomically. */
   approveFeature(
     key: string,

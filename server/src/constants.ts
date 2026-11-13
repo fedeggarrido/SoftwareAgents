@@ -467,6 +467,7 @@ export const PROJECT_SUMMARY_BLOCK_LABELS: Readonly<Record<string, string>> = {
   FAILED_FINAL: 'Trabajo fallido que necesita revisión',
 };
 export const PROJECT_SUMMARY_DECISION_LABELS: Readonly<Record<string, string>> = {
+  'project-stack': 'Elegir el stack del proyecto',
   'feature-design': 'Aclarar el diseño antes de continuar',
   'feature-review': 'Revisar los cambios antes de continuar',
   'design-review': 'Revisar el diseño visual',
@@ -483,3 +484,34 @@ export const GITHUB_COMMAND_MAX_BUFFER = 1024 * 1024;
 export const GITHUB_CONFIRMATION_TTL_MS = 5 * 60_000;
 export const GITHUB_CONFIRMATION_LIMIT = 128;
 export const GITHUB_INITIAL_COMMIT_MESSAGE = 'chore: preparar proyecto';
+
+// Tech Lead proposals (SA-156).
+export const STACK_UNVERIFIED = 'sin dato verificado';
+export const STACK_ADR_LOCK_TIMEOUT_MS = 1000;
+export const STACK_ADR_LOCK_LEASE_MS = 10_000;
+export const STACK_COMPONENTS = {
+  language: 'Lenguaje',
+  framework: 'Framework',
+  data: 'Datos',
+  hosting: 'Hosting y despliegue',
+  testing: 'Testing',
+  ci: 'CI',
+} as const;
+export const STACK_CRITERIA = {
+  fit: 'Encaje',
+  maturity: 'Madurez',
+  cost: 'Coste',
+  learningCurve: 'Curva de aprendizaje',
+  risks: 'Riesgos',
+  ecosystem: 'Ecosistema',
+} as const;
+export const STACK_CLAIM_POLICIES = {
+  fit: 'inference',
+  maturity: 'evidence',
+  cost: 'verbatim',
+  learningCurve: 'inference',
+  risks: 'inference',
+  ecosystem: 'evidence',
+} as const;
+export const STACK_RESEARCH_QUESTION =
+  'Compare mature application technology stacks, languages, frameworks, databases, hosting, testing and CI. Find official documentation on capabilities, lifecycle, ecosystem, limitations and pricing. Include ports-and-adapters architecture compatibility.';

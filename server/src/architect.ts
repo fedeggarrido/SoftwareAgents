@@ -7,9 +7,16 @@ import * as dagContract from '../../core/schemas/task-dag.schema.json';
 import type { FeatureSpec } from '../../core/src/featureSpec.js';
 import type { TaskDag } from '../../core/src/taskDag.js';
 import { reserveAdrPaths } from './adrPaths.js';
+import {
+  type ArchitectureChoice,
+  architectureChoiceContract,
+  openArchitectureAlternative,
+  requireArchitectureChoice,
+} from './architectureDecisions.js';
 import { validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskDirectory, taskPath } from './commands/taskFiles.js';
 import { TASK_CLI_INPUT_BYTES } from './constants.js';
+import { ARCHITECTURE_PROPOSAL_ERROR, HEXAGONAL_TEMPLATE } from './projectArchitectureConstants.js';
 import { stackAdr, stackDecision } from './projectStack.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { analyzeTaskDag, parseTaskDag, parseTechnicalDesign } from './taskDag.js';
@@ -23,6 +30,7 @@ export interface ArchitectRequest {
 }
 
 export interface ArchitectProposal {
+  architecture: ArchitectureChoice;
   components: string[];
   risks: string[];
   body: string;
@@ -34,8 +42,9 @@ const text = { type: 'string', minLength: 1, pattern: '\\S' };
 export const architectContract = {
   type: 'object',
   additionalProperties: false,
-  required: ['components', 'risks', 'body', 'dag'],
+  required: ['architecture', 'components', 'risks', 'body', 'dag'],
   properties: {
+    architecture: architectureChoiceContract,
     components: { type: 'array', minItems: 1, uniqueItems: true, items: text },
     risks: { type: 'array', uniqueItems: true, items: text },
     body: text,
@@ -88,6 +97,7 @@ export function architectBrief(
     answers: input.revision?.answers ?? null,
     contract: architectContract,
     dagContract,
+    architectureTemplate: HEXAGONAL_TEMPLATE,
     testScope:
       'Declare additional test roots in optional testZones; otherwise only changeZones, colocated tests and the server/src -> server/__tests__ mirror are allowed.',
     validationErrors: errors,
@@ -108,9 +118,21 @@ export function validateArchitect(
     throw new SchemaValidationError(['Architect must return a JSON object']);
   }
   const proposal = validateSchema(validateProposal, value);
+  if (
+    proposal.architecture.kind === 'alternative' &&
+    !proposal.architecture.alternatives.some((alternative) => /hexagonal/i.test(alternative))
+  )
+    throw new SchemaValidationError([
+      'Compara la propuesta con la arquitectura hexagonal en alternatives.',
+    ]);
   const dag = parseTaskDag(proposal.dag);
   const errors = analyzeTaskDag(dag, spec).issues.map((issue) => JSON.stringify(issue));
   dag.tasks.forEach((task) => {
+    if (
+      proposal.architecture.kind === 'hexagonal' &&
+      !/\b(domain|application|adapters\/(in|out)|composition)\b/.test(task.title)
+    )
+      errors.push(`${task.key}: el título debe nombrar la capa hexagonal`);
     if (!task.changeZones?.length) errors.push(`${task.key}: changeZones required`);
     if (typeof task.parallelizable !== 'boolean')
       errors.push(`${task.key}: parallelizable required`);
@@ -135,17 +157,26 @@ export async function architectArtifacts(
   store: WorkStore,
 ): Promise<Map<string, string>> {
   const paths = architectPaths(brain, key);
+  const alternative =
+    proposal.architecture.kind === 'alternative' ? proposal.architecture : undefined;
   const adrPaths = await reserveAdrPaths(
     cwd,
     brain,
     key,
-    (proposal.adrs ?? []).map((adr) => adr.title),
+    [
+      ...(alternative ? ['arquitectura del proyecto'] : []),
+      ...(proposal.adrs ?? []).map((adr) => adr.title),
+    ],
     store,
   );
   const files = new Map<string, string>();
   const adrs: string[] = [];
+  if (alternative) {
+    files.set(adrPaths[0], requireArchitectureChoice(store, key, alternative, adrPaths[0]));
+    adrs.push(`ADR-${path.basename(adrPaths[0]).slice(0, 4)}`);
+  }
   for (const [index, adr] of (proposal.adrs ?? []).entries()) {
-    const relative = adrPaths[index];
+    const relative = adrPaths[index + (alternative ? 1 : 0)];
     const id = path.basename(relative).slice(0, 4);
     files.set(relative, `# ADR-${id}: ${adr.title}\n\n${adr.body}\n`);
     adrs.push(`ADR-${id}`);
@@ -192,6 +223,8 @@ export function writeArchitectArtifacts(cwd: string, files: Map<string, string>)
 }
 
 export async function openArchitectDecision(store: WorkStore, key: string, errors: string[]) {
+  const architecture = errors.find((error) => error.startsWith(ARCHITECTURE_PROPOSAL_ERROR));
+  if (architecture) return openArchitectureAlternative(store, key, architecture);
   const pending = store
     .listDecisions()
     .find(

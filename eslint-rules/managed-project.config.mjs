@@ -15,6 +15,7 @@ export default [
       'pixel-agents': pixelAgentsPlugin,
     },
     rules: {
+      'pixel-agents/hexagonal-boundaries': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       'pixel-agents/no-double-cast': 'error',
       'pixel-agents/assertion-safety': 'warn',

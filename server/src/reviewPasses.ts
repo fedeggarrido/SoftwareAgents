@@ -5,8 +5,29 @@ import { REVIEW_EXTRA_COST_RATIO } from './constants.js';
 import { effectiveWorkInputs, type TierInputs } from './modelTiers.js';
 import { addTelemetryTotals, emptyTelemetryTotals } from './telemetryCommand.js';
 import { admissionBudgetReason, type UsageEntry } from './usageLedger.js';
+import type { VerifierFailure } from './verifierFeedback.js';
 
 export type ReviewPlan = ['single'] | ['bugs_security', 'quality_structure'];
+
+/** Deterministic layer violations are blockers even if a model approves or omits them. */
+export function reviewVerifierFeedback(
+  report: ReviewReport,
+  failures: readonly VerifierFailure[] = [],
+): ReviewReport {
+  const findings: ReviewReport['findings'] = failures.flatMap((failure) =>
+    (failure.boundaries ?? []).map((finding) => ({
+      severity: 'major',
+      category: 'boundaries',
+      file: finding.file,
+      line: finding.line,
+      summary: finding.message,
+      evidence: `${failure.command.join(' ')}: ${finding.message}`,
+      suggestion: 'Mueve la dependencia detrás de un puerto de la capa de aplicación.',
+    })),
+  );
+  if (!findings.length) return report;
+  return { ...report, verdict: 'request_changes', findings: [...report.findings, ...findings] };
+}
 
 export function reviewPassSelection(inputs: TierInputs, rule?: TierRule): ReviewPlan {
   return effectiveWorkInputs(inputs, rule).size === 'S'

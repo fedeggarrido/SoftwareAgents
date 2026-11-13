@@ -14,6 +14,7 @@ process.stdin.on('end', () => {
   const attempts = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').length : 0;
   fs.appendFileSync(log, JSON.stringify({ args, data, cwd: process.cwd() }) + '\n');
   const proposal = {
+    architecture: { kind: 'hexagonal' },
     components: ['Audit reader', 'Command Center'],
     risks: ['Large audit files'],
     body: '# Technical design\nRead audit pages without modifying the log.',
@@ -25,7 +26,7 @@ process.stdin.on('end', () => {
         {
           key: 'FEAT-001-T01',
           type: 'code',
-          title: 'Read audit',
+          title: 'application: Read audit',
           description: 'Read paginated events',
           acceptanceRefs: ['AC-001'],
           dependsOn: [],
@@ -37,7 +38,7 @@ process.stdin.on('end', () => {
         {
           key: 'FEAT-001-T02',
           type: 'qa',
-          title: 'Verify audit',
+          title: 'adapters/in: Verify audit',
           description: 'Verify view',
           acceptanceRefs: ['AC-001'],
           dependsOn: ['FEAT-001-T01'],
@@ -80,7 +81,7 @@ process.stdin.on('end', () => {
     proposal.dag.tasks = [1, 2, 3].map((n) => ({
       key: `FEAT-001-T0${n}`,
       type: n === 3 ? 'qa' : 'code',
-      title: `Implement step ${n}`,
+      title: `application: Implement step ${n}`,
       description: `Implement chained step ${n}`,
       acceptanceRefs: ['AC-001'],
       dependsOn: n === 1 ? [] : [`FEAT-001-T0${n - 1}`],

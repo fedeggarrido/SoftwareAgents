@@ -8,6 +8,7 @@ export const QUALITY_RULES = [
   'Quality rules (mandatory; reviews block on them):',
   'Code judo first: simplify by deleting complexity, not moving it. No ad-hoc conditionals, one-off booleans, nullable modes or scattered special cases; put them behind a helper, state machine or policy.',
   'Canonical layer and reuse: logic lives in its layer; reuse existing helpers; no feature logic in shared paths; no identity wrappers or pass-through helpers.',
+  'Managed projects default to hexagonal architecture: domain is pure, application owns use cases and ports, adapters/in and adapters/out depend inward, composition is the single DI root. Respect the project marker and accepted architecture ADR; layer verifier violations block review with category boundaries.',
   'Honest types: no `as unknown as`, no `any`, no `unknown` parameters or returns without need. Every type assertion carries a `// SAFETY:` reason. No silent fallbacks that hide unclear invariants.',
   'Size and atomicity: never grow a file past 1000 lines without decomposing; no partial updates that leave state half-written.',
   'Devex: call out any change to secrets, environment variables, ports or required scripts.',

@@ -184,6 +184,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     const store = await storeFor();
     const second = await storeFor();
     const proposal = {
+      architecture: { kind: 'hexagonal' as const },
       components: ['Reader'],
       risks: [],
       body: 'Design',
@@ -243,6 +244,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           if (exists)
             fs.mkdirSync(path.join(repo, zone.replace(/\/\*\*$/, '')), { recursive: true });
           const proposal = {
+            architecture: { kind: 'hexagonal' as const },
             components: ['Reader'],
             risks: [],
             body: 'Design',
@@ -254,7 +256,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
                 {
                   key: 'FEAT-001-T01',
                   type: 'code',
-                  title: 'Read',
+                  title: 'application: Read',
                   description: 'Read',
                   acceptanceRefs: ['AC-001'],
                   dependsOn: [],
@@ -287,7 +289,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     const doc = {
       key: 'FEAT-001-T01',
       type: 'doc',
-      title: 'Guide',
+      title: 'application: Guide',
       description: 'Document behavior',
       acceptanceRefs: ['AC-001'],
       dependsOn: [],
@@ -297,6 +299,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
       parallelizable: false,
     };
     const proposal = {
+      architecture: { kind: 'hexagonal' as const },
       components: ['Guide'],
       risks: [],
       body: 'Design',
@@ -325,6 +328,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
       typeof validateArchitect
     >[1];
     const proposal = {
+      architecture: { kind: 'hexagonal' as const },
       components: ['Reader'],
       risks: [],
       body: 'Design',
@@ -336,7 +340,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           {
             key: 'FEAT-001-T01',
             type: 'code',
-            title: 'Read',
+            title: 'application: Read',
             description: 'Read',
             acceptanceRefs: ['AC-001'],
             dependsOn: [],
@@ -463,6 +467,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           'CONSTRAINTS.md': null,
           // SA-156: the accepted stack reaches the Architect as context.
           'STACK.md': 'fixture stack',
+          ARCHITECTURE_DECISION: null,
         });
         expect(launchLog()[0].data.approvedGitSha).toBe(feature.git_sha);
         const args = launchLog()[0].args as string[];
@@ -610,7 +615,13 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
     const spec = readRequirements(tree(), doc, 'FEAT-001');
     const { parse } = await import('yaml');
     const dag = parse(fs.readFileSync(path.join(tree(), dagDoc), 'utf8'));
-    const valid = { components: ['Reader'], risks: [], body: 'Design', dag };
+    const valid = {
+      architecture: { kind: 'hexagonal' as const },
+      components: ['Reader'],
+      risks: [],
+      body: 'Design',
+      dag,
+    };
     for (const mutate of [
       (p: typeof valid) => {
         p.dag.tasks[0].acceptanceRefs = [];

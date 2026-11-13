@@ -11,11 +11,14 @@ import { evalGit } from './evalTasks.js';
 import { excludeCandidate, launchBlock, type SelectionSnapshot } from './executorSelection.js';
 import { withoutOperatorToken } from './featureIngress.js';
 import { featureBaseBranch } from './featureRunBase.js';
+import { projectBoundaryFailures } from './projectBoundaryReview.js';
 import { isFailedReview } from './reviewAttempts.js';
+import { reviewVerifierFeedback } from './reviewPasses.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { taskBranchBase } from './taskBranchBase.js';
 import { hasCurrentApproval } from './taskRebaseHistory.js';
 import { isExecutedTest } from './testRoots.js';
+import type { VerifierFailure } from './verifierFeedback.js';
 import type { ReviewRef, WorkStore } from './workstore/WorkStore.js';
 
 // Stored audit fields are runtime-owned. Models can only submit content fields.
@@ -34,6 +37,7 @@ const modelContract = {
 const validateReport = compileSchema<ReviewReport>(modelContract);
 
 export interface ReviewerRequest extends DeveloperRequest {
+  verifierFailures?: VerifierFailure[];
   reviewRef: ReviewRef;
   developerExecutor: 'claude' | 'codex';
   worktree: string;
@@ -158,6 +162,7 @@ export function reviewerRequest(
       .split('\0')
       .filter((file) => isDeveloperTest(file)),
     diff,
+    verifierFailures: projectBoundaryFailures(tree, files),
   };
 }
 
@@ -280,7 +285,7 @@ export function validateReview(source: string, input: ReviewerRequest): ReviewRe
   )
     errors.push('approve cannot contain blocker/major findings');
   if (errors.length) throw new SchemaValidationError(errors);
-  return report;
+  return reviewVerifierFeedback(report, input.verifierFailures);
 }
 
 /** Change preference only, never authorization, quota gates, or model identity. */

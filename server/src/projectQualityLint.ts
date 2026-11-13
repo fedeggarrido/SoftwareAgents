@@ -20,6 +20,8 @@ export function projectQualityLintCommand(files: string[]): CascadeVerifier['com
         '--no-config-lookup',
         '--no-ignore',
         '--no-inline-config',
+        '--format',
+        'json',
         '--config',
         config,
         '--',

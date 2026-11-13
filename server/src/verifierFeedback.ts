@@ -8,6 +8,7 @@ import {
   VERIFIER_FEEDBACK_MAX_LINES,
 } from './constants.js';
 import type { CriterionResult } from './evalCriteria.js';
+import { HEXAGONAL_RULE_ID } from './projectArchitectureConstants.js';
 
 export type VerifierKind = 'prettier' | 'eslint' | 'tsc' | 'tests' | 'e2e' | 'generator';
 export interface VerifierFailure {
@@ -16,6 +17,53 @@ export interface VerifierFailure {
   files: string[];
   result: CriterionResult;
   detail: string;
+  boundaries?: { file: string; line: number; message: string }[];
+}
+
+/** ESLint JSON is tool output, so validate before accepting runtime review evidence. */
+function boundaryDiagnostics(output: string, root: string) {
+  const diagnostics: NonNullable<VerifierFailure['boundaries']> = [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return diagnostics;
+  }
+  if (!Array.isArray(parsed)) return diagnostics;
+  const results: unknown[] = parsed;
+  for (const result of results) {
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      !('filePath' in result) ||
+      typeof result.filePath !== 'string' ||
+      !('messages' in result) ||
+      !Array.isArray(result.messages)
+    )
+      continue;
+    const file = path.relative(root, result.filePath).replaceAll('\\', '/');
+    if (!file || file.startsWith('../') || path.isAbsolute(file)) continue;
+    const messages: unknown[] = result.messages;
+    for (const message of messages) {
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        !('ruleId' in message) ||
+        message.ruleId !== HEXAGONAL_RULE_ID ||
+        !('severity' in message) ||
+        message.severity !== 2 ||
+        !('line' in message) ||
+        typeof message.line !== 'number' ||
+        !Number.isSafeInteger(message.line) ||
+        message.line < 1 ||
+        !('message' in message) ||
+        typeof message.message !== 'string'
+      )
+        continue;
+      diagnostics.push({ file, line: message.line, message: message.message });
+    }
+  }
+  return diagnostics;
 }
 
 export function verifierKind(argv: readonly string[]): VerifierKind {
@@ -53,6 +101,15 @@ export function verifierFailure(
       .join('\n')
       .slice(0, VERIFIER_FEEDBACK_MAX_CHARS);
   };
+  const boundaries =
+    verifier === 'eslint' && result === 'fail'
+      ? boundaryDiagnostics(output, roots[0])
+          .slice(0, VERIFIER_FEEDBACK_MAX_FILES)
+          .map((finding) => ({
+            ...finding,
+            message: clean(finding.message),
+          }))
+      : [];
   return {
     verifier,
     command: argv
@@ -63,11 +120,15 @@ export function verifierFailure(
       .map((value) => clean(value).slice(0, VERIFIER_FEEDBACK_FIELD_CHARS)),
     result,
     detail: clean(output || `Verifier exited with ${result}; no diagnostic output.`),
+    ...(boundaries.length ? { boundaries } : {}),
   };
 }
 
 export function styleOnlyFailures(failures: readonly VerifierFailure[]): boolean {
-  return failures.length > 0 && failures.every((f) => ['prettier', 'eslint'].includes(f.verifier));
+  return (
+    failures.length > 0 &&
+    failures.every((f) => ['prettier', 'eslint'].includes(f.verifier) && !f.boundaries?.length)
+  );
 }
 
 export function verifierFailureReason(failures: readonly VerifierFailure[]): string {

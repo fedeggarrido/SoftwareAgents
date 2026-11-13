@@ -1,0 +1,16 @@
+{
+  "marker": ".softwareagents/hexagonal.json",
+  "config": {
+    "version": 1,
+    "sourceRoot": "src",
+    "layers": {
+      "domain": ["src/domain/**"],
+      "application": ["src/application/**"],
+      "in": ["src/adapters/in/**"],
+      "out": ["src/adapters/out/**"],
+      "composition": ["src/composition/**"]
+    },
+    "aliases": {},
+    "domainAllowlist": []
+  }
+}

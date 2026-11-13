@@ -50,7 +50,7 @@ export function stackDecision(store: Decisions, key: string): HumanDecision | un
     );
 }
 
-function chosenStack(decision: HumanDecision) {
+export function chosenStack(decision: HumanDecision) {
   if (decision.status !== 'answered' || !decision.answeredBy || !decision.answeredAt)
     return undefined;
   return decision.projectStack?.proposal.alternatives.find(

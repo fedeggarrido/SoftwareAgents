@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 
 import type { AutonomyLevel, ProjectConfig } from '../../core/src/project.js';
+import { assertArchitectureAnswer } from './architectureDecisions.js';
 import { AuditLog } from './auditLog.js';
 import { featureIngressActor } from './featureIngress.js';
 import { evaluatePolicy, type PolicyAction, type PolicyActor } from './policy.js';
@@ -47,6 +48,7 @@ export class HumanDecisions {
     reconcile: boolean,
   ) {
     assertTaskChangeAnswer(this.store, id);
+    assertArchitectureAnswer(this.store, id);
     const policy = evaluatePolicy('answer_decision', privileged ? 'human' : 'system', level);
     const attemptId = randomUUID();
     const append = (status: string) =>

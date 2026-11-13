@@ -9,6 +9,8 @@
  *   assertion-safety  — require a `// SAFETY:` comment before a type assertion (SA-155)
  */
 
+import hexagonalBoundaries from './hexagonal-boundaries.mjs';
+
 const HEX_COLOR = /#[0-9a-fA-F]{3,8}\b/;
 const RGB_FUNC = /\brgba?\s*\(/;
 const HSL_FUNC = /\bhsla?\s*\(/;
@@ -181,6 +183,7 @@ const plugin = {
     version: '1.0.0',
   },
   rules: {
+    'hexagonal-boundaries': hexagonalBoundaries,
     'no-inline-colors': noInlineColors,
     'pixel-shadow': pixelShadow,
     'pixel-font': pixelFont,

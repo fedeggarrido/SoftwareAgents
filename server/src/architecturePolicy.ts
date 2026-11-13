@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 
 import type { ProjectConfig } from '../../core/src/project.js';
 import { architectContext, type ArchitectRequest, architectTaskKey } from './architect.js';
+import { requireArchitectureDecision } from './architectureDecisions.js';
 import { CliUsageError } from './cliErrors.js';
 import { readTaskInput, taskPath } from './commands/taskFiles.js';
 import { withoutOperatorToken } from './featureIngress.js';
@@ -19,6 +20,7 @@ import type { WorkStore } from './workstore/WorkStore.js';
 /** Gate before acquiring an architecture lease, slot or Execution. */
 export function prepareArchitectureTask(store: WorkStore, key: string): void {
   requireProjectStack(store, key);
+  requireArchitectureDecision(store, key);
   const task = architectTaskKey(key);
   const existing = store.getTask(task);
   if (existing && (existing.agent_role !== 'architect' || existing.type !== 'architecture'))
@@ -69,6 +71,7 @@ export function architectureContext(
   cwd: string,
   base: string,
 ): Record<string, string | null> {
+  requireArchitectureDecision(store, input.key);
   const approved = store.getFeature(input.key);
   if (approved?.status !== 'approved' || approved.git_sha !== input.gitSha || base !== input.gitSha)
     throw new Error('Approved FeatureSpec SHA changed before Architect launch');

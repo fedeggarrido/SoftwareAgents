@@ -8,8 +8,9 @@ test.describe('Standalone / new project', () => {
     page,
     standalone,
   }) => {
-    const parent = path.join(standalone.tmpHome, 'projects');
-    fs.mkdirSync(parent);
+    fs.mkdirSync(path.join(standalone.tmpHome, 'projects'));
+    // The server reports canonical paths; Windows runners hand out 8.3 short temp names.
+    const parent = fs.realpathSync.native(path.join(standalone.tmpHome, 'projects'));
     await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
     await page.getByRole('button', { name: 'Nuevo proyecto', exact: true }).click();
     const wizard = page.getByRole('dialog', { name: 'Nuevo proyecto', exact: true });

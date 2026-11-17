@@ -281,97 +281,107 @@ describe('SA-159 integrations policy', () => {
     expect(store.listDecisions()).toEqual([]);
   });
 
-  it('enforces the new-service gate through the real worker entry before leasing or execution', async () => {
-    const feature = 'FEAT-002';
-    const declaration = { ...task, key: `${feature}-T01` };
-    const registeredDag = parseTaskDag({ ...dag, feature, tasks: [declaration] });
-    const manifest = {
-      apiVersion: 'softwareagents.io/v1alpha1',
-      kind: 'Project',
-      id: 'test',
-      name: 'Test',
-      repo: { remote: 'https://example.invalid/test.git', defaultBranch: 'main' },
-      brain: { path: brain },
-    };
-    fs.writeFileSync(path.join(root, '.softwareagents/project.yaml'), stringify(manifest));
-    fs.mkdirSync(path.join(root, '.pixel-agents'));
-    fs.writeFileSync(
-      path.join(root, '.pixel-agents/config.json'),
-      JSON.stringify({
-        projects: { test: { autonomyLevel: 'A1', allowedExecutors: ['codex'] } },
-      }),
-    );
-    const tree = path.join(root, `.worktrees/${feature}`);
-    const branch = `sa/${feature}-worker`;
-    git('worktree', 'add', '-b', branch, tree);
-    const requirements = `${brain}/features/${feature}.yaml`;
-    fs.mkdirSync(path.join(tree, brain, 'features'), { recursive: true });
-    fs.writeFileSync(
-      path.join(tree, requirements),
-      stringify({
-        ...spec,
+  // The worker supports Windows process-tree recovery only.
+  it.skipIf(process.platform !== 'win32')(
+    'enforces the new-service gate through the real worker entry before leasing or execution',
+    async () => {
+      const feature = 'FEAT-002';
+      const declaration = { ...task, key: `${feature}-T01` };
+      const registeredDag = parseTaskDag({ ...dag, feature, tasks: [declaration] });
+      const manifest = {
+        apiVersion: 'softwareagents.io/v1alpha1',
+        kind: 'Project',
+        id: 'test',
+        name: 'Test',
+        repo: { remote: 'https://example.invalid/test.git', defaultBranch: 'main' },
+        brain: { path: brain },
+      };
+      fs.writeFileSync(path.join(root, '.softwareagents/project.yaml'), stringify(manifest));
+      fs.mkdirSync(path.join(root, '.pixel-agents'));
+      fs.writeFileSync(
+        path.join(root, '.pixel-agents/config.json'),
+        JSON.stringify({
+          projects: { test: { autonomyLevel: 'A1', allowedExecutors: ['codex'] } },
+        }),
+      );
+      const tree = path.join(root, `.worktrees/${feature}`);
+      const branch = `sa/${feature}-worker`;
+      git('worktree', 'add', '-b', branch, tree);
+      const requirements = `${brain}/features/${feature}.yaml`;
+      fs.mkdirSync(path.join(tree, brain, 'features'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tree, requirements),
+        stringify({
+          ...spec,
+          key: feature,
+          status: 'draft',
+          acceptance: [
+            {
+              ...spec.acceptance[0],
+              ears: 'When a payment is requested, the system shall display the payment.',
+            },
+          ],
+        }),
+      );
+      git('-C', tree, 'add', '.');
+      git('-C', tree, 'commit', '-m', 'requirements');
+      const featureSha = git('-C', tree, 'rev-parse', 'HEAD');
+      const docPath = `${brain}/technical-designs/${feature}.md`;
+      const dagPath = `${brain}/technical-designs/${feature}.dag.yaml`;
+      fs.mkdirSync(path.join(tree, brain, 'technical-designs'));
+      fs.writeFileSync(path.join(tree, docPath), '# Diseño\n');
+      fs.writeFileSync(path.join(tree, dagPath), stringify(registeredDag));
+      git('-C', tree, 'add', '.');
+      git('-C', tree, 'commit', '-m', 'design');
+      const designSha = git('-C', tree, 'rev-parse', 'HEAD');
+      store.createTask({
         key: feature,
-        status: 'draft',
-        acceptance: [
-          {
-            ...spec.acceptance[0],
-            ears: 'When a payment is requested, the system shall display the payment.',
-          },
-        ],
-      }),
-    );
-    git('-C', tree, 'add', '.');
-    git('-C', tree, 'commit', '-m', 'requirements');
-    const featureSha = git('-C', tree, 'rev-parse', 'HEAD');
-    const docPath = `${brain}/technical-designs/${feature}.md`;
-    const dagPath = `${brain}/technical-designs/${feature}.dag.yaml`;
-    fs.mkdirSync(path.join(tree, brain, 'technical-designs'));
-    fs.writeFileSync(path.join(tree, docPath), '# Diseño\n');
-    fs.writeFileSync(path.join(tree, dagPath), stringify(registeredDag));
-    git('-C', tree, 'add', '.');
-    git('-C', tree, 'commit', '-m', 'design');
-    const designSha = git('-C', tree, 'rev-parse', 'HEAD');
-    store.createTask({ key: feature, type: 'docs', status: 'REVIEW', branch, worktree_ref: tree });
-    store.createTask({
-      key: `${feature}-DESIGN`,
-      type: 'architecture',
-      status: 'READY',
-      agent_role: 'architect',
-    });
-    await store.claim(`${feature}-DESIGN`, 'architect');
-    await store.importTaskDag(
-      registeredDag,
-      {
-        key: feature,
-        status: 'approved',
-        git_sha: featureSha,
-        doc_path: requirements,
-      },
-      {
-        owner: 'architect',
-        design: {
-          feature_key: feature,
-          feature_sha: featureSha,
-          git_sha: designSha,
-          doc_path: docPath,
-          dag_path: dagPath,
+        type: 'docs',
+        status: 'REVIEW',
+        branch,
+        worktree_ref: tree,
+      });
+      store.createTask({
+        key: `${feature}-DESIGN`,
+        type: 'architecture',
+        status: 'READY',
+        agent_role: 'architect',
+      });
+      await store.claim(`${feature}-DESIGN`, 'architect');
+      await store.importTaskDag(
+        registeredDag,
+        {
+          key: feature,
+          status: 'approved',
+          git_sha: featureSha,
+          doc_path: requirements,
         },
-      },
-    );
-    const config = loadProjectConfig(root, true)!;
-    const input = developerRequest(store, config, feature, declaration.key);
-    await runWorker({ task: declaration.key }, { cwd: root, developer: input, log: () => {} });
-    expect(store.getTask(declaration.key)).toMatchObject({
-      status: 'WAITING_HUMAN',
-      lease_owner: null,
-    });
-    expect(store.listExecutions()).toEqual([]);
-    const decision = store.listDecisions()[0];
-    await new HumanDecisions(store).answer(decision.id, 'allow', true, 'fede', 'A1');
-    expect((await prepareDeveloperRequest(store, config, input))?.task.agentRole).toBe(
-      'integrations',
-    );
-  });
+        {
+          owner: 'architect',
+          design: {
+            feature_key: feature,
+            feature_sha: featureSha,
+            git_sha: designSha,
+            doc_path: docPath,
+            dag_path: dagPath,
+          },
+        },
+      );
+      const config = loadProjectConfig(root, true)!;
+      const input = developerRequest(store, config, feature, declaration.key);
+      await runWorker({ task: declaration.key }, { cwd: root, developer: input, log: () => {} });
+      expect(store.getTask(declaration.key)).toMatchObject({
+        status: 'WAITING_HUMAN',
+        lease_owner: null,
+      });
+      expect(store.listExecutions()).toEqual([]);
+      const decision = store.listDecisions()[0];
+      await new HumanDecisions(store).answer(decision.id, 'allow', true, 'fede', 'A1');
+      expect((await prepareDeveloperRequest(store, config, input))?.task.agentRole).toBe(
+        'integrations',
+      );
+    },
+  );
 
   it('reads the trusted Git catalog, ignoring uncommitted task metadata', () => {
     fs.writeFileSync(path.join(root, catalogPath), stringify([entry]));

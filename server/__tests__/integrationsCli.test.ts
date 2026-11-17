@@ -104,7 +104,7 @@ afterEach(async () => {
   await removeTempDir(root);
 });
 
-it.each(['claude', 'codex'] as const)(
+it.skipIf(process.platform !== 'win32').each(['claude', 'codex'] as const)(
   'gates new access before %s execution and reuses developer verification after approval',
   async (executor) => {
     fs.writeFileSync(

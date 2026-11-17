@@ -39,6 +39,12 @@ function codexUser(text: string): string {
 }
 
 describe('specialistRole', () => {
+  it('labels the integrations specialist in Spanish', () => {
+    expect(specialistRole('integrations')).toEqual({
+      label: 'Integraciones',
+      department: 'Ingeniería',
+    });
+  });
   it('distinguishes test authoring from read-only QA', () => {
     expect(specialistRole('qa-author')).toMatchObject({ label: 'QA Tests', department: 'Calidad' });
     expect(specialistRole('qa')?.label).toBe('QA');

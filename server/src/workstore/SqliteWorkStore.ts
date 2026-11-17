@@ -22,6 +22,7 @@ import { developerGuardFailure } from '../developerFailure.js';
 import { evalGit } from '../evalTasks.js';
 import { withoutOperatorToken } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
+import { IMPLEMENTATION_ROLES } from '../integrationConstants.js';
 import { resolveInside } from '../pathGuard.js';
 import { canonicalPullRequest } from '../pullRequestBinding.js';
 import { isFailedReview, QA_FAILURE_PREFIX, REVIEW_FAILURE_PREFIX } from '../reviewAttempts.js';
@@ -589,7 +590,7 @@ class SqliteWorkStore implements WorkStore {
       if (
         !reviewOnly &&
         task.type === 'code' &&
-        task.agent_role === 'developer' &&
+        IMPLEMENTATION_ROLES.includes(task.agent_role ?? '') &&
         task.status === 'FAILED_RETRYABLE' &&
         !isVerifierInfrastructureFailure(task.blocked_reason) &&
         !developerGuardFailure(task.blocked_reason) &&
@@ -621,7 +622,7 @@ class SqliteWorkStore implements WorkStore {
             'Retry lease',
             owner,
             task.type === 'code' &&
-              task.agent_role === 'developer' &&
+              IMPLEMENTATION_ROLES.includes(task.agent_role ?? '') &&
               !isVerifierInfrastructureFailure(task.blocked_reason) &&
               !developerGuardFailure(task.blocked_reason)
               ? task.attempt + 1

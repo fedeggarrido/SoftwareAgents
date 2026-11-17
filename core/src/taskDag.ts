@@ -14,6 +14,8 @@ export interface DagTask {
   dependsOn: string[];
   /** AgentSpec `metadata.id`; a role reference, never a permission grant. */
   agentRole: string;
+  /** Stable external service ids. Runtime binds new access to a Human Decision. */
+  externalServices?: string[];
   size: WorkSize;
   /** Declarative repository-relative paths/globs; required for new Architect output. */
   changeZones?: string[];

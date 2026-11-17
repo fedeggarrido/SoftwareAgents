@@ -51,6 +51,7 @@ const SPECIALISTS: Record<string, [string, Department]> = {
   'qa-author': ['QA Tests', 'Calidad'],
   reviewer: ['Reviewer', 'Calidad'],
   developer: ['DEV', 'Ingeniería'],
+  integrations: ['Integraciones', 'Ingeniería'],
   'company-manager': ['Manager', 'Dirección'],
   'delivery-lead': ['Delivery', 'Dirección'],
   'implementation-lead': ['Tech Lead', 'Ingeniería'],

@@ -60,6 +60,12 @@ process.stdin.on('end', () => {
     });
   }
   if (mode === 'generated') proposal.dag.tasks[0].changeZones.push('core/asyncapi.yaml');
+  if (mode === 'integrations')
+    Object.assign(proposal.dag.tasks[0], {
+      agentRole: 'integrations',
+      externalServices: ['payments'],
+      changeZones: ['server/src/audit*.ts', data.integrationCatalogPath],
+    });
   if (mode === 'core')
     proposal.dag.tasks[0].changeZones = [
       'core/asyncapi.yaml',

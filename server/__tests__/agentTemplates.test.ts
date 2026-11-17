@@ -13,6 +13,7 @@ const roles = [
   { id: 'requirements-analyst', profile: 'brain_write', outputs: ['FeatureSpec'] },
   { id: 'architect', profile: 'brain_write', outputs: ['TechnicalDesign', 'ADR', 'TaskDAG'] },
   { id: 'developer', profile: 'branch_write', outputs: ['commits', 'tests'] },
+  { id: 'integrations', profile: 'branch_write', outputs: ['commits', 'tests'] },
   { id: 'qa-author', profile: 'branch_write', outputs: ['commits', 'tests'] },
   { id: 'reviewer', profile: 'read_only', outputs: ['ReviewReport'] },
   { id: 'qa', profile: 'read_only', outputs: ['TestReport'] },

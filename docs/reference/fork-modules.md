@@ -38,6 +38,32 @@ para lecturas puntuales.
   cada violación de capas en hallazgo mayor que bloquea la aprobación. Si Architect
   propone otra arquitectura, `architectureDecisions.ts` abre una decisión humana con
   el ADR propuesto; el diseño queda bloqueado hasta que el humano responda.
+- Integraciones externas (SA-159) añade `agents/templates/integrations.yaml` con el
+  mismo perfil `branch_write`, herramientas y flujo de ejecución que Developer.
+  `integrationConstants.ts` compila la política de clientes, resiliencia, contratos
+  y credenciales. `workerSupport.ts` conserva la identidad del rol al ejecutarlo.
+  La regla determinista de `integrationCatalog.ts` asigna a `integrations` toda
+  tarea `code` cuyas `changeZones` intersecten `src/adapters/out/**`, incluidas zonas
+  amplias y adaptadores locales. Cada tarea del rol declara `externalServices`,
+  una lista de identificadores únicos en kebab-case, y la ruta exacta del catálogo
+  en `changeZones`. Architect y Developer validan la misma política.
+  El catálogo es `<brain>/integrations.yaml`, una lista YAML con `service`, `port`,
+  `auth`, `limits` y `owner` por servicio. `auth` describe el método de autenticación.
+  Las credenciales se obtienen mediante configuración del proyecto o gestor de secretos.
+  Su ausencia equivale a una lista vacía antes de la primera integración.
+  El guard exige una entrada completa por servicio declarado y rechaza altas sin
+  declarar. Solo el archivo exacto recibe permiso de escritura de metadatos del
+  runtime, sujeto también a las rutas protegidas del operador.
+  `integrationDecisions.ts` compara los servicios con el catálogo versionado de la
+  rama base de la feature, o de la rama por defecto. Agrupa los nuevos en una
+  decisión atómica vinculada a la declaración inmutable y al SHA del diseño.
+  Antes del lease o del executor, `prepareDeveloperRequest` abre o reutiliza esa
+  decisión y deja la tarea en `WAITING_HUMAN`. `HumanDecisions` exige ingress humano
+  para responder o reconciliar. La aprobación permite relanzar explícitamente.
+  La denegación conserva el bloqueo de ejecución y requiere replantear la tarea.
+  El agente mantiene el catálogo y propone unificar clientes duplicados. Nunca
+  crea cuentas ni claves reales. El acceso autorizado conserva los límites de
+  herramientas y permisos de Developer.
 - `projectStack.ts` guarda la propuesta y bibliografía en el esquema Human Decision.
   La decisión bloquea la tarea de Architect y conserva el SHA de los requisitos.
   `humanDecisions.ts` proyecta la opción humana elegida como ADR «Aceptado».

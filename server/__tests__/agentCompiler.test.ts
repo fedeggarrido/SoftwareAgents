@@ -62,7 +62,7 @@ for (const role of toolRoles) {
       '--dangerously-bypass-approvals-and-sandbox',
     ])
       expect(flags).not.toContain(forbidden);
-    if (!['developer', 'qa-author'].includes(role)) {
+    if (!['developer', 'integrations', 'qa-author'].includes(role)) {
       expect(compiled.claude.allowedTools).toEqual(
         ['researcher', 'tech-lead'].includes(role) ? [] : ['Read', 'Glob', 'Grep'],
       );

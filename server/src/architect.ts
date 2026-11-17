@@ -15,7 +15,13 @@ import {
 } from './architectureDecisions.js';
 import { validateChangeZone } from './changeZones.js';
 import { readTaskInput, taskDirectory, taskPath } from './commands/taskFiles.js';
-import { TASK_CLI_INPUT_BYTES } from './constants.js';
+import { PROJECT_BRAIN_PATH, TASK_CLI_INPUT_BYTES } from './constants.js';
+import {
+  integrationCatalogPath,
+  integrationTaskErrors,
+  integrationWritablePaths,
+} from './integrationCatalog.js';
+import { INTEGRATION_CATALOG_FILE } from './integrationConstants.js';
 import { ARCHITECTURE_PROPOSAL_ERROR, HEXAGONAL_TEMPLATE } from './projectArchitectureConstants.js';
 import { stackAdr, stackDecision } from './projectStack.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
@@ -75,13 +81,18 @@ export function architectPaths(brain: string, key: string) {
 
 /** Missing context is explicit. All reads use the same link/size guards as Requirements. */
 export function architectContext(cwd: string, brain: string): Record<string, string | null> {
-  return Object.fromEntries(
-    ['ARCHITECTURE.md', 'VISION.md', 'RULES.md', 'CONSTRAINTS.md'].map((name) => {
-      const relative = path.join(brain, name);
-      const file = taskPath(cwd, relative);
-      return [name, fs.existsSync(file) ? readTaskInput(cwd, relative) : null];
-    }),
-  );
+  return {
+    ...Object.fromEntries(
+      ['ARCHITECTURE.md', 'VISION.md', 'RULES.md', 'CONSTRAINTS.md', INTEGRATION_CATALOG_FILE].map(
+        (name) => {
+          const relative = path.join(brain, name);
+          const file = taskPath(cwd, relative);
+          return [name, fs.existsSync(file) ? readTaskInput(cwd, relative) : null];
+        },
+      ),
+    ),
+    INTEGRATION_CATALOG_PATH: integrationCatalogPath(brain),
+  };
 }
 
 export function architectBrief(
@@ -98,6 +109,7 @@ export function architectBrief(
     contract: architectContract,
     dagContract,
     architectureTemplate: HEXAGONAL_TEMPLATE,
+    integrationCatalogPath: context.INTEGRATION_CATALOG_PATH,
     testScope:
       'Declare additional test roots in optional testZones; otherwise only changeZones, colocated tests and the server/src -> server/__tests__ mirror are allowed.',
     validationErrors: errors,
@@ -107,7 +119,7 @@ export function architectBrief(
 export function validateArchitect(
   source: string,
   spec: FeatureSpec,
-  checkout: { cwd: string; protectedPaths?: readonly string[] },
+  checkout: { cwd: string; protectedPaths?: readonly string[]; brain?: string },
 ): ArchitectProposal {
   if (Buffer.byteLength(source) > TASK_CLI_INPUT_BYTES)
     throw new SchemaValidationError(['Architect proposal exceeds 1 MiB limit']);
@@ -128,6 +140,8 @@ export function validateArchitect(
   const dag = parseTaskDag(proposal.dag);
   const errors = analyzeTaskDag(dag, spec).issues.map((issue) => JSON.stringify(issue));
   dag.tasks.forEach((task) => {
+    const brain = checkout.brain ?? PROJECT_BRAIN_PATH;
+    errors.push(...integrationTaskErrors(task, brain));
     if (
       proposal.architecture.kind === 'hexagonal' &&
       !/\b(domain|application|adapters\/(in|out)|composition)\b/.test(task.title)
@@ -138,7 +152,12 @@ export function validateArchitect(
       errors.push(`${task.key}: parallelizable required`);
     for (const zone of [...(task.changeZones ?? []), ...(task.testZones ?? [])]) {
       try {
-        validateChangeZone(checkout.cwd, zone, checkout.protectedPaths ?? []);
+        validateChangeZone(
+          checkout.cwd,
+          zone,
+          checkout.protectedPaths ?? [],
+          integrationWritablePaths(task, brain),
+        );
       } catch (error) {
         errors.push(`${task.key}: changeZones/testZones ${zone}: ${(error as Error).message}`);
       }
@@ -156,6 +175,8 @@ export async function architectArtifacts(
   proposal: ArchitectProposal,
   store: WorkStore,
 ): Promise<Map<string, string>> {
+  const errors = proposal.dag.tasks.flatMap((task) => integrationTaskErrors(task, brain));
+  if (errors.length) throw new SchemaValidationError(errors);
   const paths = architectPaths(brain, key);
   const alternative =
     proposal.architecture.kind === 'alternative' ? proposal.architecture : undefined;

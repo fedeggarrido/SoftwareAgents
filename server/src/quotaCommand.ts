@@ -305,7 +305,16 @@ export function runQuotaCheck(args: QuotaArgs, cwd = process.cwd(), log = consol
   if (!config) throw new CliUsageError('quota check requires a Project');
   const snapshot = readSelectionSnapshot(config.operator);
   if (args.selectExecutor) {
-    if (!['developer', 'reviewer', 'qa', 'architect', 'requirements-analyst'].includes(args.role))
+    if (
+      ![
+        'developer',
+        'integrations',
+        'reviewer',
+        'qa',
+        'architect',
+        'requirements-analyst',
+      ].includes(args.role)
+    )
       throw new CliUsageError('Unknown AgentSpec role');
     const bundled = path.join(__dirname, `agents/templates/${args.role}.yaml`);
     const source = path.resolve(__dirname, `../../agents/templates/${args.role}.yaml`);

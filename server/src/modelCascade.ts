@@ -103,6 +103,7 @@ export async function checkCascadeCriteria(
   expectedHead = base,
   feedback?: {
     failures: VerifierFailure[];
+    writableMetadataPaths?: readonly string[];
     autoFix?: () => void;
     generated?: (file: string, changed: boolean, result: CriterionResult) => void;
   },
@@ -115,6 +116,7 @@ export async function checkCascadeCriteria(
         ? [...verifier.allowedPaths, ...developerTests]
         : verifier.allowedPaths,
     protectedPaths,
+    writableMetadataPaths: feedback?.writableMetadataPaths,
     allowTestChanges: !!developerTests,
   };
   assertEvalIntegrity(integrity, tree);
@@ -409,6 +411,7 @@ export function resetCascadeWorktree(
   protectedPaths?: readonly string[],
   developerTests?: string[],
   expectedHead = base,
+  writableMetadataPaths: readonly string[] = [],
 ): void {
   assertEvalIntegrity(
     {
@@ -419,6 +422,7 @@ export function resetCascadeWorktree(
           ? [...verifier.allowedPaths, ...developerTests]
           : verifier.allowedPaths,
       protectedPaths,
+      writableMetadataPaths,
       allowTestChanges: !!developerTests,
     },
     tree,

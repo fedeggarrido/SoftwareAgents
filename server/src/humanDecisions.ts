@@ -4,6 +4,7 @@ import type { AutonomyLevel, ProjectConfig } from '../../core/src/project.js';
 import { assertArchitectureAnswer } from './architectureDecisions.js';
 import { AuditLog } from './auditLog.js';
 import { featureIngressActor } from './featureIngress.js';
+import { assertIntegrationAnswer } from './integrationDecisions.js';
 import { evaluatePolicy, type PolicyAction, type PolicyActor } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
 import { materializeStackAdr } from './projectStack.js';
@@ -49,6 +50,7 @@ export class HumanDecisions {
   ) {
     assertTaskChangeAnswer(this.store, id);
     assertArchitectureAnswer(this.store, id);
+    assertIntegrationAnswer(this.store, id);
     const policy = evaluatePolicy('answer_decision', privileged ? 'human' : 'system', level);
     const attemptId = randomUUID();
     const append = (status: string) =>

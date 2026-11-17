@@ -26,6 +26,15 @@ import { guardProtectedPaths } from './executors/protectedPaths.js';
 import { featureDocument } from './featureArtifacts.js';
 import { featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
+import {
+  guardIntegrationCatalog,
+  integrationCatalogAtRef,
+  integrationCatalogPath,
+  integrationTaskErrors,
+  integrationWritablePaths,
+} from './integrationCatalog.js';
+import { IMPLEMENTATION_ROLES } from './integrationConstants.js';
+import { requireIntegrationAccess } from './integrationDecisions.js';
 import { projectQualityLintCommand } from './projectQualityLint.js';
 import { isReviewFailure, isSuccessfulTaskStep } from './reviewAttempts.js';
 import { taskBranchBase } from './taskBranchBase.js';
@@ -54,7 +63,7 @@ export function isQaAuthorTask(task: Pick<DagTask, 'agentRole'>): boolean {
 
 function isDevelopableTask(task: DagTask): boolean {
   return (
-    (['code', 'doc'].includes(task.type) && task.agentRole === 'developer') ||
+    (['code', 'doc'].includes(task.type) && IMPLEMENTATION_ROLES.includes(task.agentRole)) ||
     (task.type !== 'doc' && isQaAuthorTask(task))
   );
 }
@@ -133,6 +142,19 @@ export function developerScope(task: DagTask, root: string) {
       'Tests create scratch directories and fixture repos under os.tmpdir() (fs.mkdtempSync(path.join(os.tmpdir(), ...))) and remove them; never inside the worktree (path.resolve, process.cwd()). A leftover nested .git stops the retry.',
     colocatedTestRule: `Tests must match ${testDiscovery(root).patterns.join(', ')}; never next to sources. Webview mirrors: ${webviewTestMirrors('webview-ui/src/<basename>.ts', root).join(', ')}. Other locations never run and are rejected.`,
   };
+}
+
+/** Recheck both declared scope policy and physical paths in each actual checkout. */
+export function validateDeveloperZones(task: DagTask, config: ProjectConfig, tree: string): void {
+  const errors = integrationTaskErrors(task, config.project.brain.path);
+  if (errors.length) throw new Error(errors.join('\n'));
+  for (const zone of [...(task.changeZones ?? []), ...(task.testZones ?? [])])
+    validateChangeZone(
+      tree,
+      zone,
+      config.operator.protectedPaths ?? [],
+      integrationWritablePaths(task, config.project.brain.path),
+    );
 }
 
 /** Only an explicit failed-task retry, after claim/closure, may discard the failed edits.
@@ -216,6 +238,7 @@ export function resetDeveloperWorktree(
 }
 
 export interface DeveloperRequest {
+  integrationCatalogPath?: string;
   designReviewHistory?: NonNullable<
     import('./workstore/WorkStore.js').FeatureRunState['designReviews']
   >[string]['history'];
@@ -315,12 +338,14 @@ export function developerRequest(
     throw new Error('Developer review registration requires human reconciliation before retrying');
   if (!isDevelopableTask(task) || !task.changeZones?.length)
     throw new Error('Developer task requires a code/doc developer or qa/test role and changeZones');
-  for (const zone of [...task.changeZones, ...(task.testZones ?? [])])
-    validateChangeZone(config.repoRoot, zone, config.operator.protectedPaths ?? []);
+  validateDeveloperZones(task, config, config.repoRoot);
   if (task.type === 'doc' && task.changeZones.some((zone) => !isDocumentationPath(zone)))
     throw new Error('Documentation tasks require documentation-only changeZones');
   return {
     key,
+    ...(task.agentRole === 'integrations'
+      ? { integrationCatalogPath: integrationCatalogPath(config.project.brain.path) }
+      : {}),
     approvedSpec: spec,
     featureSha: feature.git_sha,
     designSha: design.git_sha,
@@ -374,6 +399,24 @@ export function developerRequest(
         }
       : {}),
   };
+}
+
+/** Shared pre-lease gate, including direct worker calls. A blocked task launches no executor. */
+export async function prepareDeveloperRequest(
+  store: WorkStore,
+  config: ProjectConfig,
+  expected: DeveloperRequest,
+): Promise<DeveloperRequest | null> {
+  const input = developerRequest(store, config, expected.key, expected.task.key);
+  if (input.task.agentRole !== 'integrations') return input;
+  const catalog = integrationCatalogAtRef(
+    config.repoRoot,
+    config.project.brain.path,
+    featureBaseBranch(store, config, expected.key),
+  );
+  return (await requireIntegrationAccess(store, expected.key, input.task, input.designSha, catalog))
+    ? input
+    : null;
 }
 
 /** Standard runnable JS/TS tests; fixture/config files never satisfy test-first. */
@@ -438,7 +481,14 @@ export function guardDeveloperChanges(
   expectedHead = base,
 ): string[] {
   try {
-    preflightDeveloperTree(config, tree, base, expectedHead);
+    preflightDeveloperTree(
+      config,
+      tree,
+      base,
+      expectedHead,
+      integrationWritablePaths(input.task, config.project.brain.path),
+    );
+    guardIntegrationCatalog(input.task, config.project.brain.path, tree, base);
     return checkDeveloperChanges(input, config, tree, base);
   } catch (error) {
     if (error instanceof ChangeZonesExceededError || error instanceof MissingTestError) throw error;
@@ -459,6 +509,7 @@ function preflightDeveloperTree(
   tree: string,
   base: string,
   expectedHead: string,
+  writableMetadataPaths: readonly string[],
 ): void {
   removeAgentToolCaches(tree);
   assertEvalIntegrity(
@@ -466,6 +517,7 @@ function preflightDeveloperTree(
       baseCommit: base,
       expectedHead,
       protectedPaths: config.operator.protectedPaths,
+      writableMetadataPaths,
       allowTestChanges: true,
     },
     tree,

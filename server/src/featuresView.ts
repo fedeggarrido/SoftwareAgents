@@ -11,6 +11,7 @@ import { readConfig } from './configPersistence.js';
 import { featureMerged } from './featureCompletion.js';
 import { type FlowEvent, flowMetrics, type FlowTask, wipSnapshot } from './flow.js';
 import { flowLabel } from './flowCommand.js';
+import { IMPLEMENTATION_ROLES } from './integrationConstants.js';
 import { aggregateUsage, type UsageEntry } from './usageLedger.js';
 import {
   FeaturesReadFailure,
@@ -275,7 +276,7 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
         currentTask = {
           key: text(task.key),
           step:
-            role === 'developer'
+            typeof role === 'string' && IMPLEMENTATION_ROLES.includes(role)
               ? 'develop'
               : role === 'reviewer'
                 ? 'review'

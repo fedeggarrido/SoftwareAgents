@@ -9,7 +9,6 @@ import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../con
 import { useExecutorStore } from '../office/executorStore.js';
 import { featureStepLabel } from '../office/featuresStore.js';
 import {
-  beginFeaturesRequest,
   emptyFeaturesStore,
   featureCacheRateLabel,
   featureCostLabel,
@@ -18,6 +17,7 @@ import {
   featureProgressLabel,
   featuresReasonText,
   getFeaturesStore,
+  requestFeatures,
   setFeaturesStore,
   useFeaturesStore,
   viewState,
@@ -33,13 +33,6 @@ import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
-
-let requestSequence = 0;
-function requestFeatures(projectId: string) {
-  const requestId = `features-${++requestSequence}`;
-  setFeaturesStore(beginFeaturesRequest(getFeaturesStore(), projectId, requestId));
-  transport.send({ type: 'requestFeatures', projectId, requestId });
-}
 
 export function FeaturesPanel({
   isOpen,
@@ -58,12 +51,15 @@ export function FeaturesPanel({
   const { store: ideas, connection: connectionState } = useIdeasConnection(isOpen, projectId);
 
   useEffect(() => {
-    if (!isOpen || !projectId || connectionState !== 'connected') {
+    if (!isOpen) return;
+    if (!projectId || connectionState !== 'connected') {
       setFeaturesStore(emptyFeaturesStore());
       return;
     }
-    if (getFeaturesStore().projectId !== projectId) requestFeatures(projectId);
-  }, [isOpen, projectId, store.projectId, connectionState]);
+    const current = getFeaturesStore();
+    // Opening refreshes cached rows, but can share the welcome's in-flight read.
+    if (current.projectId !== projectId || !current.loading) requestFeatures(transport, projectId);
+  }, [isOpen, projectId, connectionState]);
 
   if (!isOpen) return null;
   // A Project switch must hide the old rows even before the effect clears them.
@@ -72,7 +68,7 @@ export function FeaturesPanel({
   const state = viewState(selectedStore);
   const refresh = () => {
     if (connectionState === 'connected') requestIdeas(transport);
-    if (projectId && connectionState === 'connected') requestFeatures(projectId);
+    if (projectId && connectionState === 'connected') requestFeatures(transport, projectId);
   };
   return (
     <section

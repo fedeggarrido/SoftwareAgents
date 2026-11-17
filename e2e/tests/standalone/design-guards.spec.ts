@@ -93,6 +93,47 @@ test.describe('Design guards (SA-151)', () => {
   });
 
   for (const viewport of Object.keys(VIEWPORTS) as ViewportName[]) {
+    test(`empty first screen explains the next step at ${viewport} (SA-117) @area:design`, async ({
+      page,
+      standalone,
+    }, testInfo) => {
+      await standalone.drainMessages();
+      await page.setViewportSize(VIEWPORTS[viewport]);
+      const welcome = page.getByRole('region', { name: 'Empieza con una idea' });
+      await expect(welcome).toBeVisible();
+      await expect(welcome).toContainText('Coordina agentes de IA para construir software');
+      await expect(page.getByTestId('hud-pulse')).toHaveText(
+        'Nadie trabajando · nada espera tu revisión',
+      );
+      await expect(page.getByTestId('company-hud')).not.toContainText('Capacidad observada');
+      const action = welcome.getByRole('button', { name: 'Nueva idea', exact: true });
+      const [cardBox, hudBox, dockBox, actionBox] = await Promise.all([
+        welcome.boundingBox(),
+        page.getByTestId('company-hud').boundingBox(),
+        page.locator('.bottom-toolbar').boundingBox(),
+        action.boundingBox(),
+      ]);
+      expect(cardBox!.y).toBeGreaterThanOrEqual(hudBox!.y + hudBox!.height);
+      expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(dockBox!.y);
+      expect(cardBox!.x).toBeGreaterThanOrEqual(0);
+      expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(VIEWPORTS[viewport].width);
+      expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+      await action.focus();
+      await expect(action).toBeFocused();
+      await testInfo.attach(`empty-office-${viewport}.png`, {
+        body: await page.screenshot(),
+        contentType: 'image/png',
+      });
+      await action.press('Enter');
+      await expect(page.getByRole('dialog', { name: 'Nueva idea', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await closeWindow(page);
+      await welcome.getByRole('button', { name: 'Ocultar bienvenida' }).click();
+      await expect(welcome).toHaveCount(0);
+      await dockButton(page, viewport, 'Nueva idea');
+      await expect(page.getByRole('dialog', { name: 'Nueva idea', exact: true })).toBeVisible();
+    });
+
     test(`every screen meets the design rules at ${viewport} @area:design`, async ({
       page,
       standalone,

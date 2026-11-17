@@ -78,6 +78,24 @@ const AUTOPILOT_TEXT: Record<string, string> = {
   paused: 'en pausa',
 };
 
+/** Board phases drive the pulse; with no board work, open sessions still count as activity. */
+function HudPulse({ phases, sessions }: { phases: readonly string[]; sessions: number }) {
+  const pulse = backlogPulse(phases);
+  const idle = pulse.working === 0 && pulse.needsYou === 0 && pulse.blocked === 0;
+  return (
+    <span className="hud-pulse" data-testid="hud-pulse">
+      {idle ? (
+        `${sessions === 0 ? 'Nadie trabajando' : `${sessions} ${sessions === 1 ? 'sesión abierta' : 'sesiones abiertas'}`} · nada espera tu revisión`
+      ) : (
+        <>
+          <strong>{pulse.working}</strong> trabajando · <strong>{pulse.needsYou}</strong> te
+          necesitan · <strong>{pulse.blocked}</strong> bloqueadas
+        </>
+      )}
+    </span>
+  );
+}
+
 interface CompanyHudProps {
   onOpenDecisions: () => void;
   onOpenMeeting: () => void;
@@ -208,9 +226,7 @@ function CompanyHudContent({
           {decisionsControl}
           {meetingControl}
         </div>
-        <div className="text-2xs text-text-muted">
-          Claude {counts.claude} · Codex {counts.codex} · {capacity.title}
-        </div>
+        <HudPulse phases={board.items.map((item) => item.phase)} sessions={agents.length} />
         {open && executorPanel}
         {open && board.quota && (
           <>
@@ -235,8 +251,6 @@ function CompanyHudContent({
   const withoutSignal = active.filter(
     (i) => i.owner?.stale || !i.agentIds.some((id) => officeState.characters.get(id)?.isActive),
   ).length;
-  // Same three numbers as the Trabajo panel strip, from the same policy (SA-152).
-  const pulse = backlogPulse(board.items.map((i) => i.phase));
   const pilotStatus = ap ? (AUTOPILOT_TEXT[ap.status ?? ''] ?? ap.status ?? 'sin estado') : null;
 
   return (
@@ -272,10 +286,7 @@ function CompanyHudContent({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-10 gap-y-5">
         <div className="flex min-w-0 flex-wrap items-center gap-4">
-          <span className="hud-pulse" data-testid="hud-pulse">
-            <strong>{pulse.working}</strong> trabajando · <strong>{pulse.needsYou}</strong> te
-            necesitan · <strong>{pulse.blocked}</strong> bloqueadas
-          </span>
+          <HudPulse phases={board.items.map((item) => item.phase)} sessions={agents.length} />
           {board.manager?.stale && (
             <StatusChip text="Manager sin latido" color={PHASE_COLORS.BLOCKED} />
           )}

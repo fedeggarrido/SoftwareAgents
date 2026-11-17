@@ -309,8 +309,47 @@ body:has(.panel-window-mobile:not([hidden])) .office-notices {
   font-size: var(--reading-size);
 }
 .hud-pulse {
+  font-family: var(--font-reading);
   font-size: var(--reading-size);
   color: var(--color-text-muted);
+}
+
+/* Welcome shares the HUD/dock bounds: an expanded blocker always gets space first. */
+.office-empty-space {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+.office-empty-state {
+  width: min(440px, calc(100% - 2 * var(--space-4)));
+  min-height: 0;
+  max-height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+  pointer-events: auto;
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.office-empty-state header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.office-empty-state h2 {
+  margin: 0;
+}
+.office-empty-state p {
+  margin-block: var(--space-3);
+}
+.office-empty-state .pixel-button {
+  min-width: var(--control-target);
+  min-height: var(--control-target);
 }
 .hud-pulse strong {
   color: var(--color-text);

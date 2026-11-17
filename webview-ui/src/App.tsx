@@ -17,6 +17,7 @@ import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { NewIdeaDialog } from './components/NewIdeaDialog.js';
 import { NewProjectDialog } from './components/NewProjectDialog.js';
+import { OfficeEmptyState } from './components/OfficeEmptyState.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
 import { ProjectSummaryPanel } from './components/ProjectSummaryPanel.js';
@@ -64,6 +65,7 @@ function getOfficeState(): OfficeState {
 function App() {
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [isNewIdeaOpen, setIsNewIdeaOpen] = useState(false);
+  const handleNewIdea = () => setIsNewIdeaOpen(true);
   // Browser runtime (dev or static dist): dispatch mock messages after the
   // useExtensionMessages listener has been registered.
   useEffect(() => {
@@ -559,7 +561,7 @@ function App() {
           onToggleSettings={() => setIsSettingsOpen((v) => !v)}
           activePanel={panel.isOpen ? panel.tab : null}
           onTogglePanel={panel.toggle}
-          onNewIdea={() => setIsNewIdeaOpen(true)}
+          onNewIdea={handleNewIdea}
           workspaceFolders={workspaceFolders}
         />
 
@@ -573,6 +575,11 @@ function App() {
               meetingUnread={panel.meetingUnread}
             />
           </div>
+          <OfficeEmptyState
+            agents={agents}
+            onNewIdea={handleNewIdea}
+            hidden={editor.isEditMode || isDebugMode}
+          />
         </div>
         <PanelWindow
           isOpen={panel.isOpen}

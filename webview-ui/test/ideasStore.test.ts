@@ -77,7 +77,7 @@ describe('SA-109 dialog state without DOM', () => {
     }
     expect(ideaErrorText('missing_manifest')).toContain('.softwareagents/project.yaml');
     expect(ideaErrorText('denied')).toContain('pixel-agents open');
-    expect(ideaErrorText('unsupported_adapter')).toContain('standalone');
+    expect(ideaErrorText('unsupported_adapter')).toContain('navegador');
   });
 
   it('shows validation errors, offline, and uncertain outcomes without replay', () => {

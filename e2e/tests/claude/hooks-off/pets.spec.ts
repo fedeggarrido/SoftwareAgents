@@ -50,12 +50,12 @@ type PetWindow = Window & { __pixelAgentsTestHooks?: PetTestHooks };
 const PETS_CAROUSEL = '[data-testid="pets-carousel"]';
 
 /**
- * Dismiss the first-run tooltips ("Instant Detection Active", "Updated to vN")
+ * Dismiss the first-run tooltips ("Detección instantánea activa", "Actualizado a vN")
  * that overlay the top toolbar and would otherwise intercept the Layout click.
  * Mirrors the layout-editor smoke test in hooks-on/lifecycle.spec.ts.
  */
 async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
-  for (const tooltipText of ['Instant Detection Active', 'Updated to v']) {
+  for (const tooltipText of ['Detección instantánea activa', 'Actualizado a v']) {
     const tooltip = frame.locator('div', { hasText: tooltipText }).first();
     if (await tooltip.isVisible().catch(() => false)) {
       const closeBtn = tooltip.locator('button', { hasText: 'x' }).first();
@@ -69,7 +69,7 @@ async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 /** Enter edit mode and open the Pets tab; returns the carousel locator. */
 async function openPetsTab(frame: Frame): Promise<Locator> {
   await dismissFirstRunTooltips(frame);
-  await openDockAction(frame, 'Editar oficina');
+  await openDockAction(frame, 'Editar diseño de la oficina');
   await frame.locator('button[title="Colocar mascotas"]').click();
   const carousel = frame.locator(PETS_CAROUSEL);
   await expect(carousel).toBeVisible({ timeout: 15_000 });

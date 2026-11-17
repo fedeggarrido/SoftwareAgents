@@ -69,12 +69,12 @@ it('groups primary, panel segments and secondary controls in keyboard order', as
   expect(html).toContain('role="group" aria-label="Oficina y ajustes"');
   expect([...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1])).toEqual([
     'Nueva idea',
-    'Trabajo',
+    'Trabajo pendiente',
     'Decisiones',
     'Proyecto',
     'Funcionalidades',
     'Auditoría',
-    'Editar oficina',
+    'Editar diseño de la oficina',
     'Ajustes',
   ]);
   expect(html.match(/class="dock-button dock-primary"/g)).toHaveLength(1);
@@ -109,7 +109,7 @@ it.each(['backlog', 'decisions', 'summary', 'features', 'audit', 'meeting', null
       ...html.matchAll(/<button[^>]*aria-label="([^"]+)"[^>]*aria-pressed="true"/g),
     ].map((match) => match[1]);
     const labels: Record<string, string> = {
-      backlog: 'Trabajo',
+      backlog: 'Trabajo pendiente',
       decisions: 'Decisiones',
       summary: 'Proyecto',
       features: 'Funcionalidades',
@@ -145,7 +145,7 @@ it('keeps the same controls and labels when PR observations arrive', async () =>
   });
   const after = renderToStaticMarkup(createElement(BottomToolbar, props));
   expect(after.match(/<button\b/g)).toHaveLength(before.match(/<button\b/g)!.length);
-  expect(after).toContain('Estado de PR:');
+  expect(after).toContain('Estado de propuestas:');
   expect(after).not.toContain('dock-pr-status');
 });
 
@@ -169,6 +169,6 @@ it.each([320, 390, 767, 768])('uses four mobile slots below 768px at %spx', asyn
     expect(html).toContain('aria-controls="dock-more-sheet"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('<span>Idea</span>');
-    expect(html).not.toContain('aria-label="Editar oficina"');
+    expect(html).not.toContain('aria-label="Editar diseño de la oficina"');
   }
 });

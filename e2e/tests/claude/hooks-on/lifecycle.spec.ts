@@ -1656,10 +1656,10 @@ test.describe('Hooks ON / lifecycle', () => {
     }
 
     // Dismiss any first-run tooltips that overlay the top toolbar. The
-    // "Instant Detection Active" tooltip and the "Updated to vN" tooltip
+    // "Detección instantánea activa" tooltip and the "Actualizado a vN" tooltip
     // both intercept clicks on the Undo/Redo/Save row. We dismiss them via
     // their close buttons (the X) before entering edit mode.
-    for (const tooltipText of ['Instant Detection Active', 'Updated to v']) {
+    for (const tooltipText of ['Detección instantánea activa', 'Actualizado a v']) {
       const tooltip = frame.locator('div', { hasText: tooltipText }).first();
       if (await tooltip.isVisible().catch(() => false)) {
         const closeBtn = tooltip.locator('button', { hasText: 'x' }).first();
@@ -1671,7 +1671,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Enter edit mode.
     narrator.step('entering Layout mode');
-    await openDockAction(frame, 'Editar oficina');
+    await openDockAction(frame, 'Editar diseño de la oficina');
 
     // Editor toolbar should reveal at least one tool button. Paint floor is
     // always present in the floor section of the toolbar.

@@ -14,6 +14,7 @@ import {
   PET_THUMB_SCALE_MARGIN,
   PET_THUMB_ZOOM,
 } from '../../constants.js';
+import { es } from '../../i18n/es.js';
 import { getColorizedSprite } from '../colorize.js';
 import { getColorizedFloorSprite, getFloorPatternCount, hasFloorSprites } from '../floorTiles.js';
 import type { FurnitureCategory, LoadedAssetData } from '../layout/furnitureCatalog.js';
@@ -915,7 +916,7 @@ function AreaCard({
               : 'Asociar carpeta…'
           }
         >
-          Add folder…
+          {es.vocabulary.associateFolder}
         </Button>
         <Dropdown isOpen={addFolderOpen}>
           {availableFolders.map((f) => (

@@ -34,7 +34,10 @@ describe('features view acceptance', () => {
           feature_key: 'FEAT-001',
           state: {
             status: 'running',
-            wipWait: { task: 'FEAT-001-T02', reason: 'WIP limit: review 1/1 (FEAT-001-T01)' },
+            wipWait: {
+              task: 'FEAT-001-T02',
+              reason: 'Límite de trabajo en curso: en revisión 1/1 (FEAT-001-T01)',
+            },
           },
         },
       ],
@@ -43,8 +46,10 @@ describe('features view acceptance', () => {
       events: [],
       wip: { review: 1 },
     });
-    expect(rows[0].flow).toContain('review 1/1');
-    expect(rows[0].gates[0].reason).toBe('WIP limit: review 1/1 (FEAT-001-T01)');
+    expect(rows[0].flow).toContain('en revisión 1/1');
+    expect(rows[0].gates[0].reason).toBe(
+      'Límite de trabajo en curso: en revisión 1/1 (FEAT-001-T01)',
+    );
   });
   it('projects declared waits and real branch overlap warnings as visible gates', () => {
     const source: FeaturesSource = {
@@ -65,7 +70,8 @@ describe('features view acceptance', () => {
             status: 'running',
             zoneWait: {
               task: 'FEAT-001-T01',
-              reason: 'zone conflict: FEAT-002-T01 of FEAT-002 overlaps core/asyncapi.yaml',
+              reason:
+                'Conflicto de zona: FEAT-002-T01 de FEAT-002 también modifica core/asyncapi.yaml',
             },
           },
         },
@@ -83,7 +89,7 @@ describe('features view acceptance', () => {
     expect(gates[0]).toMatchObject({
       kind: 'zone_overlap',
       task: 'FEAT-001-T01',
-      reason: expect.stringContaining('zone conflict: FEAT-002-T01'),
+      reason: expect.stringContaining('Conflicto de zona: FEAT-002-T01'),
     });
     expect(gates[1].command).toBe('pixel-agents zones check');
   });

@@ -1,4 +1,5 @@
 import type { WorkflowStage, WorkflowStageId } from '../../../core/src/messages.js';
+import { es } from '../i18n/es.js';
 import { StatusChip } from './StatusChip.js';
 
 export function ProjectWorkflow({
@@ -20,7 +21,7 @@ export function ProjectWorkflow({
                 className="workflow-node"
                 data-state={stage.state}
                 onClick={() => onSelect(stage.id)}
-                aria-label={`Ver ${stage.label} en Trabajo`}
+                aria-label={es.navigation.stageWork(stage.label)}
                 aria-describedby={`workflow-stage-${stage.id}`}
               >
                 <span className="workflow-stage-title">{stage.label}</span>

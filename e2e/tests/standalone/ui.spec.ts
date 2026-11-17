@@ -131,7 +131,7 @@ test.describe('Standalone / UI', () => {
 
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      modal.locator('button', { hasText: 'Exportar distribución' }).click(),
+      modal.locator('button', { hasText: 'Exportar diseño de la oficina' }).click(),
     ]);
 
     expect(download.suggestedFilename()).toBe('pixel-agents-layout.json');

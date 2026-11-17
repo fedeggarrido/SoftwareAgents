@@ -55,7 +55,7 @@ describe('office connection copy', () => {
       connectionCopy('reconnecting', { cause: 'unavailable', attempt: 4, retryAt: null }).label,
     ).toBe('Sin conexión · reintentando ahora…');
     expect(copy.explanation).toContain('La oficina está cerrada en tu ordenador');
-    expect(copy.explanation).toContain('Abre Pixel Agents');
+    expect(copy.explanation).toContain('Abre SoftwareAgents');
     expect(copy.explanation).not.toContain('terminal');
     expect(copy.explanation).not.toContain('token');
   });

@@ -63,6 +63,7 @@ import { hooksConsentRequest } from './providers/hook/consentGate.js';
 import { claudeProvider, hookProviderById, hookProviders } from './providers/index.js';
 import { readSelectionSnapshot } from './quotaCommand.js';
 import { handleTaskDetailMessage } from './taskDetail.js';
+import { uiCopy } from './uiCopy.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
 
@@ -442,7 +443,7 @@ export function handleClientMessage(
         );
         send({
           type: 'companyNotice',
-          text: 'Abre Pixel Agents en tu ordenador para controlar el piloto. Revisa el acceso en Settings.',
+          text: uiCopy.pilotAccess,
         } satisfies CompanyNotice);
         break;
       }
@@ -465,7 +466,7 @@ export function handleClientMessage(
         );
         send({
           type: 'companyNotice',
-          text: 'Abre Pixel Agents en tu ordenador para responder decisiones. Revisa el acceso en Settings.',
+          text: uiCopy.decisionAccess,
         } satisfies CompanyNotice);
         break;
       }
@@ -698,7 +699,7 @@ function allowCompanyAction(action: PolicyAction, send: WsSend): PolicyDecision 
     recordAudit(action, 'policy', null, { status: 'failure' });
     send({
       type: 'companyNotice',
-      text: 'Acción rechazada: no se pudo validar la configuración del proyecto (invalid .softwareagents/project.yaml).',
+      text: uiCopy.invalidProject,
     } satisfies CompanyNotice);
   }
   return null;

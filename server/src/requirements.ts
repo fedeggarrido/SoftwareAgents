@@ -12,6 +12,7 @@ import { type ExternalReaderResult, validateExternalReaderResult } from './exter
 import { withoutOperatorToken } from './featureIngress.js';
 import { parseFeatureSpec } from './featureSpec.js';
 import { SchemaValidationError } from './schemaValidation.js';
+import { uiCopy } from './uiCopy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface RequirementsRequest {
@@ -207,7 +208,7 @@ export async function openRequirementsQuestions(
     ],
     recommendation: 'Resolver todas las preguntas y documentar las respuestas antes de aprobar',
     disagreement: [],
-    impact: 'Bloquea la aprobación del FeatureSpec',
+    impact: uiCopy.decisions.requirementsBlocked,
     urgency: 'medium',
   });
 }

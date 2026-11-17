@@ -130,8 +130,8 @@ it.each([
     expect(html).toContain('Preparar proyecto');
     for (const label of [
       'Ajustes',
-      'Exportar distribución',
-      'Importar distribución',
+      'Exportar diseño de la oficina',
+      'Importar diseño de la oficina',
       'Avisos sonoros',
       'Observar todas las sesiones',
       'Detección instantánea (hooks)',

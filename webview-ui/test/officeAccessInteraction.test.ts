@@ -53,7 +53,7 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
             return <>
               <button id="outside">Outside</button>
               <OfficeNotices>
-                {notice && <Tooltip title="Instant Detection Active" position="stack" onDismiss={() => showNotice(false)}>
+                {notice && <Tooltip title="Detección instantánea activa" position="stack" onDismiss={() => showNotice(false)}>
                   Your agents now respond in real-time. View more
                 </Tooltip>}
               </OfficeNotices>
@@ -137,7 +137,7 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
       await page.keyboard.press('Escape');
       expect(await page.locator('body').getAttribute('data-editor-escapes')).toBe('1');
       await dismiss.click();
-      expect(await page.getByText('Instant Detection Active').count()).toBe(0);
+      expect(await page.getByText('Detección instantánea activa').count()).toBe(0);
       await badge.click();
       expect(await page.locator('#office-mode-explanation').count()).toBe(1);
       await page.keyboard.press('Escape');

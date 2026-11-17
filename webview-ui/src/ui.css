@@ -388,3 +388,18 @@ body:has(.panel-window-mobile:not([hidden])) .office-notices {
 body:has(.critical-blocker) .office-notices {
   z-index: var(--z-hud);
 }
+
+.executor-toggle {
+  min-width: 108px;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.executor-toggle:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.executor-toggle:active:not(:disabled) {
+  background: var(--color-btn-hover);
+}

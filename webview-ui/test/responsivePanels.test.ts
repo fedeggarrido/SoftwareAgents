@@ -164,7 +164,7 @@ async function boot(page: Page, sequence = 1) {
   await page.evaluate(
     `for (const message of ${JSON.stringify(messages)}) window.postMessage(message, '*');`,
   );
-  await page.getByRole('button', { name: 'Trabajo', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Trabajo pendiente', exact: true }).waitFor();
   await page.evaluate('document.fonts.ready');
 }
 
@@ -392,7 +392,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       if (width === 390) {
         expect(await dock.getByRole('button').allTextContents()).toEqual([
           'Idea',
-          'Trabajo',
+          'Trabajo pendiente',
           'Decisiones',
           'Más',
         ]);
@@ -400,7 +400,12 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await more.click();
         const sheet = page.getByRole('dialog', { name: 'Más opciones', exact: true });
         await sheet.waitFor();
-        for (const name of ['Funcionalidades', 'Auditoría', 'Editar oficina', 'Ajustes']) {
+        for (const name of [
+          'Funcionalidades',
+          'Auditoría',
+          'Editar diseño de la oficina',
+          'Ajustes',
+        ]) {
           const action = sheet.getByRole('button', { name, exact: true });
           const box = (await action.boundingBox())!;
           expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
@@ -417,7 +422,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await activePanel(page, 'Auditoría').waitFor();
         await page.keyboard.press('Escape');
         await more.click();
-        await sheet.getByRole('button', { name: 'Editar oficina', exact: true }).click();
+        await sheet
+          .getByRole('button', { name: 'Editar diseño de la oficina', exact: true })
+          .click();
         expect(await dock.getByRole('button').count()).toBe(2);
         expect(await dock.evaluate(fitsHorizontally)).toBe(true);
         const dockBox = (await dock.boundingBox())!;
@@ -464,7 +471,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       } else {
         expect(
           await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').allTextContents(),
-        ).toEqual(['Trabajo', 'Decisiones', 'Proyecto', 'Funcionalidades', 'Auditoría']);
+        ).toEqual(['Trabajo pendiente', 'Decisiones', 'Proyecto', 'Funcionalidades', 'Auditoría']);
         for (const button of await dock.getByRole('button').all()) {
           expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         }
@@ -473,7 +480,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await expectAccessHelpClear(page);
       await page.keyboard.press('Escape');
       const windowPanel = page.locator('[data-testid="panel-window"]:visible');
-      const backlog = page.getByRole('button', { name: 'Trabajo', exact: true });
+      const backlog = page.getByRole('button', { name: 'Trabajo pendiente', exact: true });
       const canvas = page.locator('canvas').first();
       const officeBox = await canvas.boundingBox();
       expect(await backlog.count()).toBe(1);
@@ -481,7 +488,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await windowPanel.waitFor();
       const panelBox = (await windowPanel.boundingBox())!;
       expect(await canvas.boundingBox()).toEqual(officeBox);
-      expect(await activePanel(page, 'Trabajo').count()).toBe(1);
+      expect(await activePanel(page, 'Trabajo pendiente').count()).toBe(1);
       expect(await page.getByTestId('backlog-panel').count()).toBe(1);
       if (width === 390) {
         expect(panelBox.x).toBe(0);
@@ -558,12 +565,12 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
         ),
       ).toContain('slashed-zero');
-      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Trabajo']) {
+      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Trabajo pendiente']) {
         await openPanel(page, name);
         expect(await windowPanel.count()).toBe(1);
         expect(await activePanel(page, name).count()).toBe(1);
         const labels: Record<string, string> = {
-          Trabajo: 'Trabajo',
+          'Trabajo pendiente': 'Trabajo pendiente',
           Decisiones: 'Decisiones',
           Funcionalidades: 'Funcionalidades',
           Auditoría: 'Auditoría',
@@ -628,7 +635,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await sendMeeting('meeting-2');
       const meetingHud = page.getByTestId('company-hud').getByRole('button', { name: /Reuniones/ });
       await meetingHud.getByRole('status', { name: 'Nueva actividad' }).waitFor();
-      expect(await activePanel(page, 'Trabajo').count()).toBe(1);
+      expect(await activePanel(page, 'Trabajo pendiente').count()).toBe(1);
       expect(await meetingHud.getByRole('status', { name: 'Nueva actividad' }).isVisible()).toBe(
         true,
       );
@@ -643,7 +650,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await meetingHud.click();
         expect(await windowPanel.count()).toBe(1);
       }
-      await openPanel(page, 'Trabajo');
+      await openPanel(page, 'Trabajo pendiente');
       await sendMeeting('meeting-3');
       await meetingHud.getByRole('status').waitFor();
       // On mobile the full-screen window covers the HUD: close it first.
@@ -687,11 +694,11 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await windowPanel.count()).toBe(1);
       }
       // PR observations update the existing Trabajo tooltip without adding a control.
-      const work = page.getByRole('button', { name: 'Trabajo', exact: true });
-      expect(await work.getAttribute('title')).toContain('Estado de PR:');
+      const work = page.getByRole('button', { name: 'Trabajo pendiente', exact: true });
+      expect(await work.getAttribute('title')).toContain('Estado de propuestas:');
       expect(await page.getByTestId('dock-pr-status').count()).toBe(0);
       await work.click();
-      await activePanel(page, 'Trabajo').waitFor();
+      await activePanel(page, 'Trabajo pendiente').waitFor();
       expect(await work.getAttribute('aria-pressed')).toBe('true');
       await work.click();
       expect(await windowPanel.count()).toBe(0);
@@ -724,8 +731,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await canvas.evaluate(isFocusedElement)).toBe(true);
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(1)');
       await card.waitFor();
-      await card.getByRole('button', { name: 'Ver en Trabajo', exact: true }).click();
-      await activePanel(page, 'Trabajo').waitFor();
+      await card.getByRole('button', { name: 'Ver trabajo pendiente', exact: true }).click();
+      await activePanel(page, 'Trabajo pendiente').waitFor();
       expect(await card.count()).toBe(0);
       await page.keyboard.press('Escape');
       await page.evaluate('window.__pixelAgentsTestHooks.selectAgent(null)');
@@ -749,7 +756,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       // Escape cannot reach the editor while either overlay is present.
       // Open the window first because Layout hides the dock's panel shortcuts.
       await backlog.click();
-      await page.getByRole('button', { name: 'Editar oficina', exact: true }).click();
+      await page.getByRole('button', { name: 'Editar diseño de la oficina', exact: true }).click();
       await page.getByRole('button', { name: 'Ajustes', exact: true }).click();
       await page.getByRole('dialog', { name: 'Ajustes', exact: true }).waitFor();
       await page.keyboard.press('Escape');
@@ -921,7 +928,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       );
       await page.addScriptTag({ content: script });
       await boot(page);
-      await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
+      await page.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
       const box = (await page.locator('[data-testid="panel-window"]:visible').boundingBox())!;
       expect(box.x).toBe(64);
       expect(box.width).toBe(720);

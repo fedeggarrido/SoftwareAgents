@@ -1,6 +1,7 @@
 import { CliUsageError } from './cliErrors.js';
 import { type FlowEvent, flowMetrics, type FlowTask, wipSnapshot } from './flow.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { uiCopy } from './uiCopy.js';
 import { openReadOnlyWorkStore, readMainAncestors } from './workstore/readOnlyWorkStore.js';
 
 export async function runFlowCommand(argv: string[], cwd = process.cwd(), log = console.log) {
@@ -66,18 +67,13 @@ export async function runFlowCommand(argv: string[], cwd = process.cwd(), log = 
   }
 }
 
-const FLOW_METRIC_LABELS = {
-  cycle: 'cycle',
-  wipAge: 'WIP age',
-  reviewWait: 'review wait',
-} as const;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 /** Durations for people: minutes under an hour, hours under two days, then days. */
 export function humanDuration(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms)) return 'unknown';
+  if (ms === null || !Number.isFinite(ms)) return uiCopy.flow.unknown;
   if (ms < HOUR_MS) return `${Math.max(1, Math.round(ms / MINUTE_MS))} min`;
   if (ms < 2 * DAY_MS) return `${(ms / HOUR_MS).toFixed(1)} h`;
   return `${(ms / DAY_MS).toFixed(1)} d`;
@@ -90,13 +86,13 @@ export function flowLabel(
   const days = Object.entries(metrics.throughput).sort(([a], [b]) => a.localeCompare(b));
   const latest = days.at(-1);
   return (
-    `WIP running ${wip.running.tasks.length}/${wip.running.limit ?? 'unlimited'}; review ${wip.review.tasks.length}/${wip.review.limit ?? 'unlimited'}; ` +
+    `${uiCopy.flow.work}: ${uiCopy.flow.running} ${wip.running.tasks.length}/${wip.running.limit ?? uiCopy.flow.unlimited}; ${uiCopy.flow.review} ${wip.review.tasks.length}/${wip.review.limit ?? uiCopy.flow.unlimited}; ` +
     (['cycle', 'wipAge', 'reviewWait'] as const)
       .map(
         (key) =>
-          `${FLOW_METRIC_LABELS[key]} median ${humanDuration(metrics[key].medianMs)}, p85 ${humanDuration(metrics[key].p85Ms)} (n=${metrics[key].n})`,
+          `${uiCopy.flow.metrics[key]}: ${uiCopy.flow.median} ${humanDuration(metrics[key].medianMs)}, ${uiCopy.flow.percentile} ${humanDuration(metrics[key].p85Ms)} (${metrics[key].n} ${uiCopy.flow.samples})`,
       )
       .join('; ') +
-    `; DONE/day UTC ${latest ? `${latest[0]}: ${latest[1]}` : 'unknown'}`
+    `; ${uiCopy.flow.completed}: ${latest ? `${latest[0]}: ${latest[1]}` : uiCopy.flow.unknown}`
   );
 }

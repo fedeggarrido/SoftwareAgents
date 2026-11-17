@@ -45,7 +45,7 @@ describe('project workflow policy', () => {
       'Plan',
       'Aprobación',
       'Desarrollo',
-      'QA',
+      'Pruebas',
       'Revisión',
       'Entrega',
     ]);

@@ -11,6 +11,7 @@ import type {
 import type { FeaturesSource } from './featuresView.js';
 import type { SummaryContext } from './projectSummaryContext.js';
 import { summaryText } from './projectSummaryContext.js';
+import { uiCopy } from './uiCopy.js';
 import { FeaturesReadFailure } from './workstore/readOnlyWorkStore.js';
 import { isTaskStatus, type TaskStatus } from './workstore/taskStateMachine.js';
 
@@ -20,7 +21,7 @@ const STAGES: { id: WorkflowStageId; label: string }[] = [
   { id: 'plan', label: 'Plan' },
   { id: 'approval', label: 'Aprobación' },
   { id: 'development', label: 'Desarrollo' },
-  { id: 'qa', label: 'QA' },
+  { id: 'qa', label: uiCopy.qualityStage },
   { id: 'review', label: 'Revisión' },
   { id: 'delivery', label: 'Entrega' },
 ];

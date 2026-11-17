@@ -1,6 +1,8 @@
 import { PR_DISPLAY_SUMMARY_CHARS, PR_DISPLAY_TEXT_CHARS } from '../../../core/src/constants.js';
 import type { BoardItem } from '../../../core/src/messages.js';
 import { pullRequestCi } from '../../../core/src/pullRequest.js';
+import { es } from '../i18n/es.js';
+import { pullRequestStateLabel } from './taskDetailPresentation.js';
 
 /** Shared read-only labels for task cards and the dock. */
 export function taskPullRequestLabel(
@@ -9,8 +11,15 @@ export function taskPullRequestLabel(
 ): string | null {
   if (!item.prRef) return null;
   const pr = item.prStatus?.ref === item.prRef ? item.prStatus : undefined;
-  if (!pr) return `PR ${item.prRef.slice(0, PR_DISPLAY_TEXT_CHARS)} · CI unavailable`;
-  return `PR ${pr.state}${pr.isDraft ? ' (draft)' : ''} · CI ${pullRequestCi(pr, item.prObservation, now)}${pr.reviewDecision ? ` · ${pr.reviewDecision}` : ''}`;
+  if (!pr) return es.pullRequest.unobserved(item.prRef.slice(0, PR_DISPLAY_TEXT_CHARS));
+  return [
+    pullRequestStateLabel(pr.state),
+    pr.isDraft ? es.pullRequest.draft : '',
+    pullRequestStateLabel(pullRequestCi(pr, item.prObservation, now)),
+    pullRequestStateLabel(pr.reviewDecision),
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 export function pullRequestDockSummary(
@@ -30,7 +39,10 @@ export function pullRequestDockSummary(
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
   return {
-    label: `PR ${prs.length} · CI ${[...counts].map(([state, count]) => `${state} ${count}`).join(' / ')}`,
+    label: es.pullRequest.summary(
+      prs.length,
+      [...counts].map(([state, count]) => `${pullRequestStateLabel(state)} ${count}`).join(' / '),
+    ),
     title: prs
       .map((item) => `${item.id} · ${taskPullRequestLabel(item, now)}`)
       .join('\n')

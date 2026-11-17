@@ -9,6 +9,7 @@ import {
   INTRO_BUBBLE_Z_INDEX,
 } from '../constants.js';
 import type { ConsentChoice } from '../hooks/introTourState.js';
+import { es } from '../i18n/es.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { DiscordIcon } from './ChangelogModal.js';
 import { computeIntroBubbleGeometry } from './introBubbleGeometry.js';
@@ -212,10 +213,10 @@ export function IntroBubble({
   };
 
   const titles = [
-    '¡Bienvenido a Pixel Agents!',
-    'Con tus sesiones de Claude Code',
+    es.intro.welcome,
+    es.intro.claudeTitle,
     headline,
-    installFailed ? 'No se pudieron instalar los hooks' : '¡Todo listo!',
+    installFailed ? es.intro.installFailed : es.intro.ready,
   ];
 
   return (
@@ -256,7 +257,7 @@ export function IntroBubble({
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Cerrar"
+          aria-label={es.intro.close}
           className="absolute top-4 right-4"
           onClick={onClose}
         >
@@ -264,7 +265,7 @@ export function IntroBubble({
         </Button>
 
         {/* Step dots: the tour's "1 of 4", drawn as pixels rather than prose. */}
-        <div className="flex gap-4 mb-8" aria-label={`Paso ${step + 1} de ${STEP_COUNT}`}>
+        <div className="flex gap-4 mb-8" aria-label={es.intro.step(step + 1, STEP_COUNT)}>
           {Array.from({ length: STEP_COUNT }, (_, i) => (
             <div
               key={i}
@@ -276,25 +277,20 @@ export function IntroBubble({
 
         <div className="text-xl mb-8 text-accent-bright pr-20">{titles[step]}</div>
 
-        {step === WELCOME_STEP && (
-          <p className="text-sm m-0 mb-8">
-            En esta oficina, tus sesiones de IA cobran vida como personajes de píxeles. Escriben en
-            su escritorio mientras trabajan, pasean cuando terminan y te avisan cuando te necesitan.
-          </p>
-        )}
+        {step === WELCOME_STEP && <p className="text-sm m-0 mb-8">{es.intro.description}</p>}
 
         {step === CLAUDE_CODE_STEP && (
           <>
-            <p className="text-sm m-0 mb-8">La oficina muestra tus sesiones de Claude Code.</p>
+            <p className="text-sm m-0 mb-8">{es.intro.claudeDescription}</p>
             <details>
-              <summary>Detalles</summary>
-              <p>Si todavía no tienes Claude Code, puedes instalarlo con este comando.</p>
+              <summary>{es.intro.details}</summary>
+              <p>{es.intro.installHelp}</p>
               <div className="text-sm bg-btn-bg border-2 border-border py-4 px-8 mb-8 select-all">
                 {CLAUDE_CODE_INSTALL_COMMAND}
               </div>
             </details>
             <p className="text-sm m-0 mb-8">
-              Más información en{' '}
+              {es.intro.learnMore}{' '}
               <a
                 href={CLAUDE_CODE_URL}
                 target="_blank"
@@ -317,16 +313,9 @@ export function IntroBubble({
         {step === CLOSING_STEP && (
           <>
             {installFailed ? (
-              <p className="text-sm m-0 mb-8">
-                No se pudo guardar la configuración de Claude Code. La oficina seguirá leyendo tus
-                sesiones con actualizaciones más lentas. Puedes reintentar la instalación desde
-                Ajustes.
-              </p>
+              <p className="text-sm m-0 mb-8">{es.intro.installFailureHelp}</p>
             ) : null}
-            <p className="text-sm m-0 mb-8">
-              ¡Disfruta de tu oficina! Comparte preguntas, ideas y tus creaciones de píxeles en
-              nuestro Discord.
-            </p>
+            <p className="text-sm m-0 mb-8">{es.intro.communityHelp}</p>
             <p className="text-base text-center m-0 mt-12 mb-12">
               <a
                 href={DISCORD_INVITE_URL}
@@ -335,7 +324,7 @@ export function IntroBubble({
                 className="inline-flex items-center gap-8 text-accent-bright hover:text-accent no-underline"
               >
                 <DiscordIcon />
-                Únete a nuestro Discord
+                {es.intro.joinCommunity}
               </a>
             </p>
           </>
@@ -354,7 +343,7 @@ export function IntroBubble({
               className={installPending ? 'opacity-[var(--btn-disabled-opacity)]' : ''}
               onClick={back}
             >
-              Anterior
+              {es.intro.back}
             </Button>
           )}
 
@@ -367,7 +356,7 @@ export function IntroBubble({
                 className={installPending ? 'opacity-[var(--btn-disabled-opacity)]' : ''}
                 onClick={() => choose('never')}
               >
-                No volver a preguntar
+                {es.intro.never}
               </Button>
               <Button
                 variant="secondary"
@@ -376,7 +365,7 @@ export function IntroBubble({
 
                 onClick={() => choose('notNow')}
               >
-                Ahora no
+                {es.intro.notNow}
               </Button>
               <Button
                 variant="primary"
@@ -385,16 +374,16 @@ export function IntroBubble({
 
                 onClick={() => choose('install')}
               >
-                {installPending ? 'Instalando…' : 'Instalar hooks'}
+                {installPending ? es.intro.installing : es.intro.install}
               </Button>
             </div>
           ) : step === CLOSING_STEP ? (
             <Button variant="primary" size="sm" onClick={onClose}>
-              Terminar
+              {es.intro.finish}
             </Button>
           ) : (
             <Button variant="secondary" size="sm" onClick={forward}>
-              Continuar
+              {es.intro.next}
             </Button>
           )}
         </div>

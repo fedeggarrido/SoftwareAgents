@@ -21,7 +21,7 @@ const SETTINGS_FILE = '~/.claude/settings.json';
 
 /** WHY we ask + WHAT we write. */
 export const CONSENT_FACT_WHAT =
-  `Para mostrar tus sesiones en tiempo real, Pixel Agents añade hooks para ` +
+  `Para mostrar tus sesiones en tiempo real, SoftwareAgents añade hooks para ` +
   `${CLAUDE_HOOK_EVENTS.length} eventos de Claude Code en ${SETTINGS_FILE}. ` +
   `Se conserva tu configuración existente y se guarda una única copia de seguridad en settings.json${SETTINGS_BACKUP_SUFFIX}.`;
 
@@ -34,7 +34,7 @@ export const CONSENT_FACT_WHAT =
  *  thing that changes it, rather than making a promise the software can be
  *  asked to break. */
 export const CONSENT_FACT_DATA =
-  'Claude Code enviará esos eventos, incluidos los nombres y las entradas de las herramientas, a Pixel Agents ' +
+  'Claude Code enviará esos eventos, incluidos los nombres y las entradas de las herramientas, a SoftwareAgents ' +
   'en este ordenador. Los datos se mantienen en local y el servidor escucha en 127.0.0.1, salvo que ' +
   'lo inicies explícitamente con --host para exponerlo en tu red.';
 
@@ -45,7 +45,7 @@ export const CONSENT_FACT_REVERSIBLE =
 /** Headline for the first-run gate — the only population that is asked. A user
  *  whose hooks a pre-consent version already installed is migrated silently
  *  (the migration only ever drops events), so there is no second headline.
- *  Title of the Intro's consent step ("Welcome to Pixel Agents!" is the
+ *  Title of the Intro's consent step ("Welcome to SoftwareAgents!" is the
  *  Intro's own opening-step title, owned by the webview). Carries NO
  *  disclosure facts by design: the facts all live in CONSENT_DISCLOSURE. */
 export const CONSENT_INSTALL_HEADLINE = 'Detección de actividad en tiempo real';

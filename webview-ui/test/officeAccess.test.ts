@@ -40,7 +40,7 @@ describe('SA-116 permanent office mode', () => {
         { type: 'officeAccess', privileged: true, reason: null, persistent: false },
         false,
       ).explanation,
-    ).toContain('dura mientras Pixel Agents siga abierto');
+    ).toContain('dura mientras SoftwareAgents siga abierto');
     const settingsPath = '../src/components/SettingsModal.js';
     const { SettingsModal } = await import(settingsPath);
     const html = renderToStaticMarkup(
@@ -53,7 +53,7 @@ describe('SA-116 permanent office mode', () => {
     expect(html).toContain('no sobrevivirá a los reinicios');
     expect(html).toContain('role="alert"');
     expect(html).toMatch(/<details[^>]*><summary>Detalles<\/summary>/);
-    expect(html).toContain('Copiar token para CLI');
+    expect(html).toContain('Copiar token para la terminal');
   });
   it.each([
     ['unavailable', 'reconnecting', 'La oficina está cerrada en tu ordenador'],
@@ -107,7 +107,7 @@ describe('SA-116 permanent office mode', () => {
     setOfficeAccess({ type: 'officeAccess', privileged: true, reason: null });
     const html = await indicator();
     expect(html).toContain('Operador');
-    expect(html).toContain('recupera la conexión cuando reinicias Pixel Agents');
+    expect(html).toContain('recupera la conexión cuando reinicias SoftwareAgents');
     expect(html).toContain('revocar su acceso desde Ajustes');
     expect(officeAccessView(null, false)).toMatchObject({
       label: 'Conectando con la oficina…',

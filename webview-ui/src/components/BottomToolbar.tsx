@@ -7,6 +7,7 @@ import {
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
+import { es } from '../i18n/es.js';
 import { useBoard } from '../office/boardStore.js';
 import { decisionsHudView } from '../office/decisionsHudView.js';
 import type { PanelTab } from '../office/panelWindowState.js';
@@ -151,10 +152,10 @@ export function BottomToolbar({
   };
 
   const panels = [
-    { id: 'backlog', label: 'Trabajo', title: 'Backlog de la empresa de agentes' },
+    { id: 'backlog', label: es.common.backlog, title: es.vocabulary.backlogHint },
     { id: 'decisions', label: 'Decisiones', title: 'Decisiones del propietario' },
     { id: 'summary', label: 'Proyecto', title: 'Resumen del proyecto que se está construyendo' },
-    { id: 'features', label: 'Funcionalidades', title: 'Features de solo lectura' },
+    { id: 'features', label: 'Funcionalidades', title: es.vocabulary.featuresHint },
     { id: 'audit', label: 'Auditoría', title: 'Auditoría de solo lectura' },
   ] as const;
   const selectPanel = (tab: PanelTab) => {
@@ -174,7 +175,7 @@ export function BottomToolbar({
       }
       title={
         entry.id === 'backlog' && prs
-          ? `${entry.title}\nEstado de PR: ${prs.label}\n${prs.title}`
+          ? `${entry.title}\n${es.pullRequest.dockStatus(prs.label, prs.title)}`
           : entry.title
       }
       onClick={() => selectPanel(entry.id)}
@@ -216,8 +217,8 @@ export function BottomToolbar({
     <button
       type="button"
       className="dock-button dock-icon-button"
-      title={isEditMode ? 'Salir de edición' : 'Editar oficina'}
-      aria-label={isEditMode ? 'Salir de edición' : 'Editar oficina'}
+      title={isEditMode ? 'Salir de edición' : es.navigation.editDesign}
+      aria-label={isEditMode ? 'Salir de edición' : es.navigation.editDesign}
       aria-pressed={isEditMode}
       onClick={() => {
         setMoreOpen(false);
@@ -228,7 +229,7 @@ export function BottomToolbar({
     >
       <DockIcon name="edit" />
       {(isEditMode || moreVisible) && (
-        <span>{isEditMode ? 'Salir de edición' : 'Editar oficina'}</span>
+        <span>{isEditMode ? 'Salir de edición' : es.navigation.editDesign}</span>
       )}
     </button>
   );

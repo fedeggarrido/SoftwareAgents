@@ -1,3 +1,4 @@
+import { es } from './i18n/es.js';
 /** One stacking scale for the office, including portalled UI. */
 export const UI_LAYERS = {
   office: 0,
@@ -481,7 +482,7 @@ export const MODAL_Z_INDEX = UI_LAYERS.modal;
 export const OFFICE_HELP_Z_INDEX = UI_LAYERS.notices;
 export const PANEL_TABS = [
   { id: 'summary', label: 'Proyecto' },
-  { id: 'backlog', label: 'Trabajo' },
+  { id: 'backlog', label: es.common.backlog },
   { id: 'decisions', label: 'Decisiones' },
   { id: 'audit', label: 'Auditoría' },
   { id: 'features', label: 'Funcionalidades' },
@@ -507,12 +508,10 @@ export const AUDIT_EXPLANATION =
   'Registro de acciones de personas y agentes en este proyecto: ejecuciones, aprobaciones, decisiones y resultados de las reglas de seguridad. No se puede editar.';
 export const AUDIT_EMPTY_TEXT = 'Aún no hay nada registrado.';
 export const OFFICE_OFFLINE_TEXT = 'La oficina está cerrada en tu ordenador.';
-export const OFFICE_OFFLINE_HELP =
-  'Abre Pixel Agents en tu ordenador. Esta pestaña se conectará automáticamente.';
+export const OFFICE_OFFLINE_HELP = es.office.offlineHelp;
 export const OFFICE_START_COMMAND = 'npx pixel-agents';
 export const OFFICE_INVALID_ACCESS_TEXT = 'El acceso de esta pestaña ha caducado o se ha revocado.';
-export const OFFICE_ORIGIN_TEXT =
-  'La oficina ha rechazado el origen de esta página. Abre Pixel Agents en tu ordenador para volver a entrar.';
+export const OFFICE_ORIGIN_TEXT = es.office.originRejected;
 export const OFFICE_HANDSHAKE_TEXT =
   'Conectando con la oficina: el programa pixel-agents que se ejecuta en tu ordenador. Esperando a que confirme el modo de acceso.';
 export const OFFICE_RETRY_BASE_MS = 1000;
@@ -704,11 +703,7 @@ export const FEATURE_STEP_LABELS: Readonly<Record<string, string>> = {
   plan_approval: 'Aprobación del plan',
   merge: 'Integración',
 };
-export const MODEL_TIER_LABELS = {
-  economy: 'Económico',
-  standard: 'Estándar',
-  deep: 'Profundo',
-} as const;
+export const MODEL_TIER_LABELS = es.modelTiers;
 
 export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;

@@ -194,7 +194,7 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
       expect(sent).toEqual([
         {
           type: 'companyNotice',
-          text: 'Abre Pixel Agents en tu ordenador para responder decisiones. Revisa el acceso en Settings.',
+          text: 'Abre SoftwareAgents en tu ordenador para responder decisiones. Revisa el acceso en Ajustes.',
         },
       ]);
     } finally {

@@ -43,7 +43,7 @@ describe('cross-feature admission', () => {
       const { tasks, store } = fixture(zone);
       expect(zoneConflict(store, tasks[0])).toBeNull();
       expect(zoneConflict(store, tasks[1])).toContain(
-        'zone conflict: FEAT-001-T01 of FEAT-001 overlaps',
+        'Conflicto de zona: FEAT-001-T01 de FEAT-001 también modifica',
       );
       tasks[0].status = 'DONE';
       expect(zoneConflict(store, tasks[1])).toBeNull();

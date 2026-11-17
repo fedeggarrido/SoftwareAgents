@@ -129,7 +129,7 @@ test.describe('Hooks consent gate', () => {
 
     narrator.step('waiting for the first-run Intro');
     const dialog = await openConsentDialog(frame);
-    await expect(dialog).toContainText('¡Bienvenido a Pixel Agents!');
+    await expect(dialog).toContainText('¡Bienvenido a SoftwareAgents!');
 
     // Diegetic: the tour is a greeter character's speech bubble, and the camera
     // shifts so character + bubble are centered — the bubble ends up FULLY on

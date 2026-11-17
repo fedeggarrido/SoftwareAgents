@@ -12,6 +12,7 @@ import { featureMerged } from './featureCompletion.js';
 import { type FlowEvent, flowMetrics, type FlowTask, wipSnapshot } from './flow.js';
 import { flowLabel } from './flowCommand.js';
 import { IMPLEMENTATION_ROLES } from './integrationConstants.js';
+import { uiCopy } from './uiCopy.js';
 import { aggregateUsage, type UsageEntry } from './usageLedger.js';
 import {
   FeaturesReadFailure,
@@ -203,7 +204,7 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
               display(
                 [
                   ...warnings.map((warning) => `${warning.file}: ${warning.branches.join(', ')}`),
-                  ...outside.map((file) => `outside declared zones: ${file}`),
+                  ...outside.map((file) => uiCopy.outsideZones(file)),
                 ].join('; '),
               ) ?? '',
           });

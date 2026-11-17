@@ -94,7 +94,7 @@ test.describe('Standalone / task detail', () => {
     page,
     standalone,
   }) => {
-    await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
+    await page.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
     await page.locator('[data-task-key="FEAT-001-T01"]').click();
     const detail = page.getByTestId('task-detail');
     await expect(detail.getByRole('heading', { name: 'Crear recibos', exact: true })).toBeVisible();
@@ -114,7 +114,7 @@ test.describe('Standalone / task detail', () => {
     expect(
       inspect(standalone.workspaceDir, "SELECT status FROM tasks WHERE key = 'FEAT-001-T01'"),
     ).toEqual([{ status: 'WAITING_HUMAN' }]);
-    await detail.getByRole('button', { name: 'Volver a Trabajo' }).click();
+    await detail.getByRole('button', { name: 'Volver a Trabajo pendiente' }).click();
     await expect(page.getByTestId('task-detail')).toHaveCount(0);
   });
 
@@ -126,7 +126,7 @@ test.describe('Standalone / task detail', () => {
     try {
       const spectator = await context.newPage();
       await spectator.goto(standalone.hostUrl);
-      await spectator.getByRole('button', { name: 'Trabajo', exact: true }).click();
+      await spectator.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
       await spectator.locator('[data-task-key="FEAT-001-T01"]').click();
       const detail = spectator.getByTestId('task-detail');
       await expect(detail.getByText(/Editarás la especificación/)).toBeVisible();
@@ -149,7 +149,7 @@ test.describe('Standalone / task detail', () => {
         standalone.workspaceDir,
         "SELECT * FROM tasks WHERE key = 'FEAT-001-T01'",
       );
-      await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
+      await page.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
       await page.locator('[data-task-key="FEAT-001-T01"]').click();
       const detail = page.getByTestId('task-detail');
       await detail.getByRole('button', { name: 'Pedir un cambio', exact: true }).click();
@@ -169,7 +169,7 @@ test.describe('Standalone / task detail', () => {
       page,
       standalone,
     }) => {
-      await page.getByRole('button', { name: 'Trabajo', exact: true }).click();
+      await page.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
       await page.locator('summary').filter({ hasText: 'Hechas' }).click();
       await page.locator('[data-task-key="FEAT-001-T01"]').click();
       const detail = page.getByTestId('task-detail');

@@ -36,7 +36,7 @@ it('welcomes empty offices, reuses Nueva idea, dismisses, hides after work, and 
             <CompanyHud agents={[]} officeState={officeState} onOpenDecisions={() => {}} onOpenMeeting={() => {}} />
             <OfficeEmptyState agents={[]} onNewIdea={newIdea} />
             <nav><button onClick={newIdea}>Nueva idea</button></nav>
-            {idea && <div role="dialog" aria-label="Nueva idea" />}
+            {idea && <div role="dialog" aria-label="Nueva idea">Nueva idea</div>}
           </>;
         }
         const root = createRoot(document.getElementById('root'));

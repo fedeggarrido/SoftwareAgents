@@ -166,15 +166,19 @@
 /* HUD and office controls never participate in the canvas layout. */
 .office-panels {
   position: absolute;
-  inset: var(--office-top) 0 var(--office-bottom);
+  inset: var(--office-top) 0
+    max(var(--office-bottom), calc(var(--dock-bottom) + var(--dock-mobile-height) + var(--space-2)));
   display: flex;
   flex-direction: column;
   gap: var(--panel-gap);
   pointer-events: none;
 }
 .office-panel-hud {
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
-  min-height: calc(var(--zoom-stack-bottom) - var(--office-top));
+  min-height: 0;
+  max-height: 100%;
 }
 .office-panel-hud > [data-testid='company-hud'] {
   --hud-offset: max(
@@ -191,6 +195,18 @@
   margin-left: var(--hud-offset);
   margin-right: var(--panel-edge);
   pointer-events: auto;
+  overflow: hidden;
+  flex-shrink: 1;
+}
+.hud-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  overflow-y: auto;
+  min-height: 0;
+}
+.hud-content > .flex:first-child {
+  flex-wrap: wrap;
 }
 .panel-window {
   position: fixed;
@@ -511,7 +527,7 @@
   padding: var(--panel-gap);
   max-width: 100%;
 }
-[data-testid='company-hud'] > .flex:first-child > button {
+[data-testid='company-hud'] > .hud-content > .flex:first-child > button {
   font-size: var(--ui-info-size);
   max-width: 100%;
 }

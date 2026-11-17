@@ -1,6 +1,23 @@
-import type { BoardState, ProviderQuota } from '../../../core/src/messages.js';
+import type {
+  BoardState,
+  CapacityConfidence,
+  CapacitySource,
+  ProviderQuota,
+} from '../../../core/src/messages.js';
 import { QUOTA_COLORS } from '../constants.js';
 import { getProviderLabel } from './toolUtils.js';
+
+const CAPACITY_SOURCE: Record<CapacitySource, string> = {
+  claude_stream_json: 'Capacidad observada en Claude',
+  codex_session_log: 'Capacidad observada en Codex',
+  estimated: 'Capacidad estimada',
+};
+const CAPACITY_CONFIDENCE: Record<CapacityConfidence, string> = {
+  exact: 'datos exactos',
+  high: 'datos fiables',
+  low: 'datos poco fiables',
+  unknown: 'sin datos fiables todavía',
+};
 
 /** Count tracked office sessions, including idle ones; subtask characters are not sessions. */
 export function visibleProviderCounts(agents: readonly number[]) {
@@ -86,10 +103,10 @@ export function capacityView(q: ProviderQuota, running: number, now = new Date()
     ...describeQuota(q, now),
     provenance:
       running +
-      (running === 1 ? ' agente en marcha · Fuente: ' : ' agentes en marcha · Fuente: ') +
-      (q.capacity?.source ?? 'estimated') +
-      ' · Confianza: ' +
-      (q.capacity?.confidence ?? 'unknown'),
+      (running === 1 ? ' agente en marcha · ' : ' agentes en marcha · ') +
+      CAPACITY_SOURCE[q.capacity?.source ?? 'estimated'] +
+      ' · ' +
+      CAPACITY_CONFIDENCE[q.capacity?.confidence ?? 'unknown'],
     windows:
       q.capacity?.windows.map((w) => {
         const label =
@@ -105,7 +122,7 @@ export function capacityView(q: ProviderQuota, running: number, now = new Date()
                 hour: '2-digit',
                 minute: '2-digit',
               });
-        return label + ': ' + usage + ' · Reset: ' + reset;
+        return label + ': ' + usage + ' · Se renueva: ' + reset;
       }) ?? [],
   };
 }

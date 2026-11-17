@@ -46,8 +46,6 @@ export interface ExecutorPanelView {
   projectId: string;
   rows: ExecutorRowView[];
   readOnlyNotice: string | null;
-  /** Persistent banner (never a modal): all off, or a change without verified result. */
-  banner: string | null;
   /** Polite live-region text for screen readers. */
   live: string;
 }
@@ -178,26 +176,14 @@ export function executorPanelView(
         : null,
     };
   });
-  const allOff = state.executors.length > 0 && state.executors.every((e) => !e.enabled);
-  const banner =
-    state.configurationStatus === 'recovery_required'
-      ? 'Un cambio de disponibilidad no tiene resultado verificado: lanzamientos bloqueados hasta «pixel-agents executors recover».'
-      : state.configurationStatus === 'invalid'
-        ? 'Configuración del operador no disponible o inválida: no se lanza nada.'
-        : allOff
-          ? 'Nuevas tareas bloqueadas: todos los executors están desactivados.'
-          : null;
-  const live = [
-    banner,
-    ...rows.filter((r) => r.pending || r.error).map((r) => `${r.label}: ${r.error ?? r.status}`),
-  ]
-    .filter(Boolean)
+  const live = rows
+    .filter((r) => r.pending || r.error)
+    .map((r) => `${r.label}: ${r.error ?? r.status}`)
     .join(' ');
   return {
     projectId: state.projectId,
     rows,
     readOnlyNotice: state.canManage ? null : 'Solo el operador puede cambiar la disponibilidad.',
-    banner,
     live,
   };
 }

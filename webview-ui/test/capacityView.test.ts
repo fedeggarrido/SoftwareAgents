@@ -50,10 +50,10 @@ describe('capacity view', () => {
     expect(view.status).toBe('Sana');
     expect(view.detail).toBe('Menos del 90 % usado');
     expect(view.provenance).toBe(
-      '2 agentes en marcha · Fuente: claude_stream_json · Confianza: low',
+      '2 agentes en marcha · Capacidad observada en Claude · datos poco fiables',
     );
     expect(view.windows).toEqual([
-      '5 horas: uso desconocido · Reset: ' +
+      '5 horas: uso desconocido · Se renueva: ' +
         new Date(200 * 1000).toLocaleString('es-ES', {
           day: '2-digit',
           month: '2-digit',
@@ -72,9 +72,25 @@ describe('capacity view', () => {
   });
   it('keeps older boards readable with explicit unknown confidence', () => {
     const view = capacityView({ ...quota, capacity: undefined, status: 'unknown' }, 0);
-    expect(view.provenance).toBe('0 agentes en marcha · Fuente: estimated · Confianza: unknown');
+    expect(view.provenance).toBe(
+      '0 agentes en marcha · Capacidad estimada · sin datos fiables todavía',
+    );
     expect(view.windows).toEqual([]);
     expect(view.detail).toBe('Aún no hay una lectura de cuota');
+  });
+  it('translates every capacity source and confidence without leaking protocol jargon', () => {
+    for (const source of ['claude_stream_json', 'codex_session_log', 'estimated'] as const) {
+      for (const confidence of ['exact', 'high', 'low', 'unknown'] as const) {
+        const view = capacityView(
+          { ...quota, capacity: { ...quota.capacity!, source, confidence } },
+          0,
+        );
+        expect(view.provenance).toMatch(/Capacidad (observada en (Claude|Codex)|estimada)/);
+        expect(JSON.stringify(view)).not.toMatch(
+          /estimated|unknown|claude_stream_json|codex_session_log|\blow\b|\bhigh\b|\bexact\b|Reset/,
+        );
+      }
+    }
   });
   it('distinguishes renewed quota from missing observations', () => {
     expect(capacityView({ ...quota, status: 'reset' }, 0).detail).toBe(
@@ -91,9 +107,9 @@ describe('capacity view', () => {
       ],
     };
     expect(capacityView({ ...quota, capacity }, 0).windows).toEqual([
-      '5 horas: 0 % usado · Reset: —',
-      'Semanal: 96 % usado · Reset: —',
-      'Otra ventana: uso desconocido · Reset: —',
+      '5 horas: 0 % usado · Se renueva: —',
+      'Semanal: 96 % usado · Se renueva: —',
+      'Otra ventana: uso desconocido · Se renueva: —',
     ]);
   });
   it('uses the weekly reset when the weekly limit is exhausted', () => {

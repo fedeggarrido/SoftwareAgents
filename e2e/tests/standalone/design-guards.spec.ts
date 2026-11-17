@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../fixtures/standalone';
@@ -8,6 +11,7 @@ import {
   WRITE_BASELINE,
   writeBaseline,
 } from '../../helpers/designGuards';
+import { launchStandalone } from '../../helpers/standalone';
 
 /**
  * SA-151 design guards. Each screen is swept at desktop and mobile; violations
@@ -41,6 +45,53 @@ async function closeWindow(page: Page) {
 }
 
 test.describe('Design guards (SA-151)', () => {
+  test('critical blockers remain actionable with the HUD collapsed (SA-118) @area:design', async ({
+    page,
+  }, testInfo) => {
+    const homeDir = testInfo.outputPath('home');
+    const workspaceDir = testInfo.outputPath('workspace');
+    fs.mkdirSync(path.join(workspaceDir, '.softwareagents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspaceDir, '.softwareagents', 'project.yaml'),
+      'apiVersion: softwareagents.io/v1alpha1\nkind: Project\nid: blockers-e2e\nname: Blockers fixture\nrepo:\n  remote: https://example.invalid/blockers.git\n  defaultBranch: main\nbrain:\n  path: .softwareagents/brain\n',
+    );
+    fs.mkdirSync(path.join(homeDir, '.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, '.pixel-agents', 'config.json'),
+      JSON.stringify({
+        projects: { 'blockers-e2e': { autonomyLevel: 'A1', allowedExecutors: [] } },
+        hooksConsent: { claude: 'granted' },
+      }),
+    );
+    const session = await launchStandalone(page, { homeDir, workspaceDir });
+    try {
+      for (const viewport of Object.values(VIEWPORTS)) {
+        await page.setViewportSize(viewport);
+        const hud = page.getByTestId('company-hud');
+        const toggle = hud.locator('button[aria-expanded]');
+        const banner = hud.getByTestId('critical-blocker');
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(banner).toContainText('todos los ejecutores están desactivados');
+        const action = banner.getByRole('button', { name: 'Ver ejecutores', exact: true });
+        await expect(action).toBeVisible();
+        const [buttonBox, dockBox] = await Promise.all([
+          action.boundingBox(),
+          page.locator('.bottom-toolbar').boundingBox(),
+        ]);
+        expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+        expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(dockBox!.y);
+        await action.click();
+        await expect(hud.getByTestId('executor-panel')).toBeVisible();
+        await expect(hud.locator('.hud-executors')).toBeFocused();
+        await expect(hud.getByRole('switch')).toHaveCount(2);
+        await expect(banner).toBeVisible();
+        await toggle.click();
+      }
+    } finally {
+      await session.cleanup();
+    }
+  });
+
   for (const viewport of Object.keys(VIEWPORTS) as ViewportName[]) {
     test(`every screen meets the design rules at ${viewport} @area:design`, async ({
       page,

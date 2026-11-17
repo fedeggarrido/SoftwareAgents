@@ -15,6 +15,7 @@ import {
   PANEL_WINDOW_STORAGE_KEY,
 } from '../src/constants.js';
 import viteConfig from '../vite.config.ts';
+import { executorSnapshot } from './fixtures/executorState.js';
 type MatchableElement = { matches(selector: string): boolean };
 type MeasurableElement = { scrollWidth: number; clientWidth: number };
 const isOutsidePanelWindow = (element: unknown) =>
@@ -167,6 +168,65 @@ async function boot(page: Page, sequence = 1) {
   await page.evaluate('document.fonts.ready');
 }
 
+async function expectCriticalBlockers(page: Page) {
+  const hud = page.getByTestId('company-hud');
+  const banner = hud.getByTestId('critical-blocker');
+  const toggle = hud.locator('button[aria-expanded]');
+  const disabled = executorSnapshot();
+  const quota = { status: 'unknown', usedPercent: null, resetsAt: null, observedAt: null };
+  const capacityBoard = {
+    ...board,
+    quota: {
+      claude: { ...quota, provider: 'claude' },
+      codex: { ...quota, provider: 'codex' },
+    },
+  };
+  // Full board, capacity-only board, and runtime-only Project must share the policy.
+  for (const hudBoard of [
+    capacityBoard,
+    { ...capacityBoard, sources: { board: false, workStore: false } },
+    null,
+  ]) {
+    await page.evaluate(`window.setHudBoard(${JSON.stringify(hudBoard)});
+      window.postMessage(${JSON.stringify(disabled)}, '*');`);
+    await banner.waitFor();
+    expect(await toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(await banner.getByRole('status').textContent()).toContain(
+      'Nuevas tareas bloqueadas: todos los ejecutores están desactivados.',
+    );
+    expect(await banner.locator('svg').count()).toBe(1);
+    expect(await hud.getByTestId('executor-panel').count()).toBe(0);
+    const action = banner.getByRole('button', { name: 'Ver ejecutores', exact: true });
+    const box = (await action.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    const dock = (await page.locator('.bottom-toolbar').boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(dock.y);
+    await action.click();
+    await hud.getByTestId('executor-panel').waitFor();
+    expect(await toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(await hud.locator('.hud-executors').evaluate(isFocusedElement)).toBe(true);
+    expect(await hud.getByRole('switch').count()).toBe(2);
+    if (hudBoard) {
+      expect(await hud.textContent()).toContain('Capacidad estimada · sin datos fiables todavía');
+      expect(await hud.textContent()).not.toMatch(/estimated|unknown|Fuente:|Confianza:|Reset/);
+    }
+    expect(await action.isVisible()).toBe(true);
+    await toggle.click();
+    expect(await hud.getByTestId('executor-panel').count()).toBe(0);
+
+    const enabled = executorSnapshot({
+      executors: disabled.executors.map((executor, index) => ({
+        ...executor,
+        enabled: index === 0,
+      })),
+    });
+    await page.evaluate(`window.postMessage(${JSON.stringify(enabled)}, '*')`);
+    await banner.waitFor({ state: 'detached' });
+  }
+  await boot(page);
+}
+
 it('uses one movable office window at 390/1024/1440px, with modal-first Escape and viewer persistence', async (context) => {
   let browser;
   try {
@@ -202,6 +262,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           import { UI_LAYERS } from './constants';
           import { initialiseTextSize } from './hooks/useTextSize';
           import { setConnectionStatus } from './office/connectionStatus';
+          import { setBoardState } from './office/boardStore';
+          window.setHudBoard = setBoardState;
           for (const [key, value] of Object.entries(UI_LAYERS)) document.documentElement.style.setProperty('--z-' + key, String(value));
           initialiseTextSize();
           window.updateConnectionCopy = state => setConnectionStatus({ state, cause: 'unavailable', attempt: 2, retryAt: Date.now() + 4000 });
@@ -294,6 +356,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.goto('http://office-window.test/');
       await page.addScriptTag({ content: script });
       await boot(page);
+      await expectCriticalBlockers(page);
       // A real disconnect has exactly one notice, above the HUD in normal flow.
       await page.evaluate("window.setOfficeConnection('reconnecting')");
       const notice = page.getByTestId('connection-notice');

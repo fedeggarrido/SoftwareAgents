@@ -7,6 +7,7 @@ import type {
   FeaturesReadError,
   FeaturesSnapshot,
 } from '../../../core/src/messages.js';
+import type { MessageTransport } from '../../../core/src/transport.js';
 import { FEATURE_STEP_LABELS } from '../constants.js';
 import { statusPresentation } from './statusPresentation.js';
 
@@ -129,6 +130,13 @@ export function setFeaturesStore(next: FeaturesStore): void {
   if (next === current) return;
   current = next;
   for (const listener of listeners) listener();
+}
+
+let requestSequence = 0;
+export function requestFeatures(sender: Pick<MessageTransport, 'send'>, projectId: string): void {
+  const requestId = `features-${++requestSequence}`;
+  setFeaturesStore(beginFeaturesRequest(getFeaturesStore(), projectId, requestId));
+  sender.send({ type: 'requestFeatures', projectId, requestId });
 }
 
 export function subscribeFeaturesStore(listener: () => void): () => void {

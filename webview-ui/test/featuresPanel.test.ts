@@ -424,8 +424,11 @@ describe('FEAT-002-T06 panel acceptance', () => {
     lifecycle.state = 'connected';
     await flush();
     expect(lifecycle.send).toHaveBeenCalledTimes(3);
+    respond();
+    const cached = getFeaturesStore();
     await flush(false);
-    expect(getFeaturesStore()).toEqual(emptyFeaturesStore());
+    // Closing preserves evidence of existing work for the office welcome.
+    expect(getFeaturesStore()).toBe(cached);
     await flush();
     expect(lifecycle.send).toHaveBeenCalledTimes(4);
   });

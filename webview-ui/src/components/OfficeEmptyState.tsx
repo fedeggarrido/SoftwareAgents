@@ -26,7 +26,8 @@ export function OfficeEmptyState({
     if (dismissed || state === 'used' || !board?.projectId) return;
     if (getFeaturesStore().projectId !== board.projectId)
       requestFeatures(transport, board.projectId);
-  }, [board?.projectId, dismissed, state]);
+    // features.projectId: a store reset (e.g. the first executorState) drops the in-flight read.
+  }, [board?.projectId, dismissed, state, features.projectId]);
 
   if (dismissed || state !== 'empty') return null;
   return (

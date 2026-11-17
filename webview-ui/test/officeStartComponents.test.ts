@@ -31,9 +31,11 @@ it('welcomes empty offices, reuses Nueva idea, dismisses, hides after work, and 
         const officeState = { characters: new Map() };
         function Harness() {
           const [idea, setIdea] = useState(false);
+          const [sessions, setSessions] = useState([]);
+          window.setStartSessions = setSessions;
           const newIdea = () => setIdea(true);
           return <>
-            <CompanyHud agents={[]} officeState={officeState} onOpenDecisions={() => {}} onOpenMeeting={() => {}} />
+            <CompanyHud agents={sessions} officeState={officeState} onOpenDecisions={() => {}} onOpenMeeting={() => {}} />
             <OfficeEmptyState agents={[]} onNewIdea={newIdea} />
             <nav><button onClick={newIdea}>Nueva idea</button></nav>
             {idea && <div role="dialog" aria-label="Nueva idea">Nueva idea</div>}
@@ -77,6 +79,12 @@ it('welcomes empty offices, reuses Nueva idea, dismisses, hides after work, and 
     );
     await browserExpect(page.getByTestId('company-hud')).not.toContainText('Capacidad observada');
     await browserExpect(page.getByTestId('company-hud')).not.toContainText('Claude 0');
+    // Open sessions are activity even when the board has no work yet.
+    await page.evaluate('window.setStartSessions([1])');
+    await browserExpect(page.getByTestId('hud-pulse')).toHaveText(
+      '1 sesión abierta · nada espera tu revisión',
+    );
+    await page.evaluate('window.setStartSessions([])');
     await welcome.getByRole('button', { name: 'Nueva idea', exact: true }).click();
     await browserExpect(page.getByRole('dialog', { name: 'Nueva idea' })).toBeVisible();
     await welcome.getByRole('button', { name: 'Ocultar bienvenida' }).click();

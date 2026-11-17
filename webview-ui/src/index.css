@@ -208,33 +208,6 @@
 .hud-content > .flex:first-child {
   flex-wrap: wrap;
 }
-.critical-blocker {
-  flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2);
-  border: var(--border-thin) solid var(--color-warning);
-  background: var(--color-bg-dark);
-  font-family: var(--font-reading);
-  font-size: var(--reading-size);
-  line-height: var(--reading-line-height);
-}
-.critical-blocker > [role='status'] {
-  flex: 1 1 220px;
-}
-.critical-blocker p {
-  margin: var(--space-1) 0 0;
-}
-.critical-blocker .pixel-button {
-  min-width: var(--control-target);
-  min-height: var(--control-target);
-}
-.hud-executors:focus-visible {
-  outline: var(--border-thick) solid var(--color-text);
-  outline-offset: -2px;
-}
 .panel-window {
   position: fixed;
   display: flex;

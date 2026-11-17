@@ -226,11 +226,6 @@ button:active:not(:disabled) {
 .bottom-toolbar:has(.dock-sheet) {
   z-index: var(--z-notices);
 }
-/* A critical blocker's action (SA-118) outranks first-run office notices that would
-   otherwise cover it where the HUD and the notices meet on narrow desktops. */
-.office-panels:has(.critical-blocker) {
-  z-index: calc(var(--z-notices) + 1);
-}
 /* On mobile the panel window is a full-screen sheet over the office: office notices
    belong to the office and stay under it instead of covering the sheet's header. */
 body:has(.panel-window-mobile:not([hidden])) .office-notices {
@@ -319,4 +314,38 @@ body:has(.panel-window-mobile:not([hidden])) .office-notices {
 }
 .hud-pulse strong {
   color: var(--color-text);
+}
+
+/* Critical blockers (SA-118): always visible in the HUD with a 44 px action. */
+.critical-blocker {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-thin) solid var(--color-warning);
+  background: var(--color-bg-dark);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.critical-blocker > [role='status'] {
+  flex: 1 1 220px;
+}
+.critical-blocker p {
+  margin: var(--space-1) 0 0;
+}
+.critical-blocker .pixel-button {
+  min-width: var(--control-target);
+  min-height: var(--control-target);
+}
+.hud-executors:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+  outline-offset: -2px;
+}
+/* The blocker outranks first-run office notices only: they drop to the HUD layer (the HUD
+   comes later in the DOM), while panels and dock menus keep their higher layers. */
+body:has(.critical-blocker) .office-notices {
+  z-index: var(--z-hud);
 }

@@ -226,6 +226,11 @@ button:active:not(:disabled) {
 .bottom-toolbar:has(.dock-sheet) {
   z-index: var(--z-notices);
 }
+/* A critical blocker's action (SA-118) outranks first-run office notices that would
+   otherwise cover it where the HUD and the notices meet on narrow desktops. */
+.office-panels:has(.critical-blocker) {
+  z-index: calc(var(--z-notices) + 1);
+}
 /* On mobile the panel window is a full-screen sheet over the office: office notices
    belong to the office and stay under it instead of covering the sheet's header. */
 body:has(.panel-window-mobile:not([hidden])) .office-notices {

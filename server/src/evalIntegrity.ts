@@ -49,6 +49,8 @@ export function assertEvalIntegrity(
   task: Pick<EvalTask, 'baseCommit'> & {
     allowedPaths?: string[];
     protectedPaths?: readonly string[];
+    /** Exact metadata files authorized by trusted runtime policy, never project content. */
+    writableMetadataPaths?: readonly string[];
     /** Trusted Developer ingress only. Evals continue pinning tests. */
     allowTestChanges?: boolean;
     /** Runtime-pinned HEAD of a Developer rework; diff scope remains baseCommit. */
@@ -98,7 +100,6 @@ export function assertEvalIntegrity(
   const changed = evalChangedFiles(tree, task.baseCommit);
   const protectedPaths = [
     ...DEFAULT_PROTECTED_PATHS,
-    '.softwareagents/**',
     '**/.git/**',
     '.git/**',
     ...(task.protectedPaths ?? []),
@@ -108,6 +109,8 @@ export function assertEvalIntegrity(
       // Vitest's path normalization (pathe) treats backslashes as separators even on POSIX.
       (process.platform !== 'win32' && file.includes('\\')) ||
       (task.allowedPaths && !task.allowedPaths.includes(file)) ||
+      (matchesProtectedPath(file, '.softwareagents/**') &&
+        !task.writableMetadataPaths?.includes(file)) ||
       isProtectedEvalPath(file, task.allowTestChanges) ||
       protectedPaths.some((pattern) => matchesProtectedPath(file, pattern))
     )

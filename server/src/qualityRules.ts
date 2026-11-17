@@ -26,6 +26,7 @@ export const UI_RULES = [
 
 const QUALITY_ROLES: ReadonlySet<string> = new Set([
   'developer',
+  'integrations',
   'reviewer',
   'qa-author',
   'tech-lead',

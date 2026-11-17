@@ -7,11 +7,22 @@ import type { AgentSpec } from '../../core/src/agentSpec.js';
 import { ROLE_PROFILES } from './agentCompiler.js';
 import { CliUsageError } from './cliErrors.js';
 import { CLAUDE_OAUTH_REFRESH_CONTENTION } from './constants.js';
+import { isQaAuthorTask } from './developer.js';
 import type { SelectionSnapshot } from './executorSelection.js';
 import { resolveInside } from './pathGuard.js';
 import type { MachineQuotaPolicy } from './quotaGate.js';
 import { compileSchema, validateSchema } from './schemaValidation.js';
-import type { WorkerArgs } from './worker.js';
+import type { WorkerArgs, WorkerOptions } from './worker.js';
+
+/** Execution roles share workflow authority while preserving their AgentSpec identity. */
+export function workerRole(options: WorkerOptions, recorded?: string | null): string {
+  if (options.reviewer) return options.qa ? 'qa' : 'reviewer';
+  if (options.developer)
+    return isQaAuthorTask(options.developer.task) ? 'qa-author' : options.developer.task.agentRole;
+  if (options.architect) return 'architect';
+  if (options.requirements) return 'requirements-analyst';
+  return recorded ?? options.evaluation?.agentSpec?.identity.role ?? 'developer';
+}
 
 /** Use the brief heading as written, with the task key only in the commit scope. */
 export function workerCommitSubject(task: string, brief: string): string {

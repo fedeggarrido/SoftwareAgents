@@ -32,7 +32,6 @@ import {
   restoreArchitectureWorktree,
 } from './architecturePolicy.js';
 import { type AuditEntry, AuditLog, recordAudit } from './auditLog.js';
-import { validateChangeZone } from './changeZones.js';
 import { CliUsageError } from './cliErrors.js';
 import { taskPath } from './commands/taskFiles.js';
 import { readConfig } from './configPersistence.js';
@@ -59,7 +58,9 @@ import {
   guardDeveloperChanges,
   isQaAuthorTask,
   MissingTestError,
+  prepareDeveloperRequest,
   resetDeveloperWorktree,
+  validateDeveloperZones,
 } from './developer.js';
 import { DeveloperGuardError, developerGuardFailure } from './developerFailure.js';
 import { type CriterionResult, EvalCriterionTerminationError } from './evalCriteria.js';
@@ -104,6 +105,7 @@ import { withoutOperatorToken } from './featureIngress.js';
 import { assertTaskDependencies, featureBaseBranch } from './featureRunBase.js';
 import { assertDirectRef } from './gitPublication.js';
 import { HumanDecisions } from './humanDecisions.js';
+import { integrationWritablePaths } from './integrationCatalog.js';
 import { proposeLearnings, verifiedLearnings } from './learnings.js';
 import {
   type CascadeAttempt,
@@ -189,6 +191,7 @@ import {
   legacyMachinePolicy,
   loadWorkerAgentSpec,
   workerCommitSubject,
+  workerRole,
 } from './workerSupport.js';
 export {
   acquireTaskLock,
@@ -357,7 +360,11 @@ export async function runWorker(
         throw new Error(`${options.qa ? 'QA' : 'Reviewer'} context changed`);
     }
     if (options.developer) {
-      const current = developerRequest(store, config, options.developer.key, args.task);
+      const current = await prepareDeveloperRequest(store, config, options.developer);
+      if (!current) {
+        process.exitCode = 3;
+        return { branch: '', commit: null, stat: '' };
+      }
       if (JSON.stringify(current) !== JSON.stringify(options.developer))
         throw new Error('Developer context changed');
       if (store.getTask(args.task)?.review_ref)
@@ -568,20 +575,12 @@ async function runWorkerExecution(
     (args.brief
       ? fs.readFileSync(path.resolve(cwd, args.brief), 'utf8')
       : JSON.stringify(lifecycle?.store.getTask(args.task) ?? { key: args.task }));
-  const role =
-    (options.reviewer ? (options.qa ? 'qa' : 'reviewer') : undefined) ??
-    (options.developer
-      ? isQaAuthorTask(options.developer.task)
-        ? 'qa-author'
-        : 'developer'
-      : undefined) ??
-    (options.architect ? 'architect' : undefined) ??
-    (options.requirements ? 'requirements-analyst' : undefined) ??
-    lifecycle?.store.getTask(args.task)?.agent_role ??
-    options.evaluation?.agentSpec?.identity.role ??
-    'developer';
-  if (role === 'qa-author' && !options.developer)
-    throw new CliUsageError('QA author requires feature develop with a validated task scope');
+  const role = workerRole(options, lifecycle?.store.getTask(args.task)?.agent_role);
+  const writableMetadataPaths = options.developer
+    ? integrationWritablePaths(options.developer.task, config.project.brain.path)
+    : [];
+  if (['qa-author', 'integrations'].includes(role) && !options.developer)
+    throw new CliUsageError('El rol requiere feature develop con una tarea validada.');
   const spec = validateSchema(
     compileSchema<AgentSpec>(agentSchema),
     options.evaluation?.agentSpec ?? loadWorkerAgentSpec(undefined, role),
@@ -1401,13 +1400,7 @@ async function runWorkerExecution(
         );
         if (JSON.stringify(current) !== JSON.stringify(options.developer))
           throw new Error('Developer context changed before launch');
-        for (const zone of [
-          ...options.developer.task.changeZones!,
-          ...(options.developer.task.testZones ?? []),
-        ]) {
-          // Physical containment is checked again in the actual task checkout.
-          validateChangeZone(tree.path, zone, config.operator.protectedPaths ?? []);
-        }
+        validateDeveloperZones(options.developer.task, config, tree.path);
       }
       if (options.requirements?.revision && base !== options.requirements.revision.gitSha)
         throw new Error('Feature SHA changed before Requirements revision');
@@ -2046,6 +2039,7 @@ async function runWorkerExecution(
               designProposal = validateArchitect(requirementsOutput, options.architect.spec, {
                 cwd: tree.path,
                 protectedPaths: config.operator.protectedPaths,
+                brain: config.project.brain.path,
               });
               if (!workStore) throw new Error('Architect requires a persistent WorkStore');
               designFiles = await architectArtifacts(
@@ -2292,6 +2286,7 @@ async function runWorkerExecution(
               startingHead,
               {
                 failures,
+                writableMetadataPaths,
                 ...(options.developer
                   ? {
                       autoFix: () => {
@@ -2364,6 +2359,7 @@ async function runWorkerExecution(
                 ? guardDeveloperChanges(options.developer, config, tree.path, base, startingHead)
                 : undefined,
               startingHead,
+              writableMetadataPaths,
             );
             escalatedFrom = escalateModel ? tierSelection!.tier! : undefined;
             if (escalateModel) {

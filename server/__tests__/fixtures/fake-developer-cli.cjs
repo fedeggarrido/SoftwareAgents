@@ -33,6 +33,14 @@ process.stdin.on('end', () => {
     task,
   } = JSON.parse(context.task.brief);
   const author = ['qa', 'test', 'qa-author'].includes(task.agentRole);
+  if (mode === 'integrations') {
+    const catalog = JSON.parse(context.task.brief).integrationCatalogPath;
+    fs.mkdirSync(require('path').dirname(catalog), { recursive: true });
+    fs.writeFileSync(
+      catalog,
+      '- service: payments\n  port: src/application/ports/payments.ts\n  auth: OAuth mediante secret manager\n  limits: Según contrato del proveedor\n  owner: Equipo de pagos\n',
+    );
+  }
   const findings = [...reviewFindings, ...qaDefects];
   if (!author || mode === 'product')
     fs.writeFileSync(

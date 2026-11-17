@@ -22,6 +22,7 @@ export function taskDeclaration(feature: string, task: TaskDag['tasks'][number])
     acceptanceRefs: [...task.acceptanceRefs].sort(),
     dependsOn: [...task.dependsOn].sort(),
     agentRole: task.agentRole,
+    ...(task.externalServices ? { externalServices: [...task.externalServices].sort() } : {}),
     size: task.size,
     ...(task.changeZones ? { changeZones: [...task.changeZones].sort() } : {}),
     ...(task.testZones ? { testZones: [...task.testZones].sort() } : {}),

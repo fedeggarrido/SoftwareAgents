@@ -344,9 +344,10 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
             description: 'Read',
             acceptanceRefs: ['AC-001'],
             dependsOn: [],
-            agentRole: 'developer',
+            agentRole: 'integrations',
+            externalServices: ['payments'],
             size: 'S',
-            changeZones: ['src/audit*.ts'],
+            changeZones: ['src/audit*.ts', '.softwareagents/brain/integrations.yaml'],
             testZones: ['tests/audit.test.ts'],
             parallelizable: true,
           },
@@ -370,7 +371,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
       ).toThrow();
     }
     const validate = (zone: string) => {
-      proposal.dag.tasks[0].changeZones = [zone];
+      proposal.dag.tasks[0].changeZones = [zone, '.softwareagents/brain/integrations.yaml'];
       return () => validateArchitect(JSON.stringify(proposal), spec, checkout);
     };
     for (const zone of [
@@ -401,16 +402,7 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
       'src/**',
       'src/**/*.ts',
     ])
-      expect(() =>
-        validateArchitect(
-          JSON.stringify({
-            ...proposal,
-            dag: { ...proposal.dag, tasks: [{ ...proposal.dag.tasks[0], changeZones: [zone] }] },
-          }),
-          spec,
-          checkout,
-        ),
-      ).not.toThrow();
+      expect(validate(zone), zone).not.toThrow();
     fs.mkdirSync(path.join(repo, 'src'));
     expect(validate('src')).not.toThrow();
     fs.writeFileSync(path.join(repo, 'src/new-file.ts'), '// safe file');
@@ -468,6 +460,8 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           // SA-156: the accepted stack reaches the Architect as context.
           'STACK.md': 'fixture stack',
           ARCHITECTURE_DECISION: null,
+          INTEGRATION_CATALOG_PATH: '.softwareagents/brain/integrations.yaml',
+          'integrations.yaml': null,
         });
         expect(launchLog()[0].data.approvedGitSha).toBe(feature.git_sha);
         const args = launchLog()[0].args as string[];

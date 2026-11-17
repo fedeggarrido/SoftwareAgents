@@ -80,6 +80,7 @@ export function validateChangeZone(
   cwd: string,
   zone: string,
   protectedPaths: readonly string[],
+  writableMetadataPaths: readonly string[] = [],
 ): void {
   const parts = zone.replace(/\/$/, '').split('/');
   const firstGlob = parts.findIndex((part) => part.includes('*'));
@@ -100,7 +101,7 @@ export function validateChangeZone(
   const protectedZones = [
     '.git/**',
     '**/.git/**',
-    '.softwareagents/**',
+    ...(writableMetadataPaths.includes(zone) ? [] : ['.softwareagents/**']),
     ...DEFAULT_PROTECTED_PATHS,
     ...protectedPaths,
   ];

@@ -418,35 +418,43 @@ describe('features view acceptance', () => {
     ]);
   });
 
-  it('AC-004 uses latest execution for the current version and counts other active tasks', () => {
-    const data = fixture();
-    data.tasks = [1, 2].map((n) => ({
-      key: `FEAT-001-T0${n}`,
-      feature_key: 'FEAT-001',
-      status: 'RUNNING',
-      version: 2,
-      updated_at: `2026-01-0${n}T00:00:00Z`,
-    }));
-    data.executions = [
-      {
-        task_key: 'FEAT-001-T02',
-        task_version: 1,
-        agent_role: 'qa',
-        started_at: '2026-01-03T00:00:00Z',
-      },
-      {
-        task_key: 'FEAT-001-T02',
-        task_version: 2,
-        agent_role: 'developer',
-        started_at: '2026-01-02T00:00:00Z',
-      },
-    ];
-    expect(projectFeatures(data)[0].currentTask).toEqual({
-      key: 'FEAT-001-T02',
-      step: 'develop',
-      others: 1,
-    });
-  });
+  it.each(['developer', 'integrations'])(
+    'AC-004 uses latest %s execution for the current version and counts other active tasks',
+    (role) => {
+      const data = fixture();
+      data.tasks = [1, 2].map((n) => ({
+        key: `FEAT-001-T0${n}`,
+        feature_key: 'FEAT-001',
+        status: 'RUNNING',
+        version: 2,
+        review_ref: JSON.stringify({
+          branch: `sa/FEAT-001-T0${n}-developer`,
+          sha: 'rework',
+          base: 'base',
+        }),
+        updated_at: `2026-01-0${n}T00:00:00Z`,
+      }));
+      data.executions = [
+        {
+          task_key: 'FEAT-001-T02',
+          task_version: 1,
+          agent_role: 'qa',
+          started_at: '2026-01-03T00:00:00Z',
+        },
+        {
+          task_key: 'FEAT-001-T02',
+          task_version: 2,
+          agent_role: role,
+          started_at: '2026-01-02T00:00:00Z',
+        },
+      ];
+      expect(projectFeatures(data)[0].currentTask).toEqual({
+        key: 'FEAT-001-T02',
+        step: 'develop',
+        others: 1,
+      });
+    },
+  );
 
   it.each(['reviewer', 'qa'])(
     'keeps the active %s step when PR events share its lifecycle version',

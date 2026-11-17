@@ -152,7 +152,7 @@ it.each(['claude', 'codex'] as const)(
       expect(completed.listExecutions().filter((execution) => execution.task_key === key)).toEqual([
         expect.objectContaining({
           agent_role: 'integrations',
-          agent_template_version: 'integrations@1.0.0',
+          agent_template_version: '1.0.0',
         }),
       ]);
       expect(completed.getTask(key)?.review_ref?.branch).toBe(`sa/${key}-developer`);

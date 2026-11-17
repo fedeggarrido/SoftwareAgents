@@ -460,6 +460,8 @@ describe.skipIf(process.platform !== 'win32')('Architect CLI via worker (fake CL
           // SA-156: the accepted stack reaches the Architect as context.
           'STACK.md': 'fixture stack',
           ARCHITECTURE_DECISION: null,
+          INTEGRATION_CATALOG_PATH: '.softwareagents/brain/integrations.yaml',
+          'integrations.yaml': null,
         });
         expect(launchLog()[0].data.approvedGitSha).toBe(feature.git_sha);
         const args = launchLog()[0].args as string[];

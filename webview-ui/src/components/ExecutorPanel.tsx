@@ -52,12 +52,6 @@ export function ExecutorPanel() {
         <span className="text-text">Ejecutores para nuevas tareas</span>
         <span className="text-text-muted">Asignación: automática por política</span>
       </div>
-      {view.banner && (
-        <div className="text-2xs border border-border bg-bg-dark px-5 py-3" role="status">
-          {view.banner}
-          <OfficeRecoveryActions />
-        </div>
-      )}
       {view.rows.map((row) => (
         <div
           key={row.executorId}

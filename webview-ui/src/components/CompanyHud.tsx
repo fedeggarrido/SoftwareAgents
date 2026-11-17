@@ -1,15 +1,20 @@
-import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
 import { backlogPulse } from '../office/backlogGroups.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
 import { capacityHudView, capacityView, visibleProviderCounts } from '../office/capacityView.js';
+import { criticalBlockers } from '../office/criticalBlockers.js';
 import { decisionsHudView } from '../office/decisionsHudView.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
 import { ExecutorPanel } from './ExecutorPanel.js';
+import { StatusChip as WorkStatusChip } from './StatusChip.js';
+import { Button } from './ui/Button.js';
 
 function clock(epochS: number | null | undefined): string {
   if (!epochS) return '—';
@@ -81,18 +86,71 @@ interface CompanyHudProps {
   agents: number[];
 }
 
+/** Critical blockers stay outside the collapsible project details in every HUD mode. */
+export function CompanyHud(props: CompanyHudProps) {
+  const board = useBoard();
+  const executors = useExecutorStore();
+  const [open, setOpen] = useState(false);
+  const executorSection = useRef<HTMLDivElement>(null);
+  const blockers = criticalBlockers(executors.state);
+  const openExecutors = () => {
+    flushSync(() => setOpen(true));
+    executorSection.current?.focus({ preventScroll: true });
+    executorSection.current?.scrollIntoView({ block: 'nearest' });
+  };
+  if (!board && !executors.state) return null;
+  return (
+    <div
+      className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
+      data-testid="company-hud"
+    >
+      {blockers.map((blocker) => (
+        <div className="critical-blocker" key={blocker.id} data-testid="critical-blocker">
+          <div role="status">
+            <WorkStatusChip state="BLOCKED" />
+            <p>{blocker.text}</p>
+          </div>
+          <Button type="button" onClick={openExecutors}>
+            Ver ejecutores
+          </Button>
+        </div>
+      ))}
+      <div className="hud-content">
+        <CompanyHudContent
+          {...props}
+          open={open}
+          onToggle={() => setOpen((value) => !value)}
+          executorPanel={
+            <div
+              className="hud-executors"
+              ref={executorSection}
+              tabIndex={-1}
+              role="group"
+              aria-label="Configuración de ejecutores"
+            >
+              <ExecutorPanel />
+            </div>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Project progress, autopilot, owner decisions and provider availability. */
-export function CompanyHud({
+function CompanyHudContent({
   onOpenDecisions,
   onOpenMeeting,
   meetingUnread = false,
   officeState,
   agents,
-}: CompanyHudProps) {
+  open,
+  onToggle,
+  executorPanel,
+}: CompanyHudProps & { open: boolean; onToggle: () => void; executorPanel: ReactNode }) {
   const board = useBoard();
   const notice = useCompanyNotice();
   const executors = useExecutorStore();
-  const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 2000);
@@ -103,20 +161,17 @@ export function CompanyHud({
   if (!board) {
     if (!executors.state) return null;
     return (
-      <div
-        className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
-        data-testid="company-hud"
-      >
+      <>
         <button
           className="min-w-0 truncate text-left text-xs cursor-pointer"
-          onClick={() => setOpen((v) => !v)}
+          onClick={onToggle}
           aria-expanded={open}
           title={open ? 'Ocultar detalles' : 'Ver executors del proyecto'}
         >
           {open ? '▾' : '▸'} {executors.state.projectId}
         </button>
-        {open && <ExecutorPanel />}
-      </div>
+        {open && executorPanel}
+      </>
     );
   }
 
@@ -140,14 +195,11 @@ export function CompanyHud({
   const counts = visibleProviderCounts(agents);
   if (capacity.minimal) {
     return (
-      <div
-        className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
-        data-testid="company-hud"
-      >
+      <>
         <div className="flex justify-between gap-8 text-xs">
           <button
             className="min-w-0 truncate text-left cursor-pointer"
-            onClick={() => setOpen((v) => !v)}
+            onClick={onToggle}
             aria-expanded={open}
             title={open ? 'Ocultar detalles' : 'Ver detalles de la oficina'}
           >
@@ -159,14 +211,14 @@ export function CompanyHud({
         <div className="text-2xs text-text-muted">
           Claude {counts.claude} · Codex {counts.codex} · {capacity.title}
         </div>
+        {open && executorPanel}
         {open && board.quota && (
           <>
             <QuotaRow name="Claude" q={board.quota.claude} running={counts.claude} />
             <QuotaRow name="Codex" q={board.quota.codex} running={counts.codex} />
           </>
         )}
-        {open && <ExecutorPanel />}
-      </div>
+      </>
     );
   }
 
@@ -188,14 +240,11 @@ export function CompanyHud({
   const pilotStatus = ap ? (AUTOPILOT_TEXT[ap.status ?? ''] ?? ap.status ?? 'sin estado') : null;
 
   return (
-    <div
-      className="layer-hud pixel-panel min-w-0 p-8 flex flex-col gap-6"
-      data-testid="company-hud"
-    >
+    <>
       <div className="flex items-center justify-between gap-8 min-w-0">
         <button
           className="hud-project flex min-w-0 items-center gap-5 text-left text-text cursor-pointer hover:text-accent-bright"
-          onClick={() => setOpen((v) => !v)}
+          onClick={onToggle}
           aria-expanded={open}
           title={open ? 'Ocultar detalles' : 'Ver detalles de la oficina'}
         >
@@ -268,7 +317,7 @@ export function CompanyHud({
             )}
             {ap?.enabled && !ap.running && <span>Proceso del piloto no activo</span>}
           </div>
-          <ExecutorPanel />
+          {executorPanel}
           {board.quota && (
             <div className="flex flex-col gap-4">
               <div className="text-2xs text-text-muted">{capacity.title}</div>
@@ -278,6 +327,6 @@ export function CompanyHud({
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }

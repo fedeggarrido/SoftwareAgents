@@ -112,20 +112,12 @@ describe('executor panel view', () => {
     expect(view.readOnlyNotice).toBe('Solo el operador puede cambiar la disponibilidad.');
     expect(view.rows[0].ariaLabel).toContain('Claude para nuevas tareas de softwareagents');
   });
-
-  it('warns persistently when everything is off and when recovery is required', () => {
-    const off = state({
-      executors: [row({ enabled: false }), row({ executorId: 'codex', enabled: false })],
-    });
-    expect(executorPanelView(withState(off), NOW_S * 1000)!.banner).toMatch(
-      /Nuevas tareas bloqueadas/,
-    );
-    const recovery = executorPanelView(
+  it('disables controls while executor recovery is required', () => {
+    const view = executorPanelView(
       withState(state({ configurationStatus: 'recovery_required' })),
       NOW_S * 1000,
     )!;
-    expect(recovery.banner).toMatch(/executors recover/);
-    expect(recovery.rows.every((r) => r.disabled)).toBe(true);
+    expect(view.rows.every((row) => row.disabled)).toBe(true);
   });
 });
 

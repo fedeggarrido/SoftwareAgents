@@ -396,6 +396,16 @@ describe('SA-159 integrations policy', () => {
     expect(() => parseIntegrationCatalog(stringify([entry, entry]))).toThrow(/duplicados/);
   });
 
+  it('rejects catalog changes from any other role, even with a zone covering the brain', () => {
+    const doc = { ...task, agentRole: 'developer', type: 'doc' as const, externalServices: [] };
+    expect(() => guardIntegrationCatalog(doc, brain, root, 'HEAD')).not.toThrow();
+    fs.writeFileSync(path.join(root, catalogPath), stringify([entry]));
+    expect(() => guardIntegrationCatalog(doc, brain, root, 'HEAD')).toThrow(/integraciones/);
+    git('add', '.');
+    git('commit', '-m', 'catalog');
+    expect(() => guardIntegrationCatalog(doc, brain, root, 'HEAD')).not.toThrow();
+  });
+
   it('permits only the catalog metadata path while preserving operator protections', () => {
     const paths = integrationWritablePaths(task, brain);
     expect(() => validateChangeZone(root, catalogPath, [], paths)).not.toThrow();

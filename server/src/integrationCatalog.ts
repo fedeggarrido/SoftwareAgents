@@ -102,8 +102,18 @@ export function guardIntegrationCatalog(
   tree: string,
   base: string,
 ): void {
-  if (task.agentRole !== 'integrations') return;
   const relative = integrationCatalogPath(brain);
+  // Only integrations tasks may change the catalog; any other role (e.g. a doc task whose
+  // zone covers a custom brain path) would otherwise register services without a decision.
+  if (task.agentRole !== 'integrations') {
+    const exists = fs.existsSync(taskPath(tree, relative));
+    const known = evalGit(tree, ['ls-tree', base, '--', relative]) !== '';
+    const current = exists ? readTaskInput(tree, relative) : null;
+    const previous = known ? evalGit(tree, ['show', `${base}:${relative}`]) : null;
+    if (current?.trim() !== previous?.trim())
+      throw new Error(`Solo una tarea de integraciones puede modificar ${relative}`);
+    return;
+  }
   if (!fs.existsSync(taskPath(tree, relative)))
     throw new Error(`Falta el catálogo de integraciones ${relative}`);
   const catalog = parseIntegrationCatalog(readTaskInput(tree, relative));

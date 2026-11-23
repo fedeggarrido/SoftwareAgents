@@ -40,7 +40,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "new-idea|mobile|touch-target|button.pixel-button|x",
+    "key": "new-idea|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
@@ -64,7 +64,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "office|mobile|touch-target|button.pixel-button|x",
+    "key": "office|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
@@ -112,7 +112,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "window-Auditoría|mobile|touch-target|button.pixel-button|x",
+    "key": "window-Auditoría|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
@@ -136,7 +136,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "window-Decisiones|mobile|touch-target|button.pixel-button|x",
+    "key": "window-Decisiones|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
@@ -160,7 +160,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "window-Funcionalidades|mobile|touch-target|button.pixel-button|x",
+    "key": "window-Funcionalidades|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
@@ -208,7 +208,7 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "window-Trabajo|mobile|touch-target|button.pixel-button|x",
+    "key": "window-Trabajo|mobile|touch-target|button.pixel-button|Cerrar",
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   }
 ]

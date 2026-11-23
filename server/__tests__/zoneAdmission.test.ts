@@ -35,7 +35,7 @@ describe('cross-feature admission', () => {
   it('a newer run holding an admitted task blocks a resumed older run', () => {
     const { tasks, runs, store } = fixture('core/asyncapi.yaml');
     runs['FEAT-002'].state.zoneHold = 'FEAT-002-T01';
-    expect(zoneConflict(store, tasks[0])).toContain('FEAT-002-T01 of FEAT-002');
+    expect(zoneConflict(store, tasks[0])).toContain('FEAT-002-T01 de FEAT-002');
   });
   it.each(['server/src', 'core/asyncapi.yaml', 'core/**'])(
     'oldest advances without deadlock for %s',

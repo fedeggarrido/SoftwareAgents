@@ -267,7 +267,7 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/project-summary.spec.ts:80` — shows the app, real work and next steps through the office window without writes (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:106` — denies unprivileged access without project details (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:124` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:197` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
+- `e2e/standalone/project-summary.spec.ts:204` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
 - `e2e/standalone/task-detail.spec.ts:93` — opens within Trabajo and requires a second confirmation after listing the impact (Standalone / task detail)
 - `e2e/standalone/task-detail.spec.ts:121` — read-only access explains the change path and cannot submit (Standalone / task detail)
 - `e2e/standalone/task-detail.spec.ts:144` — records a request while preserving the active lease (Standalone / task detail › running work)

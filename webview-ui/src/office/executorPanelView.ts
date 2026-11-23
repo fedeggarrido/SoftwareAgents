@@ -1,6 +1,6 @@
 import type { ExecutorAvailability, ModelTier } from '../../../core/src/messages.js';
 import type { TransportState } from '../../../core/src/transport.js';
-import { EXECUTOR_STATUS_COLORS } from '../constants.js';
+import { EXECUTOR_STATUS_COLORS, MODEL_TIER_LABELS } from '../constants.js';
 import type { ExecutorStore } from './executorStore.js';
 
 // What the «Executors para nuevas tareas» panel shows (docs/design/executor-toggles.md,
@@ -8,11 +8,6 @@ import type { ExecutorStore } from './executorStore.js';
 // eligibility. Unknown is never shown as available. DOM-free for unit tests.
 
 const LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
-const LEVEL_TEXT: Record<string, string> = {
-  economy: 'economy',
-  standard: 'standard',
-  deep: 'deep',
-};
 
 /** SA-092: one level the Operator may allow or disallow for this Executor. */
 export interface ExecutorLevelView {
@@ -95,10 +90,10 @@ function details(e: ExecutorAvailability, nowS: number): string[] {
   const lines: string[] = [];
   const disallowed = (e.catalogLevels ?? []).filter((l) => !e.levels.includes(l));
   const levels = [
-    e.levels.map((l) => LEVEL_TEXT[l] ?? l).join(', ') ||
+    e.levels.map((l) => MODEL_TIER_LABELS[l]).join(', ') ||
       (e.catalogLevels?.length ? 'ningún nivel permitido' : ''),
     disallowed.length
-      ? `(no permitido: ${disallowed.map((l) => LEVEL_TEXT[l] ?? l).join(', ')})`
+      ? `(no permitido: ${disallowed.map((l) => MODEL_TIER_LABELS[l]).join(', ')})`
       : '',
   ]
     .filter(Boolean)
@@ -165,7 +160,7 @@ export function executorPanelView(
       levelControls: editable
         ? e.catalogLevels!.map((tier) => {
             const allowed = e.levels.includes(tier);
-            const text = LEVEL_TEXT[tier] ?? tier;
+            const text = MODEL_TIER_LABELS[tier];
             return {
               tier,
               label: text,

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { es } from '../i18n/es.js';
 import { COMMAND_COPY_FEEDBACK, COMMAND_COPY_LABEL, copyCommand } from '../office/commandCopy.js';
 import { Button } from './ui/Button.js';
 
@@ -24,7 +25,7 @@ export function IdeaCommand({ command, checkoutName }: { command: string; checko
       <div className="flex flex-col gap-8">
         <p>Para continuar, ejecuta este comando en tu terminal.</p>
         <p>
-          «Este checkout» es la carpeta del repositorio vinculada a esta oficina
+          {es.vocabulary.repositoryFolder}
           {checkoutName ? (
             <>
               : <strong>{checkoutName}</strong>
@@ -48,11 +49,7 @@ export function IdeaCommand({ command, checkoutName }: { command: string; checko
         <p role="status" aria-live="polite">
           {feedback}
         </p>
-        <p>
-          El comando pedirá el token del operador. En esta oficina, abre Ajustes → Detalles → Copiar
-          token para CLI y pégalo en la confirmación oculta. El token no aparece en la URL impresa
-          al iniciar Pixel Agents.
-        </p>
+        <p>{es.vocabulary.tokenInstructions}</p>
       </div>
     </details>
   );

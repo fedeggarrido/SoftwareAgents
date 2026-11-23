@@ -654,7 +654,8 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
       await click('Siguiente');
     }
     const html = await render();
-    expect(html).toContain('openQuestions');
+    expect(html).toContain('Preguntas abiertas');
+    expect(html).not.toContain('openQuestions');
     expect(html).toContain('panel de Decisiones');
     expect(html.split(IDEA_ASSUMPTION_TEXT)).toHaveLength(IDEA_QUESTIONS.length + 1);
     expect(html).not.toContain('Texto que conservar');
@@ -755,7 +756,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
   it.each([
     ['missing_manifest', '.softwareagents/project.yaml'],
     ['invalid_manifest', 'no es válido'],
-    ['no_project', 'no hay un Project'],
+    ['no_project', 'no hay un proyecto'],
     ['unsupported_adapter', 'VS Code'],
     ['unsafe_storage', 'ruta de ideas'],
   ] as const)('explains %s and retries the actual read', async (errorCode, text) => {
@@ -894,14 +895,14 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
         'Decisiones',
         'Plan técnico:',
         'Desarrollo:',
-        'Revisión y QA:',
+        'Revisión y pruebas:',
         'Investigación posterior:',
         'espera por ti',
         'consume cuota',
         'estimaciones, no cargos',
         'Copiar comando',
-        'carpeta del repositorio vinculada a esta oficina',
-        'Copiar token para CLI',
+        'Carpeta del repositorio vinculada a esta oficina',
+        'Copiar token para la terminal',
       ])
         expect(html).toContain(text);
       if (errorCode) expect(html).toContain('falta confirmar su auditoría');
@@ -913,13 +914,13 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     const { IdeasList } = await import(listPath);
     const html = renderToStaticMarkup(createElement(IdeasList, { ideas: [result.idea] }));
     for (const text of [
-      'Ideas pendientes · sin FeatureSpec',
+      'Ideas pendientes · sin especificación',
       'Idea · pendiente',
       'data-state="idea_pending"',
       result.idea!.command,
       'Copiar comando',
-      'carpeta del repositorio vinculada a esta oficina',
-      'Copiar token para CLI',
+      'Carpeta del repositorio vinculada a esta oficina',
+      'Copiar token para la terminal',
     ])
       expect(html).toContain(text);
     expect(html).not.toMatch(/progressbar|feature-cost|<textarea/);

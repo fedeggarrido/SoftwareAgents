@@ -199,7 +199,7 @@ describe('project summary panel', () => {
       },
     ];
     const html = renderToStaticMarkup(createElement(ProjectSummaryContent, { summary: data }));
-    expect(html).toContain('aria-label="Stack del proyecto"');
+    expect(html).toContain('aria-label="Tecnologías del proyecto"');
     expect(html).toContain('TypeScript y PostgreSQL');
     expect(html).toContain('Permite el despliegue local requerido.');
     expect(html).toContain('Aceptado');
@@ -208,7 +208,7 @@ describe('project summary panel', () => {
     expect(html).not.toMatch(/<script>|<button|<input|<select|<textarea/);
     expect(
       renderToStaticMarkup(createElement(ProjectSummaryContent, { summary: summary() })),
-    ).toContain('El stack aparecerá cuando respondas su decisión');
+    ).toContain('Las tecnologías aparecerán cuando respondas su decisión');
   });
   it('explains a new project and where its data will appear without fake numbers or write actions', async () => {
     const { ProjectSummaryPanel } = await import(panelPath);

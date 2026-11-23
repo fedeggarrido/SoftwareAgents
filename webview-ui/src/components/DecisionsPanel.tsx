@@ -1,5 +1,6 @@
+import { roleLabel } from '../i18n/roles.js';
 import { useBoard } from '../office/boardStore.js';
-import { decisionOptions } from '../office/decisionOptions.js';
+import { decisionOptions, decisionUrgency } from '../office/decisionOptions.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
 
@@ -45,13 +46,13 @@ export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPan
           )}
           {d.impact && (
             <div className="text-2xs">
-              Impacto: {d.impact} / Urgencia: {d.urgency}
+              Impacto: {d.impact} / Urgencia: {decisionUrgency(d.urgency)}
             </div>
           )}
-          {d.requestedBy && <div className="text-2xs">Solicita: {d.requestedBy}</div>}
+          {d.requestedBy && <div className="text-2xs">Solicita: {roleLabel(d.requestedBy)}</div>}
           {d.disagreement?.map((position, i) => (
             <div key={i} className="text-2xs">
-              {position.role}: {position.position}
+              {roleLabel(position.role)}: {position.position}
             </div>
           ))}
           {d.blocks && d.blocks.length > 0 && (

@@ -91,7 +91,7 @@ describe('registered flow', () => {
     } as unknown as WorkStore;
     expect(wipConflict(store, 'new')).toBeNull();
     expect(wipConflict(store, 'new', { review: 3 })).toBe(
-      'WIP limit: review 3/3 (F2 (merge), T1, T2)',
+      'Límite de trabajo en curso: en revisión 3/3 (F2 (merge), T1, T2)',
     );
     expect(wipConflict(store, 'new', { review: 3 }, new Set(['sha']))).toBeNull();
     expect(wipSnapshot(tasks, new Set(['F2'])).review.tasks).toHaveLength(3);
@@ -106,7 +106,9 @@ describe('registered flow', () => {
         state: { status: 'running', zoneHold: 'T1' },
       }),
     } as unknown as WorkStore;
-    expect(wipConflict(store, 'T2', { running: 1 })).toBe('WIP limit: running 1/1 (T1)');
+    expect(wipConflict(store, 'T2', { running: 1 })).toBe(
+      'Límite de trabajo en curso: en ejecución 1/1 (T1)',
+    );
     task.status = 'DONE';
     expect(wipConflict(store, 'T2', { running: 1 })).toBeNull();
   });

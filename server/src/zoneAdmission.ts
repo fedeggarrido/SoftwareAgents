@@ -1,5 +1,6 @@
 import { zonesOverlap } from './changeZones.js';
 import { isProcessRunning } from './leaseLock.js';
+import { uiCopy } from './uiCopy.js';
 import type { TaskRecord, WorkStore } from './workstore/WorkStore.js';
 
 export function taskZones(task: Pick<TaskRecord, 'declaration'>): string[] {
@@ -35,7 +36,7 @@ export function zoneConflict(store: WorkStore, task: TaskRecord): string | null 
     if (!running && order(other.feature_key) >= order(task.feature_key)) continue;
     for (const zone of taskZones(task))
       if (taskZones(other).some((candidate) => zonesOverlap(zone, candidate)))
-        return `zone conflict: ${other.key} of ${other.feature_key} overlaps ${zone}`;
+        return uiCopy.zoneConflict(other.key, other.feature_key, zone);
   }
   return null;
 }

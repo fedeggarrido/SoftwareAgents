@@ -14,6 +14,7 @@ import {
   projectPreparationErrorText,
 } from '../../../core/src/projectPreparation.js';
 import { IDEA_TEXTAREA_ROWS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { sendIdeaDocument } from '../office/ideaDocument.js';
 import {
@@ -405,15 +406,12 @@ export function NewIdeaDialog({
                     </p>
                   </div>
                 ))}
-                <p>
-                  Las preguntas adaptativas llegarán mediante Requirements (openQuestions) al panel
-                  de Decisiones cuando inicies el flujo.
-                </p>
+                <p>{es.vocabulary.adaptiveQuestions}</p>
               </section>
             )}
             <div role={state === 'error' || state === 'uncertain' ? 'alert' : 'status'}>
               {access.pending && connection === 'connected' && <p>{access.explanation}</p>}
-              {!access.pending && state === 'loading' && 'Comprobando el Project…'}
+              {!access.pending && state === 'loading' && es.vocabulary.checkingProject}
               {!access.pending &&
                 state === 'disabled' &&
                 !preparation &&

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { ModelTier } from '../../../core/src/messages.js';
+import { es } from '../i18n/es.js';
 import { executorPanelView } from '../office/executorPanelView.js';
 import {
   sendExecutorCommand,
@@ -55,7 +56,7 @@ export function ExecutorPanel() {
       {view.rows.map((row) => (
         <div
           key={row.executorId}
-          className="grid grid-cols-[52px_minmax(0,1fr)] gap-x-8 text-2xs leading-tight"
+          className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-8 text-2xs leading-tight"
           data-testid={`executor-row-${row.executorId}`}
         >
           <button
@@ -65,11 +66,11 @@ export function ExecutorPanel() {
             aria-label={row.ariaLabel}
             disabled={row.disabled}
             onClick={() => toggle(row.executorId, !row.checked)}
-            className={`self-start border border-border px-4 py-3 leading-none ${
+            className={`executor-toggle self-start border border-border px-4 py-3 leading-none ${
               row.checked ? 'bg-active-bg text-text' : 'bg-bg-dark text-text-muted'
             } ${row.disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-btn-hover'}`}
           >
-            {row.checked ? 'ON' : 'OFF'}
+            {row.checked ? es.common.enabled : es.common.disabled}
           </button>
           <span className="min-w-0">
             <span className="text-text">{row.label}</span>{' '}
@@ -127,8 +128,7 @@ export function ExecutorPanel() {
         </div>
       ))}
       <div className="text-2xs text-text-muted">
-        {view.readOnlyNotice ??
-          'Tú eliges qué executors y niveles pueden usarse. El programa decide quién hace cada tarea. Desactivar deja terminar las ejecuciones en curso.'}
+        {view.readOnlyNotice ?? es.vocabulary.executorPolicy}
       </div>
       {view.readOnlyNotice && <OfficeRecoveryActions />}
       <div className="sr-only" aria-live="polite">

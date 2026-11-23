@@ -1,3 +1,4 @@
+import { furnitureLabels } from '../../i18n/catalog.js';
 import type { FurnitureCatalogEntry, SpriteData } from '../types.js';
 
 export interface LoadedAssetData {
@@ -81,7 +82,7 @@ export function buildDynamicCatalog(assets: LoadedAssetData): boolean {
       }
       return {
         type: asset.id,
-        label: asset.label,
+        label: furnitureLabels[asset.label] ?? asset.label,
         footprintW: asset.footprintW,
         footprintH: asset.footprintH,
         sprite,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { OFFICE_EPHEMERAL_WARNING } from '../../../core/src/officeAccess.js';
 import { useTextSize } from '../hooks/useTextSize.js';
+import { es } from '../i18n/es.js';
 import { isSoundEnabled, setSoundEnabled } from '../notificationSound.js';
 import { officeAccessView, useOfficeAccess } from '../office/accessStore.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
@@ -96,8 +97,8 @@ export function SettingsModal({
   }, [revoking, connection.state, onClose]);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Ajustes" className="settings-dialog">
-      <MenuItem onClick={onNewProject}>Nuevo proyecto</MenuItem>
+    <Modal isOpen={isOpen} onClose={onClose} title={es.settings.title} className="settings-dialog">
+      <MenuItem onClick={onNewProject}>{es.settings.newProject}</MenuItem>
       <p className="p-10" role="status">
         {access.explanation}
       </p>
@@ -108,23 +109,17 @@ export function SettingsModal({
       )}
       {isBrowserRuntime && !access.blocked && !access.pending && (
         <details className="p-10">
-          <summary>Detalles</summary>
-          <p>
-            Si un comando pide el token del operador, cópialo aquí y pégalo en la confirmación
-            oculta de tu terminal. No lo compartas.
-          </p>
+          <summary>{es.settings.details}</summary>
+          <p>{es.settings.operatorTokenHelp}</p>
           <Button
             onClick={() =>
               void copyOperatorToken().then(
-                () => setCopyFeedback('Token copiado.'),
-                () =>
-                  setCopyFeedback(
-                    'No se pudo copiar el token. Comprueba el permiso del portapapeles.',
-                  ),
+                () => setCopyFeedback(es.settings.tokenCopied),
+                () => setCopyFeedback(es.settings.tokenCopyFailed),
               )
             }
           >
-            Copiar token para CLI
+            {es.settings.copyToken}
           </Button>
           <p role="status">{copyFeedback}</p>
         </details>
@@ -137,7 +132,7 @@ export function SettingsModal({
               recovery.prepareProject();
             }}
           >
-            Preparar proyecto
+            {es.settings.prepareProject}
           </MenuItem>
           {!access.pending && !access.blocked && connection.state === 'connected' && (
             <MenuItem
@@ -146,22 +141,17 @@ export function SettingsModal({
                 setConfirmRevocation(true);
               }}
             >
-              Revocar acceso de esta pestaña
+              {es.settings.revokeTab}
             </MenuItem>
           )}
           {confirmRevocation && (
             <div
               className="p-10 flex flex-col gap-8"
               role="group"
-              aria-label="Confirmar revocación"
+              aria-label={es.settings.revokeConfirm}
             >
-              <p>
-                Se revocará el acceso de todas las pestañas abiertas. Abre Pixel Agents de nuevo
-                para volver a entrar.
-              </p>
-              {revocationFailed && (
-                <p role="alert">No se pudo revocar el acceso. Reintenta desde Ajustes.</p>
-              )}
+              <p>{es.settings.revokeWarning}</p>
+              {revocationFailed && <p role="alert">{es.settings.revokeFailed}</p>}
               <Button
                 disabled={
                   revoking || access.blocked || access.pending || connection.state !== 'connected'
@@ -178,28 +168,28 @@ export function SettingsModal({
                 }}
               >
                 {revoking
-                  ? 'Revocando…'
+                  ? es.settings.revoking
                   : revocationFailed
-                    ? 'Reintentar'
-                    : 'Revocar todas las pestañas'}
+                    ? es.settings.retry
+                    : es.settings.revokeAll}
               </Button>
-              <Button onClick={() => setConfirmRevocation(false)}>Cancelar</Button>
+              <Button onClick={() => setConfirmRevocation(false)}>{es.settings.cancel}</Button>
             </div>
           )}
         </>
       )}
       <fieldset className="text-size-setting">
-        <legend>Tamaño del texto</legend>
-        <p>Elige cómo leer los paneles en este navegador.</p>
+        <legend>{es.settings.textSize}</legend>
+        <p>{es.settings.textSizeHelp}</p>
         <Button
           size="sm"
           aria-pressed={textSize === 'normal'}
           onClick={() => setTextSize('normal')}
         >
-          Normal
+          {es.settings.normal}
         </Button>
         <Button size="sm" aria-pressed={textSize === 'large'} onClick={() => setTextSize('large')}>
-          Grande
+          {es.settings.large}
         </Button>
       </fieldset>
       {/* The sessions folder opens an OS file manager, unavailable in the browser. */}
@@ -210,7 +200,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Abrir carpeta de sesiones
+          {es.settings.openSessions}
         </MenuItem>
       )}
       <MenuItem
@@ -223,8 +213,8 @@ export function SettingsModal({
           onClose();
         }}
       >
-        Exportar distribución
-        <span className="setting-help">Guarda la distribución de tu oficina en un archivo.</span>
+        {es.office.exportDesign}
+        <span className="setting-help">{es.office.exportHelp}</span>
       </MenuItem>
       <MenuItem
         onClick={() => {
@@ -237,8 +227,8 @@ export function SettingsModal({
           }
         }}
       >
-        Importar distribución
-        <span className="setting-help">Carga una distribución guardada desde un archivo.</span>
+        {es.office.importDesign}
+        <span className="setting-help">{es.office.importHelp}</span>
       </MenuItem>
       {isBrowserRuntime && (
         <input
@@ -263,7 +253,7 @@ export function SettingsModal({
           <input
             type="text"
             value={assetDirDraft}
-            placeholder="Ruta absoluta de la carpeta de recursos"
+            placeholder={es.settings.assetDirectoryPlaceholder}
             onChange={(e) => setAssetDirDraft(e.target.value)}
             className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text"
           />
@@ -278,7 +268,7 @@ export function SettingsModal({
             }}
             className="shrink-0"
           >
-            Añadir
+            {es.settings.add}
           </Button>
         </div>
       ) : (
@@ -288,7 +278,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Añadir carpeta de recursos
+          {es.settings.addAssets}
         </MenuItem>
       )}
       {externalAssetDirectories.map((dir) => (
@@ -310,8 +300,8 @@ export function SettingsModal({
         </div>
       ))}
       <Checkbox
-        label="Avisos sonoros"
-        help="Suena un aviso cuando un agente necesita tu atención."
+        label={es.settings.sound}
+        help={es.settings.soundHelp}
         checked={soundLocal}
         onChange={() => {
           const newVal = !isSoundEnabled();
@@ -321,20 +311,20 @@ export function SettingsModal({
         }}
       />
       <Checkbox
-        label="Observar todas las sesiones"
-        help="Incluye las sesiones que abres fuera de esta oficina."
+        label={es.settings.watchSessions}
+        help={es.settings.watchSessionsHelp}
         checked={watchAllSessions}
         onChange={onToggleWatchAllSessions}
       />
       <Checkbox
-        label="Detección instantánea (hooks)"
-        help="Recibe la actividad de Claude Code en cuanto ocurre."
+        label={es.settings.hooks}
+        help={es.settings.hooksHelp}
         checked={hooksInstalled}
         onChange={onToggleHooksEnabled}
       />
       <Checkbox
-        label="Mostrar siempre las etiquetas"
-        help="Muestra el nombre y el estado sin pasar el cursor."
+        label={es.settings.labels}
+        help={es.settings.labelsHelp}
         checked={alwaysShowOverlay}
         onChange={onToggleAlwaysShowOverlay}
       />
@@ -342,23 +332,23 @@ export function SettingsModal({
           Standalone has no terminals at all, so nothing there would ever ghost. */}
       {!isBrowserRuntime && (
         <Checkbox
-          label="Atenuar sesiones sin terminal"
-          help="Distingue las sesiones que no tienen una terminal para abrir."
+          label={es.settings.headless}
+          help={es.settings.headlessHelp}
           checked={ghostHeadlessAgents}
           onChange={onToggleGhostHeadlessAgents}
         />
       )}
       {showAreasAvailable && (
         <Checkbox
-          label="Mostrar áreas"
-          help="Resalta las zonas de la oficina y sus nombres."
+          label={es.settings.areas}
+          help={es.settings.areasHelp}
           checked={showAreas}
           onChange={onToggleShowAreas}
         />
       )}
       <Checkbox
-        label="Vista de diagnóstico"
-        help="Muestra datos técnicos para investigar problemas de actividad."
+        label={es.settings.debug}
+        help={es.settings.debugHelp}
         checked={isDebugMode}
         onChange={onToggleDebugMode}
       />

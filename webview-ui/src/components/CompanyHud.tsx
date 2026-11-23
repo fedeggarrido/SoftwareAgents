@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { backlogPulse } from '../office/backlogGroups.js';
 import type { ProviderQuota } from '../office/boardStore.js';
 import { useBoard, useCompanyNotice } from '../office/boardStore.js';
@@ -71,10 +72,10 @@ function StatusChip({ text, color }: { text: string; color: string }) {
 
 const AUTOPILOT_TEXT: Record<string, string> = {
   starting: 'arrancando',
-  round: 'ronda de manager en curso',
+  round: es.vocabulary.managerRound,
   sleeping: 'esperando a la próxima ronda',
   waiting_quota: 'en espera de cuota',
-  manager_busy: 'otro manager está en ronda',
+  manager_busy: es.vocabulary.anotherManager,
   paused: 'en pausa',
 };
 
@@ -184,7 +185,7 @@ function CompanyHudContent({
           className="min-w-0 truncate text-left text-xs cursor-pointer"
           onClick={onToggle}
           aria-expanded={open}
-          title={open ? 'Ocultar detalles' : 'Ver executors del proyecto'}
+          title={open ? 'Ocultar detalles' : es.vocabulary.showExecutors}
         >
           {open ? '▾' : '▸'} {executors.state.projectId}
         </button>
@@ -288,7 +289,7 @@ function CompanyHudContent({
         <div className="flex min-w-0 flex-wrap items-center gap-4">
           <HudPulse phases={board.items.map((item) => item.phase)} sessions={agents.length} />
           {board.manager?.stale && (
-            <StatusChip text="Manager sin latido" color={PHASE_COLORS.BLOCKED} />
+            <StatusChip text={es.vocabulary.managerNoHeartbeat} color={PHASE_COLORS.BLOCKED} />
           )}
           {ap && (
             <StatusChip

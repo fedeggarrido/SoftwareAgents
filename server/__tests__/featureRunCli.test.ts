@@ -271,7 +271,12 @@ describe('feature run interruption authority', () => {
           undefined,
           invoke,
           (line) => {
-            if (!line.startsWith(zone.startsWith('WIP') ? 'WIP limit:' : 'zone conflict:')) return;
+            if (
+              !line.startsWith(
+                zone.startsWith('WIP') ? 'Límite de trabajo en curso:' : 'Conflicto de zona:',
+              )
+            )
+              return;
             waited = true;
             expect(invoke).not.toHaveBeenCalled();
             expect(store.getTask('FEAT-002-T01')!.attempt).toBe(0);

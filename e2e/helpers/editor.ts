@@ -51,12 +51,12 @@ export interface TestHooksWindow extends Window {
 }
 
 /**
- * Dismiss the first-run tooltips ("Instant Detection Active", "Updated to vN")
+ * Dismiss the first-run tooltips ("Detección instantánea activa", "Actualizado a vN")
  * that overlay the top toolbar and would otherwise intercept the Layout click.
  * Mirrors the helper inlined in pets.spec.ts.
  */
 export async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
-  for (const tooltipText of ['Instant Detection Active', 'Updated to v']) {
+  for (const tooltipText of ['Detección instantánea activa', 'Actualizado a v']) {
     const tooltip = frame.locator('div', { hasText: tooltipText }).first();
     if (await tooltip.isVisible().catch(() => false)) {
       const closeBtn = tooltip.locator('button', { hasText: 'x' }).first();
@@ -70,7 +70,7 @@ export async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
 /** Enter the layout editor (idempotent-ish: only clicks the Layout button). */
 export async function enterEditMode(frame: Frame): Promise<void> {
   await dismissFirstRunTooltips(frame);
-  await openDockAction(frame, 'Editar oficina');
+  await openDockAction(frame, 'Editar diseño de la oficina');
 }
 
 /**

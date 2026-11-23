@@ -1,5 +1,6 @@
 import type { BoardState, CharacterDetail, ServerMessage } from '../../../core/src/messages.js';
 import { AGENT_HISTORY_LIMIT, RELATIVE_SECOND_MS, WORK_TASK_DETAIL_PREFIX } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { knownText } from './displayText.js';
 import type { AgentRoleView } from './toolUtils.js';
 import { extractToolName } from './toolUtils.js';
@@ -22,7 +23,7 @@ export function taskEventText(status?: string): string | undefined {
   if (status === 'DONE' || status === 'VERIFIED') return 'Terminó la tarea';
   if (status?.startsWith('FAILED')) return 'Falló la tarea';
   if (status === 'REVIEW' || status === 'AWAITING_REVIEW') return 'Pasó la tarea a revisión';
-  if (status === 'QA') return 'Pasó la tarea a QA';
+  if (status === 'QA') return es.vocabulary.taskTesting;
 }
 
 /** Webview-only observations. Tool rows may be cleared each turn; this bounded history survives. */

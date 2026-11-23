@@ -7,6 +7,7 @@ import {
   taskChangeImpact,
   taskChangePolicy,
 } from '../../../core/src/taskChangePolicy.js';
+import { es } from '../i18n/es.js';
 import { useOfficeAccess } from '../office/accessStore.js';
 import { decisionOptions } from '../office/decisionOptions.js';
 import { knownText } from '../office/displayText.js';
@@ -78,7 +79,7 @@ export function TaskDetail({
       aria-label="Detalle de tarea"
     >
       <div className="flex flex-wrap gap-6">
-        <Button onClick={onBack}>Volver a Trabajo</Button>
+        <Button onClick={onBack}>{es.navigation.backToWork}</Button>
         <Button onClick={controller.refresh} disabled={view.pending || view.loading}>
           Actualizar
         </Button>

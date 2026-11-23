@@ -4,6 +4,10 @@
 
 ## Office UI
 
+**Idioma y marca**: la oficina se presenta como SoftwareAgents y usa español.
+Consulta el [glosario de usuario](glosario-usuario.md) para etiquetas, explicaciones,
+fuentes de cadenas y excepciones (comandos, nombres propios y contenido del usuario).
+
 **Rendering**: Game state in imperative `OfficeState` class (not React state). Pixel-perfect: zoom = integer device-pixels-per-sprite-pixel (1x–10x). No `ctx.scale(dpr)`. Default zoom = `Math.round(2 * devicePixelRatio)`. Z-sort all entities by Y. Pan via middle-mouse drag (`panRef`). **Camera follow**: `cameraFollowId` (separate from `selectedAgentId`) smoothly centers camera on the followed agent; set on agent click, cleared on deselection or manual pan.
 
 **UI styling**: Pixel art aesthetic — sharp corners (`borderRadius: 0`), solid backgrounds (`#1e1e2e`), `2px solid` borders, hard offset shadows (`2px 2px 0px #0a0a14`, no blur). CSS variables in `index.css` `:root` (`--pixel-bg`, `--pixel-border`, `--pixel-accent`, ...). Typography uses two fonts: FS Pixel Sans for titles, buttons and large HUD numbers, and the system UI stack for reading (14–16 px, line-height 1.4; metadata may use 12 px). Settings persists Normal/Grande in viewer-local storage, guarded against blocked storage. Spacing, radius and border tokens live in `index.css`; shared controls and reading styles live in `ui.css`.

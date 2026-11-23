@@ -26,6 +26,7 @@ import { ARCHITECTURE_PROPOSAL_ERROR, HEXAGONAL_TEMPLATE } from './projectArchit
 import { stackAdr, stackDecision } from './projectStack.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
 import { analyzeTaskDag, parseTaskDag, parseTechnicalDesign } from './taskDag.js';
+import { uiCopy } from './uiCopy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface ArchitectRequest {
@@ -264,12 +265,12 @@ export async function openArchitectDecision(store: WorkStore, key: string, error
         label: 'Aclarar el diseño',
         benefit: 'Desbloquea el diseño',
         cost: 'Tiempo del operador',
-        risk: 'Revisar el DAG',
+        risk: uiCopy.decisions.reviewDependencies,
       },
     ],
     recommendation: 'Documentar respuestas y relanzar feature design --answers',
     disagreement: [],
-    impact: 'Bloquea TechnicalDesign y TaskDAG',
+    impact: uiCopy.decisions.designBlocked,
     urgency: 'medium',
   });
 }

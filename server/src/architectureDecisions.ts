@@ -8,6 +8,7 @@ import {
   ARCHITECTURE_PROPOSAL_ERROR,
 } from './projectArchitectureConstants.js';
 import { compileSchema, SchemaValidationError, validateSchema } from './schemaValidation.js';
+import { uiCopy } from './uiCopy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export type ArchitectureChoice =
@@ -112,7 +113,7 @@ export async function openArchitectureAlternative(
     recommendation:
       'Revisar el ADR y elegir la arquitectura; la recomendación del agente no autoriza el diseño.',
     disagreement: [],
-    impact: 'TechnicalDesign y TaskDAG bloqueados hasta tu respuesta.',
+    impact: uiCopy.decisions.architectureBlocked,
     urgency: 'medium',
   });
 }

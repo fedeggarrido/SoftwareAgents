@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import type { useEditorActions } from '../hooks/useEditorActions.js';
+import { es } from '../i18n/es.js';
 import type { EditorState } from '../office/editor/editorState.js';
 import { Button } from './ui/Button.js';
 
@@ -9,11 +10,11 @@ interface EditActionBarProps {
   editorState: EditorState;
 }
 
-export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
+export function EditActionBar({ editor, editorState }: EditActionBarProps) {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  const undoDisabled = es.undoStack.length === 0;
-  const redoDisabled = es.redoStack.length === 0;
+  const undoDisabled = editorState.undoStack.length === 0;
+  const redoDisabled = editorState.redoStack.length === 0;
 
   return (
     <div className="absolute top-8 left-1/2 -translate-x-1/2 layer-hud flex gap-4 items-center pixel-panel p-4">
@@ -39,7 +40,7 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
         variant="secondary"
         size="md"
         onClick={editor.handleSave}
-        title="Guardar distribución"
+        title={es.office.saveDesign}
       >
         Guardar
       </Button>
@@ -48,7 +49,7 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
           variant="secondary"
           size="md"
           onClick={() => setShowResetConfirm(true)}
-          title="Volver a la distribución guardada"
+          title={es.office.resetDesign}
         >
           Restablecer
         </Button>

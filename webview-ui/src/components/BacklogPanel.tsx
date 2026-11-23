@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { WorkflowStageId } from '../../../core/src/messages.js';
 import { PHASE_COLORS, PRIORITY_COLORS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { backlogPulse, groupBacklog } from '../office/backlogGroups.js';
 import { backlogView } from '../office/backlogView.js';
 import type { BoardEvent, BoardItem } from '../office/boardStore.js';
@@ -221,9 +222,9 @@ export function BacklogPanel({
         className="read-only-panel p-8 flex flex-col gap-8"
         data-testid="backlog-panel"
         role="region"
-        aria-label="Trabajo"
+        aria-label={es.common.backlog}
       >
-        <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
+        <PanelHeading hosted={hosted} title={es.common.backlog} onClose={onClose} />
         <TaskDetail
           key={`${board.projectId}-${selected.id}`}
           item={selected}
@@ -242,13 +243,13 @@ export function BacklogPanel({
       className="read-only-panel p-8 flex flex-col gap-8"
       data-testid="backlog-panel"
       role="region"
-      aria-label="Trabajo"
+      aria-label={es.common.backlog}
     >
-      <PanelHeading hosted={hosted} title="Trabajo" onClose={onClose} />
+      <PanelHeading hosted={hosted} title={es.common.backlog} onClose={onClose} />
       {workflowStage && (
         <div className="workflow-backlog-filter" role="status">
           <span>{filtered.stage ? `Etapa · ${filtered.stage.label}` : filtered.message}</span>
-          <Button onClick={onClearWorkflowStage}>Ver todo el trabajo</Button>
+          <Button onClick={onClearWorkflowStage}>{es.navigation.allWork}</Button>
           {summary.snapshot?.status === 'read_error' && (
             <Button onClick={summary.refresh}>Reintentar</Button>
           )}

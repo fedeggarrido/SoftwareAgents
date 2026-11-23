@@ -180,7 +180,7 @@ test.describe('Design guards (SA-151)', () => {
 
       await check('office');
 
-      await dockButton(page, viewport, 'Trabajo');
+      await dockButton(page, viewport, 'Trabajo pendiente');
       await check('window-Trabajo');
       expect(await page.getByRole('tab').count()).toBe(0);
       for (const panel of WINDOW_PANELS) {

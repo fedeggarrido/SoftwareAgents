@@ -1,3 +1,4 @@
+import { es } from '../../i18n/es.js';
 import type { SpriteData } from '../types.js';
 
 /**
@@ -84,7 +85,7 @@ export function setPetTemplates(
       idleRight: idleDown,
       idleLeft: idleUp,
     });
-    resolvedNames.push(petNames?.[i] ?? `Pet ${i + 1}`);
+    resolvedNames.push(petNames?.[i] ?? es.pets.fallback(i));
   }
   loadedPets = resolved;
   loadedPetNames = resolvedNames;
@@ -102,7 +103,7 @@ export function getPetCount(): number {
   return loadedPets?.length ?? 0;
 }
 
-/** Display name for a petType. Falls back to "Pet N" when manifest missing. */
+/** Display name for a petType. Uses a Spanish numbered name when no manifest exists. */
 export function getPetName(petIndex: number): string {
-  return loadedPetNames[petIndex] ?? `Pet ${petIndex + 1}`;
+  return loadedPetNames[petIndex] ?? es.pets.fallback(petIndex);
 }

@@ -14,6 +14,8 @@ import {
   WORK_STATE,
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
+import { es } from '../i18n/es.js';
+import { roleLabel } from '../i18n/roles.js';
 import { agentCardPosition } from '../office/agentCardState.js';
 import type { AgentHistoryEvent } from '../office/agentHistory.js';
 import { agentElapsed } from '../office/agentHistory.js';
@@ -114,7 +116,7 @@ export function CharacterDetailPanel({
             {knownText(name) ?? 'Agente'}
           </h2>
           {(knownText(role) ?? knownText(detail?.role)) && (
-            <p>{knownText(role) ?? knownText(detail?.role)}</p>
+            <p>{roleLabel(knownText(role) ?? knownText(detail?.role) ?? '')}</p>
           )}
           <StatusChip state={statusState} />
           {status && <p>{status}</p>}
@@ -156,7 +158,7 @@ export function CharacterDetailPanel({
             )}
             {currentExecutor && (
               <div>
-                <dt>Ejecutor</dt>
+                <dt title={es.common.executorHelp}>{es.common.executor}</dt>
                 <dd>{currentExecutor}</dd>
               </div>
             )}
@@ -198,7 +200,7 @@ export function CharacterDetailPanel({
       <footer className="flex flex-wrap gap-8">
         {onOpenBacklog && (
           <Button size="sm" onClick={onOpenBacklog}>
-            Ver en Trabajo
+            {es.navigation.openWork}
           </Button>
         )}
         {onCloseAgent && (

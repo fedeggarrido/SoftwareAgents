@@ -4,6 +4,7 @@ import type {
   WorkflowStageId,
 } from '../../../core/src/messages.js';
 import { PROJECT_EMPTY_TEXT } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { featureCostLabel, featuresReasonText } from '../office/featuresStore.js';
 import type { PanelTab } from '../office/panelWindowState.js';
 import { useProjectSummary } from '../office/useProjectSummary.js';
@@ -68,8 +69,8 @@ export function ProjectSummaryContent({ summary }: { summary: ProjectSummary }) 
         items={summary.decisions}
         empty="Sin decisiones pendientes registradas."
       />
-      <section aria-label="Stack del proyecto">
-        <h3>Stack del proyecto</h3>
+      <section aria-label={es.vocabulary.stack}>
+        <h3>{es.vocabulary.stack}</h3>
         {summary.stack?.length ? (
           summary.stack.map((stack) => (
             <div key={stack.feature}>
@@ -91,7 +92,7 @@ export function ProjectSummaryContent({ summary }: { summary: ProjectSummary }) 
             </div>
           ))
         ) : (
-          <p>El stack aparecerá cuando respondas su decisión en Decisiones.</p>
+          <p>{es.vocabulary.stackPending}</p>
         )}
       </section>
       <section aria-label="Progreso por funcionalidad">
@@ -262,7 +263,7 @@ export function ProjectSummaryPanel({
           Ver funcionalidades
         </Button>
         <Button size="sm" onClick={() => onNavigate('backlog')}>
-          Ver trabajo
+          {es.navigation.openWork}
         </Button>
         <Button size="sm" onClick={() => onNavigate('decisions')}>
           Ver decisiones

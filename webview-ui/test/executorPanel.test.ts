@@ -101,7 +101,7 @@ describe('executor panel view', () => {
       NOW_S * 1000,
     )!;
     expect(view.rows[0].details).toEqual([
-      'standard, deep · ? ejecuciones / límite desconocido',
+      'Estándar, Profundo · ? ejecuciones / límite desconocido',
       'Cuota observada sana · v2.1.296 · comprobado hace 20 s',
     ]);
   });
@@ -323,10 +323,10 @@ describe('SA-092 level controls', () => {
       expect.objectContaining({ tier: 'deep', allowed: true }),
     ]);
     expect(view.rows[0].levelControls![0].ariaLabel).toBe(
-      'Nivel standard de Claude en softwareagents: no permitido',
+      'Nivel Estándar de Claude en softwareagents: no permitido',
     );
-    expect(view.rows[0].details[0]).toMatch(/^deep \(no permitido: standard\) · /);
-    expect(view.rows[1].details[0]).toMatch(/^ningún nivel permitido \(no permitido: economy\)/);
+    expect(view.rows[0].details[0]).toMatch(/^Profundo \(no permitido: Estándar\) · /);
+    expect(view.rows[1].details[0]).toMatch(/^ningún nivel permitido \(no permitido: Económico\)/);
     const viewer = withState({ ...tiered().state!, canManage: false });
     expect(executorPanelView(viewer, NOW_S * 1000)!.rows[0].levelControls).toBeNull();
     expect(beginLevelToggle(viewer, 'claude', 'standard', true, 0, 'x')).toBeNull();

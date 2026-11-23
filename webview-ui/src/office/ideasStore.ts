@@ -12,6 +12,7 @@ import type {
 } from '../../../core/src/messages.js';
 import { OFFICE_ACCESS_INSTRUCTIONS } from '../../../core/src/officeAccess.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
+import { es } from '../i18n/es.js';
 
 export interface IdeasStore {
   requestId: string | null;
@@ -144,15 +145,15 @@ export function ideaErrorText(code: IdeaErrorCode | null | undefined): string {
     case 'denied':
       return OFFICE_ACCESS_INSTRUCTIONS;
     case 'unsupported_adapter':
-      return 'Nueva idea no está disponible en VS Code: este control aún no tiene selección de Project. Abre la oficina standalone del Project.';
+      return es.vocabulary.ideaUnsupported;
     case 'no_project':
-      return 'El proyecto no está preparado: no hay un Project vinculado a la oficina.';
+      return es.vocabulary.noProject;
     case 'missing_manifest':
       return 'El proyecto no está preparado: falta .softwareagents/project.yaml.';
     case 'invalid_manifest':
       return 'El proyecto no está preparado: .softwareagents/project.yaml no es válido o no se puede leer.';
     case 'unknown_project':
-      return 'El Project ha cambiado. Vuelve a abrir el diálogo.';
+      return es.vocabulary.projectChanged;
     case 'empty_text':
       return 'Escribe una idea antes de guardarla.';
     case 'too_large':

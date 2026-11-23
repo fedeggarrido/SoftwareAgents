@@ -1,3 +1,4 @@
+import { es } from '../i18n/es.js';
 export function IdeaNextSteps() {
   return (
     <section aria-label="Qué pasa ahora" className="flex flex-col gap-8">
@@ -12,15 +13,9 @@ export function IdeaNextSteps() {
           Decisiones. Después respondes y apruebas la especificación; sin esa aprobación el flujo no
           avanza.
         </li>
-        <li>
-          Plan técnico: se genera el diseño y las tareas. Puedes revisarlo en Features y marcarlo
-          con «Aprobar plan», pero hoy el desarrollo no espera a esa aprobación.
-        </li>
+        <li>{es.vocabulary.technicalPlan}</li>
         <li>Desarrollo: se implementan las tareas del plan.</li>
-        <li>
-          Revisión y QA: se revisa el trabajo y se comprueban los criterios; la integración final
-          requiere intervención humana.
-        </li>
+        <li>{es.vocabulary.reviewAndTests}</li>
         <li>
           Investigación posterior: puedes pedirla por separado cuando el trabajo esté listo para
           integrar; contrasta lo construido con el plan.

@@ -1,6 +1,7 @@
 import type { ProjectOperatorConfig } from '../../core/src/project.js';
 import { FLOW_P85 } from './constants.js';
 import { isProcessRunning } from './leaseLock.js';
+import { uiCopy } from './uiCopy.js';
 import type { WorkStore } from './workstore/WorkStore.js';
 
 export interface FlowTask {
@@ -169,7 +170,12 @@ export function wipConflict(
   for (const kind of ['review', 'running'] as const) {
     const bucket = snapshot[kind];
     if (bucket.limit !== null && bucket.tasks.length >= bucket.limit)
-      return `WIP limit: ${kind} ${bucket.tasks.length}/${bucket.limit} (${bucket.tasks.sort().join(', ')})`;
+      return uiCopy.flow.limitReached(
+        kind,
+        bucket.tasks.length,
+        bucket.limit,
+        bucket.tasks.sort().join(', '),
+      );
   }
   return null;
 }

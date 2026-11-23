@@ -37,8 +37,10 @@ describe('PR labels in task details and dock', () => {
       ...item('task', success),
       prObservation: { lastSuccessAt: 1000, attemptedAt: 1000, error: null },
     };
-    expect(taskPullRequestLabel(observed, 1000)).toContain('CI success');
-    expect(taskPullRequestLabel(observed, 1001 + PR_OBSERVATION_STALE_MS)).toContain('CI stale');
+    expect(taskPullRequestLabel(observed, 1000)).toContain('Pruebas correctas');
+    expect(taskPullRequestLabel(observed, 1001 + PR_OBSERVATION_STALE_MS)).toContain(
+      'Resultado de pruebas pendiente de actualizar',
+    );
     const failed = {
       ...observed,
       prObservation: {
@@ -47,11 +49,11 @@ describe('PR labels in task details and dock', () => {
         error: 'unavailable' as const,
       },
     };
-    expect(taskPullRequestLabel(failed, 2000)).toContain('CI unavailable');
-    expect(taskPullRequestLabel(failed, 2000)).not.toContain('CI success');
-    expect(pullRequestDockSummary([failed], 2000)!.label).toContain('unavailable 1');
+    expect(taskPullRequestLabel(failed, 2000)).toContain('Pruebas no disponibles');
+    expect(taskPullRequestLabel(failed, 2000)).not.toContain('Pruebas correctas');
+    expect(pullRequestDockSummary([failed], 2000)!.label).toContain('Pruebas no disponibles 1');
     expect(pullRequestDockSummary([observed], 1001 + PR_OBSERVATION_STALE_MS)!.label).toContain(
-      'stale 1',
+      'Resultado de pruebas pendiente de actualizar 1',
     );
   });
   it('bounds legacy persisted checks and rejects corrupt freshness metadata', () => {
@@ -66,19 +68,23 @@ describe('PR labels in task details and dock', () => {
     ).toMatchObject({ error: 'unavailable' });
   });
   it('shows observed PR, draft, review and CI state', () => {
-    expect(taskPullRequestLabel(item('task', pr))).toBe('PR OPEN (draft) · CI pending');
+    expect(taskPullRequestLabel(item('task', pr))).toBe(
+      'Propuesta abierta · Borrador · Pruebas pendientes',
+    );
     expect(
       taskPullRequestLabel(
         item('task', { ...pr, isDraft: false, reviewDecision: 'APPROVED', ci: 'success' }),
       ),
-    ).toBe('PR OPEN · CI success · APPROVED');
+    ).toBe('Propuesta abierta · Pruebas correctas · Revisión aprobada');
     expect(taskPullRequestLabel(item('task', { ...pr, state: 'MERGED', ci: 'failure' }))).toContain(
-      'PR MERGED',
+      'Cambios integrados',
     );
   });
   it('keeps unobserved and mismatched PR references unknown', () => {
-    expect(taskPullRequestLabel(item('task'))).toBe('PR 42 · CI unavailable');
-    expect(taskPullRequestLabel(item('task', { ...pr, ref: '43' }))).toBe('PR 42 · CI unavailable');
+    expect(taskPullRequestLabel(item('task'))).toBe('Propuesta 42 · Pruebas no disponibles');
+    expect(taskPullRequestLabel(item('task', { ...pr, ref: '43' }))).toBe(
+      'Propuesta 42 · Pruebas no disponibles',
+    );
     expect(taskPullRequestLabel({})).toBeNull();
   });
   it('summarizes CI states without displaying unknown observations as green', () => {
@@ -87,8 +93,10 @@ describe('PR labels in task details and dock', () => {
       item('b', { ...pr, ci: 'failure' }),
       item('c'),
     ]);
-    expect(summary?.label).toBe('PR 3 · CI pending 1 / failure 1 / unavailable 1');
-    expect(summary?.title).toContain('a · PR OPEN (draft) · CI pending');
+    expect(summary?.label).toBe(
+      'Propuestas 3 · Pruebas pendientes 1 / Pruebas con fallos 1 / Pruebas no disponibles 1',
+    );
+    expect(summary?.title).toContain('a · Propuesta abierta · Borrador · Pruebas pendientes');
     expect(pullRequestDockSummary([])).toBeNull();
   });
 });

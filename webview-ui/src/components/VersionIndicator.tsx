@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { toMajorMinor } from '../changelogData.ts';
 import { WHATS_NEW_AUTO_CLOSE_MS, WHATS_NEW_FADE_MS } from '../constants.ts';
+import { es } from '../i18n/es.js';
 import { Button } from './ui/Button.js';
 
 interface VersionIndicatorProps {
@@ -71,13 +72,19 @@ export function VersionIndicator({
         >
           <div className="flex justify-between items-center gap-10">
             <span className="text-lg text-accent-bright leading-none">
-              Updated to v{currentMajorMinor}!
+              {es.version.updated(currentMajorMinor)}
             </span>
-            <Button variant="ghost" size="icon" onClick={handleDismiss} className="leading-none">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={es.common.close}
+              onClick={handleDismiss}
+              className="leading-none"
+            >
               x
             </Button>
           </div>
-          <span className="text-sm whitespace-nowrap">Ver novedades</span>
+          <span className="text-sm whitespace-nowrap">{es.version.news}</span>
         </div>
       )}
       {/* Hover tooltip — "Ver novedades" appears on label hover after notice is gone */}
@@ -86,7 +93,7 @@ export function VersionIndicator({
           onClick={handleOpenChangelog}
           className="version-hint absolute right-28 layer-notices pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
         >
-          Ver novedades!
+          {es.version.news}
         </div>
       )}
       {/* Version label — always visible */}
@@ -96,7 +103,7 @@ export function VersionIndicator({
         onClick={handleOpenChangelog}
         className="version-label absolute right-28 layer-notices text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
       >
-        {currentVersion === 'demo' ? 'versión: demo' : `v${currentVersion}`}
+        {currentVersion === 'demo' ? es.version.demo : `v${currentVersion}`}
       </div>
     </>
   );

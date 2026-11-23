@@ -1,4 +1,5 @@
 import type { IdeaSummary } from '../../../core/src/messages.js';
+import { es } from '../i18n/es.js';
 import { IdeaCommand } from './IdeaCommand.js';
 
 export function IdeasList({
@@ -11,7 +12,7 @@ export function IdeasList({
   if (!ideas.length) return null;
   return (
     <section aria-label="Ideas pendientes" className="flex flex-col gap-8">
-      <h3>Ideas pendientes · sin FeatureSpec</h3>
+      <h3 title={es.vocabulary.pendingIdeasHelp}>{es.vocabulary.pendingIdeas}</h3>
       {ideas.map((idea) => (
         <article
           key={idea.key}

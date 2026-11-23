@@ -1,4 +1,5 @@
 import { CHARACTER_ACTIVITY_TEXT, RELATIVE_MINUTE_MS, WORK_STATE } from '../constants.js';
+import { roleLabel } from '../i18n/roles.js';
 import { knownText } from './displayText.js';
 import { spanishToolStatus } from './toolUtils.js';
 import type { Character, ToolActivity } from './types.js';
@@ -61,7 +62,11 @@ export function characterDisplayName(
 ): string {
   if (ch.isSubagent && subtask) return knownText(spanishToolStatus(subtask)) ?? 'Subagente';
   if (ch.isTeamLead) return 'Responsable';
-  return knownText(ch.agentName) ?? (role === 'Dueño' ? undefined : knownText(role)) ?? provider;
+  return (
+    knownText(ch.agentName) ??
+    (role === 'Dueño' || !role ? undefined : knownText(roleLabel(role))) ??
+    provider
+  );
 }
 
 /** A blocked CLI may remain seated for approval; waiting work cannot route back to a desk. */

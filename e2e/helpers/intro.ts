@@ -15,7 +15,7 @@ import { expect } from '@playwright/test';
 
 /** Walk the Intro from its opening step to the consent step. */
 export async function advanceIntroToConsentStep(dialog: Locator): Promise<void> {
-  await expect(dialog).toContainText('¡Bienvenido a Pixel Agents!');
+  await expect(dialog).toContainText('¡Bienvenido a SoftwareAgents!');
   await dialog.getByRole('button', { name: 'Continuar' }).click();
   await expect(dialog).toContainText('Claude Code');
   await dialog.getByRole('button', { name: 'Continuar' }).click();

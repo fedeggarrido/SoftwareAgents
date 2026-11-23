@@ -9,6 +9,7 @@ import type {
 } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
 import { FEATURE_STEP_LABELS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { statusPresentation } from './statusPresentation.js';
 
 export interface FeaturesStore {
@@ -106,15 +107,15 @@ export function featureCacheRateLabel(cost: FeatureCost): string {
 export function featuresReasonText(reason: FeaturesReadError | null): string {
   switch (reason) {
     case 'unavailable':
-      return 'WorkStore no disponible.';
+      return es.vocabulary.storeUnavailable;
     case 'schema_incompatible':
-      return 'Versión del esquema de WorkStore incompatible.';
+      return es.vocabulary.storeIncompatible;
     case 'query_failed':
-      return 'No se pudo consultar WorkStore.';
+      return es.vocabulary.storeQueryFailed;
     case 'invalid_data':
-      return 'Respuesta de WorkStore inválida.';
+      return es.vocabulary.storeInvalid;
     default:
-      return 'No se pudieron leer las features.';
+      return es.vocabulary.featuresReadFailed;
   }
 }
 

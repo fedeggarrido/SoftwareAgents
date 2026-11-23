@@ -146,7 +146,7 @@ describe('project workflow nodes and Backlog navigation', () => {
       stages,
       onSelect: (id: WorkflowStageId) => selections.push(id),
     });
-    expect(clickNode(tree, 'Ver QA en Trabajo')).toBe(true);
+    expect(clickNode(tree, 'Ver QA en Trabajo pendiente')).toBe(true);
     expect(selections).toEqual(['qa']);
     const filtered = workflowBacklog(items, snapshot, 'project', selections[0]);
     expect(filtered.items.map((item) => item.id)).toEqual(['second']);
@@ -229,7 +229,7 @@ describe('project workflow nodes and Backlog navigation', () => {
       }),
     );
     expect(html).toContain('Etapa · QA');
-    expect(html).toContain('Ver todo el trabajo');
+    expect(html).toContain('Ver todo el trabajo pendiente');
     expect(html).toContain('Segunda');
     expect(html).not.toContain('Primera');
     expect(html).not.toContain('Terminada');

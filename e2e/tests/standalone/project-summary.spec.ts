@@ -134,7 +134,10 @@ test.describe('Standalone / project summary', () => {
     for (const width of [390, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await workflow.locator('summary').click();
-      const qa = workflow.getByRole('button', { name: 'Ver QA en Trabajo', exact: true });
+      const qa = workflow.getByRole('button', {
+        name: 'Ver Pruebas en Trabajo pendiente',
+        exact: true,
+      });
       await expect(qa).toContainText('Activo');
       await expect(qa).toContainText('1 tarea');
       expect(await workflow.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
@@ -150,11 +153,13 @@ test.describe('Standalone / project summary', () => {
       ).toBeGreaterThanOrEqual(14);
       expect(await qa.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
       await qa.click();
-      const backlog = page.getByRole('region', { name: 'Trabajo', exact: true });
-      await expect(backlog.getByText('Etapa · QA', { exact: true })).toBeVisible();
+      const backlog = page.getByRole('region', { name: 'Trabajo pendiente', exact: true });
+      await expect(backlog.getByText('Etapa · Pruebas', { exact: true })).toBeVisible();
       await expect(backlog.getByTestId('backlog-card')).toHaveCount(1);
       await expect(backlog.getByTestId('backlog-card')).toContainText('FEAT-001-T02');
-      await backlog.getByRole('button', { name: 'Ver todo el trabajo', exact: true }).click();
+      await backlog
+        .getByRole('button', { name: 'Ver todo el trabajo pendiente', exact: true })
+        .click();
       await expect(backlog.getByTestId('backlog-card')).toHaveCount(3);
       const project = page.locator('.bottom-toolbar').getByRole('button', {
         name: 'Proyecto',
@@ -181,15 +186,17 @@ test.describe('Standalone / project summary', () => {
       db.close();
     }
     await expect(
-      workflow.getByRole('button', { name: 'Ver QA en Trabajo', exact: true }),
+      workflow.getByRole('button', { name: 'Ver Pruebas en Trabajo pendiente', exact: true }),
     ).toContainText('Hecho');
     await expect(
-      workflow.getByRole('button', { name: 'Ver Entrega en Trabajo', exact: true }),
+      workflow.getByRole('button', { name: 'Ver Entrega en Trabajo pendiente', exact: true }),
     ).toContainText('Hecho');
-    await workflow.getByRole('button', { name: 'Ver Idea en Trabajo', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Trabajo', exact: true })).toContainText(
-      'Sin tareas en esta etapa.',
-    );
+    await workflow
+      .getByRole('button', { name: 'Ver Idea en Trabajo pendiente', exact: true })
+      .click();
+    await expect(
+      page.getByRole('region', { name: 'Trabajo pendiente', exact: true }),
+    ).toContainText('Sin tareas en esta etapa.');
   });
 
   test.describe('empty project on mobile', () => {

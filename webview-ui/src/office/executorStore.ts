@@ -8,6 +8,7 @@ import type {
 } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../../../core/src/transport.js';
 import { EXECUTOR_TOGGLE_TIMEOUT_MS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { connectionCopy } from './connectionStatus.js';
 import { newRequestId } from './requestId.js';
 
@@ -65,7 +66,7 @@ const ERROR_TEXT: Record<string, string> = {
   unauthorized: 'Solo el operador puede cambiar la disponibilidad.',
   invalid_request: 'Petición inválida (¿el catálogo de niveles cambió?).',
   unknown_project: 'Este servidor no gestiona ese proyecto.',
-  unknown_executor: 'Executor desconocido.',
+  unknown_executor: es.vocabulary.unknownExecutor,
   policy_denied: 'La política del operador no permite este cambio.',
   revision_conflict: 'La configuración cambió en otro sitio; estado actualizado.',
   apply_failed: 'No se pudo aplicar ahora; inténtalo de nuevo.',

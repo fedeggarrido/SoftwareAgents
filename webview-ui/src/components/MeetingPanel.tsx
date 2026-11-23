@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { DEPARTMENT_COLORS, QUOTA_COLORS } from '../constants.js';
+import { roleLabel } from '../i18n/roles.js';
 import { useBoard } from '../office/boardStore.js';
 
 const ROUND_LABELS: Record<string, string> = {
@@ -74,7 +75,7 @@ export function MeetingPanel({ hosted = false }: { hosted?: boolean }) {
           {m.lines.map((l, i) => (
             <div key={`${l.at}-${i}`} className="text-2xs leading-tight">
               <div className="text-text-muted">{ROUND_LABELS[l.round] ?? l.round}</div>
-              <span style={{ color: colorOf(l.role) }}>{l.role}</span>: {l.stance}
+              <span style={{ color: colorOf(l.role) }}>{roleLabel(l.role)}</span>: {l.stance}
             </div>
           ))}
           {m.decision && (

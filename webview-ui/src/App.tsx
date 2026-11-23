@@ -31,6 +31,7 @@ import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { usePanelWindow } from './hooks/usePanelWindow.js';
+import { es } from './i18n/es.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -290,10 +291,7 @@ function App() {
     (file: File) => {
       // Browser-native import (standalone): read + validate + apply directly,
       // bypassing the layoutLoaded message whose dirty guard would skip it.
-      if (
-        isEditDirty() &&
-        !window.confirm('¿Reemplazar la distribución actual? Se perderán los cambios sin guardar.')
-      ) {
+      if (isEditDirty() && !window.confirm(es.office.replaceDesign)) {
         return;
       }
       const reader = new FileReader();
@@ -307,7 +305,7 @@ function App() {
             !Array.isArray(imported.tiles) ||
             !Array.isArray(imported.furniture)
           ) {
-            window.alert('El archivo de distribución no es válido.');
+            window.alert(es.office.invalidDesign);
             return;
           }
           const migrated = migrateLayoutColors(imported as unknown as OfficeLayout);
@@ -319,7 +317,7 @@ function App() {
           });
           editor.markClean();
         } catch {
-          window.alert('No se pudo leer el archivo de distribución.');
+          window.alert(es.office.unreadableDesign);
         }
       };
       reader.readAsText(file);

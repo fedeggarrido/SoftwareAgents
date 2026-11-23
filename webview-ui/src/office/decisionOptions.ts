@@ -1,4 +1,11 @@
 import type { BoardDecision } from '../../../core/src/messages.js';
+import { es } from '../i18n/es.js';
+
+const urgencyLabels: Readonly<Record<string, string>> = es.decisions.urgency;
+
+export function decisionUrgency(urgency: string | undefined): string | undefined {
+  return urgency === undefined ? undefined : (urgencyLabels[urgency] ?? urgency);
+}
 
 /** Keep legacy strings and structured IDs compatible on the same transport. */
 export function decisionOptions(decision: BoardDecision) {

@@ -156,7 +156,7 @@ describe('companyControl authorization and containment', () => {
     });
     expect(send).toHaveBeenCalledWith({
       type: 'companyNotice',
-      text: expect.stringContaining('invalid .softwareagents/project.yaml'),
+      text: expect.stringContaining('.softwareagents/project.yaml'),
     });
     // Denied controls may append audit entries, but may not write company state.
     expect(write.mock.calls.every(([target]) => typeof target === 'number')).toBe(true);
@@ -370,7 +370,7 @@ describe('companyControl authorization and containment', () => {
     });
     expect(send).toHaveBeenCalledWith({
       type: 'companyNotice',
-      text: expect.stringContaining('Revisa el acceso en Settings'),
+      text: expect.stringContaining('Revisa el acceso en Ajustes'),
     });
     expect(childProcess.spawn).not.toHaveBeenCalled();
     expect(fs.readdirSync(gitDir)).toEqual([]);

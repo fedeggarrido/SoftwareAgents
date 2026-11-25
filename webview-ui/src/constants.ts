@@ -703,3 +703,5 @@ export const MODEL_TIER_LABELS = es.modelTiers;
 
 export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;
+/** Longer than a system double-click interval. */
+export const DECISION_REVIEW_ARM_MS = 600;

@@ -104,7 +104,9 @@ for (const width of [390, 1440]) {
         await option.press('Enter');
         await expect(review).toContainText('Retrasar la entrega');
         expect(sent).toHaveLength(0);
-        await review.getByRole('button', { name: 'Confirmar', exact: true }).focus();
+        const confirm = review.getByRole('button', { name: 'Confirmar', exact: true });
+        await expect(confirm).toBeEnabled();
+        await confirm.focus();
         await page.keyboard.press('Enter');
         await expect(panel).toContainText('Respondida: Esperar revisión');
         expect(sent.map((payload) => JSON.parse(payload))).toEqual([

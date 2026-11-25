@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { HumanDecisionOption } from '../../../core/src/messages.js';
+import { DECISION_REVIEW_ARM_MS } from '../constants.js';
 import { roleLabel } from '../i18n/roles.js';
 import { getBoardState, subscribeBoard, useBoard } from '../office/boardStore.js';
 import { decisionOptions, decisionUrgency } from '../office/decisionOptions.js';
@@ -39,6 +40,8 @@ export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPan
   const connection = useSyncExternalStore(subscribeTransport, transportState, transportState);
   const [review, setReview] = useState<DecisionReview>({ phase: 'choosing' });
   const reviewRef = useRef<DecisionReview>(review);
+  // Opening the review shifts the layout: the second click of a double click must hit nothing.
+  const [armed, setArmed] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const returnFocus = useRef<HTMLButtonElement | null>(null);
   const updateReview = (next: DecisionReview) => {
@@ -77,6 +80,12 @@ export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPan
       }),
     [],
   );
+  useEffect(() => {
+    setArmed(false);
+    if (review.phase !== 'reviewing') return;
+    const timer = setTimeout(() => setArmed(true), DECISION_REVIEW_ARM_MS);
+    return () => clearTimeout(timer);
+  }, [review.phase]);
   useEffect(() => {
     if (!isOpen) {
       reviewRef.current = { phase: 'choosing' };
@@ -148,10 +157,12 @@ export function DecisionsPanel({ isOpen, onClose, hosted = false }: DecisionsPan
                 )}
               />
               <div className="flex gap-8 flex-wrap">
-                <Button variant="primary" onClick={confirm}>
+                <Button variant="primary" disabled={!armed} onClick={confirm}>
                   Confirmar
                 </Button>
-                <Button onClick={change}>Cambiar</Button>
+                <Button disabled={!armed} onClick={change}>
+                  Cambiar
+                </Button>
               </div>
             </>
           ) : (

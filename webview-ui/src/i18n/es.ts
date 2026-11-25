@@ -36,6 +36,15 @@ export const es = {
       decision: 'Decisión final',
     },
   },
+  connection: {
+    staleSince: (time: string) => `Datos de las ${time}: pueden no ser actuales.`,
+    stale: 'Sin actualizar',
+    unsentAction:
+      'La acción no se ha enviado porque no hay conexión. Repítela cuando la oficina vuelva a conectar.',
+    unsentSave:
+      'El diseño aún no se ha guardado en la oficina. Se guardará al recuperar la conexión.',
+    dismiss: 'Entendido',
+  },
   features: {
     details: 'Ver detalles',
     tasksComplete: 'Tareas completadas; cierre sin confirmar',

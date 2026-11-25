@@ -272,6 +272,8 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/meetings.spec.ts:20` — Standalone meeting stays out of the way and explains itself at 1440px
 - `e2e/standalone/multi-server-hooks.spec.ts:39` — extension and standalone both stay hook-driven without cross-contamination (Standalone / multi-server hooks)
 - `e2e/standalone/new-project.spec.ts:7` — creates and opens a local project through the wizard in an isolated parent (Standalone / new project)
+- `e2e/standalone/offline.spec.ts:8` — stopping the office is noticed at once and no action leaves silently at 390px
+- `e2e/standalone/offline.spec.ts:8` — stopping the office is noticed at once and no action leaves silently at 1440px
 - `e2e/standalone/project-summary.spec.ts:81` — shows the app, real work and next steps through the office window without writes (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:107` — denies unprivileged access without project details (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:125` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)

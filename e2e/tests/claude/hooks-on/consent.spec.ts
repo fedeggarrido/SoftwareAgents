@@ -5,14 +5,14 @@ import type { Frame, Locator } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/pixel-agents';
 import { ourHookEvents } from '../../../helpers/hooks';
-import { advanceIntroToConsentStep, finishIntro } from '../../../helpers/intro';
+import { advanceIntroToConsentStep, closeProjectGuide, finishIntro } from '../../../helpers/intro';
 import { getSettingChecked, setSettings } from '../../../helpers/webview';
 
 /**
- * The Intro — the four-step first-run tour — and, inside it, the consent gate for modifying ~/.claude/settings.json.
+ * The Intro — the three-step consent tour after the first-visit guide — and, inside it, the consent gate for modifying ~/.claude/settings.json.
  * Every other spec seeds a granted Claude consent so hooks flow silently; these opt OUT via `seedConfig`, which is
  * what a real first run looks like. The tour is diegetic: a greeter stands near the office's bottom-left corner and
- * the IntroBubble is its speech bubble, driven by the server's `hooksConsentRequest`, paging welcome → Claude Code →
+ * the IntroBubble is its speech bubble, driven by the server's `hooksConsentRequest`, paging Claude Code →
  * consent → all set. A choice sends immediately and moves to the closing step, from which Back allows a genuine
  * change of mind. Both surfaces render this component off the same message (standalone: standalone/hooks.spec.ts).
  * The gate answers a 1-star review — a settings.json replaced with no prompt, backup or disclosure — so these assert
@@ -43,8 +43,9 @@ function greeterPresent(frame: Frame): Promise<boolean> {
   });
 }
 
-/** Wait for the first-run Intro (it opens on its welcome step) and return it. */
+/** Wait for the first-run Intro (it opens after the guide closes) and return it. */
 async function openConsentDialog(frame: Frame): Promise<Locator> {
+  await closeProjectGuide(frame);
   const dialog = consentDialog(frame);
   await expect(dialog).toBeVisible({ timeout: 30_000 });
   return dialog;
@@ -129,7 +130,7 @@ test.describe('Hooks consent gate', () => {
 
     narrator.step('waiting for the first-run Intro');
     const dialog = await openConsentDialog(frame);
-    await expect(dialog).toContainText('¡Bienvenido a SoftwareAgents!');
+    await expect(dialog).toContainText('Con tus sesiones de Claude Code');
 
     // Diegetic: the tour is a greeter character's speech bubble, and the camera
     // shifts so character + bubble are centered — the bubble ends up FULLY on
@@ -273,7 +274,6 @@ test.describe('Hooks consent gate', () => {
 
     const dialog = await openConsentDialog(frame);
     // The x is on every step — here, mid-tour, one step before the disclosure.
-    await dialog.getByRole('button', { name: 'Continuar' }).click();
     await expect(dialog).toContainText('Claude Code');
 
     narrator.step('aborting the tour with the x — no choice made');

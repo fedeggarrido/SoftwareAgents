@@ -46,25 +46,21 @@ interface IntroBubbleProps {
   onChoice: (choice: ConsentChoice) => void;
   /** Closing, Escape and finishing share persisted dismissal without hook consent. */
   onClose: () => void;
-  /** True while another surface owns Escape — an open Settings/changelog modal
-   *  (stacked ABOVE this bubble) or the layout editor's multi-stage Esc
-   *  ladder. Escape aborts the tour only when the tour is topmost; without
-   *  this gate it silently aborted UNDER an open modal. */
-  escapeSuppressed: boolean;
+  /** Another surface is open (canShowTour): hide without losing the step, and leave Escape to it. */
+  paused: boolean;
 }
 
-const STEP_COUNT = 4;
-const WELCOME_STEP = 0;
-const CLAUDE_CODE_STEP = 1;
-const CONSENT_STEP = 2;
-const CLOSING_STEP = 3;
+const STEP_COUNT = 3;
+const CLAUDE_CODE_STEP = 0;
+const CONSENT_STEP = 1;
+const CLOSING_STEP = 2;
 
 /**
- * The Intro: the four-step first-run tour the greeter character "speaks",
+ * The Intro: the three-step hooks consent tour the greeter character "speaks",
  * shared by both surfaces (the VS Code webview and the standalone browser
  * render this same component off the same server message).
  *
- * Steps: welcome → Claude Code → hooks consent → all set. The consent step is
+ * Steps: Claude Code → hooks consent → all set. The consent step is
  * the same first-run ask as before, now wrapped in a tour; its copy still
  * arrives from the server and its buttons still send `hooksConsentResponse`
  * the moment they are clicked. Back from the closing step re-opens the consent
@@ -100,11 +96,11 @@ export function IntroBubble({
   installPending,
   onChoice,
   onClose,
-  escapeSuppressed,
+  paused,
 }: IntroBubbleProps) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
-  const [step, setStep] = useState(WELCOME_STEP);
+  const [step, setStep] = useState(CLAUDE_CODE_STEP);
 
   // The greeter lives exactly as long as this component.
   useEffect(() => {
@@ -113,13 +109,13 @@ export function IntroBubble({
   }, [officeState]);
 
   useEffect(() => {
-    if (escapeSuppressed) return;
+    if (paused) return;
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, escapeSuppressed]);
+  }, [onClose, paused]);
 
   // Per-frame tick (same pattern as ToolOverlay): re-render — the greeter's
   // matrix effect, a pan, and the camera drift all move the anchor between
@@ -202,7 +198,7 @@ export function IntroBubble({
     wrapperStyle = { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
   }
 
-  const back = (): void => setStep((s) => Math.max(WELCOME_STEP, s - 1));
+  const back = (): void => setStep((s) => Math.max(CLAUDE_CODE_STEP, s - 1));
   const forward = (): void => setStep((s) => Math.min(CLOSING_STEP, s + 1));
   const choose = (choice: ConsentChoice): void => {
     onChoice(choice);
@@ -213,7 +209,6 @@ export function IntroBubble({
   };
 
   const titles = [
-    es.intro.welcome,
     es.intro.claudeTitle,
     headline,
     installFailed ? es.intro.installFailed : es.intro.ready,
@@ -225,7 +220,7 @@ export function IntroBubble({
       style={{
         ...wrapperStyle,
         zIndex: INTRO_BUBBLE_Z_INDEX,
-        visibility: measured || !greeter ? undefined : 'hidden',
+        visibility: !paused && (measured || !greeter) ? undefined : 'hidden',
       }}
     >
       {/* Tail squares render BEFORE the panel so the bubble paints over any
@@ -264,7 +259,7 @@ export function IntroBubble({
           x
         </Button>
 
-        {/* Step dots: the tour's "1 of 4", drawn as pixels rather than prose. */}
+        {/* Step dots: the tour's "1 of 3", drawn as pixels rather than prose. */}
         <div className="flex gap-4 mb-8" aria-label={es.intro.step(step + 1, STEP_COUNT)}>
           {Array.from({ length: STEP_COUNT }, (_, i) => (
             <div
@@ -276,8 +271,6 @@ export function IntroBubble({
         </div>
 
         <div className="text-xl mb-8 text-accent-bright pr-20">{titles[step]}</div>
-
-        {step === WELCOME_STEP && <p className="text-sm m-0 mb-8">{es.intro.description}</p>}
 
         {step === CLAUDE_CODE_STEP && (
           <>
@@ -333,7 +326,7 @@ export function IntroBubble({
         <div className="flex items-center justify-between gap-6 mt-10 flex-wrap">
           {/* Left slot: Back everywhere it can go back; a spacer on the opening
               step keeps the right-side buttons in place. */}
-          {step === WELCOME_STEP ? (
+          {step === CLAUDE_CODE_STEP ? (
             <span />
           ) : (
             <Button

@@ -9,6 +9,8 @@
  * (server/src/layoutPersistence.ts). SEED_LAYOUT_REVISION sits far above that.
  */
 
+import { SEEN_VERSION } from './returning-user';
+
 /** Far above the bundled default-layout revision so a seeded layout survives load. */
 export const SEED_LAYOUT_REVISION = 9999;
 
@@ -88,7 +90,7 @@ export function buildSeedLayout(opts: SeedLayoutOptions = {}): Record<string, un
  */
 const DEFAULT_ADAPTER_SETTINGS = {
   soundEnabled: true,
-  lastSeenVersion: '',
+  lastSeenVersion: SEEN_VERSION,
   alwaysShowLabels: true,
   watchAllSessions: false,
   hooksInfoShown: false,

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { PHASE_COLORS, QUOTA_COLORS } from '../constants.js';
@@ -98,6 +98,7 @@ function HudPulse({ phases, sessions }: { phases: readonly string[]; sessions: n
 }
 
 interface CompanyHudProps {
+  onOpenChange?: (open: boolean) => void;
   onOpenDecisions: () => void;
   onOpenMeeting: () => void;
   meetingUnread?: boolean;
@@ -110,6 +111,11 @@ export function CompanyHud(props: CompanyHudProps) {
   const board = useBoard();
   const executors = useExecutorStore();
   const [open, setOpen] = useState(false);
+  const { onOpenChange } = props;
+  useLayoutEffect(() => {
+    onOpenChange?.(open);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
   const executorSection = useRef<HTMLDivElement>(null);
   const blockers = criticalBlockers(executors.state);
   const openExecutors = () => {

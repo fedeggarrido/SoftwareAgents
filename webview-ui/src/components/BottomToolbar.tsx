@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
   DOCK_MOBILE_BREAKPOINT_PX,
@@ -26,6 +26,7 @@ interface BottomToolbarProps {
   activePanel: PanelTab | null;
   onTogglePanel: (tab: PanelTab) => void;
   onNewIdea: () => void;
+  onMenuOpenChange: (open: boolean) => void;
   workspaceFolders: WorkspaceFolder[];
 }
 
@@ -38,6 +39,7 @@ export function BottomToolbar({
   activePanel,
   onTogglePanel,
   onNewIdea,
+  onMenuOpenChange,
   workspaceFolders,
 }: BottomToolbarProps) {
   const board = useBoard();
@@ -92,6 +94,11 @@ export function BottomToolbar({
   }, [moreVisible]);
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
+  const menuOpen = moreVisible || isFolderPickerOpen || isBypassMenuOpen;
+  useLayoutEffect(() => {
+    onMenuOpenChange(menuOpen);
+    return () => onMenuOpenChange(false);
+  }, [menuOpen, onMenuOpenChange]);
   const folderPickerRef = useRef<HTMLDivElement>(null);
   const pendingBypassRef = useRef(false);
   // Close folder picker / bypass menu on outside click

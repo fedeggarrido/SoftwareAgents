@@ -8,7 +8,7 @@ import {
   sessionEndExit,
   sessionStartStartup,
 } from '../../helpers/hooks';
-import { advanceIntroToConsentStep, finishIntro } from '../../helpers/intro';
+import { advanceIntroToConsentStep, closeProjectGuide, finishIntro } from '../../helpers/intro';
 import { expectOverlayCount, expectOverlayVisible } from '../../helpers/office';
 import type { RecordedServerMessage } from '../../helpers/standalone';
 import { openSettingsModal, setSettings } from '../../helpers/webview';
@@ -135,6 +135,7 @@ test.describe('Standalone / hooks consent', () => {
     page,
     standalone,
   }) => {
+    await closeProjectGuide(page);
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await advanceIntroToConsentStep(dialog);
@@ -199,6 +200,7 @@ test.describe('Standalone / hooks consent', () => {
 
     // First-run Intro is up; decline with Not Now — which writes NOTHING —
     // and finish the tour.
+    await closeProjectGuide(page);
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await advanceIntroToConsentStep(dialog);

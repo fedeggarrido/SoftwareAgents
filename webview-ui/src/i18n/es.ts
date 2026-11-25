@@ -44,15 +44,48 @@ export const es = {
     debug: 'Vista de diagnóstico',
     debugHelp: 'Muestra datos técnicos para investigar problemas de actividad.',
   },
+  officeWelcome: {
+    title: 'Empieza con una idea',
+    description: 'Coordina agentes de IA para construir software y revisa su trabajo aquí.',
+    newIdea: 'Nueva idea',
+    close: 'Ocultar bienvenida',
+  },
+  projectGuide: {
+    guide: 'Guía del proyecto',
+    workflow: [
+      {
+        title: 'De la idea a las decisiones',
+        description:
+          'En Nueva idea, cuenta qué necesitas y para quién. Responde las preguntas sobre requisitos en Decisiones y confirma las decisiones pendientes.',
+      },
+      {
+        title: 'Del plan al desarrollo',
+        description:
+          'Revisa el plan técnico y apruébalo cuando refleje lo acordado. Sigue el desarrollo en Trabajo pendiente y responde si surge una duda.',
+      },
+      {
+        title: 'Revisión, pruebas e integración',
+        description:
+          'Consulta la revisión y los resultados de las pruebas. La integración requiere una decisión humana: revisa las evidencias antes de autorizarla.',
+      },
+      {
+        title: 'Tu primera idea',
+        description:
+          'Describe el problema que quieres resolver. Después podrás concretar los requisitos y revisar el plan antes de empezar el desarrollo.',
+      },
+    ],
+    step: (current: number, total: number) => `Paso ${current} de ${total}`,
+    close: 'Cerrar',
+    back: 'Anterior',
+    finish: 'Terminar',
+    next: 'Continuar',
+  },
   intro: {
     step: (current: number, total: number) => `Paso ${current} de ${total}`,
-    welcome: '¡Bienvenido a SoftwareAgents!',
     claudeTitle: 'Con tus sesiones de Claude Code',
     installFailed: 'No se pudieron instalar los hooks',
     ready: '¡Todo listo!',
     close: 'Cerrar',
-    description:
-      'En esta oficina, tus sesiones de IA cobran vida como personajes de píxeles. Escriben en su escritorio mientras trabajan, pasean cuando terminan y te avisan cuando te necesitan.',
     claudeDescription: 'La oficina muestra tus sesiones de Claude Code.',
     details: 'Detalles',
     installHelp: 'Si todavía no tienes Claude Code, puedes instalarlo con este comando.',

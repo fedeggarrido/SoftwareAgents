@@ -6,6 +6,7 @@ import path from 'path';
 
 import { namespaceE2EPath } from '../run-config';
 import { applyMockHomeEnv } from './mock-claude';
+import { SEEN_VERSION } from './returning-user';
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const VSCODE_PATH_FILE = path.join(REPO_ROOT, '.vscode-test/vscode-executable.txt');
@@ -97,8 +98,8 @@ export async function launchVSCode(
   // overlaying the office UI no test expects to be covered. The consent specs
   // opt out via opts.seedConfig — they are the only ones that want the dialog.
   const seedConfig = opts.seedConfig ?? {
-    vscode: { alwaysShowLabels: true },
-    standalone: { alwaysShowLabels: true },
+    vscode: { alwaysShowLabels: true, lastSeenVersion: SEEN_VERSION },
+    standalone: { alwaysShowLabels: true, lastSeenVersion: SEEN_VERSION },
     hooksConsent: { claude: 'granted' },
   };
   fs.writeFileSync(path.join(paDir, 'config.json'), JSON.stringify(seedConfig, null, 2));

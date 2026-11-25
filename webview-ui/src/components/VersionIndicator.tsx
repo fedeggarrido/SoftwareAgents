@@ -4,6 +4,7 @@ import { toMajorMinor } from '../changelogData.ts';
 import { WHATS_NEW_AUTO_CLOSE_MS, WHATS_NEW_FADE_MS } from '../constants.ts';
 import { es } from '../i18n/es.js';
 import { Button } from './ui/Button.js';
+import { versionNotice } from './versionNotice.js';
 
 interface VersionIndicatorProps {
   currentVersion: string;
@@ -23,7 +24,11 @@ export function VersionIndicator({
   const [labelHovered, setLabelHovered] = useState(false);
 
   const currentMajorMinor = toMajorMinor(currentVersion);
-  const isUnseen = currentMajorMinor !== lastSeenVersion;
+  const notice = versionNotice(currentVersion, lastSeenVersion);
+  useEffect(() => {
+    if (notice.recordCurrent) onDismiss();
+  }, [notice.recordCurrent, onDismiss]);
+  const isUnseen = notice.showUpdate;
   const showUpdateNotice = isUnseen && !dismissed;
 
   // Start fade-out after auto-close delay, then fully dismiss after the transition
@@ -79,7 +84,7 @@ export function VersionIndicator({
               size="icon"
               aria-label={es.common.close}
               onClick={handleDismiss}
-              className="leading-none"
+              className="leading-none w-44 h-44"
             >
               x
             </Button>

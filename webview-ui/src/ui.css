@@ -852,3 +852,30 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
   line-height: var(--control-target);
   cursor: pointer;
 }
+
+.changelog-body {
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.changelog-body > section + section {
+  margin-top: var(--space-4);
+}
+.changelog-body ul {
+  list-style: disc;
+  padding-left: var(--space-4);
+}
+.changelog-body a {
+  color: var(--color-accent-bright);
+  text-decoration: underline;
+}
+.changelog-links {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+}
+.changelog-links a,
+.changelog-body summary {
+  line-height: var(--control-target);
+}

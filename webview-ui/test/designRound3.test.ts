@@ -36,6 +36,6 @@ it.each(['demo', '1.4.1'])('labels version %s with context', async (version) => 
       onOpenChangelog: () => {},
     }),
   );
-  expect(html).toContain(version === 'demo' ? 'versión: demo' : 'v1.4.1');
+  expect(html).toContain(version === 'demo' ? 'Novedades · versión: demo' : 'Novedades · v1.4.1');
   expect(html).not.toContain('vdemo');
 });

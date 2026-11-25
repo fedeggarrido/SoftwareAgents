@@ -21,7 +21,6 @@ export function VersionIndicator({
 }: VersionIndicatorProps) {
   const [dismissed, setDismissed] = useState(false);
   const [fading, setFading] = useState(false);
-  const [labelHovered, setLabelHovered] = useState(false);
 
   const currentMajorMinor = toMajorMinor(currentVersion);
   const notice = versionNotice(currentVersion, lastSeenVersion);
@@ -92,24 +91,14 @@ export function VersionIndicator({
           <span className="text-sm whitespace-nowrap">{es.version.news}</span>
         </div>
       )}
-      {/* Hover tooltip — "Ver novedades" appears on label hover after notice is gone */}
-      {!showUpdateNotice && labelHovered && (
-        <div
-          onClick={handleOpenChangelog}
-          className="version-hint absolute right-28 layer-notices pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
-        >
-          {es.version.news}
-        </div>
-      )}
-      {/* Version label — always visible */}
-      <div
-        onMouseEnter={() => setLabelHovered(true)}
-        onMouseLeave={() => setLabelHovered(false)}
+      <Button
+        variant="secondary"
+        size="sm"
+        className="version-label absolute right-28 layer-notices"
         onClick={handleOpenChangelog}
-        className="version-label absolute right-28 layer-notices text-lg text-text-muted hover:text-text cursor-pointer select-none pr-2"
       >
-        {currentVersion === 'demo' ? es.version.demo : `v${currentVersion}`}
-      </div>
+        {es.version.label(currentVersion === 'demo' ? es.version.demo : `v${currentVersion}`)}
+      </Button>
     </>
   );
 }

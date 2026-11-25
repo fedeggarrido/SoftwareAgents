@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { expect, test as base } from '../../fixtures/standalone';
 import { launchStandalone } from '../../helpers/standalone';
+import { setSettings } from '../../helpers/webview';
 
 const test = base.extend<{ summarySeed: 'mixed' | 'empty' }>({
   summarySeed: ['mixed', { option: true }],
@@ -325,6 +326,86 @@ test.describe('Standalone / project summary', () => {
         Array(8).fill('Sin trabajo'),
       );
       await expect(panel).not.toContainText('USD');
+      await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).click();
+      await page.getByRole('button', { name: 'M\u00e1s', exact: true }).click();
+      await page.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
+      const instructions = page.locator('.terminal-instructions');
+      await expect(instructions).toContainText('puedes supervisar el proyecto');
+      await expect(instructions.locator('code')).toBeHidden();
+      await instructions.getByText('Comando para el ordenador', { exact: true }).click();
+      await expect(instructions.locator('code')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
     });
   });
 });
+
+for (const width of [375, 390]) {
+  test(`mobile supervision at ${width}px keeps controls separate @area:standalone`, async ({
+    page,
+    standalone,
+  }) => {
+    void standalone;
+    await setSettings(page, { hooksEnabled: true });
+    await page.setViewportSize({ width, height: 812 });
+    const hud = page.getByTestId('company-hud');
+    const zoom = page.getByTestId('zoom-controls');
+    await expect(hud).toBeVisible();
+    await expect(zoom).toBeVisible();
+    await expect(
+      page.getByText('Detecci\u00f3n instant\u00e1nea activa', { exact: true }),
+    ).toBeVisible();
+
+    const boxes = await Promise.all([
+      hud.boundingBox(),
+      page.locator('.office-notices').boundingBox(),
+      zoom.boundingBox(),
+    ]);
+    for (let i = 0; i < boxes.length; i++) {
+      const a = boxes[i];
+      expect(a).not.toBeNull();
+      if (!a) throw new Error('Missing office control');
+      expect(a.x).toBeGreaterThanOrEqual(0);
+      expect(a.x + a.width).toBeLessThanOrEqual(width);
+      for (const b of boxes.slice(i + 1)) {
+        if (!b) throw new Error('Missing office control');
+        expect(
+          a.x + a.width <= b.x ||
+            b.x + b.width <= a.x ||
+            a.y + a.height <= b.y ||
+            b.y + b.height <= a.y,
+        ).toBe(true);
+      }
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const reduce = zoom.getByRole('button', { name: 'Reducir (Ctrl + rueda)', exact: true });
+    await expect(reduce).toBeDisabled();
+    await page.setViewportSize({ width: 700, height: 812 });
+    await expect(reduce).toBeEnabled();
+    await page.setViewportSize({ width, height: 812 });
+    await expect(reduce).toBeDisabled();
+    await zoom.getByRole('button', { name: 'Ampliar (Ctrl + rueda)', exact: true }).click();
+    await page.setViewportSize({ width: width + 1, height: 812 });
+    await expect(reduce).toBeEnabled();
+    const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
+    for (const name of ['Proyecto', 'Trabajo pendiente', 'Decisiones']) {
+      if (name === 'Proyecto')
+        await dock.getByRole('button', { name: 'M\u00e1s', exact: true }).click();
+      const button = dock.getByRole('button', { name, exact: true });
+      const box = await button.boundingBox();
+      if (!box) throw new Error('Missing lower navigation');
+      expect(box.y).toBeGreaterThan(812 / 2);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      await button.click();
+      await expect(page.locator('.panel-window-mobile')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).click();
+    }
+  });
+}

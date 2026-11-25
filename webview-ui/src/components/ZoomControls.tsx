@@ -58,6 +58,7 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
       {/* Zoom level indicator at top-center */}
       {showLevel && (
         <div
+          data-testid="zoom-level"
           className="absolute top-10 left-1/2 -translate-x-1/2 layer-hud pixel-panel pb-4 px-16 text-lg select-none pointer-events-none"
           style={{
             opacity: fadeOut ? 0 : 1,

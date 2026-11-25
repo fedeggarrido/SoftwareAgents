@@ -33,6 +33,7 @@ import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { StatusChip } from './StatusChip.js';
+import { TerminalInstructions } from './TerminalInstructions.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -151,12 +152,14 @@ export function FeaturesPanel({
           <div role="status">
             {state === 'loading' && 'Cargando funcionalidades…'}
             {state === 'empty' && (
-              <p>
-                Sin funcionalidades todavía. Se crean con{' '}
-                <code className="feature-command">
-                  {'pixel-agents feature run <FEAT> --request <file>'}
-                </code>
-              </p>
+              <TerminalInstructions>
+                <p>
+                  Sin funcionalidades todavía. Se crean con{' '}
+                  <code className="feature-command">
+                    {'pixel-agents feature run <FEAT> --request <file>'}
+                  </code>
+                </p>
+              </TerminalInstructions>
             )}
             {state === 'denied' && 'Acceso denegado a las funcionalidades'}
           </div>

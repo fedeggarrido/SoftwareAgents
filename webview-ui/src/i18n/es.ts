@@ -15,6 +15,7 @@ export const es = {
     unknownStatus: 'No consta en qué estado está la reunión.',
     interventionTitle: 'Tu intervención',
     openDecision: 'Ver decisión',
+    openDecisions: 'Ver decisiones',
     result: 'Resultado',
     roundsTitle: 'Rondas recientes',
     currentRound: 'en curso',
@@ -42,7 +43,7 @@ export const es = {
     unsentAction:
       'La acción no se ha enviado porque no hay conexión. Repítela cuando la oficina vuelva a conectar.',
     unsentSave:
-      'El diseño aún no se ha guardado en la oficina. Se guardará al recuperar la conexión.',
+      'El diseño aún no se ha guardado en la oficina. Se guardará si esta pestaña recupera la conexión; no la cierres ni la recargues.',
     dismiss: 'Entendido',
   },
   features: {

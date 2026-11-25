@@ -40,7 +40,10 @@ export function EditActionBar({ editor, editorState }: EditActionBarProps) {
         variant="secondary"
         size="md"
         disabled={!editor.isDirty}
-        onClick={editor.handleSave}
+        onClick={() => {
+          setShowResetConfirm(false);
+          editor.handleSave();
+        }}
         title={es.office.saveDesign}
       >
         Guardar

@@ -11,7 +11,7 @@ const snapshot = () => transport.state;
 
 export function ConnectionIndicator() {
   const state = useSyncExternalStore(subscribe, snapshot, snapshot);
-  const { unsent } = useConnectionStatus();
+  const { unsentAction, unsentSave } = useConnectionStatus();
   return (
     <>
       {state !== 'connected' && (
@@ -19,12 +19,15 @@ export function ConnectionIndicator() {
           <OfficeConnectionHelp />
         </div>
       )}
-      {unsent && (
+      {(unsentAction || unsentSave) && (
         <div className="connection-unsent pixel-panel" data-testid="connection-unsent">
-          <p role="alert">
-            {unsent === 'action' ? es.connection.unsentAction : es.connection.unsentSave}
-          </p>
-          <Button size="sm" onClick={() => setUnsent(null)}>
+          <p role="alert">{unsentAction ? es.connection.unsentAction : es.connection.unsentSave}</p>
+          <Button
+            size="sm"
+            onClick={() =>
+              setUnsent(unsentAction ? { unsentAction: false } : { unsentSave: false })
+            }
+          >
             {es.connection.dismiss}
           </Button>
         </div>

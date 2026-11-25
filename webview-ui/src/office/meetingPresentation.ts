@@ -46,6 +46,7 @@ export function meetingPresentation(
       }),
     ),
     decision,
+    needsOwner: !!decision || meeting.status === 'escalated',
     intervention: decision
       ? copy.sameTaskDecision
       : (labelOf(NO_DECISION_TEXT, meeting.status) ?? copy.unknownStatus),

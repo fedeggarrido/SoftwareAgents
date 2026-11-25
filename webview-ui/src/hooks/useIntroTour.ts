@@ -68,8 +68,12 @@ export function useIntroTour(args: {
   const onChoice = useCallback((choice: ConsentChoice) => {
     const providerId = providerIdRef.current;
     if (!providerId) return; // no ask on screen: nothing to answer about
+    try {
+      transport.send({ type: 'hooksConsentResponse', providerId, choice });
+    } catch {
+      return; // Offline: the connection notice explains it and the ask stays open.
+    }
     dispatch({ kind: 'choiceSent', choice });
-    transport.send({ type: 'hooksConsentResponse', providerId, choice });
   }, []);
 
   const { dismissConsentRequest } = args;

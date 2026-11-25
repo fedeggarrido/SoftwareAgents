@@ -244,6 +244,9 @@ function App() {
   // user has toggled Show Areas off globally — they need to see what they're
   // editing. The selected area's overlay is alpha-bumped via activeAreaLabel.
   const isEditingAreas = editor.isEditMode && editorState.activeTool === EditTool.AREA_PAINT;
+  const meetingAttendee = getOfficeState()
+    .getCharacters()
+    .find((character) => character.isInMeeting);
   const effectiveShowAreas = isEditingAreas || showAreas;
   const activeAreaLabel = isEditingAreas ? editor.selectedAreaLabel : null;
 
@@ -548,9 +551,7 @@ function App() {
           onMenuOpenChange={setIsDockMenuOpen}
           isEditMode={editor.isEditMode}
           editActions={
-            editor.isEditMode && editor.isDirty ? (
-              <EditActionBar editor={editor} editorState={editorState} />
-            ) : null
+            editor.isEditMode ? <EditActionBar editor={editor} editorState={editorState} /> : null
           }
           onOpenClaude={editor.handleOpenClaude}
           onToggleEditMode={editor.handleToggleEditMode}
@@ -661,7 +662,19 @@ function App() {
             isOpen={panel.isOpen && panel.tab === 'decisions'}
             onClose={panel.close}
           />
-          {panel.isOpen && panel.tab === 'meeting' && <MeetingPanel hosted />}
+          {panel.isOpen && panel.tab === 'meeting' && (
+            <MeetingPanel
+              onOpenDecisions={() => panel.select('decisions')}
+              onShowRoom={
+                meetingAttendee
+                  ? () => {
+                      getOfficeState().cameraFollowId = meetingAttendee.id;
+                      if (panel.mobile) panel.close();
+                    }
+                  : undefined
+              }
+            />
+          )}
         </PanelWindow>
         {isNewIdeaOpen && (
           <NewIdeaDialog

@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { OFFICE_START_COMMAND, RELATIVE_SECOND_MS } from '../constants.js';
-import { connectionCopy, useConnectionStatus } from '../office/connectionStatus.js';
+import { connectionCopy, staleDataText, useConnectionStatus } from '../office/connectionStatus.js';
 import { transport } from '../transport/index.js';
 import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
@@ -21,6 +21,7 @@ export function OfficeConnectionHelp() {
   }, [state]);
   if (state === 'connected') return null;
   const copy = connectionCopy(state, status, now);
+  const stale = staleDataText(status.lastContactAt);
   if (minimised) {
     return (
       <Button
@@ -37,6 +38,7 @@ export function OfficeConnectionHelp() {
   return (
     <div className="office-connection-help pixel-panel">
       <p role="status">{copy.label}</p>
+      {stale && <p>{stale}</p>}
       <Button
         size="sm"
         onClick={() => {

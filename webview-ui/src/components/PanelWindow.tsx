@@ -9,9 +9,11 @@ import {
   PANEL_WINDOW_Z_INDEX,
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
+import { useConnectionStatus } from '../office/connectionStatus.js';
 import type { PanelRect, PanelTab } from '../office/panelWindowState.js';
 import { resizePanelRect } from '../office/panelWindowState.js';
 import { DockIcon } from './DockIcon.js';
+import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
 
 interface PanelWindowProps {
@@ -36,6 +38,8 @@ export function PanelWindow({
   children,
 }: PanelWindowProps) {
   const label = PANEL_TABS.find((entry) => entry.id === tab)?.label;
+  const { state, lastContactAt } = useConnectionStatus();
+  const stale = state !== undefined && state !== 'connected' && !!lastContactAt;
   const titleRef = useRef<HTMLDivElement>(null);
   const windowRef = useRef<HTMLElement>(null);
   const gesture = useRef<{
@@ -139,6 +143,7 @@ export function PanelWindow({
         onLostPointerCapture={end}
       >
         <span className="min-w-0 flex-1">{label}</span>
+        {stale && <StatusChip state="stale" />}
         <Button
           size="sm"
           variant="ghost"

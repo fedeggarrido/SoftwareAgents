@@ -1,92 +1,83 @@
 import { useState } from 'react';
 
-import { DEPARTMENT_COLORS, QUOTA_COLORS } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { roleLabel } from '../i18n/roles.js';
 import { useBoard } from '../office/boardStore.js';
+import { meetingPresentation, meetingRoundLabel } from '../office/meetingPresentation.js';
+import { StatusChip } from './StatusChip.js';
+import { Button } from './ui/Button.js';
 
-const ROUND_LABELS: Record<string, string> = {
-  borrador: 'Borradores independientes',
-  critica: 'Crítica cruzada',
-  premortem: 'Pre-mortem',
-  'delphi-1': 'Delphi · ronda 1',
-  'delphi-2': 'Delphi · ronda 2',
-  decision: 'Decisión del juez',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  running: 'en curso',
-  waiting_quota: 'en espera de cuota',
-  decided: 'decidida',
-  escalated: 'escalada al propietario',
-};
-
-/** Rough department by role name, for coloring who speaks. */
-function colorOf(role: string): string {
-  if (role === 'company-manager') return DEPARTMENT_COLORS['Dirección'];
-  if (/reviewer|testing|validation/.test(role)) return DEPARTMENT_COLORS['Calidad'];
-  if (/analyst|strategist|challenger/.test(role)) return DEPARTMENT_COLORS['Análisis'];
-  if (/design|ux/.test(role)) return DEPARTMENT_COLORS['Diseño'];
-  return DEPARTMENT_COLORS['Ingeniería'];
+interface MeetingPanelProps {
+  onOpenDecisions: () => void;
+  /** Absent while no participant is in the physical room. */
+  onShowRoom?: () => void;
 }
 
 /** What the agents are discussing in the meeting room, round by round. */
-export function MeetingPanel({ hosted = false }: { hosted?: boolean }) {
+export function MeetingPanel({ onOpenDecisions, onShowRoom }: MeetingPanelProps) {
   const board = useBoard();
   const [open, setOpen] = useState(true);
   const m = board?.meeting;
-  if (!m)
-    return (
-      <p className="p-8 text-xs text-text-muted">
-        Una reunión es una conversación entre agentes para contrastar propuestas y acordar una
-        decisión. Aparece cuando una tarea necesita varias perspectivas. Ahora no hay ninguna en
-        curso.
-      </p>
-    );
-  const status = STATUS_LABELS[m.status] ?? m.status;
+  const copy = es.meeting;
+  if (!m) return <p className="meeting-panel p-10">{copy.empty}</p>;
+  const view = meetingPresentation(m, board.decisions);
   return (
     <div
-      className="read-only-panel p-8 flex flex-col gap-4"
+      className="read-only-panel meeting-panel p-10 flex flex-col gap-8"
       data-testid="meeting-panel"
       role="region"
       aria-label="Reuniones"
     >
-      <div className="panel-toolbar flex flex-wrap items-center gap-8">
-        <button
-          aria-expanded={open}
-          className="cursor-pointer text-left text-xs"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? '▾' : '▸'}{' '}
-          {hosted ? (open ? 'Ocultar detalles' : 'Mostrar detalles') : 'Sala de reuniones'}
-        </button>
-        <span className="ui-info text-text-muted">{status}</span>
+      <div className="flex flex-wrap items-center gap-8">
+        <StatusChip state={view.chip} />
+        {view.format && <span>{view.format}</span>}
+      </div>
+      <h3>{m.topic}</h3>
+      <p>{m.question}</p>
+      <section className="meeting-intervention" aria-label={copy.interventionTitle}>
+        <p>
+          <strong>{view.intervention}</strong>
+        </p>
+        {view.decision && <p>{view.decision.question}</p>}
+        {view.needsOwner && (
+          <Button variant="primary" onClick={onOpenDecisions}>
+            {view.decision ? copy.openDecision : copy.openDecisions}
+          </Button>
+        )}
+        {m.status === 'waiting_quota' && m.waitReason && <p>{m.waitReason}</p>}
+      </section>
+      {m.decision && (
+        <p>
+          <strong>{copy.result}:</strong> {m.decision}
+        </p>
+      )}
+      <section aria-label={copy.roundsTitle}>
+        <h3>{copy.roundsTitle}</h3>
+        <ol className="meeting-rounds">
+          {view.rounds.map((round, index) => (
+            <li key={index} aria-current={round.current ? 'step' : undefined}>
+              {round.label}
+              {round.current && ` (${copy.currentRound})`}
+            </li>
+          ))}
+        </ol>
+      </section>
+      <div className="flex flex-wrap gap-8">
+        {onShowRoom && <Button onClick={onShowRoom}>{copy.showRoom}</Button>}
+        <Button aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          {open ? copy.hideDetails : copy.showDetails}
+        </Button>
       </div>
       {open && (
-        <>
-          <div className="text-2xs leading-tight">
-            <span className="text-text-muted">{m.format}</span> · {m.topic}
-          </div>
-          <div className="text-2xs text-text-muted leading-tight">{m.question}</div>
-          {m.status === 'waiting_quota' && m.waitReason && (
-            <div className="text-2xs" style={{ color: QUOTA_COLORS.rejected }}>
-              ⏸ {m.waitReason}
-            </div>
-          )}
-          {m.lines.map((l, i) => (
-            <div key={`${l.at}-${i}`} className="text-2xs leading-tight">
-              <div className="text-text-muted">{ROUND_LABELS[l.round] ?? l.round}</div>
-              <span style={{ color: colorOf(l.role) }}>{roleLabel(l.role)}</span>: {l.stance}
-            </div>
+        <ul className="meeting-lines">
+          {m.lines.length === 0 && <li>{copy.noLines}</li>}
+          {m.lines.map((line, index) => (
+            <li key={`${line.at}-${index}`}>
+              <strong>{roleLabel(line.role)}</strong> · {meetingRoundLabel(line.round)}
+              <p>{line.stance}</p>
+            </li>
           ))}
-          {m.decision && (
-            <div
-              className="text-xs border-t-2 border-border pt-4"
-              style={{ color: DEPARTMENT_COLORS['Dirección'] }}
-            >
-              Decisión: {m.decision}
-            </div>
-          )}
-        </>
+        </ul>
       )}
     </div>
   );

@@ -9,12 +9,19 @@ import {
   OFFICE_ORIGIN_TEXT,
   RELATIVE_SECOND_MS,
 } from '../constants.js';
+import { es } from '../i18n/es.js';
 
 export interface ConnectionStatus {
   state?: TransportState;
   cause: 'unavailable' | 'unauthorized' | 'origin';
   attempt: number;
   retryAt: number | null;
+  /** Last message received from the office; null until the first one. */
+  lastContactAt?: number | null;
+  /** A refused action: its notice outlives the reconnection until dismissed. */
+  unsentAction?: boolean;
+  /** A layout save waiting for the reconnection. */
+  unsentSave?: boolean;
 }
 const empty: ConnectionStatus = { cause: 'unavailable', attempt: 0, retryAt: null };
 let current = empty;
@@ -24,6 +31,9 @@ export function setConnectionStatus(status: ConnectionStatus): void {
   current = status;
   for (const listener of listeners) listener();
 }
+export function setUnsent(change: Pick<ConnectionStatus, 'unsentAction' | 'unsentSave'>): void {
+  setConnectionStatus({ ...current, ...change });
+}
 export function useConnectionStatus(): ConnectionStatus {
   return useSyncExternalStore(
     (listener) => {
@@ -32,6 +42,13 @@ export function useConnectionStatus(): ConnectionStatus {
     },
     getConnectionStatus,
     getConnectionStatus,
+  );
+}
+
+export function staleDataText(lastContactAt: number | null | undefined): string | null {
+  if (!lastContactAt) return null;
+  return es.connection.staleSince(
+    new Date(lastContactAt).toLocaleTimeString('es-ES', { timeStyle: 'medium' }),
   );
 }
 

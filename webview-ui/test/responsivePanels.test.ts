@@ -535,7 +535,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await sheet
           .getByRole('button', { name: 'Editar diseño de la oficina', exact: true })
           .click();
-        expect(await dock.getByRole('button').count()).toBe(3);
+        // Exit, settings and the always-present Deshacer, Rehacer, Guardar, Restablecer.
+        expect(await dock.getByRole('button').count()).toBe(7);
         expect(await dock.evaluate(fitsHorizontally)).toBe(true);
         const dockBox = (await dock.boundingBox())!;
         expect(dockBox.x).toBeGreaterThanOrEqual(0);
@@ -727,8 +728,14 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           .getByRole('button', { name: /Reuniones/ })
           .waitFor();
       };
-      // A new meeting opens a closed window, without stealing another open tab.
+      // A new meeting only announces itself: it never opens the window over other controls.
       await sendMeeting('meeting-1');
+      await page
+        .getByTestId('company-hud')
+        .getByRole('status', { name: 'Nueva actividad' })
+        .waitFor();
+      expect(await windowPanel.count()).toBe(0);
+      await openPanel(page, 'Reuniones');
       await activePanel(page, 'Reuniones').waitFor();
       await expectWindowOwnsHeading(page, 'Reuniones');
       const meetingDetails = page

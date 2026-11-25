@@ -52,16 +52,16 @@ export function BottomToolbar({
   const toolbarRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
-    const viewport = toolbar?.parentElement;
-    if (!toolbar || !viewport) return;
+    const shell = toolbar?.closest<HTMLElement>('.office-shell');
+    if (!toolbar || !shell) return;
     const update = () =>
-      viewport.style.setProperty('--office-dock-height', toolbar.offsetHeight + 'px');
+      shell.style.setProperty('--office-dock-height', toolbar.offsetHeight + 'px');
     const observer = new ResizeObserver(update);
     observer.observe(toolbar);
     update();
     return () => {
       observer.disconnect();
-      viewport.style.removeProperty('--office-dock-height');
+      shell.style.removeProperty('--office-dock-height');
     };
   }, []);
   const board = useBoard();

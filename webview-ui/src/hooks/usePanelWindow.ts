@@ -117,12 +117,11 @@ export function usePanelWindow(ready: boolean) {
   useLayoutEffect(() => {
     if (!ready) return;
     if (meetingId && meetingId !== previousMeeting.current) {
-      if (!isOpen) select('meeting');
-      else if (preferences.lastTab !== 'meeting') setMeetingUnread(true);
+      setMeetingUnread(true);
     }
     previousMeeting.current = meetingId;
-    if (isOpen && preferences.lastTab === 'meeting') setMeetingUnread(false);
-  }, [ready, meetingId, isOpen, preferences.lastTab, select]);
+    if (!meetingId || (isOpen && preferences.lastTab === 'meeting')) setMeetingUnread(false);
+  }, [ready, meetingId, isOpen, preferences.lastTab]);
   const toggle = (tab: PanelTab) => {
     if (isOpen && preferences.lastTab === tab) setIsOpen(false);
     else select(tab);

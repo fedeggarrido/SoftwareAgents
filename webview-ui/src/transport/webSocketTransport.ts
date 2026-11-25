@@ -11,7 +11,9 @@ import {
   OFFICE_RETRY_BASE_MS,
   OFFICE_RETRY_MAX_MS,
 } from '../constants.js';
-import { getConnectionStatus, setConnectionStatus } from '../office/connectionStatus.js';
+import type { ConnectionStatus } from '../office/connectionStatus.js';
+import { getConnectionStatus, setConnectionStatus, setUnsent } from '../office/connectionStatus.js';
+import { offlineHandling } from './offlinePolicy.js';
 import type { MessageTransport, TransportState } from './types.js';
 
 // Structural socket contract keeps transport regressions runnable without DOM types.
@@ -25,15 +27,6 @@ interface TransportSocket {
   onerror: (() => void) | null;
 }
 const SOCKET_OPEN = 1;
-const LIVE_CONNECTION_COMMANDS: ReadonlySet<ClientMessage['type']> = new Set([
-  'setExecutorEnabled',
-  'setExecutorLevels',
-  'submitIdea',
-  'prepareProject',
-  'rotateOfficeToken',
-  'submitTaskChange',
-]);
-
 /**
  * WebSocket transport for standalone browser mode.
  * Connects to the Pixel Agents server via WebSocket for bidirectional messaging.
@@ -49,6 +42,7 @@ export class WebSocketTransport implements MessageTransport {
   private disposed = false;
   private resolvingUrl = false;
   private pendingMessages: ClientMessage[] = [];
+  private lastContactAt: number | null = null;
   private _state: TransportState = TRANSPORT_STATE_CONNECTING;
   private readonly _ready: Promise<void>;
   private resolveReady!: () => void;
@@ -69,10 +63,18 @@ export class WebSocketTransport implements MessageTransport {
   }
 
   private setState(next: TransportState): void {
-    setConnectionStatus({ ...getConnectionStatus(), state: next });
+    this.updateStatus({ state: next });
     if (this._state === next) return;
     this._state = next;
     for (const handler of this.stateHandlers) handler(next);
+  }
+
+  private updateStatus(change: Partial<ConnectionStatus>): void {
+    setConnectionStatus({
+      ...getConnectionStatus(),
+      ...change,
+      lastContactAt: this.lastContactAt,
+    });
   }
 
   connect(): void {
@@ -99,18 +101,21 @@ export class WebSocketTransport implements MessageTransport {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
-      setConnectionStatus({ cause: 'unavailable', attempt: 0, retryAt: null });
+      this.updateStatus({ cause: 'unavailable', attempt: 0, retryAt: null });
       console.log('[Transport] WebSocket connected');
-      this.setState(TRANSPORT_STATE_CONNECTED);
-      this.resolveReady();
       // Flush any messages queued while connecting
       for (const msg of this.pendingMessages) {
         this.ws!.send(JSON.stringify(msg));
       }
       this.pendingMessages = [];
+      // Pending saves go first, so the new handshake already reads them back.
+      this.setState(TRANSPORT_STATE_CONNECTED);
+      this.resolveReady();
+      if (getConnectionStatus().unsentSave) setUnsent({ unsentSave: false });
     };
 
     this.ws.onmessage = (e) => {
+      this.lastContactAt = Date.now();
       try {
         const msg = JSON.parse(e.data as string) as ServerMessage;
         for (const handler of this.handlers) handler(msg);
@@ -128,7 +133,7 @@ export class WebSocketTransport implements MessageTransport {
               ? 'origin'
               : 'unavailable';
         if (cause !== 'unavailable') {
-          setConnectionStatus({ cause, attempt: 0, retryAt: null });
+          this.updateStatus({ cause, attempt: 0, retryAt: null });
           this.setState(TRANSPORT_STATE_DISCONNECTED);
           return;
         }
@@ -159,19 +164,33 @@ export class WebSocketTransport implements MessageTransport {
       this.ws.close();
     }
     this.reconnectAttempts++;
-    setConnectionStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
+    this.updateStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
     this.connect();
   }
 
   send(message: ClientMessage): void {
     if (this.ws?.readyState === SOCKET_OPEN) {
       this.ws.send(JSON.stringify(message));
-    } else {
-      // Mutations are only valid for the live connection and its confirmed revision.
-      if (LIVE_CONNECTION_COMMANDS.has(message.type))
+      return;
+    }
+    switch (offlineHandling(message.type)) {
+      case 'live':
+        setUnsent({ unsentAction: true });
         throw new Error('Office mutations require a connected transport');
-      // Queue messages while connecting (flushed in onopen)
-      this.pendingMessages.push(message);
+      case 'action':
+        setUnsent({ unsentAction: true });
+        return;
+      case 'save': {
+        const rest = this.pendingMessages.filter(({ type }) => type !== message.type);
+        // Only the first pending save is announced: a dismissed notice stays dismissed.
+        if (message.type === 'saveLayout' && rest.length === this.pendingMessages.length)
+          setUnsent({ unsentSave: true });
+        this.pendingMessages = [...rest, message];
+        return;
+      }
+      case 'read':
+        // Queue messages while connecting (flushed in onopen)
+        this.pendingMessages.push(message);
     }
   }
 
@@ -216,7 +235,7 @@ export class WebSocketTransport implements MessageTransport {
     // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
     const delay = Math.min(OFFICE_RETRY_BASE_MS * 2 ** this.reconnectAttempts, OFFICE_RETRY_MAX_MS);
     this.reconnectAttempts++;
-    setConnectionStatus({
+    this.updateStatus({
       cause: 'unavailable',
       attempt: this.reconnectAttempts,
       retryAt: Date.now() + delay,
@@ -226,7 +245,7 @@ export class WebSocketTransport implements MessageTransport {
     );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      setConnectionStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
+      this.updateStatus({ cause: 'unavailable', attempt: this.reconnectAttempts, retryAt: null });
       this.connect();
     }, delay);
   }

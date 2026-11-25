@@ -61,6 +61,12 @@ for (const width of [390, 1440]) {
     await expect(exit).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Edición de la oficina' })).toBeVisible();
 
+    // The mode bar is complete before the first change.
+    const undo = page.getByRole('button', { name: 'Deshacer', exact: true });
+    const save = page.getByRole('button', { name: 'Guardar', exact: true });
+    await expect(undo).toBeDisabled();
+    await expect(save).toBeDisabled();
+
     // Real UI edits a pet: no internal state writes or hooks bypass.
     await page.getByRole('button', { name: 'Mascotas', exact: true }).click();
     const pet = page.getByRole('button', { name: 'Claudio', exact: true });
@@ -73,8 +79,7 @@ for (const width of [390, 1440]) {
         return !!tools && !!dock && tools.y + tools.height <= dock.y;
       })
       .toBe(true);
-    const save = page.getByRole('button', { name: 'Guardar', exact: true });
-    await expect(save).toBeVisible();
+    await expect(save).toBeEnabled();
     const layoutFile = path.join(standalone.tmpHome, '.pixel-agents', 'layout.json');
     await expect.poll(() => fs.existsSync(layoutFile)).toBe(true);
     await expect.poll(() => JSON.parse(fs.readFileSync(layoutFile, 'utf8')).pets?.length).toBe(1);
@@ -88,13 +93,39 @@ for (const width of [390, 1440]) {
       page.locator('.bottom-toolbar').getByRole('button', { name: 'Nueva idea', exact: true }),
     ).toBeVisible();
     await openDockAction(page, 'Editar diseño de la oficina');
-    await expect(save).toBeVisible();
+    await expect(save).toBeEnabled();
     expect(fs.readFileSync(layoutFile, 'utf8')).toBe(edited);
     await page.getByRole('button', { name: 'Restablecer', exact: true }).click();
     await page.getByRole('button', { name: 'Sí', exact: true }).click();
-    await expect(save).toBeHidden();
+    await expect(save).toBeDisabled();
     await expect
       .poll(() => JSON.parse(fs.readFileSync(layoutFile, 'utf8')).pets?.length ?? 0)
       .toBe(0);
   });
 }
+
+test('resizing redraws the office without waiting for an animation frame @area:standalone', async ({
+  page,
+  standalone: _standalone,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const canvas = page.locator('canvas[data-ready="true"]');
+  await expect(canvas).toBeVisible();
+  // A background tab stops delivering frames: the next one never comes here.
+  await page.evaluate(() => {
+    window.requestAnimationFrame = () => 0;
+  });
+  const size = await canvas.evaluate((element: HTMLCanvasElement) => element.width);
+  await page.setViewportSize({ width: 1300, height: 850 });
+  await expect
+    .poll(() =>
+      page.locator('canvas').evaluate((element: HTMLCanvasElement, before) => {
+        const context = element.getContext('2d');
+        if (!context || element.width === before) return false;
+        return context
+          .getImageData(0, 0, element.width, element.height)
+          .data.some((value) => value > 0);
+      }, size),
+    )
+    .toBe(true);
+});

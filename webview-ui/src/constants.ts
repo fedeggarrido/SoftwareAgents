@@ -9,6 +9,8 @@ export const UI_LAYERS = {
   connection: 31,
   modal: 40,
   modalContent: 41,
+  /** A refused action is usually a dialog's: it must read over it. */
+  alert: 42,
 } as const;
 
 import type { ColorValue } from './components/ui/types.js';
@@ -665,6 +667,7 @@ export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
   needs_you: { label: 'Necesita tu aprobación', icon: 'attention', tone: 'attention' },
   in_review: { label: 'Requisitos en revisión', icon: 'clock', tone: 'attention' },
   in_design: { label: 'En diseño', icon: 'play', tone: 'active' },
+  stale: { label: es.connection.stale, icon: 'clock', tone: 'attention' },
   feature_tasks_complete: { label: es.features.tasksComplete, icon: 'clock', tone: 'attention' },
   in_development: { label: 'En desarrollo', icon: 'play', tone: 'active' },
   ready_to_merge: { label: 'Lista para integrar', icon: 'check', tone: 'attention' },
@@ -675,6 +678,8 @@ export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
   unbound: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
   pending: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
   meeting: { label: 'En reunión', icon: 'clock', tone: 'active' },
+  meeting_decided: { label: 'Decisión tomada', icon: 'check', tone: 'success' },
+  meeting_escalated: { label: 'Necesita tu decisión', icon: 'attention', tone: 'attention' },
   unknown: { label: 'Sin estado registrado', icon: 'minus', tone: 'muted' },
 };
 

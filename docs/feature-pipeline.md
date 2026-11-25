@@ -1768,7 +1768,7 @@ y su hash SHA-256 del extracto; máximo `RESEARCH_EXCERPT_CHARS` (4000), no obra
 
 ResearchReport exige findings con tipo fact/opinion/anecdote, motivo y referencias
 existentes; referencias inexistentes fallan cerrado. Confianza high/medium requiere dos
-fuentes con extractos diferentes, autor/canal identificable distinto **y** dominio
+fuentes con extractos diferentes, autor/canal distinto cuando ambos se conocen **y** dominio
 distinto; esta heurística conservadora rebaja a low con motivo si no hay independencia
 demostrable. No garantiza independencia editorial ni verdad semántica. Contradicciones
 también citan fuentes. Citas exactas, atribuidas y limitadas a `RESEARCH_QUOTE_CHARS`
@@ -1837,7 +1837,7 @@ a los mismos 4000 caracteres; citas siguen limitadas a 300 por fuente. Cambios e
 HTML, restricciones regionales, consentimiento o bloqueos públicos pueden impedir
 recuperar evidencia. No hay evasión de acceso ni garantía de disponibilidad.
 
-TODO fase B: Google Books opcional y podcasts.
+Podcasts e importancia: [contrato y límites SA-106](research-evidence.md). TODO: Google Books opcional.
 La investigación posterior al plan pertenece a SA-113.
 
 ## Investigación previa al plan (SA-112)

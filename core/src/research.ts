@@ -28,6 +28,8 @@ export interface ResearchReport {
   findings: {
     claim: string;
     topic?: ResearchTopic;
+    /** Model-labelled significance; absent in legacy reports means not important. */
+    important?: boolean;
     type: 'fact' | 'opinion' | 'anecdote';
     confidence: 'high' | 'medium' | 'low';
     reason: string;

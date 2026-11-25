@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
@@ -19,6 +20,8 @@ import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
 interface BottomToolbarProps {
   isEditMode: boolean;
+  /** Save, undo and reset live with the exit so nothing overlays them. */
+  editActions?: ReactNode;
   onOpenClaude: () => void;
   onToggleEditMode: () => void;
   isSettingsOpen: boolean;
@@ -32,6 +35,7 @@ interface BottomToolbarProps {
 
 export function BottomToolbar({
   isEditMode,
+  editActions,
   onOpenClaude,
   onToggleEditMode,
   isSettingsOpen,
@@ -42,6 +46,21 @@ export function BottomToolbar({
   onMenuOpenChange,
   workspaceFolders,
 }: BottomToolbarProps) {
+  const toolbarRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    const viewport = toolbar?.parentElement;
+    if (!toolbar || !viewport) return;
+    const update = () =>
+      viewport.style.setProperty('--office-dock-height', toolbar.offsetHeight + 'px');
+    const observer = new ResizeObserver(update);
+    observer.observe(toolbar);
+    update();
+    return () => {
+      observer.disconnect();
+      viewport.style.removeProperty('--office-dock-height');
+    };
+  }, []);
   const board = useBoard();
   const [prNow, setPrNow] = useState(Date.now);
   useEffect(() => {
@@ -224,9 +243,10 @@ export function BottomToolbar({
     <button
       type="button"
       className="dock-button dock-icon-button"
-      title={isEditMode ? 'Salir de edición' : es.navigation.editDesign}
-      aria-label={isEditMode ? 'Salir de edición' : es.navigation.editDesign}
+      title={isEditMode ? es.office.exitEditing : es.navigation.editDesign}
+      aria-label={isEditMode ? es.office.exitEditing : es.navigation.editDesign}
       aria-pressed={isEditMode}
+      aria-describedby={isEditMode ? 'editing-help' : undefined}
       onClick={() => {
         setMoreOpen(false);
         setIsFolderPickerOpen(false);
@@ -236,7 +256,7 @@ export function BottomToolbar({
     >
       <DockIcon name="edit" />
       {(isEditMode || moreVisible) && (
-        <span>{isEditMode ? 'Salir de edición' : es.navigation.editDesign}</span>
+        <span>{isEditMode ? es.office.exitEditing : es.navigation.editDesign}</span>
       )}
     </button>
   );
@@ -283,11 +303,17 @@ export function BottomToolbar({
 
   return (
     <nav
+      ref={toolbarRef}
       className={`bottom-toolbar pixel-panel ${mobile ? 'dock-mobile' : ''} ${isEditMode ? 'dock-editing' : ''}`}
       aria-label="Controles de la oficina"
     >
       {isEditMode ? (
         <>
+          <div className="editing-context">
+            <h2>{es.office.editingTitle}</h2>
+            <p id="editing-help">{es.office.editingHelp}</p>
+          </div>
+          {editActions}
           {editButton}
           {/* Agents can still be opened while arranging seats and areas, as before. */}
           {agentControl}

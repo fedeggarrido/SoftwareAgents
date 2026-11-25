@@ -17,7 +17,7 @@ export function EditActionBar({ editor, editorState }: EditActionBarProps) {
   const redoDisabled = editorState.redoStack.length === 0;
 
   return (
-    <div className="absolute top-8 left-1/2 -translate-x-1/2 layer-hud flex gap-4 items-center pixel-panel p-4">
+    <div className="flex flex-wrap max-sm:basis-full gap-4 items-center px-8">
       <Button
         variant="secondary"
         disabled={undoDisabled}

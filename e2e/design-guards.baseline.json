@@ -80,7 +80,6 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "settings|mobile|touch-target|input.flex-1|",
     "reason": "Text input under 44 px tall on mobile. Fix in SA-152."
   },
   {

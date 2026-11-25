@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 interface CheckboxProps {
   checked: boolean;
   onChange: () => void;
@@ -7,17 +9,23 @@ interface CheckboxProps {
 }
 
 export function Checkbox({ checked, onChange, label, help, className = '' }: CheckboxProps) {
+  const helpId = useId();
   return (
     <button
       onClick={onChange}
       role="checkbox"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={help ? helpId : undefined}
       className={`flex items-center justify-between w-full py-6 px-10 bg-transparent border-none rounded-none cursor-pointer text-left hover:bg-btn-bg ${className}`}
     >
       <span>
         {label}
-        {help && <span className="setting-help">{help}</span>}
+        {help && (
+          <span id={helpId} className="setting-help">
+            {help}
+          </span>
+        )}
       </span>
       <span
         className={`w-14 h-14 border-2 border-white/50 rounded-none shrink-0 flex items-center justify-center text-2xs pl-1.5 pb-4 leading-none text-white ${checked ? 'bg-accent' : 'bg-transparent'}`}

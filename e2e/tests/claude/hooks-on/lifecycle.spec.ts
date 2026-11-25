@@ -1711,7 +1711,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
     // Exit edit mode and confirm the editor button disappears.
     narrator.step('exiting Layout mode');
-    await openDockAction(frame, 'Salir de edición');
+    await openDockAction(frame, 'Salir de la edición');
     await expect(paintFloorBtn).toBeHidden({ timeout: 5_000 });
     narrator.check('exiting Layout mode hides the editor toolbar');
   });

@@ -318,6 +318,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
                   return () => window.removeEventListener('message', listener);
                 },
                 send(message) {
+                  if (message.type === 'companyDecision') (window.decisionSends ??= []).push(message);
                   if (message.type === 'requestFeatures') queueMicrotask(() => window.postMessage({
                     type: 'featuresSnapshot', projectId: message.projectId, requestId: message.requestId,
                     status: 'ok', reason: null, features: [{ key: 'FEAT-001', title: 'A feature',
@@ -356,6 +357,115 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await page.goto('http://office-window.test/');
       await page.addScriptTag({ content: script });
       await boot(page);
+      const decisionBoard = {
+        ...board,
+        decisions: [
+          {
+            id: 'review',
+            question: '¿Esperar?',
+            status: 'open',
+            urgency: 'critical',
+            options: ['Esperar', 'Continuar'],
+          },
+        ],
+      };
+      const publishDecision = async (status = 'open') => {
+        await page.evaluate(
+          `window.setHudBoard(${JSON.stringify({ ...decisionBoard, decisions: [{ ...decisionBoard.decisions[0], status }] })})`,
+        );
+      };
+      await publishDecision();
+      await openPanel(page, 'Decisiones');
+      const decisionPanel = page.getByTestId('decisions-panel');
+      const choose = decisionPanel.getByRole('button', { name: 'Esperar', exact: true });
+      await choose.dblclick();
+      expect(
+        await decisionPanel.getByRole('button', { name: 'Confirmar', exact: true }).count(),
+      ).toBe(1);
+      expect(await page.evaluate('(window.decisionSends ?? []).length')).toBe(0);
+      await page.keyboard.press('Escape');
+      expect(await decisionPanel.count()).toBe(0);
+      expect(await page.evaluate('(window.decisionSends ?? []).length')).toBe(0);
+      await openPanel(page, 'Decisiones');
+      await choose.click();
+      await page.evaluate("window.setOfficeConnection('reconnecting')");
+      await page.evaluate("window.setOfficeConnection('connected')");
+      await publishDecision();
+      expect(
+        await decisionPanel.getByRole('button', { name: 'Confirmar', exact: true }).count(),
+      ).toBe(0);
+      await decisionPanel.getByRole('button', { name: 'Volver a las decisiones' }).click();
+      await choose.click();
+      await publishDecision('expired');
+      await decisionPanel.getByRole('status').filter({ hasText: 'No se ha enviado' }).waitFor();
+      expect(
+        await decisionPanel.getByRole('button', { name: 'Confirmar', exact: true }).count(),
+      ).toBe(0);
+      await decisionPanel.getByRole('button', { name: 'Volver a las decisiones' }).click();
+      await publishDecision();
+      await choose.click();
+      const confirmButton = decisionPanel.getByRole('button', { name: 'Confirmar', exact: true });
+      expect(await confirmButton.isEnabled()).toBe(false);
+      await expect.poll(() => confirmButton.isEnabled()).toBe(true);
+      // Dispatch two confirmations in the same turn, before React can replace the button.
+      await page.evaluate(`(() => {
+        const button = [...document.querySelectorAll('[data-testid="decisions-panel"] button')].find(button => button.textContent === 'Confirmar');
+        button.click(); button.click();
+      })()`);
+      expect(await page.evaluate('window.decisionSends.length')).toBe(1);
+      expect(await decisionPanel.getByRole('status').textContent()).toContain(
+        'No consta que se haya aplicado',
+      );
+      await decisionPanel.getByRole('button', { name: 'Volver a las decisiones' }).click();
+      await choose.click();
+      await decisionPanel.getByRole('button', { name: 'Confirmar', exact: true }).click();
+      await page.evaluate(
+        "window.postMessage({ type: 'companyNotice', text: 'Respuesta rechazada' }, '*')",
+      );
+      await expect.poll(() => choose.isEnabled()).toBe(true);
+      expect(await page.evaluate('window.decisionSends.length')).toBe(2);
+      await choose.click();
+      await decisionPanel.getByRole('button', { name: 'Confirmar', exact: true }).click();
+      await page.evaluate("window.setOfficeConnection('reconnecting')");
+      await page.evaluate("window.setOfficeConnection('connected')");
+      await publishDecision();
+      await expect.poll(() => choose.isEnabled()).toBe(true);
+      expect(await page.evaluate('window.decisionSends.length')).toBe(3);
+      await page.keyboard.press('Escape');
+      for (const name of ['Ajustes', 'Nueva idea']) {
+        if (name === 'Ajustes' && width === 390)
+          await page.getByRole('button', { name: 'Más', exact: true }).click();
+        await page.getByRole('button', { name, exact: true }).click();
+        const dialog = page.getByRole('dialog');
+        await dialog.waitFor();
+        const urgent = page.locator('.dock-urgent-notice');
+        expect(await urgent.isVisible()).toBe(true);
+        expect(await urgent.getAttribute('role')).toBe('status');
+        expect(
+          await page.evaluate(
+            'Number(getComputedStyle(document.querySelector(".dock-urgent-notice")).zIndex)',
+          ),
+        ).toBeGreaterThanOrEqual(
+          await page.evaluate(
+            'Number(getComputedStyle(document.querySelector("[role=dialog]")).zIndex)',
+          ),
+        );
+        expect(await urgent.locator('.status-chip svg').count()).toBe(1);
+        expect(
+          await page.evaluate(
+            'getComputedStyle(document.querySelector(".dock-urgent-notice")).pointerEvents',
+          ),
+        ).toBe('none');
+        const alertBox = (await urgent.boundingBox())!;
+        const dialogBox = (await dialog.boundingBox())!;
+        expect(alertBox.y).toBeGreaterThanOrEqual(dialogBox.y + dialogBox.height);
+        expect(alertBox.x).toBeGreaterThanOrEqual(0);
+        expect(alertBox.x + alertBox.width).toBeLessThanOrEqual(width);
+        await page.keyboard.press('Escape');
+      }
+      const closeWindow = page.getByRole('button', { name: 'Cerrar ventana', exact: true });
+      if (await closeWindow.isVisible()) await closeWindow.click();
+      await page.evaluate(`window.setHudBoard(${JSON.stringify(board)})`);
       await expectCriticalBlockers(page);
       // A real disconnect has exactly one notice, above the HUD in normal flow.
       await page.evaluate("window.setOfficeConnection('reconnecting')");
@@ -425,7 +535,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await sheet
           .getByRole('button', { name: 'Editar diseño de la oficina', exact: true })
           .click();
-        expect(await dock.getByRole('button').count()).toBe(2);
+        expect(await dock.getByRole('button').count()).toBe(3);
         expect(await dock.evaluate(fitsHorizontally)).toBe(true);
         const dockBox = (await dock.boundingBox())!;
         expect(dockBox.x).toBeGreaterThanOrEqual(0);

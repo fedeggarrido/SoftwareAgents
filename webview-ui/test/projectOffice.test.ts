@@ -55,6 +55,7 @@ describe('office without a board', () => {
       expect(decisionsHudView(state)).toEqual({
         visible: true,
         open: 1,
+        urgent: 0,
         label: 'Decisiones · 1',
         accessibleName: 'Decisiones, 1 pendientes',
       });
@@ -62,6 +63,7 @@ describe('office without a board', () => {
       expect(decisionsHudView(state)).toEqual({
         visible: true,
         open: 0,
+        urgent: 0,
         label: 'Decisiones · 0',
         accessibleName: 'Decisiones, 0 pendientes',
       });

@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   DOCK_MOBILE_BREAKPOINT_PX,
   DOCK_SHEET_Z_INDEX,
   PR_DISPLAY_REFRESH_MS,
+  UI_LAYERS,
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
@@ -16,6 +18,7 @@ import { pullRequestDockSummary } from '../office/prStatusView.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { DockIcon } from './DockIcon.js';
+import { StatusChip } from './StatusChip.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
 interface BottomToolbarProps {
@@ -68,7 +71,7 @@ export function BottomToolbar({
     return () => clearInterval(timer);
   }, []);
   const prs = pullRequestDockSummary(board?.items ?? [], prNow);
-  const pending = decisionsHudView(board ?? {}).open;
+  const { open: pending, urgent } = decisionsHudView(board ?? {});
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < DOCK_MOBILE_BREAKPOINT_PX,
   );
@@ -213,14 +216,17 @@ export function BottomToolbar({
             id="dock-decisions-pending"
             className="dock-badge"
             role="status"
-            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}`}
+            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}${urgent ? `, ${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}` : ''}`}
           >
             <DockIcon name="attention" />
             {pending}
           </span>
         )}
       </span>
-      <span>{entry.label}</span>
+      <span>
+        {entry.label}
+        {entry.id === 'decisions' && urgent > 0 && <span className="dock-urgent"> · Urgente</span>}
+      </span>
     </button>
   );
   const settingsButton = (
@@ -307,6 +313,19 @@ export function BottomToolbar({
       className={`bottom-toolbar pixel-panel ${mobile ? 'dock-mobile' : ''} ${isEditMode ? 'dock-editing' : ''}`}
       aria-label="Controles de la oficina"
     >
+      {urgent > 0 &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="dock-urgent-notice"
+            role="status"
+            style={{ zIndex: UI_LAYERS.modalContent }}
+          >
+            <StatusChip state="WAITING_HUMAN" />
+            <span>Decisiones urgentes: {urgent}</span>
+          </div>,
+          document.body,
+        )}
       {isEditMode ? (
         <>
           <div className="editing-context">
@@ -314,6 +333,7 @@ export function BottomToolbar({
             <p id="editing-help">{es.office.editingHelp}</p>
           </div>
           {editActions}
+          {panels.filter((entry) => entry.id === 'decisions').map(panelButton)}
           {editButton}
           {/* Agents can still be opened while arranging seats and areas, as before. */}
           {agentControl}

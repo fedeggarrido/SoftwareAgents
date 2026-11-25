@@ -1,4 +1,5 @@
 import { CHARACTER_ACTIVITY_TEXT, RELATIVE_MINUTE_MS, WORK_STATE } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { roleLabel } from '../i18n/roles.js';
 import { knownText } from './displayText.js';
 import { spanishToolStatus } from './toolUtils.js';
@@ -52,6 +53,14 @@ export function characterActivityLabel(
   return activity
     ? `${CHARACTER_ACTIVITY_TEXT.working} · ${activity}`
     : CHARACTER_ACTIVITY_TEXT.working;
+}
+
+/** What the agent needs from the owner, as far as its session reports. */
+export function characterNeed(ch: ActivityCharacter): string {
+  if (ch.bubbleType === 'permission') return es.agentCard.needsPermission;
+  if (ch.workState === WORK_STATE.WAITING_HUMAN) return es.agentCard.needsDecision;
+  if (ch.waitingAwaitingInput) return es.agentCard.needsAnswer;
+  return es.agentCard.needsNothing;
 }
 
 export function characterDisplayName(

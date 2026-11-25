@@ -2,6 +2,14 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  agentCard: {
+    needsPermission: 'Necesita tu aprobación. Respóndela en la terminal de su sesión.',
+    needsDecision: 'Su tarea espera una decisión tuya.',
+    needsAnswer: 'Espera tu respuesta en la terminal de su sesión.',
+    needsNothing: 'No consta que necesite nada de ti.',
+    lastActivity: (when: string) => `Última actividad observada ${when}.`,
+    technical: 'Detalle técnico',
+  },
   meeting: {
     empty:
       'Una reunión es una conversación entre agentes para contrastar propuestas y acordar una decisión. Aparece cuando una tarea necesita varias perspectivas. Ahora no hay ninguna en curso.',

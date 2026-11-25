@@ -30,6 +30,7 @@ export interface CharacterDetailPanelProps {
   role?: string;
   status?: string;
   statusState?: string;
+  need?: string;
   assignment?: string;
   context?: { used: number; limit: number };
   workspaceName?: string;
@@ -55,6 +56,7 @@ export function CharacterDetailPanel({
   role,
   status,
   statusState = 'waiting',
+  need,
   assignment,
   context,
   workspaceName,
@@ -89,6 +91,25 @@ export function CharacterDetailPanel({
   const currentModel = knownText(model) ?? knownText(detail?.model);
   const currentExecutor = knownText(detail?.executor) ?? knownText(executor);
   const elapsed = agentElapsed(detail, detailAt, now);
+  const sorted = [...history].sort((a, b) => b.at - a.at);
+  const latest = sorted.at(0);
+  const availability =
+    provider?.checkedAt != null &&
+    (provider.staleAfter === null || executorState!.observedAt <= provider.staleAfter)
+      ? provider.eligible
+        ? 'disponible'
+        : 'no disponible'
+      : undefined;
+  const folder = knownText(workspaceName);
+  const team = knownText(teamName);
+  const technical: ReadonlyArray<readonly [label: string, value: string | undefined]> = [
+    ['Modelo', currentModel],
+    [es.common.executor, currentExecutor],
+    ['Disponibilidad', availability],
+    ['Nivel', tier],
+    ['Carpeta', folder],
+    ['Equipo', team],
+  ];
   const { mobile, ...position } = agentCardPosition(
     anchor,
     typeof window === 'undefined'
@@ -130,53 +151,19 @@ export function CharacterDetailPanel({
               {assignment}
             </p>
           )}
-          {workspaceName && <p>Carpeta: {knownText(workspaceName)}</p>}
-          {teamName && <p>Equipo: {knownText(teamName)}</p>}
-          {context && (
-            <>
-              <p>Contexto usado: {Math.round((context.used / context.limit) * 100)}%</p>
-              <ContextGauge {...context} />
-            </>
-          )}
-          {tier && <p>Nivel: {tier}</p>}
         </div>
         <Button size="sm" variant="ghost" aria-label="Cerrar ficha del agente" onClick={onClose}>
           ✕
         </Button>
       </header>
-      {(taskKey || taskTitle || currentModel || currentExecutor || elapsed) && (
+      {need && <p className="agent-card-need">{need}</p>}
+      {latest && <p>{es.agentCard.lastActivity(relativeTime(latest.at, now))}</p>}
+      {(taskKey || taskTitle || elapsed) && (
         <section>
           <h3>Ahora</h3>
           {task?.state && task.state !== WORK_STATE.AVAILABLE && <StatusChip state={task.state} />}
           {(taskKey || taskTitle) && <p>{[taskKey, taskTitle].filter(Boolean).join(' · ')}</p>}
-          <dl>
-            {currentModel && (
-              <div>
-                <dt>Modelo</dt>
-                <dd>{currentModel}</dd>
-              </div>
-            )}
-            {currentExecutor && (
-              <div>
-                <dt title={es.common.executorHelp}>{es.common.executor}</dt>
-                <dd>{currentExecutor}</dd>
-              </div>
-            )}
-            {elapsed && (
-              <div>
-                <dt>Tiempo en la tarea</dt>
-                <dd>{elapsed}</dd>
-              </div>
-            )}
-            {provider?.checkedAt != null &&
-              (provider.staleAfter === null ||
-                executorState!.observedAt <= provider.staleAfter) && (
-                <div>
-                  <dt>Disponibilidad</dt>
-                  <dd>{provider.eligible ? 'disponible' : 'no disponible'}</dd>
-                </div>
-              )}
-          </dl>
+          {elapsed && <p>Tiempo en la tarea: {elapsed}</p>}
         </section>
       )}
       <section>
@@ -185,18 +172,37 @@ export function CharacterDetailPanel({
           <p>Aún no hay actividad registrada en esta ventana.</p>
         ) : (
           <ol>
-            {[...history]
-              .sort((a, b) => b.at - a.at)
-              .slice(0, AGENT_HISTORY_LIMIT)
-              .map((event) => (
-                <li key={event.key}>
-                  {knownText(event.text)}{' '}
-                  <span className="text-text-muted">· {relativeTime(event.at, now)}</span>
-                </li>
-              ))}
+            {sorted.slice(0, AGENT_HISTORY_LIMIT).map((event) => (
+              <li key={event.key}>
+                {knownText(event.text)}{' '}
+                <span className="text-text-muted">· {relativeTime(event.at, now)}</span>
+              </li>
+            ))}
           </ol>
         )}
       </section>
+      {(context || technical.some(([, value]) => value)) && (
+        <details>
+          <summary>{es.agentCard.technical}</summary>
+          <dl>
+            {technical.map(
+              ([label, value]) =>
+                value && (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ),
+            )}
+          </dl>
+          {context && (
+            <>
+              <p>Contexto usado: {Math.round((context.used / context.limit) * 100)}%</p>
+              <ContextGauge {...context} />
+            </>
+          )}
+        </details>
+      )}
       <footer className="flex flex-wrap gap-8">
         {onOpenBacklog && (
           <Button size="sm" onClick={onOpenBacklog}>

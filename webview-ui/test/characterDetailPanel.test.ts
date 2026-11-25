@@ -6,6 +6,7 @@ import type { BoardState, CharacterDetail } from '../../core/src/messages.js';
 import { AGENT_HISTORY_LIMIT } from '../src/constants.js';
 import type { AgentHistoryEvent } from '../src/office/agentHistory.js';
 import { agentElapsed, AgentHistory, agentTask } from '../src/office/agentHistory.js';
+import { characterNeed } from '../src/office/characterActivity.js';
 
 // Runtime path keeps TSX outside the DOM-free TypeScript test project.
 const panelPath = '../src/components/CharacterDetailPanel.js';
@@ -55,6 +56,8 @@ describe('agent card', () => {
       expect(html).toContain(text);
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('desconocido');
+    // Technical facts stay folded, after what the agent does and needs.
+    expect(html).toMatch(/<details><summary>Detalle técnico.*gpt-test.*<\/details>/s);
     const empty = await render({
       taskKey: '3b547b5e-b1a1-4ed5-8cde-f152b6f47894',
       taskTitle: 'desconocido',
@@ -64,6 +67,19 @@ describe('agent card', () => {
     });
     expect(empty).not.toMatch(/3b547b5e|desconocido|unknown|<dt>Modelo|<h3>Ahora/);
     expect(empty).toContain('Aún no hay actividad');
+  });
+  it('says what the agent needs from the owner', () => {
+    const idle = {
+      isActive: true,
+      isInMeeting: false,
+      hasDomainWork: false,
+      bubbleType: null,
+      waitingAwaitingInput: false,
+    };
+    expect(characterNeed(idle)).toContain('No consta');
+    expect(characterNeed({ ...idle, bubbleType: 'permission' })).toContain('aprobación');
+    expect(characterNeed({ ...idle, workState: 'WAITING_HUMAN' })).toContain('decisión');
+    expect(characterNeed({ ...idle, waitingAwaitingInput: true })).toContain('respuesta');
   });
   it('shows newest events first with relative time and caps the rendered list', async () => {
     const now = Date.now();

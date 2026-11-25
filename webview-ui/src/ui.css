@@ -842,3 +842,14 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
   min-height: var(--control-target);
   white-space: normal;
 }
+
+.agent-card-need {
+  border-left: var(--border-thick) solid var(--color-border);
+  padding-left: var(--space-2);
+}
+.agent-card summary {
+  min-height: var(--control-target);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}

@@ -809,13 +809,9 @@ export function OfficeCanvas({
         // Dismiss the turn-end checkmark; selecting never resolves a pending approval.
         officeState.dismissBubble(hitId);
         // Toggle selection: click same agent deselects, different agent selects
-        if (officeState.selectedAgentId === hitId) {
-          officeState.selectedAgentId = null;
-          officeState.cameraFollowId = null;
-        } else {
-          officeState.selectedAgentId = hitId;
-          officeState.cameraFollowId = hitId;
-        }
+        officeState.selectedAgentId = officeState.selectedAgentId === hitId ? null : hitId;
+        // The character is already under the pointer: opening its card must not move the office.
+        officeState.cameraFollowId = null;
         onClick(hitId); // still focus terminal
         return;
       }

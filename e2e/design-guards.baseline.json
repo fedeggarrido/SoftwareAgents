@@ -164,30 +164,6 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "window-Reuniones|desktop|contrast|span.text-accent|2.6|Ver más",
-    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
-  },
-  {
-    "key": "window-Reuniones|desktop|contrast|span.text-base|2.6|Detección instantánea activa",
-    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
-  },
-  {
-    "key": "window-Reuniones|mobile|contrast|span.text-accent|2.6|Ver más",
-    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
-  },
-  {
-    "key": "window-Reuniones|mobile|contrast|span.text-base|2.6|Detección instantánea activa",
-    "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
-  },
-  {
-    "key": "window-Reuniones|mobile|touch-target|button.bg-transparent|x",
-    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
-  },
-  {
-    "key": "window-Reuniones|mobile|touch-target|button.pixel-button|x",
-    "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
-  },
-  {
     "key": "window-Trabajo|desktop|contrast|span.text-accent|2.6|Ver más",
     "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
   },

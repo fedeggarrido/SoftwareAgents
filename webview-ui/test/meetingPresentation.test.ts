@@ -60,6 +60,7 @@ describe('meetingPresentation', () => {
     const view = meetingPresentation({ ...meeting, status });
     expect(view.chip).toBe(chip);
     expect(view.intervention).toContain(text);
+    expect(view.needsOwner).toBe(status === 'escalated');
     expect(view.rounds.some(({ current }) => current)).toBe(status === 'waiting_quota');
   });
 

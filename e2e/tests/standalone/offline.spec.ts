@@ -52,6 +52,10 @@ for (const width of [390, 1440]) {
       true,
     );
 
+    const noticeBox = (await unsent.boundingBox())!;
+    const dockBox = (await page.locator('.bottom-toolbar').boundingBox())!;
+    expect(noticeBox.y + noticeBox.height).toBeLessThanOrEqual(dockBox.y);
+
     await standalone.startHost();
     await expect(notice).toHaveCount(0, { timeout: 20_000 });
     await expect(alert).toBeVisible();

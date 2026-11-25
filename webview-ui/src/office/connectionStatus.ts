@@ -18,8 +18,10 @@ export interface ConnectionStatus {
   retryAt: number | null;
   /** Last message received from the office; null until the first one. */
   lastContactAt?: number | null;
-  /** What the office could not receive. An action outlives the reconnection until dismissed. */
-  unsent?: 'action' | 'save' | null;
+  /** A refused action: its notice outlives the reconnection until dismissed. */
+  unsentAction?: boolean;
+  /** A layout save waiting for the reconnection. */
+  unsentSave?: boolean;
 }
 const empty: ConnectionStatus = { cause: 'unavailable', attempt: 0, retryAt: null };
 let current = empty;
@@ -29,10 +31,8 @@ export function setConnectionStatus(status: ConnectionStatus): void {
   current = status;
   for (const listener of listeners) listener();
 }
-/** An undelivered action matters more than a save that will be retried. */
-export function setUnsent(unsent: 'action' | 'save' | null): void {
-  if (unsent === 'save' && current.unsent === 'action') return;
-  setConnectionStatus({ ...current, unsent });
+export function setUnsent(change: Pick<ConnectionStatus, 'unsentAction' | 'unsentSave'>): void {
+  setConnectionStatus({ ...current, ...change });
 }
 export function useConnectionStatus(): ConnectionStatus {
   return useSyncExternalStore(

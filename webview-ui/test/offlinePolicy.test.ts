@@ -62,19 +62,19 @@ describe('offline sends', () => {
   it('drops an action with a notice that survives the reconnection and never replays it', () => {
     FakeSocket.latest.drop();
     transport.send(decision);
-    expect(getConnectionStatus().unsent).toBe('action');
+    expect(getConnectionStatus().unsentAction).toBe(true);
     expect(reconnect()).toEqual([]);
-    expect(getConnectionStatus().unsent).toBe('action');
-    setUnsent(null);
-    expect(getConnectionStatus().unsent).toBeNull();
+    expect(getConnectionStatus().unsentAction).toBe(true);
+    setUnsent({ unsentAction: false });
+    expect(getConnectionStatus().unsentAction).toBe(false);
   });
   it('keeps only the latest save, writes it before the new handshake and clears its notice', () => {
     FakeSocket.latest.drop();
     transport.send({ type: 'setSoundEnabled', enabled: true });
-    expect(getConnectionStatus().unsent).toBeFalsy();
+    expect(getConnectionStatus().unsentSave).toBeFalsy();
     transport.send({ type: 'setSoundEnabled', enabled: false });
     transport.send({ type: 'saveLayout', layout: { version: 1 } });
-    expect(getConnectionStatus().unsent).toBe('save');
+    expect(getConnectionStatus().unsentSave).toBe(true);
     transport.onStateChange((state) => {
       if (state === 'connected') transport.send({ type: 'webviewReady' });
     });
@@ -84,13 +84,31 @@ describe('offline sends', () => {
       'webviewReady',
     ]);
     expect(FakeSocket.latest.sent[0]).toEqual({ type: 'setSoundEnabled', enabled: false });
-    expect(getConnectionStatus().unsent).toBeNull();
+    expect(getConnectionStatus().unsentSave).toBe(false);
   });
   it('does not let a pending save hide an action that was never sent', () => {
     FakeSocket.latest.drop();
     transport.send(decision);
     transport.send({ type: 'saveLayout', layout: { version: 1 } });
-    expect(getConnectionStatus().unsent).toBe('action');
+    expect(getConnectionStatus().unsentAction).toBe(true);
+  });
+  it('announces a pending save once, beside any refused action', () => {
+    FakeSocket.latest.drop();
+    transport.send(decision);
+    transport.send({ type: 'saveLayout', layout: { version: 1 } });
+    setUnsent({ unsentAction: false });
+    expect(getConnectionStatus().unsentSave).toBe(true);
+    setUnsent({ unsentSave: false });
+    transport.send({ type: 'saveLayout', layout: { version: 1 } });
+    expect(getConnectionStatus().unsentSave).toBe(false);
+  });
+  it('never lets the tour dismissal outrun an undelivered consent answer', () => {
+    FakeSocket.latest.drop();
+    expect(() =>
+      transport.send({ type: 'hooksConsentResponse', providerId: 'claude', choice: 'never' }),
+    ).toThrow();
+    transport.send({ type: 'setHooksInfoShown' });
+    expect(reconnect()).toEqual([]);
   });
   it('dates the data from the last message received, never from the attempt', () => {
     expect(staleDataText(getConnectionStatus().lastContactAt)).toBeNull();

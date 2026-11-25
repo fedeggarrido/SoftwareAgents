@@ -38,13 +38,11 @@ export function MeetingPanel({ onOpenDecisions, onShowRoom }: MeetingPanelProps)
         <p>
           <strong>{view.intervention}</strong>
         </p>
-        {view.decision && (
-          <>
-            <p>{view.decision.question}</p>
-            <Button variant="primary" onClick={onOpenDecisions}>
-              {copy.openDecision}
-            </Button>
-          </>
+        {view.decision && <p>{view.decision.question}</p>}
+        {view.needsOwner && (
+          <Button variant="primary" onClick={onOpenDecisions}>
+            {view.decision ? copy.openDecision : copy.openDecisions}
+          </Button>
         )}
         {m.status === 'waiting_quota' && m.waitReason && <p>{m.waitReason}</p>}
       </section>

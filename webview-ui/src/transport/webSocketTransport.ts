@@ -111,7 +111,7 @@ export class WebSocketTransport implements MessageTransport {
       // Pending saves go first, so the new handshake already reads them back.
       this.setState(TRANSPORT_STATE_CONNECTED);
       this.resolveReady();
-      if (getConnectionStatus().unsent === 'save') setUnsent(null);
+      if (getConnectionStatus().unsentSave) setUnsent({ unsentSave: false });
     };
 
     this.ws.onmessage = (e) => {
@@ -175,16 +175,19 @@ export class WebSocketTransport implements MessageTransport {
     }
     switch (offlineHandling(message.type)) {
       case 'live':
-        setUnsent('action');
+        setUnsent({ unsentAction: true });
         throw new Error('Office mutations require a connected transport');
       case 'action':
-        setUnsent('action');
+        setUnsent({ unsentAction: true });
         return;
-      case 'save':
-        this.pendingMessages = this.pendingMessages.filter(({ type }) => type !== message.type);
-        this.pendingMessages.push(message);
-        if (message.type === 'saveLayout') setUnsent('save');
+      case 'save': {
+        const rest = this.pendingMessages.filter(({ type }) => type !== message.type);
+        // Only the first pending save is announced: a dismissed notice stays dismissed.
+        if (message.type === 'saveLayout' && rest.length === this.pendingMessages.length)
+          setUnsent({ unsentSave: true });
+        this.pendingMessages = [...rest, message];
         return;
+      }
       case 'read':
         // Queue messages while connecting (flushed in onopen)
         this.pendingMessages.push(message);

@@ -120,7 +120,7 @@ export function usePanelWindow(ready: boolean) {
       setMeetingUnread(true);
     }
     previousMeeting.current = meetingId;
-    if (isOpen && preferences.lastTab === 'meeting') setMeetingUnread(false);
+    if (!meetingId || (isOpen && preferences.lastTab === 'meeting')) setMeetingUnread(false);
   }, [ready, meetingId, isOpen, preferences.lastTab]);
   const toggle = (tab: PanelTab) => {
     if (isOpen && preferences.lastTab === tab) setIsOpen(false);

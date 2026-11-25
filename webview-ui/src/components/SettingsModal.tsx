@@ -15,6 +15,7 @@ import { MenuItem } from './ui/MenuItem.js';
 import { Modal } from './ui/Modal.js';
 
 interface SettingsModalProps {
+  onOpenNews: () => void;
   onNewProject: () => void;
   isOpen: boolean;
   onClose: () => void;
@@ -65,6 +66,7 @@ export function SettingsModal({
   showAreasAvailable,
   onExportLayout,
   onImportLayout,
+  onOpenNews,
 }: SettingsModalProps) {
   const [textSize, setTextSize] = useTextSize();
   const [soundLocal, setSoundLocal] = useState(isSoundEnabled);
@@ -102,6 +104,9 @@ export function SettingsModal({
         <h2 id="settings-general">{es.settings.general}</h2>
         <MenuItem onClick={onNewProject} help={es.settings.newProjectHelp}>
           {es.settings.newProject}
+        </MenuItem>
+        <MenuItem onClick={onOpenNews} help={es.settings.newsHelp}>
+          {es.settings.news}
         </MenuItem>
         <p className="p-10" role="status">
           {access.explanation}

@@ -17,6 +17,7 @@ import {
   characterActivity,
   characterActivityLabel,
   characterDisplayName,
+  characterNeed,
 } from '../characterActivity.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { useExecutorStore } from '../executorStore.js';
@@ -111,6 +112,7 @@ export function ToolOverlay({
               role={role?.label}
               statusState={characterActivity(ch)}
               status={characterActivityLabel(ch, tools)}
+              need={characterNeed(ch)}
               assignment={assignmentReason(role, managedProject)}
               tier={modelTierLabel(role)}
               context={

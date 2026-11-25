@@ -693,11 +693,7 @@ function App() {
           onOpenChangelog={handleOpenChangelog}
         />
 
-        <ChangelogModal
-          isOpen={isChangelogOpen}
-          onClose={() => setIsChangelogOpen(false)}
-          currentVersion={extensionVersion}
-        />
+        <ChangelogModal isOpen={isChangelogOpen} onClose={() => setIsChangelogOpen(false)} />
 
         {isNewProjectOpen && <NewProjectDialog onClose={() => setIsNewProjectOpen(false)} />}
         <SettingsModal
@@ -742,6 +738,10 @@ function App() {
           showAreasAvailable={areasAvailable}
           onExportLayout={handleExportLayout}
           onImportLayout={handleImportLayout}
+          onOpenNews={() => {
+            setIsSettingsOpen(false);
+            handleOpenChangelog();
+          }}
         />
 
         {showMigrationNotice && (

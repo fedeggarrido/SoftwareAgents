@@ -2,6 +2,14 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  agentCard: {
+    needsPermission: 'Necesita tu aprobación. Respóndela en la terminal de su sesión.',
+    needsDecision: 'Su tarea espera una decisión tuya.',
+    needsAnswer: 'Espera tu respuesta en la terminal de su sesión.',
+    needsNothing: 'No consta que necesite nada de ti.',
+    lastActivity: (when: string) => `Última actividad observada ${when}.`,
+    technical: 'Detalle técnico',
+  },
   meeting: {
     empty:
       'Una reunión es una conversación entre agentes para contrastar propuestas y acordar una decisión. Aparece cuando una tarea necesita varias perspectivas. Ahora no hay ninguna en curso.',
@@ -79,6 +87,8 @@ export const es = {
     general: 'General',
     office: 'Oficina',
     advanced: 'Avanzado',
+    news: 'Novedades y acerca de',
+    newsHelp: 'Muestra qué hay de nuevo en SoftwareAgents y de qué proyecto procede.',
     newProjectHelp: 'Abre el formulario para crear un proyecto.',
     openSessionsHelp: 'Abre en el explorador de archivos la carpeta de registros de las sesiones.',
     assetsHelp:
@@ -178,8 +188,8 @@ export const es = {
     installFailureHelp:
       'No se pudo guardar la configuración de Claude Code. La oficina seguirá leyendo tus sesiones con actualizaciones más lentas. Puedes reintentar la instalación desde Ajustes.',
     communityHelp:
-      '¡Disfruta de tu oficina! Comparte preguntas, ideas y tus creaciones de píxeles en nuestro Discord.',
-    joinCommunity: 'Únete a nuestro Discord',
+      '¡Disfruta de tu oficina! El código y la documentación de SoftwareAgents están en GitHub.',
+    joinCommunity: 'SoftwareAgents en GitHub',
     back: 'Anterior',
     never: 'No volver a preguntar',
     notNow: 'Ahora no',
@@ -189,9 +199,39 @@ export const es = {
     next: 'Continuar',
   },
   changelog: {
-    contributors: 'Colaboradores',
-    github: 'Ver en GitHub',
-    discord: 'Únete a Discord',
+    title: 'Novedades de SoftwareAgents',
+    sections: [
+      {
+        title: 'De la idea al plan',
+        items: [
+          'Cuentas tu idea, respondes a una entrevista y revisas los requisitos antes de seguir.',
+          'Ves el plan completo y lo apruebas tú: los agentes no empiezan sin tu respuesta.',
+          'Las investigaciones citan sus fuentes y contrastan las afirmaciones importantes.',
+        ],
+      },
+      {
+        title: 'Decidir con seguridad',
+        items: [
+          'Las decisiones se revisan antes de enviarse y avisan de su urgencia.',
+          'Las reuniones explican de qué se habla, en qué punto van y si te necesitan.',
+        ],
+      },
+      {
+        title: 'Supervisar sin sobresaltos',
+        items: [
+          'La oficina se puede supervisar desde el móvil.',
+          'Sin conexión, los datos antiguos se señalan y ninguna acción se envía más tarde sin avisar.',
+          'La ficha de cada agente dice qué hace y qué necesita de ti.',
+        ],
+      },
+    ],
+    about: 'Acerca de',
+    attribution:
+      'SoftwareAgents parte de Pixel Agents, de Pablo De Lucca y sus colaboradores, publicado con licencia MIT (Copyright (c) 2026 Pablo De Lucca).',
+    project: 'SoftwareAgents en GitHub',
+    license: 'Licencia MIT',
+    upstream: 'Proyecto original: Pixel Agents',
+    contributors: 'Colaboradores de Pixel Agents',
   },
   common: {
     details: 'Detalles',
@@ -274,7 +314,7 @@ export const es = {
     updated: (version: string) => `Actualizado a v${version}`,
     news: 'Ver novedades',
     demo: 'versión: demo',
-    changelogTitle: (version: string) => `Novedades de v${version}`,
+    label: (version: string) => `Novedades · ${version}`,
   },
   pullRequest: {
     labels: {

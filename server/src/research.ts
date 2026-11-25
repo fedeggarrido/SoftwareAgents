@@ -58,6 +58,7 @@ function normalizeReport(raw: unknown): unknown {
           const finding = pick(f, [
             'claim',
             'topic',
+            'important',
             'type',
             'confidence',
             'reason',
@@ -194,6 +195,14 @@ export function validateResearchReport(source: string, sources: SourceItem[]): R
         );
       }),
     );
+    if (finding.important && !independent) {
+      const gap =
+        `Insufficient evidence for important claim (fewer than two independent sources): ${finding.claim}`.slice(
+          0,
+          4000,
+        );
+      if (!report.gaps.includes(gap)) report.gaps.push(gap);
+    }
     if (finding.confidence !== 'low' && !independent) {
       finding.confidence = 'low';
       finding.reason = `${finding.reason.slice(0, 3800)}; runtime: fewer than two independent sources.`;

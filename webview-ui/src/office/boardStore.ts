@@ -25,13 +25,17 @@ export function setBoardState(next: BoardState | null): void {
   for (const l of listeners) l();
 }
 
-function subscribe(listener: () => void): () => void {
+export function subscribeBoard(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 export function useBoard(): BoardState | null {
-  return useSyncExternalStore(subscribe, () => board);
+  return useSyncExternalStore(subscribeBoard, () => board);
+}
+
+export function getBoardState(): BoardState | null {
+  return board;
 }
 
 // ── Short notices from the company controls (autopilot, decisions) ──

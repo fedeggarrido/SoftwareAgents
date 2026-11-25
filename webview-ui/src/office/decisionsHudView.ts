@@ -4,9 +4,15 @@ import type { BoardState } from '../../../core/src/messages.js';
 export function decisionsHudView(board: { decisions?: BoardState['decisions'] }) {
   const decisions = board.decisions ?? [];
   const open = decisions.filter((decision) => decision.status === 'open').length;
+  const urgent = decisions.filter(
+    (decision) =>
+      decision.status === 'open' &&
+      (decision.urgency === 'high' || decision.urgency === 'critical'),
+  ).length;
   return {
     visible: decisions.length > 0,
     open,
+    urgent,
     label: `Decisiones · ${open}`,
     accessibleName: `Decisiones, ${open} pendientes`,
   };

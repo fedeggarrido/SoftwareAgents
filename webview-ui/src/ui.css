@@ -623,3 +623,92 @@ nav.bottom-toolbar.dock-editing {
 body:has(.dock-editing) .editor-toolbar {
   bottom: calc(var(--dock-bottom) + var(--office-dock-height) + var(--space-2));
 }
+
+/* Decision review stays in the panel's reading flow, above the choices. */
+.decisions-panel {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.decision-card,
+.decision-review {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.decision-review {
+  padding: var(--space-3);
+  border: var(--border-thick) solid var(--color-warning);
+}
+.decision-review h3:focus {
+  outline: var(--border-thick) solid var(--color-text);
+  outline-offset: var(--space-1);
+}
+.decision-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+  padding: 0;
+}
+.decision-options li {
+  border-top: var(--border-thin) solid var(--color-border);
+  padding-top: var(--space-2);
+}
+.decision-options button {
+  margin-top: var(--space-2);
+  min-height: var(--control-target);
+  white-space: normal;
+}
+.decision-consequences {
+  margin: 0;
+}
+.decision-consequences dt {
+  font-weight: bold;
+}
+.decision-consequences dd {
+  margin: 0 0 var(--space-2);
+}
+/* The reserved dock band remains reachable even below an open panel. */
+.bottom-toolbar:has(#dock-decisions-pending) {
+  z-index: var(--z-notices);
+}
+.dock-urgent {
+  display: block;
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
+.decisions-panel button {
+  min-height: var(--control-target);
+  min-width: var(--control-target);
+}
+
+.dock-button[aria-label='Decisiones'] {
+  min-height: var(--control-target);
+}
+
+/* An inert notice occupies the dock band while modal controls stay above it. */
+.dock-urgent-notice {
+  position: fixed;
+  bottom: var(--dock-bottom);
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: calc(100vw - 32px);
+  padding: var(--space-2);
+  background: var(--pixel-bg);
+  border: 2px solid var(--pixel-border);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
+body:has([role='dialog'][aria-modal='true']:not(.dock-sheet)) .dock-urgent-notice {
+  display: flex;
+}
+body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet) {
+  top: calc((100dvh - var(--office-dock-height, 100px) - 32px) / 2);
+  max-height: calc(100dvh - var(--office-dock-height, 100px) - 48px);
+  overflow-y: auto;
+}

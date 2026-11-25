@@ -88,10 +88,10 @@ it('refuses independently counted token-dense input before any model call or usa
   req.taskData!.task = { diff: dense.text };
   const compiled = compileAgent(req.agentSpec!, req.role, req.taskData!);
   const bytes = Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
-  // Fixed all-ASCII compiled fixture: ceil(36,719 / 2) + 1,024 = 19,384.
+  // Fixed all-ASCII compiled fixture: ceil(36,921 / 2) + 1,024 = 19,485.
   // Independent BPE count above: its diff alone is 16,906 tokens (> quick's 16,000).
-  expect(bytes).toBe(36_719);
-  expect(Math.ceil(bytes / 2) + 1_024).toBe(19_384);
+  expect(bytes).toBe(36_921);
+  expect(Math.ceil(bytes / 2) + 1_024).toBe(19_485);
   const executor = underlying(dense.tokens);
   const abort = new AbortController();
   const budget = researchBudget(executor, researchPolicy('quick', {}), abort, []);
@@ -125,7 +125,7 @@ it('lets a quick synthesis of four normal excerpts reach the model and accounts 
   expect(budget.stopReason).toBeUndefined();
 });
 
-it('admits a 17,557-byte quick feature review with 60 added lines and its real schema', async () => {
+it('admits a 17,759-byte quick feature review with 60 added lines and its real schema', async () => {
   const req = request();
   req.agentSpec = { ...RESEARCHER_SPEC, outputs: ['FeatureResearchReview'] };
   const lines = Array.from({ length: 60 }, (_, i) => `export const available${i} = true;`);
@@ -161,10 +161,10 @@ it('admits a 17,557-byte quick feature review with 60 added lines and its real s
   };
   const compiled = compileAgent(req.agentSpec, req.role, req.taskData);
   const bytes = Buffer.byteLength(compiled.systemPrompt) + Buffer.byteLength(compiled.context);
-  // All ASCII: ceil(17,557 / 2) + 1,024 = 9,803, leaving 6,197 for output.
+  // All ASCII: ceil(17,759 / 2) + 1,024 = 9,904, leaving 6,096 for output.
   // Fixed numbers are independent of production conversion/overhead constants.
-  expect(bytes).toBe(17_557);
-  expect(Math.ceil(bytes / 2) + 1_024).toBe(9_803);
+  expect(bytes).toBe(17_759);
+  expect(Math.ceil(bytes / 2) + 1_024).toBe(9_904);
   const executor = underlying();
   const budget = researchBudget(executor, researchPolicy('quick', {}), new AbortController(), []);
   for await (const event of budget.executor.start(req).events) void event;

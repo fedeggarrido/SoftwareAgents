@@ -513,36 +513,6 @@ function App() {
           message), NOT the hooksEnabled preference: hooksEnabled defaults true
           while first-run consent is still pending, and announcing "Instant
           Detection Active" before anything is installed would be a lie. */}
-        <OfficeNotices>
-          {hooksEnabled &&
-            claudeHooksInstalled &&
-            !hooksInfoShown &&
-            !guide.open &&
-            !hooksTooltipDismissed && (
-              <Tooltip
-                title="Detección instantánea activa"
-                position="stack"
-                onDismiss={() => {
-                  setHooksTooltipDismissed(true);
-                  transport.send({ type: 'setHooksInfoShown' });
-                }}
-              >
-                <span className="text-sm text-text leading-none">
-                  La actividad de tus agentes se actualiza al instante.{' '}
-                  <span
-                    className="text-accent cursor-pointer underline"
-                    onClick={() => {
-                      setIsHooksInfoOpen(true);
-                      setHooksTooltipDismissed(true);
-                      transport.send({ type: 'setHooksInfoShown' });
-                    }}
-                  >
-                    Ver más
-                  </span>
-                </span>
-              </Tooltip>
-            )}
-        </OfficeNotices>
 
         {/* Hooks info modal */}
         <Modal
@@ -602,6 +572,37 @@ function App() {
               onOpenMeeting={() => panel.select('meeting')}
               meetingUnread={panel.meetingUnread}
             />
+            <OfficeNotices>
+              {hooksEnabled &&
+                claudeHooksInstalled &&
+                !hooksInfoShown &&
+                !guide.open &&
+                !hooksTooltipDismissed && (
+                  <Tooltip
+                    title="Detección instantánea activa"
+                    position="stack"
+                    onDismiss={() => {
+                      setHooksTooltipDismissed(true);
+                      transport.send({ type: 'setHooksInfoShown' });
+                    }}
+                  >
+                    <span className="text-sm text-text leading-none">
+                      La actividad de tus agentes se actualiza al instante.{' '}
+                      <button
+                        type="button"
+                        className="text-accent-bright cursor-pointer underline"
+                        onClick={() => {
+                          setIsHooksInfoOpen(true);
+                          setHooksTooltipDismissed(true);
+                          transport.send({ type: 'setHooksInfoShown' });
+                        }}
+                      >
+                        Ver más
+                      </button>
+                    </span>
+                  </Tooltip>
+                )}
+            </OfficeNotices>
           </div>
           <OfficeEmptyState
             agents={agents}

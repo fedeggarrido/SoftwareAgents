@@ -404,6 +404,9 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       await decisionPanel.getByRole('button', { name: 'Volver a las decisiones' }).click();
       await publishDecision();
       await choose.click();
+      const confirmButton = decisionPanel.getByRole('button', { name: 'Confirmar', exact: true });
+      expect(await confirmButton.isEnabled()).toBe(false);
+      await expect.poll(() => confirmButton.isEnabled()).toBe(true);
       // Dispatch two confirmations in the same turn, before React can replace the button.
       await page.evaluate(`(() => {
         const button = [...document.querySelectorAll('[data-testid="decisions-panel"] button')].find(button => button.textContent === 'Confirmar');

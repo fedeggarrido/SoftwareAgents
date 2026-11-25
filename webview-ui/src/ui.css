@@ -802,3 +802,29 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 .office-panel-hud .office-notices {
   pointer-events: auto;
 }
+
+/* Meetings read like the decisions they can lead to. */
+.meeting-panel {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+  overflow-wrap: anywhere;
+}
+.meeting-intervention {
+  border: var(--border-thin) solid var(--color-border);
+  padding: var(--space-3);
+}
+.meeting-intervention > * + *,
+.meeting-lines > li + li {
+  margin-top: var(--space-2);
+}
+.meeting-rounds {
+  list-style: decimal inside;
+}
+.meeting-rounds [aria-current] {
+  font-weight: bold;
+}
+.meeting-panel button {
+  min-height: var(--control-target);
+  white-space: normal;
+}

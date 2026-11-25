@@ -11,6 +11,7 @@ import {
 import { unlockAudio } from '../../notificationSound.js';
 import { isBrowserRuntime } from '../../runtime.js';
 import { transport } from '../../transport/index.js';
+import { getBoardState } from '../boardStore.js';
 import { getColorizedSprite } from '../colorize.js';
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js';
 import type { EditorState } from '../editor/editorState.js';
@@ -23,6 +24,7 @@ import type {
   SelectionRenderState,
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
+import { visibleAreas } from '../engine/seatPlacement.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { MobileZoomPolicy } from '../mobileZoom.js';
 import { EditTool, TILE_SIZE, TileType } from '../types.js';
@@ -294,6 +296,8 @@ export function OfficeCanvas({
         };
 
         const layout = officeState.getLayout();
+        const meetingRunning = !isEditMode && getBoardState()?.meeting?.status === 'running';
+        const shown = visibleAreas(layout, showAreas, meetingRunning);
         const { offsetX, offsetY } = renderFrame(
           ctx,
           w,
@@ -310,9 +314,9 @@ export function OfficeCanvas({
           layout.cols,
           layout.rows,
           layout.carpetTiles,
-          layout.areas,
-          layout.areaTiles,
-          showAreas,
+          shown.areas,
+          shown.areaTiles,
+          showAreas || meetingRunning,
           activeAreaLabel,
           officeState.pets,
         );

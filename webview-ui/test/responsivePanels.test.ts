@@ -727,8 +727,14 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           .getByRole('button', { name: /Reuniones/ })
           .waitFor();
       };
-      // A new meeting opens a closed window, without stealing another open tab.
+      // A new meeting only announces itself: it never opens the window over other controls.
       await sendMeeting('meeting-1');
+      await page
+        .getByTestId('company-hud')
+        .getByRole('status', { name: 'Nueva actividad' })
+        .waitFor();
+      expect(await windowPanel.count()).toBe(0);
+      await openPanel(page, 'Reuniones');
       await activePanel(page, 'Reuniones').waitFor();
       await expectWindowOwnsHeading(page, 'Reuniones');
       const meetingDetails = page

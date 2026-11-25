@@ -5,6 +5,8 @@
  * dependency-free — OfficeState's real Seat/Character satisfy them.
  */
 
+import type { OfficeLayout } from '../types.js';
+
 export interface SeatLike {
   seatCol: number;
   seatRow: number;
@@ -20,6 +22,17 @@ export interface AnchorLike {
 /** Social chairs are reserved for the live meeting, not a worker's saved desk. */
 export function isMeetingArea(label: string | null): boolean {
   return label !== null && /reuni|meeting/i.test(label);
+}
+
+/** Areas to draw: every one when shown, else only the room hosting the live meeting. */
+export function visibleAreas(
+  { areas, areaTiles }: Pick<OfficeLayout, 'areas' | 'areaTiles'>,
+  showAll: boolean,
+  meetingRunning: boolean,
+): Pick<OfficeLayout, 'areas' | 'areaTiles'> {
+  if (showAll) return { areas, areaTiles };
+  if (!meetingRunning) return {};
+  return { areas, areaTiles: areaTiles?.map((label) => (isMeetingArea(label) ? label : null)) };
 }
 
 /**

@@ -2,6 +2,40 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  meeting: {
+    empty:
+      'Una reunión es una conversación entre agentes para contrastar propuestas y acordar una decisión. Aparece cuando una tarea necesita varias perspectivas. Ahora no hay ninguna en curso.',
+    running: 'Reunión en curso. No consta que necesite tu intervención.',
+    waitingQuota:
+      'Reunión detenida hasta que el servicio de IA vuelva a tener capacidad disponible.',
+    decided: 'Reunión terminada con una decisión. No consta que necesite tu intervención.',
+    escalated:
+      'Los agentes han dejado la decisión en tus manos. No consta una decisión pendiente vinculada a esta reunión.',
+    sameTaskDecision: 'Hay una decisión pendiente de tu respuesta sobre la misma tarea.',
+    unknownStatus: 'No consta en qué estado está la reunión.',
+    interventionTitle: 'Tu intervención',
+    openDecision: 'Ver decisión',
+    result: 'Resultado',
+    roundsTitle: 'Rondas recientes',
+    currentRound: 'en curso',
+    unknownRound: 'Ronda sin nombre registrado',
+    showRoom: 'Ver la sala en la oficina',
+    hideDetails: 'Ocultar detalles',
+    showDetails: 'Mostrar detalles',
+    noLines: 'Todavía no hay intervenciones registradas.',
+    formats: {
+      delphi: 'Opiniones por rondas',
+      premortem: 'Anticipar posibles fallos',
+    },
+    rounds: {
+      borrador: 'Propuestas independientes',
+      critica: 'Revisión entre agentes',
+      premortem: 'Qué podría salir mal',
+      'delphi-1': 'Primera ronda de opiniones',
+      'delphi-2': 'Segunda ronda de opiniones',
+      decision: 'Decisión final',
+    },
+  },
   features: {
     details: 'Ver detalles',
     tasksComplete: 'Tareas completadas; cierre sin confirmar',

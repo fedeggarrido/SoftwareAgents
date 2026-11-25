@@ -675,6 +675,8 @@ export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
   unbound: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
   pending: { label: 'Plan pendiente de aprobación', icon: 'clock', tone: 'attention' },
   meeting: { label: 'En reunión', icon: 'clock', tone: 'active' },
+  meeting_decided: { label: 'Decisión tomada', icon: 'check', tone: 'success' },
+  meeting_escalated: { label: 'Necesita tu decisión', icon: 'attention', tone: 'attention' },
   unknown: { label: 'Sin estado registrado', icon: 'minus', tone: 'muted' },
 };
 

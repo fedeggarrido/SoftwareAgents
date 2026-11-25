@@ -7,6 +7,10 @@ for (const width of [390, 1440]) {
     standalone: _standalone,
   }) => {
     await page.setViewportSize({ width, height: 844 });
+    // The resize switches the dock variant asynchronously.
+    const more = page.getByRole('button', { name: 'Más', exact: true });
+    if (width < 768) await expect(more).toBeVisible();
+    else await expect(more).toBeHidden();
     const label = page.getByRole('button', { name: /^Novedades · v/ });
     if (width === 1440) {
       expect((await label.boundingBox())!.height).toBeGreaterThanOrEqual(44);

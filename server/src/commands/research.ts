@@ -42,6 +42,7 @@ import {
 } from '../research.js';
 import { booksAdapter } from '../researchAdapters/books.js';
 import { paperAdapter } from '../researchAdapters/papers.js';
+import { podcastAdapter } from '../researchAdapters/podcast.js';
 import { redditAdapter } from '../researchAdapters/reddit.js';
 import { webAdapter } from '../researchAdapters/web.js';
 import { isYoutube, youtubeAdapter } from '../researchAdapters/youtube.js';
@@ -188,6 +189,7 @@ export async function runResearchCommand(
     registry.register(paperAdapter('semantic-scholar'));
     registry.register(booksAdapter());
     registry.register(youtubeAdapter());
+    registry.register(podcastAdapter());
   }
   const add = (items: SourceItem[]) => {
     if (abort.signal.aborted) return;

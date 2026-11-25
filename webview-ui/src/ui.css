@@ -21,7 +21,7 @@
   z-index: var(--z-office);
 }
 .office-panels {
-  z-index: var(--z-hud);
+  z-index: auto;
 }
 .connection-indicator {
   position: relative;
@@ -600,24 +600,25 @@ body:has(.critical-blocker) .office-notices {
   cursor: pointer;
 }
 nav.bottom-toolbar.dock-editing {
-  width: min(760px, calc(100vw - 2 * var(--space-2)));
+  width: min(1040px, calc(100vw - 2 * var(--space-2)));
   flex-wrap: wrap;
   height: auto;
 }
 .editing-context {
-  flex-basis: 100%;
-  padding: var(--space-2);
+  flex: 1 1 260px;
+  padding: 0 var(--space-2);
   white-space: normal;
 }
 .editing-context h2 {
   font-size: 20px;
+  line-height: 1;
   margin: 0;
 }
 .editing-context p {
   font-family: var(--font-reading);
   font-size: var(--reading-size);
-  line-height: var(--reading-line-height);
-  margin: var(--space-1) 0 0;
+  line-height: 1.3;
+  margin: 0;
 }
 /* Leave the editing tools above the mode explanation and exit controls. */
 body:has(.dock-editing) .editor-toolbar {
@@ -711,4 +712,90 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
   top: calc((100dvh - var(--office-dock-height, 100px) - 32px) / 2);
   max-height: calc(100dvh - var(--office-dock-height, 100px) - 48px);
   overflow-y: auto;
+}
+
+/* Mobile supervision: one flowing stack, with a separate thumb zone for zoom. */
+@media (max-width: 767px) {
+  .office-viewport {
+    --office-zoom-bottom: calc(
+      var(--office-dock-height, var(--dock-mobile-height)) + var(--dock-bottom) + var(--space-2)
+    );
+  }
+  [data-testid='zoom-level'] {
+    top: auto;
+    bottom: var(--office-zoom-bottom);
+    left: auto;
+    right: var(--panel-edge);
+    transform: none;
+    translate: none;
+  }
+  .office-panels .office-panel-hud {
+    padding-top: 0;
+    overflow-y: auto;
+    pointer-events: auto;
+    max-height: calc(100% - var(--control-target) - var(--space-2));
+  }
+  .office-panel-hud > [data-testid='company-hud'] {
+    --hud-offset: var(--panel-edge);
+    flex-shrink: 0;
+  }
+  .office-panel-hud :where(p, span, div) {
+    font-size: var(--reading-size);
+  }
+  .office-panel-hud .office-notices {
+    position: static;
+    margin: var(--space-2) var(--panel-edge);
+    max-width: none;
+    flex-shrink: 0;
+  }
+  .version-label {
+    display: none;
+  }
+  [data-testid='zoom-controls'] {
+    top: auto;
+    bottom: var(--office-zoom-bottom);
+    flex-direction: row;
+  }
+  [data-testid='zoom-controls'] button,
+  [data-testid='company-hud'] button,
+  .office-notices button,
+  .idea-command summary {
+    min-height: var(--control-target);
+    min-width: var(--control-target);
+    font-size: var(--reading-size);
+  }
+}
+.idea-command summary:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+}
+
+.terminal-instructions summary {
+  min-height: var(--control-target);
+  font-size: var(--reading-size);
+  cursor: pointer;
+}
+.terminal-instructions summary:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+}
+
+@media (min-width: 768px) {
+  .office-panel-hud .office-notices {
+    top: calc(10px - var(--office-top));
+  }
+}
+
+.terminal-instructions summary:active {
+  background: var(--color-btn-bg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .terminal-instructions summary:hover {
+    background: var(--color-btn-hover);
+  }
+}
+.office-notices button:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+}
+
+.office-panel-hud .office-notices {
+  pointer-events: auto;
 }

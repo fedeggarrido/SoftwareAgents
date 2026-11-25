@@ -1,0 +1,5 @@
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel>
+<title>Publisher show</title><itunes:author>Publisher</itunes:author><language>es</language>
+<item><title>Episode &amp; evidence</title><pubDate>Tue, 24 Nov 2026 10:00:00 GMT</pubDate><description><![CDATA[<p>Public episode description.</p>]]></description><podcast:transcript url="/transcript.txt" type="text/plain"/><enclosure url="https://audio.invalid/episode.mp3" type="audio/mpeg"/></item>
+<item><title>Metadata only</title><description>Second description.</description></item>
+</channel></rss>

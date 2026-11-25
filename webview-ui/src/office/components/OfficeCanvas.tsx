@@ -9,6 +9,7 @@ import {
   ZOOM_SCROLL_THRESHOLD,
 } from '../../constants.js';
 import { unlockAudio } from '../../notificationSound.js';
+import { isBrowserRuntime } from '../../runtime.js';
 import { transport } from '../../transport/index.js';
 import { getColorizedSprite } from '../colorize.js';
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js';
@@ -23,6 +24,7 @@ import type {
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
+import { MobileZoomPolicy } from '../mobileZoom.js';
 import { EditTool, TILE_SIZE, TileType } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
 
@@ -101,6 +103,11 @@ export function OfficeCanvas({
     [officeState, zoom],
   );
 
+  const mobileZoomRef = useRef(new MobileZoomPolicy(zoom));
+  mobileZoomRef.current.observe(zoom);
+  const cameraRef = useRef({ onZoomChange, isEditMode });
+  cameraRef.current = { onZoomChange, isEditMode };
+
   // Resize canvas backing store to device pixels (no DPR transform on ctx)
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -113,8 +120,19 @@ export function OfficeCanvas({
     delete canvas.dataset.ready;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
+    const camera = cameraRef.current;
+    // A narrow VS Code panel is still a desktop: only the browser office fits itself.
+    if (isBrowserRuntime && !camera.isEditMode) {
+      const fitted = mobileZoomRef.current.fit(
+        rect.width,
+        dpr,
+        officeState.getLayout().cols,
+        officeState.cameraFollowId !== null,
+      );
+      if (fitted !== null) camera.onZoomChange(fitted);
+    }
     // No ctx.scale(dpr) — we render directly in device pixels
-  }, []);
+  }, [officeState]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

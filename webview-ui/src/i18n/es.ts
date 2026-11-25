@@ -212,7 +212,7 @@ export const es = {
     editingTitle: 'Edición de la oficina',
     exitEditing: 'Salir de la edición',
     editingHelp:
-      'Aquí organizas el diseño de la oficina. Para crear una idea, sal de la edición. El diseño se guarda automáticamente; salir conserva los cambios. Al volver puedes confirmar con Guardar o recuperar el punto anterior con Restablecer.',
+      'Se guarda automáticamente: salir conserva los cambios. Para crear una idea, sal de la edición.',
     offlineHelp: 'Abre SoftwareAgents en tu ordenador. Esta pestaña se conectará automáticamente.',
     originRejected:
       'La oficina ha rechazado el origen de esta página. Abre SoftwareAgents en tu ordenador para volver a entrar.',

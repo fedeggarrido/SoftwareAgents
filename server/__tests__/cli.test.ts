@@ -363,8 +363,8 @@ describe('dist/cli.js entry-point guard', () => {
       await body({ output: () => output, port });
     } finally {
       await stopChild(child);
-      fs.rmSync(tmpHome, { recursive: true, force: true });
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     }
   }
 
@@ -704,8 +704,8 @@ describe('dist/cli.js entry-point guard', () => {
       expect(hooks.SessionStart[0].hooks[0].command).toBe(`node "${installedHook}"`);
     } finally {
       await stopChild(child);
-      fs.rmSync(tmpHome, { recursive: true, force: true });
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     }
   });
 });

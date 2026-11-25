@@ -54,6 +54,20 @@
   max-height: 40dvh;
   overflow: auto;
 }
+/* Above dialogs: the refused action is usually one of theirs. */
+.connection-unsent {
+  position: fixed;
+  inset: auto var(--space-2) var(--space-2);
+  z-index: var(--z-alert);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
 .connection-chip {
   position: absolute;
   right: var(--space-2);

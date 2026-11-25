@@ -535,7 +535,8 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         await sheet
           .getByRole('button', { name: 'Editar diseño de la oficina', exact: true })
           .click();
-        expect(await dock.getByRole('button').count()).toBe(3);
+        // Exit, settings and the always-present Deshacer, Rehacer, Guardar, Restablecer.
+        expect(await dock.getByRole('button').count()).toBe(7);
         expect(await dock.evaluate(fitsHorizontally)).toBe(true);
         const dockBox = (await dock.boundingBox())!;
         expect(dockBox.x).toBeGreaterThanOrEqual(0);

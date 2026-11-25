@@ -117,9 +117,14 @@ export function OfficeCanvas({
     if (!canvas || !container) return;
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    delete canvas.dataset.ready;
+    const width = Math.round(rect.width * dpr);
+    const height = Math.round(rect.height * dpr);
+    // Assigning either size clears the drawing, even when it does not change.
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      delete canvas.dataset.ready;
+    }
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     const camera = cameraRef.current;
@@ -142,12 +147,7 @@ export function OfficeCanvas({
 
     resizeCanvas();
 
-    const observer = new ResizeObserver(() => resizeCanvas());
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
-
-    const stop = startGameLoop(canvas, {
+    const loop = startGameLoop(canvas, {
       update: (dt) => {
         officeState.update(dt);
       },
@@ -336,8 +336,16 @@ export function OfficeCanvas({
       },
     });
 
+    const observer = new ResizeObserver(() => {
+      resizeCanvas();
+      loop.redraw();
+    });
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
     return () => {
-      stop();
+      loop.stop();
       delete canvas.dataset.ready;
       observer.disconnect();
     };

@@ -39,15 +39,17 @@ export function EditActionBar({ editor, editorState }: EditActionBarProps) {
       <Button
         variant="secondary"
         size="md"
+        disabled={!editor.isDirty}
         onClick={editor.handleSave}
         title={es.office.saveDesign}
       >
         Guardar
       </Button>
-      {!showResetConfirm ? (
+      {!showResetConfirm || !editor.isDirty ? (
         <Button
           variant="secondary"
           size="md"
+          disabled={!editor.isDirty}
           onClick={() => setShowResetConfirm(true)}
           title={es.office.resetDesign}
         >

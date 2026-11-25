@@ -551,9 +551,7 @@ function App() {
           onMenuOpenChange={setIsDockMenuOpen}
           isEditMode={editor.isEditMode}
           editActions={
-            editor.isEditMode && editor.isDirty ? (
-              <EditActionBar editor={editor} editorState={editorState} />
-            ) : null
+            editor.isEditMode ? <EditActionBar editor={editor} editorState={editorState} /> : null
           }
           onOpenClaude={editor.handleOpenClaude}
           onToggleEditMode={editor.handleToggleEditMode}

@@ -5,8 +5,10 @@ import {
   OFFICE_MANAGED_EXPLANATION,
 } from '../../../core/src/officeAccess.js';
 import { PROJECT_EMPTY_TEXT } from '../constants.js';
-import { FEATURE_COST_ESTIMATE_HINT, FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
+import { FEATURE_PROGRESS_PERCENT_MAX } from '../constants.js';
+import { es } from '../i18n/es.js';
 import { useExecutorStore } from '../office/executorStore.js';
+import { featurePresentation } from '../office/featurePresentation.js';
 import { featureStepLabel } from '../office/featuresStore.js';
 import {
   emptyFeaturesStore,
@@ -25,6 +27,7 @@ import {
 } from '../office/featuresStore.js';
 import { ideaErrorText, requestIdeas } from '../office/ideasStore.js';
 import { useIdeasConnection } from '../office/useIdeasConnection.js';
+import { useProjectSummary } from '../office/useProjectSummary.js';
 import { transport } from '../transport/index.js';
 import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
@@ -47,8 +50,17 @@ export function FeaturesPanel({
 }) {
   const store = useFeaturesStore();
   const executor = useExecutorStore();
-  const projectId = executor.needsSnapshot ? null : (executor.state?.projectId ?? null);
-  const { store: ideas, connection: connectionState } = useIdeasConnection(isOpen, projectId);
+  const executorProjectId = executor.state?.projectId ?? null;
+  const { store: ideas, connection: connectionState } = useIdeasConnection(
+    isOpen,
+    executorProjectId,
+  );
+  const projectId = executorProjectId ?? ideas.snapshot?.projectId ?? null;
+  const summary = useProjectSummary(isOpen);
+  const ideaGoals =
+    summary.snapshot?.status === 'ok' && summary.snapshot.projectId === projectId
+      ? summary.snapshot.summary?.goals
+      : undefined;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,7 +79,10 @@ export function FeaturesPanel({
     store.projectId === projectId && connectionState === 'connected' ? store : emptyFeaturesStore();
   const state = viewState(selectedStore);
   const refresh = () => {
-    if (connectionState === 'connected') requestIdeas(transport);
+    if (connectionState === 'connected') {
+      requestIdeas(transport);
+      summary.refresh();
+    }
     if (projectId && connectionState === 'connected') requestFeatures(transport, projectId);
   };
   return (
@@ -107,18 +122,28 @@ export function FeaturesPanel({
             onRetry={() => requestIdeas(transport)}
           />
         ) : !projectId || ideas.snapshot.projectId === projectId ? (
-          <IdeasList ideas={ideas.snapshot.ideas} checkoutName={checkoutName} />
+          <IdeasList
+            ideas={ideas.snapshot.ideas}
+            checkoutName={checkoutName}
+            goals={ideaGoals}
+            loading={summary.store.phase === 'loading' || summary.store.phase === 'idle'}
+          />
         ) : (
           <p role="status">Cargando ideas pendientes…</p>
         )}
       </div>
       {!projectId ? (
         <div>
-          {connectionState === 'connected' ? (
+          {connectionState === 'connected' &&
+          !executor.needsSnapshot &&
+          (ideas.snapshot?.errorCode === 'no_project' ||
+            ideas.snapshot?.errorCode === 'missing_manifest') ? (
             <>
               <p>{PROJECT_EMPTY_TEXT}</p>
               <OfficeRecoveryActions project />
             </>
+          ) : connectionState === 'connected' ? (
+            <p role="status">{es.features.projectLoading}</p>
           ) : null}
         </div>
       ) : (
@@ -142,81 +167,98 @@ export function FeaturesPanel({
               disabled={connectionState !== 'connected'}
             />
           )}
-          {visibleFeatures(selectedStore).map((feature) => (
-            <article
-              key={feature.key}
-              className="feature-row bg-bg-dark border-2 border-border p-8 text-xs"
-              data-state={feature.state}
-            >
-              <h3 className="feature-heading" title={feature.title ?? feature.key}>
-                <span className="text-accent-bright">{feature.key}</span>
-                {feature.title && <span className="feature-title"> · {feature.title}</span>}
-              </h3>
-              <FeaturePlanButton
-                key={`${projectId}/${feature.key}`}
-                projectId={projectId}
-                featureKey={feature.key}
-              />
-              <StatusChip state={feature.state} />
-              <div className="feature-progress">
-                {feature.progress && (
-                  <div
-                    className="feature-progress-track"
-                    role="progressbar"
-                    aria-label={`Progreso de ${feature.key}`}
-                    aria-valuemin={0}
-                    aria-valuemax={feature.progress.total}
-                    aria-valuenow={feature.progress.done}
-                    aria-valuetext={featureProgressLabel(feature.progress)}
-                  >
-                    <span
-                      style={{
-                        width: `${Math.min(FEATURE_PROGRESS_PERCENT_MAX, (feature.progress.done / feature.progress.total) * FEATURE_PROGRESS_PERCENT_MAX)}%`,
-                      }}
-                    />
-                  </div>
-                )}
-                <span>{featureProgressLabel(feature.progress)}</span>
-              </div>
-              {feature.flow && <div className="text-text-muted">{feature.flow}</div>}
-              <div
-                className="feature-cost flex flex-wrap gap-8 text-text-muted"
-                title={FEATURE_COST_ESTIMATE_HINT}
+          {visibleFeatures(selectedStore).map((feature) => {
+            const presentation = featurePresentation(feature);
+            return (
+              <article
+                key={feature.key}
+                className="feature-row bg-bg-dark border-2 border-border p-8"
+                data-state={presentation.state}
               >
-                <span>Coste est. API: {featureCostLabel(feature.cost)}</span>
-                <span>Ejecuciones: {feature.cost.executions}</span>
-                <span>Cobertura: {featureCoverageLabel(feature.cost)}</span>
-                <span>Coste est./tarea hecha: {featureCostPerDoneLabel(feature.cost)}</span>
-                <span>Caché: {featureCacheRateLabel(feature.cost)}</span>
-              </div>
-              <div className="feature-context text-text-muted">
-                {feature.currentTask && (
-                  <span title="Tarea en curso">
-                    {feature.currentTask.key} {featureStepLabel(feature.currentTask.step)}
-                    {feature.currentTask.others > 0 && ` (+${feature.currentTask.others})`}
+                <h3 className="feature-heading" title={feature.title ?? feature.key}>
+                  <span className="text-accent-bright">{feature.key}</span>
+                  {feature.title && <span className="feature-title"> · {feature.title}</span>}
+                </h3>
+                <FeaturePlanButton
+                  key={`${projectId}/${feature.key}`}
+                  projectId={projectId}
+                  featureKey={feature.key}
+                />
+                <StatusChip state={presentation.state} />
+                {feature.progress && (
+                  <p>
+                    {es.features.progress}:{' '}
+                    {es.features.tasksDone(feature.progress.done, feature.progress.total)}
+                  </p>
+                )}
+                <p>
+                  {es.features.next}: {presentation.nextAction}
+                </p>
+                <p title={es.features.costHint}>
+                  {es.features.cost}: {featureCostLabel(feature.cost)}. {es.features.costHint}
+                </p>
+                <details className="feature-details">
+                  <summary>{es.features.details}</summary>
+                  <div className="feature-progress">
+                    {feature.progress && (
+                      <div
+                        className="feature-progress-track"
+                        role="progressbar"
+                        aria-label={`Progreso de ${feature.key}`}
+                        aria-valuemin={0}
+                        aria-valuemax={feature.progress.total}
+                        aria-valuenow={feature.progress.done}
+                        aria-valuetext={featureProgressLabel(feature.progress)}
+                      >
+                        <span
+                          style={{
+                            width: `${Math.min(FEATURE_PROGRESS_PERCENT_MAX, (feature.progress.done / feature.progress.total) * FEATURE_PROGRESS_PERCENT_MAX)}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                    <span>{featureProgressLabel(feature.progress)}</span>
+                  </div>
+                  {feature.flow && <div className="text-text-muted">{feature.flow}</div>}
+                  <div
+                    className="feature-cost flex flex-wrap gap-8 text-text-muted"
+                    title={es.features.costHint}
+                  >
+                    <span>Ejecuciones: {feature.cost.executions}</span>
+                    <span>Cobertura: {featureCoverageLabel(feature.cost)}</span>
+                    <span>Coste est./tarea hecha: {featureCostPerDoneLabel(feature.cost)}</span>
+                    <span>Caché: {featureCacheRateLabel(feature.cost)}</span>
+                  </div>
+                </details>
+                <div className="feature-context text-text-muted">
+                  {feature.currentTask && (
+                    <span title="Tarea en curso">
+                      {feature.currentTask.key} {featureStepLabel(feature.currentTask.step)}
+                      {feature.currentTask.others > 0 && ` (+${feature.currentTask.others})`}
+                    </span>
+                  )}
+                  {feature.gates.map((gate, index) => (
+                    <div key={index} className="feature-gate">
+                      <span>
+                        {featureStepLabel(gate.kind)} {gate.task}
+                        {gate.expired && ' · expirado'}
+                      </span>
+                      <code>{gate.command}</code>
+                      {gate.reason && <span>{gate.reason}</span>}
+                    </div>
+                  ))}
+                </div>
+                {feature.integration && (
+                  <span
+                    className="feature-integration text-text-muted"
+                    title={feature.integration.branch}
+                  >
+                    {feature.integration.branch.replace(/^sa\//, '')} {feature.integration.sha}
                   </span>
                 )}
-                {feature.gates.map((gate, index) => (
-                  <div key={index} className="feature-gate">
-                    <span>
-                      {featureStepLabel(gate.kind)} {gate.task}
-                      {gate.expired && ' · expirado'}
-                    </span>
-                    <code>{gate.command}</code>
-                    {gate.reason && <span>{gate.reason}</span>}
-                  </div>
-                ))}
-              </div>
-              {feature.integration && (
-                <span
-                  className="feature-integration text-text-muted"
-                  title={feature.integration.branch}
-                >
-                  {feature.integration.branch.replace(/^sa\//, '')} {feature.integration.sha}
-                </span>
-              )}
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </>
       )}
     </section>

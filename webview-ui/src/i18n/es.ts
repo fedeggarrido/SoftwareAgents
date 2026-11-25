@@ -2,6 +2,34 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  features: {
+    details: 'Ver detalles',
+    tasksComplete: 'Tareas completadas; cierre sin confirmar',
+    verifyClosure: 'Comprobar la revisión y la integración con Ver plan.',
+    integrated: 'Consultar el resultado integrado con Ver plan.',
+    integrate: 'Revisar los cambios y realizar la integración humana.',
+    followTask: 'Consultar la tarea en curso indicada en esta tarjeta.',
+    noTasks: 'Sin tareas todavía. Consultar Ver plan para comprobar qué falta.',
+    queued: 'Quedan tareas y ninguna está en curso. Consultar Ver plan.',
+    failedTasks: (count: number) =>
+      `Revisar ${count} ${count === 1 ? 'tarea con fallo' : 'tareas con fallo'} en Ver plan.`,
+    progress: 'Progreso',
+    tasksDone: (done: number, total: number) => `${done} de ${total} tareas hechas`,
+    gates: 'Resolver las decisiones o impedimentos indicados en esta tarjeta.',
+    next: 'Siguiente acción',
+    cost: 'Coste estimado API',
+    costHint: 'Estimación a precio de API del consumo registrado; no es un cargo.',
+    readIdea: 'Leer resumen de la idea',
+    ideaLoading: 'Cargando el texto de la idea…',
+    ideaUnavailable: 'No se pudo obtener el texto. Actualiza las funcionalidades para reintentar.',
+    projectLoading: 'Comprobando el proyecto…',
+    planUnavailable:
+      'No se pudo leer el plan: el servidor no pudo obtenerlo. No se conoce la causa concreta. Pulsa Actualizar plan; si persiste, consulta el plan con pixel-agents feature show.',
+    planInvalid:
+      'No se pudo leer el plan: la solicitud no es válida. Cierra el plan y vuelve a abrirlo desde su funcionalidad.',
+    planUnknown:
+      'No se pudo leer el plan. No se conoce la causa. Pulsa Actualizar plan para reintentar.',
+  },
   settings: {
     title: 'Ajustes',
     newProject: 'Nuevo proyecto',

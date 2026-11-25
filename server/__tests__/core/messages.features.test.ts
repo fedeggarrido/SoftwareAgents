@@ -17,7 +17,7 @@ const row = {
   title: '<b>Title</b>',
   state: 'in_review',
   rawStatus: null,
-  progress: { done: 2, total: 5 },
+  progress: { done: 2, failed: 0, total: 5 },
   currentTask: { key: 'FEAT-002-T01', step: 'review', others: 0 },
   gates: [
     {

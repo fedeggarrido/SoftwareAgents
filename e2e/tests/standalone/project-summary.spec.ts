@@ -254,6 +254,56 @@ test.describe('Standalone / project summary', () => {
     }
   });
 
+  test('SA-123 readable feature cards and completed tasks @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    const file = path.join(standalone.workspaceDir, '.git/softwareagents/work.sqlite3');
+    const db = new DatabaseSync(file);
+    try {
+      db.exec("UPDATE tasks SET status = 'DONE' WHERE project_id = 'summary-e2e'");
+    } finally {
+      db.close();
+    }
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 390) await page.getByRole('button', { name: 'Más', exact: true }).click();
+      await page.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
+      const panel = page.getByRole('region', { name: 'Funcionalidades', exact: true });
+      const card = panel.locator('.feature-row').filter({ hasText: 'Recibos' });
+      await expect(card.locator('.status-chip')).toHaveText(
+        'Tareas completadas; cierre sin confirmar',
+      );
+      await expect(card).not.toContainText('En desarrollo');
+      await expect(panel).not.toContainText('Esta oficina no tiene un proyecto');
+      await expect(card.getByText(/Siguiente acción:/)).toBeVisible();
+      await expect(card.getByText(/Coste estimado API:/)).toContainText('sin datos');
+      await expect(card.getByRole('progressbar')).not.toBeVisible();
+      const details = card.locator('.feature-details');
+      await expect(details).not.toHaveAttribute('open');
+      await details.locator('summary').click();
+      await expect(card.getByRole('progressbar')).toHaveAttribute('aria-valuetext', '3/3');
+      const idea = panel.locator('.idea-row');
+      await expect(idea.locator('.idea-text')).toHaveText('Consultar los pedidos de la tienda');
+      await idea.getByText('Leer resumen de la idea', { exact: true }).click();
+      await expect(idea.locator('.idea-description p')).toHaveText(
+        'Consultar los pedidos de la tienda',
+      );
+      await idea.getByText('Detalles', { exact: true }).click();
+      await expect(idea.getByRole('button', { name: 'Copiar comando', exact: true })).toBeVisible();
+      await card.getByRole('button', { name: 'Ver plan', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Plan de funcionalidad' });
+      await expect(dialog.getByText(/No se pudo leer el plan:/)).toContainText(
+        'No se conoce la causa concreta',
+      );
+      await expect(
+        dialog.getByRole('button', { name: 'Actualizar plan', exact: true }),
+      ).toBeEnabled();
+      await dialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+      await page.getByRole('button', { name: 'Cerrar ventana', exact: true }).click();
+    }
+  });
+
   test.describe('empty project on mobile', () => {
     test.use({ summarySeed: 'empty' });
     test('explains how to start from the mobile dock @area:standalone', async ({

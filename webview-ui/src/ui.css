@@ -499,3 +499,74 @@ body:has(.critical-blocker) .office-notices {
 .idea-dialog #idea-review-heading:focus {
   outline: 2px solid var(--color-accent);
 }
+
+/* Fold metrics without hiding the feature's next action. */
+.feature-row,
+.idea-row {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: 1.4;
+}
+.feature-row p {
+  margin-block: 8px;
+}
+.feature-details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  text-decoration: underline;
+}
+@media (hover: hover) and (pointer: fine) {
+  .feature-details > summary:hover {
+    color: var(--color-accent-bright);
+  }
+}
+.feature-details > summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.feature-details > summary:active {
+  background: var(--color-bg);
+}
+.idea-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.feature-row {
+  align-items: flex-start;
+}
+.feature-row > p,
+.feature-details {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.feature-heading {
+  flex-wrap: wrap;
+}
+.feature-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.idea-description > summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+}
+.idea-description > summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.idea-description > summary:active {
+  background: var(--color-bg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .idea-description > summary:hover {
+    color: var(--color-accent-bright);
+  }
+}

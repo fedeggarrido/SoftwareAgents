@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FeatureRow, FeaturesSnapshot } from '../../core/src/messages.js';
+import type { FeatureRow, FeaturesSnapshot, ProjectSummary } from '../../core/src/messages.js';
 import { emptyExecutorStore, setExecutorStore } from '../src/office/executorStore.js';
 import {
   applyFeaturesSnapshot,
@@ -12,6 +12,7 @@ import {
   setFeaturesStore,
 } from '../src/office/featuresStore.js';
 import { emptyIdeasStore, setIdeasStore } from '../src/office/ideasStore.js';
+import { setProjectSummaryStore } from '../src/office/projectSummaryStore.js';
 
 const lifecycle = vi.hoisted(() => ({
   effects: [] as Array<() => void | (() => void)>,
@@ -24,11 +25,14 @@ vi.mock('../src/transport/index.js', () => ({
   transport: {
     // Keep the existing feature-read assertions separate from the new draft reads.
     send: (message: { type: string }) =>
-      message.type === 'requestIdeas' ? lifecycle.sendIdeas(message) : lifecycle.send(message),
+      ['requestIdeas', 'requestProjectSummary'].includes(message.type)
+        ? lifecycle.sendIdeas(message)
+        : lifecycle.send(message),
     get state() {
       return lifecycle.state;
     },
     onStateChange: () => () => {},
+    onMessage: () => () => {},
   },
 }));
 vi.mock('react', async (original) => ({
@@ -53,6 +57,7 @@ async function flush(isOpen = true) {
     if (cleanup) lifecycle.cleanups.push(cleanup);
   }
 }
+// SAFETY: panel fixtures only read the project identity from executor state.
 const project = (projectId: string) =>
   setExecutorStore({
     ...emptyExecutorStore(),
@@ -63,7 +68,7 @@ const row: FeatureRow = {
   title: '<b>Title</b>',
   state: 'in_development',
   rawStatus: null,
-  progress: { done: 2, total: 5 },
+  progress: { done: 2, failed: 0, total: 5 },
   currentTask: { key: 'FEAT-020-T02', step: 'review', others: 2 },
   gates: [
     {
@@ -98,6 +103,7 @@ beforeEach(() => {
   lifecycle.send.mockClear();
   lifecycle.sendIdeas.mockClear();
   setIdeasStore(emptyIdeasStore());
+  setProjectSummaryStore({ phase: 'idle' });
   close.mockClear();
   project('P');
   setFeaturesStore(beginFeaturesRequest(emptyFeaturesStore(), 'P', 'r'));
@@ -219,7 +225,9 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const html = await render();
     expect(html).toContain(`Ejecuciones: ${cost.executions}`);
     expect(html).toContain(`Cobertura: ${cost.costKnown} de ${cost.executions}`);
-    expect(html).toContain(`Coste est. API: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`);
+    expect(html).toContain(
+      `Coste estimado API: ${cost.costUsd === null ? 'sin datos' : '0.00 USD'}`,
+    );
     expect(html).toContain(
       `Coste est./tarea hecha: ${cost.costPerDoneTaskUsd === null ? 'sin datos' : '0.00 USD'}`,
     );
@@ -230,16 +238,16 @@ describe('FEAT-002-T06 panel acceptance', () => {
 
   it('FEAT-003 AC-005 hides costs across Projects with the same feature key', async () => {
     const previousRequest = getFeaturesStore().requestId!;
-    expect(await render()).toContain('Coste est. API: 0.60 USD');
+    expect(await render()).toContain('Coste estimado API: 0.60 USD');
     project('Q');
     expect(await render()).not.toContain('USD');
     await flush();
     respond({ features: [{ ...row, cost: { ...row.cost, costUsd: 5 } }] });
-    expect(await render()).toContain('Coste est. API: 5.00 USD');
+    expect(await render()).toContain('Coste estimado API: 5.00 USD');
     respond({ projectId: 'P', requestId: previousRequest });
     const html = await render();
-    expect(html).toContain('Coste est. API: 5.00 USD');
-    expect(html).not.toContain('Coste est. API: 0.60 USD');
+    expect(html).toContain('Coste estimado API: 5.00 USD');
+    expect(html).not.toContain('Coste estimado API: 0.60 USD');
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
     expect(lifecycle.send).toHaveBeenCalledWith({
       type: 'requestFeatures',
@@ -263,8 +271,8 @@ describe('FEAT-002-T06 panel acceptance', () => {
     const html = await render();
     const block = html.match(/<div class="feature-cost[^>]*>(.*?)<\/div>/s)?.[1];
     expect(block).toBeDefined();
+    expect(html).toContain('Coste estimado API: 0.90 USD (parcial)');
     for (const text of [
-      'Coste est. API: 0.90 USD (parcial)',
       'Ejecuciones: 5',
       'Cobertura: 3 de 5',
       'Coste est./tarea hecha: 0.30 USD',
@@ -343,7 +351,9 @@ describe('FEAT-002-T06 panel acceptance', () => {
     expect(html).not.toContain('<dl>');
   });
   it('renders the merged chip and a complete progress bar', async () => {
-    respond({ features: [{ ...row, state: 'merged', progress: { done: 5, total: 5 } }] });
+    respond({
+      features: [{ ...row, state: 'merged', progress: { done: 5, failed: 0, total: 5 } }],
+    });
     const html = await render();
     expect(html).toContain('data-state="merged"');
     expect(html).toContain('Integrada');
@@ -392,7 +402,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
       features: [
         {
           ...row,
-          progress: { done: 3, total: 5 },
+          progress: { done: 3, failed: 0, total: 5 },
           currentTask: { key: 'FEAT-020-T03', step: 'develop', others: 0 },
         },
       ],
@@ -437,8 +447,113 @@ describe('FEAT-002-T06 panel acceptance', () => {
 it('uses the same actionable project empty state as Auditoría', async () => {
   setExecutorStore(emptyExecutorStore());
   setFeaturesStore(emptyFeaturesStore());
+  setIdeasStore({
+    ...emptyIdeasStore(),
+    snapshot: {
+      type: 'ideasSnapshot',
+      requestId: 'none',
+      projectId: null,
+      canSubmit: false,
+      errorCode: 'no_project',
+      ideas: [],
+    },
+  });
   const html = await render();
   expect(html).toContain('Esta oficina no tiene un proyecto preparado vinculado');
   expect(html).toContain('Abre la oficina desde la carpeta de un proyecto preparado');
   expect(html).not.toContain('Sin Project');
+});
+
+it('SA-123 folds metrics by default and shows a consistent 5/5 summary', async () => {
+  respond({ features: [{ ...row, progress: { done: 5, failed: 0, total: 5 } }] });
+  const html = await render();
+  expect(html).toContain('Tareas completadas; cierre sin confirmar');
+  expect(html).not.toContain('En desarrollo');
+  expect(html).toContain('Siguiente acción');
+  expect(html).toContain('no es un cargo');
+  expect(html).toMatch(/<details class="feature-details"><summary>Ver detalles/);
+  expect(html).not.toMatch(/<details[^>]*open/);
+  expect(html).toContain('Ver plan');
+  expect(html).toContain('pixel-agents feature show FEAT-020');
+});
+it('SA-123 does not claim there is no project while its snapshot is pending', async () => {
+  setExecutorStore(emptyExecutorStore());
+  expect(await render()).toContain('Comprobando el proyecto');
+  expect(await render()).not.toContain('Esta oficina no tiene un proyecto');
+});
+it('SA-123 retains a known project while waiting for fresh executor evidence', async () => {
+  const { getExecutorStore } = await import('../src/office/executorStore.js');
+  setExecutorStore({ ...getExecutorStore(), needsSnapshot: true });
+  expect(await render()).not.toContain('Esta oficina no tiene un proyecto');
+  expect(await render()).toContain('FEAT-020');
+});
+
+it('SA-123 reads idea text from the existing project summary and hides another project', async () => {
+  const summary: ProjectSummary = {
+    name: 'Proyecto P',
+    goals: [{ key: 'FEAT-021', text: '<b>Consultar pedidos</b>', at: null }],
+    features: [],
+    milestones: [],
+    deliveries: [],
+    decisions: [],
+    risks: [],
+    blockers: [],
+    nextSteps: [],
+    notices: [],
+    workflow: [],
+    cost: {
+      source: 'none',
+      executions: 0,
+      costKnown: 0,
+      costUsd: null,
+      inputTokens: null,
+      outputTokens: null,
+      tokenKnown: null,
+    },
+  };
+  setProjectSummaryStore({
+    phase: 'settled',
+    projectId: 'P',
+    snapshot: {
+      type: 'projectSummarySnapshot',
+      projectId: 'P',
+      requestId: 'summary',
+      status: 'ok',
+      reason: null,
+      summary,
+    },
+  });
+  setIdeasStore({
+    ...emptyIdeasStore(),
+    snapshot: {
+      type: 'ideasSnapshot',
+      projectId: 'P',
+      requestId: 'ideas',
+      canSubmit: true,
+      errorCode: null,
+      ideas: [{ key: 'FEAT-021', command: 'pixel-agents feature run FEAT-021' }],
+    },
+  });
+  const html = await render();
+  expect(html).toContain('&lt;b&gt;Consultar pedidos&lt;/b&gt;');
+  expect(html).toContain('Leer resumen de la idea');
+  expect(html).not.toContain('<b>Consultar pedidos</b>');
+  project('Q');
+  expect(await render()).not.toContain('Consultar pedidos');
+});
+it('SA-123 uses the project reported by ideas before executor state arrives', async () => {
+  setExecutorStore(emptyExecutorStore());
+  setIdeasStore({
+    ...emptyIdeasStore(),
+    snapshot: {
+      type: 'ideasSnapshot',
+      projectId: 'P',
+      requestId: 'ideas',
+      canSubmit: true,
+      errorCode: null,
+      ideas: [],
+    },
+  });
+  expect(await render()).toContain('FEAT-020');
+  expect(await render()).not.toContain('Esta oficina no tiene un proyecto');
 });

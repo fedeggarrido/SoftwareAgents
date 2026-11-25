@@ -571,6 +571,7 @@ export type FeatureState =
 
 export interface FeatureProgress {
   done: number;
+  failed: number;
   total: number;
 }
 

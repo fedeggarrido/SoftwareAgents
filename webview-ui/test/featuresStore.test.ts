@@ -24,7 +24,7 @@ const row: FeatureRow = {
   title: null,
   state: 'in_development',
   rawStatus: null,
-  progress: { done: 2, total: 5 },
+  progress: { done: 2, failed: 0, total: 5 },
   currentTask: null,
   gates: [],
   integration: null,
@@ -135,7 +135,7 @@ describe('features store acceptance', () => {
     const rows = [
       {
         ...row,
-        progress: { done: 3, total: 5 },
+        progress: { done: 3, failed: 0, total: 5 },
         currentTask: { key: 'FEAT-020-T03', step: 'develop' as const, others: 0 },
       },
       { ...row, key: 'FEAT-021' },

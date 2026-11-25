@@ -619,7 +619,7 @@ describe('features view acceptance', () => {
     expect(rows.map((r) => r.key)).toEqual(['FEAT-002', 'FEAT-001']);
     expect(rows[0]).toMatchObject({
       state: 'in_development',
-      progress: { done: 1, total: 1 },
+      progress: { done: 1, failed: 0, total: 1 },
       currentTask: { key: 'FEAT-002-T01', step: 'review', others: 0 },
       integration: { branch: 'sa/FEAT-002-integration', sha: 'aaaaaaa' },
     });
@@ -629,6 +629,33 @@ describe('features view acceptance', () => {
       progress: null,
       gates: [{ kind: 'spec_approval', command: 'pixel-agents feature approve FEAT-001' }],
     });
+  });
+
+  it.each([
+    ['FAILED_FINAL', 1],
+    ['FAILED_RETRYABLE', 1],
+    ['READY', 0],
+  ])('SA-123 counts a %s task as failed: %i', (status, failed) => {
+    const [feature] = projectFeatures({
+      features: [{ key: 'FEAT-001', title: 'T', status: 'approved', updated_at: null }],
+      designs: [{ feature_key: 'FEAT-001' }],
+      tasks: [
+        {
+          key: 'FEAT-001-T01',
+          feature_key: 'FEAT-001',
+          status,
+          declaration: '{}',
+          version: 1,
+          review_ref: null,
+          updated_at: null,
+        },
+      ],
+      runs: [],
+      decisions: [],
+      executions: [],
+      events: [],
+    });
+    expect(feature.progress).toEqual({ done: 0, failed, total: 1 });
   });
 
   it('AC-006/009/010/011/013 reads a migrated database without writes or processes', async () => {

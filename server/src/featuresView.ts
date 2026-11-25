@@ -332,7 +332,11 @@ export function projectFeatures(source: FeaturesSource): FeatureRow[] {
           ? null
           : display(status),
         progress: dag.length
-          ? { done: dag.filter((t) => t.status === 'DONE').length, total: dag.length }
+          ? {
+              done: dag.filter((t) => t.status === 'DONE').length,
+              failed: dag.filter((t) => text(t.status).startsWith('FAILED')).length,
+              total: dag.length,
+            }
           : null,
         currentTask,
         gates,

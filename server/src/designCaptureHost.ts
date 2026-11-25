@@ -46,7 +46,7 @@ export async function captureInHost(
     title: 'Dirección artística del espacio de trabajo',
     state: 'in_development',
     rawStatus: 'approved',
-    progress: { done: 2, total: 5 },
+    progress: { done: 2, failed: 0, total: 5 },
     currentTask: { key: 'FEAT-105-T03', step: 'develop', others: 1 },
     gates: [],
     integration: { branch: 'sa/FEAT-105-integration', sha: null },

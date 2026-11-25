@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
 import type { MessageTransport, TransportState } from '../../core/src/transport.js';
 import { FEATURE_PLAN_TIMEOUT_MS } from '../src/constants.js';
-import { FeaturePlanController } from '../src/office/featurePlanController.js';
+import { FeaturePlanController, planErrorText } from '../src/office/featurePlanController.js';
 import { planDecisionText } from '../src/office/featurePlanPresentation.js';
 import { planSnapshot as snapshot } from './fixtures/featurePlan.js';
 
@@ -269,4 +269,13 @@ describe('SA-111 plan notices', () => {
     reply(null);
     expect(controller.getSnapshot().notice).toBe('');
   });
+});
+
+it('SA-123 explains known plan failures and admits an unknown cause', () => {
+  expect(planErrorText('invalid_request')).toContain('solicitud no es válida');
+  expect(planErrorText('invalid_request')).toContain('vuelve a abrirlo');
+  expect(planErrorText('unavailable')).toContain('No se conoce la causa concreta');
+  expect(planErrorText('unavailable')).toContain('Actualizar plan');
+  expect(planErrorText(null)).toContain('No se conoce la causa');
+  expect(planErrorText('unknown_project')).toContain('Vuelve a abrir');
 });

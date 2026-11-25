@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { IDEA_ASSUMPTION_TEXT, IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
+import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import type { IdeasSnapshot, SubmitIdeaResult } from '../../core/src/messages.js';
 import { IDEA_REQUEST_TIMEOUT_MS } from '../src/constants.js';
 import { setOfficeAccess } from '../src/office/accessStore.js';
@@ -161,12 +161,6 @@ async function change(id: string, value: string) {
   control.onChange!({ target: { value } });
   return render();
 }
-async function choose(choice: 'answer' | 'decide') {
-  findControl(await tree(), (props) => props.value === choice && !!props.onChange)!.onChange!({
-    target: { value: choice },
-  });
-  return render();
-}
 async function review() {
   await change('new-idea-text', 'Una idea literal');
   await click('Siguiente');
@@ -232,7 +226,6 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     await click('Siguiente');
     for (const question of IDEA_QUESTIONS) {
       expect(await render()).toContain(question.label);
-      await choose('decide');
       await click('Siguiente');
     }
     await click('Guardar idea');
@@ -601,7 +594,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     await click('Siguiente');
   });
 
-  it('keeps idea and answers when navigating and requires an explicit choice for an empty answer', async () => {
+  it('keeps idea and answers when navigating and allows an empty optional answer', async () => {
     await render();
     respond();
     await render();
@@ -609,12 +602,9 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     await click('Siguiente');
     expect(await render()).toContain(IDEA_QUESTIONS[0].helper);
     expect(findControl(await tree(), (props) => props.children === 'Siguiente')?.disabled).toBe(
-      true,
+      false,
     );
-    await choose('answer');
-    expect(findControl(await tree(), (props) => props.children === 'Siguiente')?.disabled).toBe(
-      true,
-    );
+    expect(await render()).not.toContain('type="radio"');
     await change('idea-answer', 'Objetivo conservado');
     await click('Siguiente');
     await change('idea-answer', 'Usuarios conservados');
@@ -632,33 +622,24 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     expect(getIdeasStore()).not.toHaveProperty('text');
   });
 
-  it('shows decide choices as assumptions, retains alternate text and submits structured answers only on save', async () => {
+  it('serializes empty optional answers as decide and groups them once in review', async () => {
     await render();
     respond();
     await render();
     await change('new-idea-text', 'Una idea literal');
     await click('Siguiente');
-    await change('idea-answer', 'Texto que conservar');
-    await choose('decide');
-    expect(await render()).toContain(IDEA_ASSUMPTION_TEXT);
-    expect(findControl(await tree(), (props) => props.id === 'idea-answer')?.disabled).toBe(true);
-    await click('Siguiente');
-    await click('Anterior');
-    await choose('answer');
-    expect(await render()).toContain('Texto que conservar');
-    await choose('decide');
-    await click('Siguiente');
-    for (const question of IDEA_QUESTIONS.slice(1)) {
+    for (const question of IDEA_QUESTIONS) {
       expect(await render()).toContain(question.helper);
-      await choose('decide');
+      expect(await render()).toContain('Ejemplo:');
+      expect(await render()).not.toContain('no inicia ningún trabajo');
+      await change('idea-answer', '   ');
       await click('Siguiente');
     }
     const html = await render();
     expect(html).toContain('Preguntas abiertas');
     expect(html).not.toContain('openQuestions');
     expect(html).toContain('panel de Decisiones');
-    expect(html.split(IDEA_ASSUMPTION_TEXT)).toHaveLength(IDEA_QUESTIONS.length + 1);
-    expect(html).not.toContain('Texto que conservar');
+    expect(html.split('Propondremos respuestas para tu revisión.')).toHaveLength(2);
     expect(lifecycle.send).toHaveBeenCalledTimes(1);
     await click('Guardar idea');
     expect(lifecycle.send).toHaveBeenLastCalledWith({
@@ -671,6 +652,42 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
         text: '',
       })),
     });
+  });
+
+  it('skips the rest, preserves answers and returns directly from each review edit', async () => {
+    await render();
+    respond();
+    await render();
+    await change('new-idea-text', 'Una idea literal');
+    await click('Siguiente');
+    await change('idea-answer', 'Objetivo conservado');
+    await click('Siguiente');
+    await click('Decide tú el resto');
+    expect(await render()).toContain('Objetivo conservado');
+    await click('Editar idea');
+    await change('new-idea-text', 'Idea corregida');
+    await click('Volver a la revisión');
+    for (const question of IDEA_QUESTIONS) {
+      await click('Editar: ' + question.label);
+      await change('idea-answer', 'Corregido ' + question.id);
+      await click('Volver a la revisión');
+      expect(await render()).toContain('Idea corregida');
+      expect(await render()).toContain('Corregido ' + question.id);
+    }
+    await click('Editar: Objetivo');
+    await change('idea-answer', '');
+    await click('Volver a la revisión');
+    await click('Guardar idea');
+    expect(lifecycle.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        text: 'Idea corregida',
+        answers: IDEA_QUESTIONS.map((question, index) => ({
+          questionId: question.id,
+          choice: index === 0 ? 'decide' : 'answer',
+          text: index === 0 ? '' : 'Corregido ' + question.id,
+        })),
+      }),
+    );
   });
 
   it('confirms closing with content through both the close button and modal dismissal', async () => {

@@ -25,8 +25,12 @@ export const planErrorText = (code: FeaturePlanSnapshot['errorCode']): string =>
       return 'El proyecto ha cambiado. Vuelve a abrir el plan.';
     case 'approval_blocked':
       return 'La aprobación está bloqueada. Actualiza y revisa las preguntas, decisiones y la revisión Git.';
+    case 'invalid_request':
+      return es.features.planInvalid;
+    case 'unavailable':
+      return es.features.planUnavailable;
     default:
-      return 'No se pudo leer el plan. Actualiza para reintentar.';
+      return es.features.planUnknown;
   }
 };
 

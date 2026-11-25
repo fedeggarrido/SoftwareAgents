@@ -448,11 +448,6 @@ export const EMPTY_SPRITE_THUMBNAIL_BG = '#333';
 export const MAX_PET_ID_LENGTH = 128;
 /** Features panel progress is expressed as a percentage for its pixel bar. */
 export const FEATURE_PROGRESS_PERCENT_MAX = 100;
-
-/** Feature costs are tokens reported by the local CLIs × the configured per-model price
- * table: an API-price equivalent, not a charge (subscriptions consume quota instead). */
-export const FEATURE_COST_ESTIMATE_HINT =
-  'Estimación a precio de API: tokens informados por los CLIs × tabla de precios por modelo. No es un cargo real; con suscripción se consume cuota.';
 export const PR_DISPLAY_REFRESH_MS = 5000;
 // A lost draft response must be reconciled from the list, never replayed automatically.
 export const IDEA_REQUEST_TIMEOUT_MS = 15_000;
@@ -670,6 +665,7 @@ export const STATUS_MAP: Readonly<Record<string, StatusDefinition>> = {
   needs_you: { label: 'Necesita tu aprobación', icon: 'attention', tone: 'attention' },
   in_review: { label: 'Requisitos en revisión', icon: 'clock', tone: 'attention' },
   in_design: { label: 'En diseño', icon: 'play', tone: 'active' },
+  feature_tasks_complete: { label: es.features.tasksComplete, icon: 'clock', tone: 'attention' },
   in_development: { label: 'En desarrollo', icon: 'play', tone: 'active' },
   ready_to_merge: { label: 'Lista para integrar', icon: 'check', tone: 'attention' },
   merged: { label: 'Integrada', icon: 'check', tone: 'success' },

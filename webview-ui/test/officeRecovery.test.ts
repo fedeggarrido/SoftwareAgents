@@ -145,6 +145,6 @@ it.each([
     expect(html).not.toMatch(
       /Settings|Export Layout|Import Layout|Sound Notifications|Watch All Sessions|Debug View/,
     );
-    expect(html).toContain('Recibe la actividad de Claude Code en cuanto ocurre.');
+    expect(html).toContain('Claude Code enviará su actividad en cuanto ocurre');
   },
 );

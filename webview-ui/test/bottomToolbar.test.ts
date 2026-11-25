@@ -95,8 +95,12 @@ it('retains the VS Code launcher as a secondary icon without adding an accent ac
     );
     expect(
       [...editing.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]),
-    ).toEqual(['Salir de edición', 'Abrir agente', 'Ajustes']);
+    ).toEqual(['Salir de la edición', 'Abrir agente', 'Ajustes']);
     expect(editing).not.toContain('aria-label="Más"');
+    expect(editing).toContain('<h2>Edición de la oficina</h2>');
+    expect(editing).toContain('aria-describedby="editing-help"');
+    expect(editing).toContain('Para crear una idea, sal de la edición.');
+    expect(editing).toContain('salir conserva los cambios');
   }
 });
 
@@ -156,7 +160,7 @@ it('collapses editing mode to exit and settings at desktop and mobile widths', a
     const html = renderToStaticMarkup(createElement(BottomToolbar, { ...props, isEditMode: true }));
     expect(
       [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]),
-    ).toEqual(['Salir de edición', 'Ajustes']);
+    ).toEqual(['Salir de la edición', 'Ajustes']);
   }
 });
 

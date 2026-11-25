@@ -80,10 +80,6 @@
     "reason": "Close «x» buttons under 44 px on mobile. Fix in SA-160/SA-152."
   },
   {
-    "key": "settings|mobile|touch-target|input.flex-1|",
-    "reason": "Text input under 44 px tall on mobile. Fix in SA-152."
-  },
-  {
     "key": "window-Auditoría|desktop|contrast|span.text-accent|2.6|Ver más",
     "reason": "Hooks first-run tooltip (App.tsx) text on accent background is 2.6:1; «Ver más» is a clickable span, not a button. Fix in SA-150 follow-up."
   },

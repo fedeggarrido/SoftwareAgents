@@ -454,7 +454,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         ).toBe('16px');
         await settings.getByRole('button', { name: 'Normal', exact: true }).click();
         await page.keyboard.press('Escape');
-        await dock.getByRole('button', { name: 'Salir de edición', exact: true }).click();
+        await dock.getByRole('button', { name: 'Salir de la edición', exact: true }).click();
         await more.click();
         await page
           .locator('canvas')
@@ -773,10 +773,10 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       ).toBe(true);
       expect(
         await page
-          .getByRole('button', { name: 'Salir de edición', exact: true })
+          .getByRole('button', { name: 'Salir de la edición', exact: true })
           .getAttribute('aria-pressed'),
       ).toBe('true');
-      await page.getByRole('button', { name: 'Salir de edición', exact: true }).click();
+      await page.getByRole('button', { name: 'Salir de la edición', exact: true }).click();
 
       await page.getByRole('button', { name: 'Funcionalidades', exact: true }).click();
       await page.getByRole('button', { name: 'Ver plan', exact: true }).click();

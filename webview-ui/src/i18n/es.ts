@@ -32,6 +32,14 @@ export const es = {
   },
   settings: {
     title: 'Ajustes',
+    general: 'General',
+    office: 'Oficina',
+    advanced: 'Avanzado',
+    newProjectHelp: 'Abre el formulario para crear un proyecto.',
+    openSessionsHelp: 'Abre en el explorador de archivos la carpeta de registros de las sesiones.',
+    assetsHelp:
+      'Añade una carpeta del ordenador donde se ejecuta SoftwareAgents para cargar recursos gráficos adicionales. Quitarla de la lista no borra sus archivos.',
+    removeAssets: (dir: string) => 'Quitar carpeta: ' + dir,
     newProject: 'Nuevo proyecto',
     details: 'Detalles',
     operatorTokenHelp:
@@ -40,6 +48,8 @@ export const es = {
     tokenCopyFailed: 'No se pudo copiar el token. Comprueba el permiso del portapapeles.',
     copyToken: 'Copiar token para la terminal',
     prepareProject: 'Preparar proyecto',
+    prepareProjectHelp: 'Abre la preparación del proyecto vinculado a esta oficina.',
+    revokeHelp: 'Inicia la confirmación para retirar el acceso de todas las pestañas abiertas.',
     revokeTab: 'Revocar acceso de esta pestaña',
     revokeConfirm: 'Confirmar revocación',
     revokeWarning:
@@ -56,13 +66,16 @@ export const es = {
     openSessions: 'Abrir carpeta de sesiones',
     assetDirectoryPlaceholder: 'Ruta absoluta de la carpeta de recursos',
     add: 'Añadir',
+    remove: 'Quitar',
     addAssets: 'Añadir carpeta de recursos',
     sound: 'Avisos sonoros',
-    soundHelp: 'Suena un aviso cuando un agente necesita tu atención.',
+    soundHelp: 'Suena un aviso cuando una sesión termina su turno o solicita tu aprobación.',
     watchSessions: 'Observar todas las sesiones',
-    watchSessionsHelp: 'Incluye las sesiones que abres fuera de esta oficina.',
+    watchSessionsHelp:
+      'Permite incorporar sesiones de otras carpetas, además de las vinculadas a esta oficina. Desactivarlo no retira las sesiones ya incorporadas.',
     hooks: 'Detección instantánea (hooks)',
-    hooksHelp: 'Recibe la actividad de Claude Code en cuanto ocurre.',
+    hooksHelp:
+      'Al activarlo autorizas instalar hooks en ~/.claude/settings.json del ordenador donde se ejecuta SoftwareAgents. Claude Code enviará su actividad en cuanto ocurre, incluidos los nombres y las entradas de las herramientas, a SoftwareAgents. Al desactivarlo se retiran los hooks de SoftwareAgents. La casilla indica si están instalados; sin ellos se siguen leyendo los registros de las sesiones.',
     labels: 'Mostrar siempre las etiquetas',
     labelsHelp: 'Muestra el nombre y el estado sin pasar el cursor.',
     headless: 'Atenuar sesiones sin terminal',
@@ -196,6 +209,10 @@ export const es = {
     taskTesting: 'Pasó la tarea a pruebas',
   },
   office: {
+    editingTitle: 'Edición de la oficina',
+    exitEditing: 'Salir de la edición',
+    editingHelp:
+      'Aquí organizas el diseño de la oficina. Para crear una idea, sal de la edición. El diseño se guarda automáticamente; salir conserva los cambios. Al volver puedes confirmar con Guardar o recuperar el punto anterior con Restablecer.',
     offlineHelp: 'Abre SoftwareAgents en tu ordenador. Esta pestaña se conectará automáticamente.',
     originRejected:
       'La oficina ha rechazado el origen de esta página. Abre SoftwareAgents en tu ordenador para volver a entrar.',

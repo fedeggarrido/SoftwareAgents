@@ -570,3 +570,56 @@ body:has(.critical-blocker) .office-notices {
     color: var(--color-accent-bright);
   }
 }
+
+/* Settings keep reading text distinct from the pixel control labels. */
+.settings-dialog section + section {
+  border-top: var(--border-thin) solid var(--color-border);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+}
+.settings-dialog h2 {
+  padding-inline: var(--space-3);
+  font-size: 20px;
+}
+.settings-dialog p,
+.settings-dialog input,
+.settings-dialog summary {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+}
+.settings-dialog input {
+  min-height: var(--control-target);
+}
+.settings-dialog input:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+  outline-offset: calc(-1 * var(--border-thick));
+}
+.settings-dialog summary {
+  min-height: var(--control-target);
+  cursor: pointer;
+}
+nav.bottom-toolbar.dock-editing {
+  width: min(760px, calc(100vw - 2 * var(--space-2)));
+  flex-wrap: wrap;
+  height: auto;
+}
+.editing-context {
+  flex-basis: 100%;
+  padding: var(--space-2);
+  white-space: normal;
+}
+.editing-context h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.editing-context p {
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+  line-height: var(--reading-line-height);
+  margin: var(--space-1) 0 0;
+}
+/* Leave the editing tools above the mode explanation and exit controls. */
+body:has(.dock-editing) .editor-toolbar {
+  bottom: calc(var(--dock-bottom) + var(--office-dock-height) + var(--space-2));
+}

@@ -139,7 +139,8 @@ export const es = {
     repositoryFolder: `${glossary.checkout.label} vinculada a esta oficina`,
     pendingIdeas: 'Ideas pendientes · sin especificación',
     pendingIdeasHelp: glossary.FeatureSpec.explanation,
-    adaptiveQuestions: `Las preguntas sobre los requisitos aparecerán como «${glossary.openQuestions.label}» en el panel de Decisiones cuando inicies el flujo.`,
+    adaptiveQuestions:
+      'Al iniciar el trabajo, las dudas pendientes aparecerán como Preguntas abiertas en el panel de Decisiones para que puedas responderlas.',
     checkingProject: 'Comprobando el proyecto…',
     technicalPlan:
       'Plan técnico: se genera el diseño y las tareas. Puedes revisarlo en Funcionalidades y marcarlo con «Aprobar plan», pero hoy el desarrollo no espera a esa aprobación.',

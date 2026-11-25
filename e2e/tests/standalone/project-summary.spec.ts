@@ -199,6 +199,61 @@ test.describe('Standalone / project summary', () => {
     ).toContainText('Sin tareas en esta etapa.');
   });
 
+  test('completes and corrects an idea with visible actions on desktop and mobile @area:standalone', async ({
+    page,
+    standalone,
+  }) => {
+    expect(standalone.workspaceDir).toBeTruthy();
+    for (const viewport of [
+      { width: 1024, height: 768 },
+      { width: 390, height: 768 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.getByRole('button', { name: 'Nueva idea', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Nueva idea', exact: true });
+      await dialog
+        .getByLabel('Tu idea', { exact: true })
+        .fill('Recordar las citas de la peluquería');
+      await dialog.getByRole('button', { name: 'Siguiente', exact: true }).click();
+      const answer = dialog.getByLabel('Tu respuesta (opcional)', { exact: true });
+      await expect(answer).toBeFocused();
+      await expect(
+        dialog.getByText('Ejemplo: recordar las citas para evitar olvidos.'),
+      ).toBeVisible();
+      await expect(dialog.getByRole('radio')).toHaveCount(0);
+      await expect(dialog.getByRole('progressbar')).toHaveAccessibleName('Paso 2 de 9');
+      await answer.fill('Evitar olvidos');
+      await dialog.getByRole('button', { name: 'Siguiente', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Decide tú el resto', exact: true }).click();
+      await expect(
+        dialog.getByRole('heading', { name: 'Revisar entrevista', exact: true }),
+      ).toBeFocused();
+      await dialog.getByRole('button', { name: 'Editar: Objetivo', exact: true }).click();
+      await expect(answer).toHaveValue('Evitar olvidos');
+      await answer.fill('Reducir citas olvidadas');
+      await dialog.getByRole('button', { name: 'Volver a la revisión', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Editar: Usuarios', exact: true }).click();
+      await answer.fill('La peluquera');
+      await dialog.getByRole('button', { name: 'Volver a la revisión', exact: true }).click();
+      await expect(dialog).toContainText('Reducir citas olvidadas');
+      await expect(dialog).toContainText('La peluquera');
+      await expect(dialog.getByText(/^Decide tú:/)).toHaveCount(1);
+      await expect(dialog).not.toContainText('openQuestions');
+      const footer = dialog.locator('.idea-dialog-footer');
+      const before = await footer.boundingBox();
+      expect(before).not.toBeNull();
+      expect(before!.y).toBeGreaterThanOrEqual(0);
+      expect(before!.y + before!.height).toBeLessThanOrEqual(viewport.height);
+      await dialog.locator('.idea-dialog-scroll').evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      expect(await footer.boundingBox()).toEqual(before);
+      await dialog.getByRole('button', { name: 'Guardar idea', exact: true }).click();
+      await expect(dialog.getByText(/Idea guardada:/)).toBeVisible();
+      await footer.getByRole('button', { name: 'Cerrar', exact: true }).click();
+    }
+  });
+
   test.describe('empty project on mobile', () => {
     test.use({ summarySeed: 'empty' });
     test('explains how to start from the mobile dock @area:standalone', async ({

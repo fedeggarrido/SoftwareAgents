@@ -439,3 +439,63 @@ body:has(.critical-blocker) .office-notices {
   min-height: 44px;
   min-width: 44px;
 }
+
+/* The interview scrolls independently of its actions. */
+.idea-dialog[role='dialog'] {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+}
+.idea-dialog > [role='region'] {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.idea-dialog-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px;
+}
+.idea-dialog-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 2px solid var(--color-border);
+}
+.idea-dialog button,
+.idea-dialog input {
+  min-height: 44px;
+}
+.idea-dialog progress {
+  width: 100%;
+  flex-shrink: 0;
+  height: 14px;
+  appearance: none;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-dark);
+}
+.idea-dialog progress::-webkit-progress-bar {
+  background: var(--color-bg-dark);
+}
+.idea-dialog progress::-webkit-progress-value {
+  background: var(--color-accent);
+}
+.idea-dialog progress::-moz-progress-bar {
+  background: var(--color-accent);
+}
+.idea-dialog .idea-review-edits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.idea-dialog textarea {
+  resize: vertical;
+}
+.idea-dialog #idea-review-heading:focus {
+  outline: 2px solid var(--color-accent);
+}

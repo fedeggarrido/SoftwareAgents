@@ -1,8 +1,8 @@
-import type { Locator } from '@playwright/test';
+import type { Frame, Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 
 /**
- * Drivers for the Intro — the four-step first-run tour the greeter speaks
+ * Drivers for the Intro — the three-step consent tour the greeter speaks
  * (webview-ui/src/components/IntroBubble.tsx). Locator-based so the same
  * helpers drive both surfaces: the VS Code webview frame and the standalone
  * browser page.
@@ -13,10 +13,17 @@ import { expect } from '@playwright/test';
  * advanced.
  */
 
+/** Close the first-visit guide, which precedes the consent ask. */
+export async function closeProjectGuide(root: Page | Frame): Promise<void> {
+  const guide = root.getByRole('region', { name: 'Guía del proyecto' });
+  await expect(guide).toBeVisible({ timeout: 30_000 });
+  await expect(root.getByRole('dialog')).toHaveCount(0);
+  await guide.getByRole('button', { name: 'Cerrar', exact: true }).click();
+  await expect(guide).toHaveCount(0);
+}
+
 /** Walk the Intro from its opening step to the consent step. */
 export async function advanceIntroToConsentStep(dialog: Locator): Promise<void> {
-  await expect(dialog).toContainText('¡Bienvenido a SoftwareAgents!');
-  await dialog.getByRole('button', { name: 'Continuar' }).click();
   await expect(dialog).toContainText('Claude Code');
   await dialog.getByRole('button', { name: 'Continuar' }).click();
   await expect(dialog.getByRole('button', { name: 'Instalar hooks' })).toBeVisible();

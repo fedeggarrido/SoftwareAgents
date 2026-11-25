@@ -70,6 +70,8 @@ test.describe('Design guards (SA-151)', () => {
         const hud = page.getByTestId('company-hud');
         const toggle = hud.locator('button[aria-expanded]');
         const banner = hud.getByTestId('critical-blocker');
+        const guide = page.getByRole('region', { name: 'Guía del proyecto' });
+        await expect(guide).toBeVisible();
         await expect(toggle).toHaveAttribute('aria-expanded', 'false');
         await expect(banner).toContainText('todos los ejecutores están desactivados');
         const action = banner.getByRole('button', { name: 'Ver ejecutores', exact: true });
@@ -82,10 +84,12 @@ test.describe('Design guards (SA-151)', () => {
         expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(dockBox!.y);
         await action.click();
         await expect(hud.getByTestId('executor-panel')).toBeVisible();
+        await expect(guide).toBeHidden();
         await expect(hud.locator('.hud-executors')).toBeFocused();
         await expect(hud.getByRole('switch')).toHaveCount(2);
         await expect(banner).toBeVisible();
         await toggle.click();
+        await expect(guide).toBeVisible();
       }
     } finally {
       await session.cleanup();

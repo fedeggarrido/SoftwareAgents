@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { createElement } from 'react';
+import { type ComponentType, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 
@@ -29,10 +29,18 @@ it('translates runtime roles and urgency while preserving custom names', () => {
   expect(glossary.executor.explanation).toContain('con tu cuenta');
 });
 
+interface VersionIndicatorProps {
+  currentVersion: string;
+  lastSeenVersion: string;
+  onDismiss: () => void;
+  onOpenChangelog: () => void;
+}
+
 it('announces updates in Spanish with a named dismiss control', async () => {
   // Keep TSX outside the DOM-free test project.
   const componentPath = '../src/components/VersionIndicator.js';
-  const { VersionIndicator } = await import(componentPath);
+  const { VersionIndicator }: { VersionIndicator: ComponentType<VersionIndicatorProps> } =
+    await import(componentPath);
   const html = renderToStaticMarkup(
     createElement(VersionIndicator, {
       currentVersion: '1.4.1',

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 
 import { type HookServerConfig, waitForHookServer } from './hooks';
+import { SEEN_VERSION } from './returning-user';
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const STANDALONE_CLI = path.resolve(REPO_ROOT, 'dist', 'cli.js');
@@ -236,7 +237,14 @@ export async function launchStandalone(
   const configPath = path.join(tmpHome, '.pixel-agents', 'config.json');
   if ((options.seedHooksConsent ?? true) && !fs.existsSync(configPath)) {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify({ hooksConsent: { claude: 'granted' } }, null, 2));
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(
+        { hooksConsent: { claude: 'granted' }, standalone: { lastSeenVersion: SEEN_VERSION } },
+        null,
+        2,
+      ),
+    );
   }
   const hostPort = await getFreePort();
   const hostUrl = `http://127.0.0.1:${hostPort}`;

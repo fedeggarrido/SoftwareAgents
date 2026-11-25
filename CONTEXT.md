@@ -85,8 +85,11 @@ Bring an agent's terminal to the front. Reserved exclusively for terminals — n
 
 ## First Run
 
+**Project guide**:
+The non-modal first-visit guide to the SoftwareAgents workflow: idea and decisions, technical plan and development, review and tests, human integration. It pauses behind any open surface and never touches hooks consent.
+
 **Intro**:
-The four-step first-run tour the Greeter speaks: welcome, Claude Code, hooks consent, all set. The hooks consent ask is one step of it, not a separate dialog.
+The three-step tour the Greeter speaks after the Project guide closes: Claude Code, hooks consent, all set. The hooks consent ask is one step of it, not a separate dialog.
 _Avoid_: onboarding, tutorial, wizard, consent modal
 
 **Greeter**:

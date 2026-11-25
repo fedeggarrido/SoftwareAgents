@@ -403,3 +403,39 @@ body:has(.critical-blocker) .office-notices {
 .executor-toggle:active:not(:disabled) {
   background: var(--color-btn-hover);
 }
+
+/* The guide occupies only its controls, leaving the office interactive. */
+.intro-guide {
+  position: absolute;
+  z-index: var(--z-hud);
+  bottom: 80px;
+  left: 16px;
+  width: min(400px, calc(100% - 32px));
+  max-height: calc(100% - 160px);
+  overflow-y: auto;
+  padding: 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.intro-guide[hidden] {
+  display: none;
+}
+.intro-guide header,
+.intro-guide footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.intro-guide h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.intro-guide p {
+  margin: 8px 0;
+}
+.intro-guide button {
+  min-height: 44px;
+  min-width: 44px;
+}

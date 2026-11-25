@@ -1,18 +1,14 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import { CLAUDE_CODE_INSTALL_COMMAND } from '../src/constants.js';
 
-const hooks = vi.hoisted(() => ({ cursor: 0 }));
 vi.mock('react', async (original) => ({
   ...(await original<typeof import('react')>()),
-  useState: (initial: unknown) => [hooks.cursor++ === 1 ? 1 : initial, vi.fn()],
+  useState: (initial: unknown) => [initial, vi.fn()],
 }));
 vi.mock('../src/transport/index.js', () => ({ transport: {} }));
-afterEach(() => {
-  hooks.cursor = 0;
-});
 
 // Runtime paths keep TSX outside tsconfig.node.json.
 it('keeps the tour installation command inside a closed Detalles', async () => {

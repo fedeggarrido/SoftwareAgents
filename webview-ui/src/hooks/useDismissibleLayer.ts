@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 
 interface Layer {
   priority: number;
@@ -9,6 +9,24 @@ interface Layer {
 }
 
 const layers: Layer[] = [];
+const listeners = new Set<() => void>();
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+function notifyLayersChanged() {
+  for (const listener of listeners) listener();
+}
+/** Observe registered surfaces without duplicating their ownership state. */
+export function useOpenLayerCount() {
+  return useSyncExternalStore(
+    subscribe,
+    () => layers.length,
+    () => 0,
+  );
+}
 let subscriptionGeneration = 0;
 const focusableSelector =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]';
@@ -67,9 +85,11 @@ export function useDismissibleLayer(
     const layer: Layer = { priority, close: () => close.current(), element: scope, modal };
     if (layers.length === 0) window.addEventListener('keydown', handleKeyDown, true);
     layers.push(layer);
+    notifyLayersChanged();
     element.current?.focus();
     return () => {
       layers.splice(layers.indexOf(layer), 1);
+      notifyLayersChanged();
       if (layers.length === 0) window.removeEventListener('keydown', handleKeyDown, true);
       const generation = subscriptionGeneration;
       // React restores pre-commit focus; defer ours until its commit has finished.

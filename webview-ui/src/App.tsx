@@ -20,17 +20,21 @@ import { NewProjectDialog } from './components/NewProjectDialog.js';
 import { OfficeEmptyState } from './components/OfficeEmptyState.js';
 import { OfficeNotices } from './components/OfficeNotices.js';
 import { PanelWindow } from './components/PanelWindow.js';
+import { ProjectGuide } from './components/ProjectGuide.js';
 import { ProjectSummaryPanel } from './components/ProjectSummaryPanel.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
+import { canShowTour } from './hooks/tourVisibility.js';
+import { useOpenLayerCount } from './hooks/useDismissibleLayer.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
 import { usePanelWindow } from './hooks/usePanelWindow.js';
+import { useProjectGuide } from './hooks/useProjectGuide.js';
 import { es } from './i18n/es.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
@@ -108,8 +112,8 @@ function App() {
     setGhostHeadlessAgents,
     hooksEnabled,
     hooksInstalled,
-    hooksStatusSeq,
     hooksInfoShown,
+    hooksStatusSeq,
     consentRequest,
     dismissConsentRequest,
     areaMappings,
@@ -125,6 +129,8 @@ function App() {
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const panel = usePanelWindow(layoutReady);
+  const [isHudOpen, setIsHudOpen] = useState(false);
+  const [isDockMenuOpen, setIsDockMenuOpen] = useState(false);
   const [focusedTask, setFocusedTask] = useState<string | null>(null);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStageId | null>(null);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
@@ -179,6 +185,23 @@ function App() {
     onChoice: handleConsentChoice,
     onClose: handleIntroClose,
   } = useIntroTour({ consentRequest, hooksInstalled, hooksStatusSeq, dismissConsentRequest });
+
+  const guide = useProjectGuide(extensionVersion, lastSeenVersion, hooksInfoShown);
+  const openLayerCount = useOpenLayerCount();
+  const introAllowed = canShowTour({
+    layers: openLayerCount > 0,
+    menu: isDockMenuOpen,
+    hud: isHudOpen,
+    settings: isSettingsOpen,
+    idea: isNewIdeaOpen,
+    project: isNewProjectOpen,
+    panel: panel.isOpen,
+    changelog: isChangelogOpen,
+    hooks: isHooksInfoOpen,
+    migration: showMigrationNotice,
+    editor: editor.isEditMode,
+    debug: isDebugMode,
+  });
 
   // The Settings surface renders one provider today; its checkbox binds to
   // the Claude row of the per-provider install-state map.
@@ -495,30 +518,34 @@ function App() {
           while first-run consent is still pending, and announcing "Instant
           Detection Active" before anything is installed would be a lie. */}
         <OfficeNotices>
-          {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
-            <Tooltip
-              title="Detección instantánea activa"
-              position="stack"
-              onDismiss={() => {
-                setHooksTooltipDismissed(true);
-                transport.send({ type: 'setHooksInfoShown' });
-              }}
-            >
-              <span className="text-sm text-text leading-none">
-                La actividad de tus agentes se actualiza al instante.{' '}
-                <span
-                  className="text-accent cursor-pointer underline"
-                  onClick={() => {
-                    setIsHooksInfoOpen(true);
-                    setHooksTooltipDismissed(true);
-                    transport.send({ type: 'setHooksInfoShown' });
-                  }}
-                >
-                  Ver más
+          {hooksEnabled &&
+            claudeHooksInstalled &&
+            !hooksInfoShown &&
+            !guide.open &&
+            !hooksTooltipDismissed && (
+              <Tooltip
+                title="Detección instantánea activa"
+                position="stack"
+                onDismiss={() => {
+                  setHooksTooltipDismissed(true);
+                  transport.send({ type: 'setHooksInfoShown' });
+                }}
+              >
+                <span className="text-sm text-text leading-none">
+                  La actividad de tus agentes se actualiza al instante.{' '}
+                  <span
+                    className="text-accent cursor-pointer underline"
+                    onClick={() => {
+                      setIsHooksInfoOpen(true);
+                      setHooksTooltipDismissed(true);
+                      transport.send({ type: 'setHooksInfoShown' });
+                    }}
+                  >
+                    Ver más
+                  </span>
                 </span>
-              </span>
-            </Tooltip>
-          )}
+              </Tooltip>
+            )}
         </OfficeNotices>
 
         {/* Hooks info modal */}
@@ -552,6 +579,7 @@ function App() {
         </Modal>
 
         <BottomToolbar
+          onMenuOpenChange={setIsDockMenuOpen}
           isEditMode={editor.isEditMode}
           onOpenClaude={editor.handleOpenClaude}
           onToggleEditMode={editor.handleToggleEditMode}
@@ -566,6 +594,7 @@ function App() {
         <div className="office-panels">
           <div className="office-panel-hud">
             <CompanyHud
+              onOpenChange={setIsHudOpen}
               agents={agents}
               officeState={officeState}
               onOpenDecisions={() => panel.select('decisions')}
@@ -576,7 +605,7 @@ function App() {
           <OfficeEmptyState
             agents={agents}
             onNewIdea={handleNewIdea}
-            hidden={editor.isEditMode || isDebugMode}
+            hidden={editor.isEditMode || isDebugMode || guide.open}
           />
         </div>
         <PanelWindow
@@ -704,7 +733,7 @@ function App() {
           <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
         )}
 
-        {intro && (
+        {intro && !guide.open && (
           <IntroBubble
             officeState={officeState}
             headline={intro.headline}
@@ -716,17 +745,11 @@ function App() {
             installPending={installPending}
             onChoice={handleConsentChoice}
             onClose={handleIntroClose}
-            escapeSuppressed={
-              isSettingsOpen ||
-              isNewIdeaOpen ||
-              isNewProjectOpen ||
-              panel.isOpen ||
-              isChangelogOpen ||
-              isHooksInfoOpen ||
-              showMigrationNotice ||
-              editor.isEditMode
-            }
+            paused={!introAllowed}
           />
+        )}
+        {guide.open && (
+          <ProjectGuide visible={introAllowed} onClose={guide.onClose} onNewIdea={handleNewIdea} />
         )}
       </div>
     </div>,

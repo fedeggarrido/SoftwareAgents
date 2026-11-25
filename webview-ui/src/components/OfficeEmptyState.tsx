@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { es } from '../i18n/es.js';
 import { useBoard } from '../office/boardStore.js';
 import { getFeaturesStore, requestFeatures, useFeaturesStore } from '../office/featuresStore.js';
 import { officeEmptyState } from '../office/officeEmptyState.js';
@@ -38,19 +39,19 @@ export function OfficeEmptyState({
         hidden={hidden}
       >
         <header>
-          <h2 id="office-empty-title">Empieza con una idea</h2>
+          <h2 id="office-empty-title">{es.officeWelcome.title}</h2>
           <Button
             type="button"
             variant="ghost"
-            aria-label="Ocultar bienvenida"
+            aria-label={es.officeWelcome.close}
             onClick={() => setDismissed(true)}
           >
             Cerrar
           </Button>
         </header>
-        <p>Coordina agentes de IA para construir software y revisa su trabajo aquí.</p>
+        <p>{es.officeWelcome.description}</p>
         <Button type="button" variant="primary" onClick={onNewIdea}>
-          Nueva idea
+          {es.officeWelcome.newIdea}
         </Button>
       </section>
     </div>

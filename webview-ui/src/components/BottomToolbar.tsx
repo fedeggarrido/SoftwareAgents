@@ -216,7 +216,7 @@ export function BottomToolbar({
             id="dock-decisions-pending"
             className="dock-badge"
             role="status"
-            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}${urgent ? `, ${urgent} urgentes` : ''}`}
+            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}${urgent ? `, ${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}` : ''}`}
           >
             <DockIcon name="attention" />
             {pending}

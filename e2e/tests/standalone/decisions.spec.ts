@@ -50,7 +50,6 @@ for (const width of [390, 1440]) {
     test('corrects an accidental choice before sending, including keyboard confirmation @area:standalone', async ({
       page,
     }, testInfo) => {
-      await page.setViewportSize({ width, height: 900 });
       const workspace = testInfo.outputPath('workspace');
       const home = testInfo.outputPath('home');
       await seed(workspace, home);
@@ -62,13 +61,15 @@ for (const width of [390, 1440]) {
         }),
       );
       const session = await launchStandalone(page, { workspaceDir: workspace, homeDir: home });
+      // Launching resets the viewport, so size it afterwards.
+      await page.setViewportSize({ width, height: 900 });
       try {
         const dock = page.locator('.bottom-toolbar');
         const decisions = dock.getByRole('button', { name: 'Decisiones', exact: true });
         await expect(decisions).toContainText('Urgente');
         await expect(dock.getByRole('status')).toHaveAttribute(
           'aria-label',
-          /1 decisión pendiente, 1 urgentes/,
+          /1 decisión pendiente, 1 urgente$/,
         );
         await dock.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
         expect(
@@ -118,7 +119,6 @@ for (const width of [390, 1440]) {
       test(`blocks a review ${change} by another person @area:standalone`, async ({
         page,
       }, testInfo) => {
-        await page.setViewportSize({ width, height: 900 });
         const workspace = testInfo.outputPath('workspace');
         const home = testInfo.outputPath('home');
         const { decision, save } = await seed(workspace, home);
@@ -129,6 +129,8 @@ for (const width of [390, 1440]) {
           }),
         );
         const session = await launchStandalone(page, { workspaceDir: workspace, homeDir: home });
+        // Launching resets the viewport, so size it afterwards.
+        await page.setViewportSize({ width, height: 900 });
         try {
           await page
             .locator('.bottom-toolbar')

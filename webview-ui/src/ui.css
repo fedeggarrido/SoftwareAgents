@@ -640,6 +640,9 @@ body:has(.dock-editing) .editor-toolbar {
   padding: var(--space-3);
   border: var(--border-thick) solid var(--color-warning);
 }
+.decision-review > * + * {
+  margin-top: var(--space-2);
+}
 .decision-review h3:focus {
   outline: var(--border-thick) solid var(--color-text);
   outline-offset: var(--space-1);

@@ -10,6 +10,10 @@ for (const width of [390, 1440]) {
     standalone,
   }) => {
     await page.setViewportSize({ width, height: 900 });
+    // The resize switches the dock variant asynchronously.
+    const more = page.getByRole('button', { name: 'Más', exact: true });
+    if (width < 768) await expect(more).toBeVisible();
+    else await expect(more).toBeHidden();
     await openDockAction(page, 'Editar diseño de la oficina');
     await expect(page.getByRole('heading', { name: 'Edición de la oficina' })).toBeVisible();
     const exit = page.getByRole('button', { name: 'Salir de la edición', exact: true });
@@ -61,9 +65,14 @@ for (const width of [390, 1440]) {
     await page.getByRole('button', { name: 'Mascotas', exact: true }).click();
     const pet = page.getByRole('button', { name: 'Claudio', exact: true });
     await pet.click();
-    const toolsBox = await page.locator('.editor-toolbar').boundingBox();
-    const dockBox = await page.locator('.bottom-toolbar').boundingBox();
-    expect((toolsBox?.y ?? 0) + (toolsBox?.height ?? 0)).toBeLessThanOrEqual(dockBox?.y ?? 0);
+    // The dock grows when the edit actions appear; the tools follow it on the next layout.
+    await expect
+      .poll(async () => {
+        const tools = await page.locator('.editor-toolbar').boundingBox();
+        const dock = await page.locator('.bottom-toolbar').boundingBox();
+        return !!tools && !!dock && tools.y + tools.height <= dock.y;
+      })
+      .toBe(true);
     const save = page.getByRole('button', { name: 'Guardar', exact: true });
     await expect(save).toBeVisible();
     const layoutFile = path.join(standalone.tmpHome, '.pixel-agents', 'layout.json');

@@ -2,6 +2,34 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  inbox: {
+    title: 'Te necesita',
+    hint: 'Todo lo que espera tu respuesta, lo más urgente primero',
+    empty: 'Nada espera tu respuesta.',
+    covers:
+      'Aquí aparecen decisiones, aprobaciones de agentes, tareas que esperan tu revisión, bloqueos y reuniones que te necesitan.',
+    kinds: {
+      blocker: 'Bloqueo',
+      urgentDecision: 'Decisión urgente',
+      decision: 'Decisión',
+      approval: 'Aprobación',
+      failedTask: 'Tarea fallida',
+      review: 'Revisión',
+      task: 'Tarea',
+      meeting: 'Reunión',
+    },
+    actions: {
+      decision: 'Responder',
+      task: 'Ver tarea',
+      agent: 'Ver agente',
+      meeting: 'Ver reunión',
+    },
+    blocks: (tasks: string) => `Bloquea: ${tasks}`,
+    approvalTitle: (name: string) => `${name} pide permiso para continuar`,
+    approvalDetail: 'Respóndelo en la terminal de su sesión.',
+    count: (count: number) =>
+      `${count} ${count === 1 ? 'asunto espera' : 'asuntos esperan'} tu respuesta`,
+  },
   agentList: {
     title: 'Agentes de la oficina',
     empty: 'No hay agentes en la oficina.',

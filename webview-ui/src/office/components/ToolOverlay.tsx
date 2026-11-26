@@ -178,6 +178,11 @@ export function ToolOverlay({
             {!hideLabel && (
               <>
                 <div className="pixel-panel character-hover-label">
+                  {characterActivity(ch) === 'needs_you' && (
+                    <span className="agent-needs-mark" aria-hidden="true">
+                      !
+                    </span>
+                  )}
                   <span data-testid="agent-pill">{name}</span>
                   <span> · </span>
                   <span data-testid="agent-activity">{activity}</span>

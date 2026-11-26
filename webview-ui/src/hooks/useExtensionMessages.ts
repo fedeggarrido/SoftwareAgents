@@ -186,7 +186,7 @@ export function useExtensionMessages(
   const [lastSeenVersion, setLastSeenVersion] = useState('');
   const [extensionVersion, setExtensionVersion] = useState('');
   const [watchAllSessions, setWatchAllSessions] = useState(false);
-  const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
+  const [alwaysShowLabels, setAlwaysShowLabels] = useState(true);
   const [ghostHeadlessAgents, setGhostHeadlessAgentsState] = useState(false);
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInstalled, setHooksInstalled] = useState<Record<string, boolean>>({});

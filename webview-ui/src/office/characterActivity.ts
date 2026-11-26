@@ -36,6 +36,15 @@ export function characterActivity(ch: ActivityCharacter): CharacterActivity {
   return ch.isActive || ch.hasDomainWork ? 'working' : 'waiting';
 }
 
+/** Plainly idle: waiting with nothing pending for anyone. Only these are drawn faded. */
+export function characterIsIdle(ch: ActivityCharacter): boolean {
+  return (
+    characterActivity(ch) === 'waiting' &&
+    !ch.waitingAwaitingInput &&
+    (!ch.workState || ch.workState === WORK_STATE.AVAILABLE)
+  );
+}
+
 export function characterActivityLabel(
   ch: ActivityCharacter,
   tools: readonly ToolActivity[] = [],

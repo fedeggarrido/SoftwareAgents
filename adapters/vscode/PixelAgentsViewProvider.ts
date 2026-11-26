@@ -649,7 +649,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         );
         const alwaysShowLabels = this.adapter.getSetting<boolean>(
           GLOBAL_KEY_ALWAYS_SHOW_LABELS,
-          false,
+          true,
         );
         const ghostHeadlessAgents = this.adapter.getSetting<boolean>(
           GLOBAL_KEY_GHOST_HEADLESS_AGENTS,

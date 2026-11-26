@@ -23,7 +23,7 @@ interface IntroBubbleProps {
    *  terms, only orientation. */
   headline: string;
   disclosure: string;
-  containerRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: React.RefObject<HTMLElement | null>;
   zoom: number;
   panRef: React.RefObject<{ x: number; y: number }>;
   /** The closing step's verdict: the install this tour asked for FAILED. The

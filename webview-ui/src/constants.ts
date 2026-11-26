@@ -2,7 +2,9 @@ import { es } from './i18n/es.js';
 /** One stacking scale for the office, including portalled UI. */
 export const UI_LAYERS = {
   office: 0,
-  hud: 10,
+  dock: 10,
+  /** Above the dock: the HUD now precedes it in the DOM, so a tie would hide HUD notices. */
+  hud: 11,
   panel: 20,
   agentCard: 21,
   notices: 30,
@@ -710,3 +712,5 @@ export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;
 /** Longer than a system double-click interval. */
 export const DECISION_REVIEW_ARM_MS = 600;
+/** The accessible agent list mirrors the canvas; once a second is enough for reading. */
+export const AGENT_LIST_REFRESH_MS = 1_000;

@@ -5,7 +5,8 @@ export const es = {
   agentList: {
     title: 'Agentes de la oficina',
     empty: 'No hay agentes en la oficina.',
-    needsYou: (name: string) => `${name} necesita tu aprobación.`,
+    needsYou: (names: string) => `${names} necesita tu aprobación.`,
+    row: (name: string, activity: string) => `${name} · ${activity}`,
     heading: 'Oficina de SoftwareAgents',
   },
   agentCard: {

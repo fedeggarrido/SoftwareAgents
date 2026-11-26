@@ -41,8 +41,12 @@ test('the office is usable with the keyboard and announces who needs you @area:s
   await page.keyboard.press('Enter');
   const card = page.getByTestId('character-detail-panel');
   await expect(card).toBeVisible();
+  // Focus moves into the card (the list folds away) and returns to the agent on close.
+  await expect(card).toBeFocused();
+  expect((await page.locator('.agent-list').boundingBox())!.width).toBeLessThanOrEqual(1);
   await page.keyboard.press('Escape');
   await expect(card).toHaveCount(0);
+  await expect(agent).toBeFocused();
 
   // Visual order: the HUD comes before the dock.
   const order = await page.evaluate(() => {

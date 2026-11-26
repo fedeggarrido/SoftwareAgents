@@ -2,7 +2,9 @@ import { es } from './i18n/es.js';
 /** One stacking scale for the office, including portalled UI. */
 export const UI_LAYERS = {
   office: 0,
-  hud: 10,
+  dock: 10,
+  /** Above the dock: the HUD now precedes it in the DOM, so a tie would hide HUD notices. */
+  hud: 11,
   panel: 20,
   agentCard: 21,
   notices: 30,

@@ -263,7 +263,7 @@ function App() {
     hooks.getShowAreas = () => effectiveShowAreas;
   }, [editor.handleEditorTileAction, editor.handleEditorEraseAction, effectiveShowAreas]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLElement>(null);
 
   const [editorTickForKeyboard, setEditorTickForKeyboard] = useState(0);
   useEditorKeyboard(

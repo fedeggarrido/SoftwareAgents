@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { es } from '../i18n/es.js';
+
 interface TooltipProps {
   title: string;
   onDismiss: () => void;
@@ -21,12 +23,14 @@ export function Tooltip({ title, onDismiss, position = 'top-right', children }: 
       style={positionStyles[position]}
     >
       <div className="flex items-center justify-between py-4 px-8 border-b border-border">
-        <span className="text-base text-accent font-bold">{title}</span>
+        <span className="text-base text-accent-bright font-bold">{title}</span>
         <button
+          type="button"
           onClick={onDismiss}
-          className="bg-transparent border-none text-text-muted cursor-pointer text-sm px-2 leading-none"
+          aria-label={es.common.dismissNotice}
+          className="tooltip-dismiss bg-transparent border-none text-text-muted cursor-pointer"
         >
-          x
+          ×
         </button>
       </div>
       <div className="py-6 px-8">{children}</div>

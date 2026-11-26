@@ -107,7 +107,7 @@ it('stacks access help and hooks notices at 390px and desktop, and isolates Esca
       });
       const dismiss = page
         .locator('.office-notices')
-        .getByRole('button', { name: 'x', exact: true });
+        .getByRole('button', { name: 'Cerrar aviso', exact: true });
       // Check both closed and expanded help. Hit testing must reach both buttons.
       for (const expanded of [false, true]) {
         if (expanded) await badge.click();

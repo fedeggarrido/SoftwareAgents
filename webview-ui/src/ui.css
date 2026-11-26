@@ -187,6 +187,17 @@ button:disabled {
   opacity: var(--btn-disabled-opacity);
   cursor: default;
 }
+/* A disabled field must not look writable: muted, dashed and without the text cursor. */
+:is(
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']),
+  textarea,
+  select
+):disabled {
+  border-style: dashed;
+  background: var(--color-bg-dark);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
 button:active:not(:disabled) {
   translate: 0 var(--border-thin);
 }
@@ -206,6 +217,8 @@ button:active:not(:disabled) {
   color: var(--color-bg-dark);
 }
 .pixel-button-secondary {
+  /* Outlined, so it never reads as the filled primary action. */
+  border-color: var(--color-border);
   background: var(--color-btn-bg);
   color: var(--color-text);
 }
@@ -917,4 +930,12 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 }
 .agent-list button:focus-visible {
   outline: var(--border-thick) solid var(--color-text);
+}
+.tooltip-dismiss {
+  min-width: var(--control-target);
+  min-height: var(--control-target);
+  font-size: var(--reading-size);
+}
+.tooltip-dismiss:hover {
+  color: var(--color-text);
 }

@@ -28,7 +28,7 @@
   --hud-width: 460px;
   --control-target: 44px;
   --ui-info-size: var(--reading-size);
-  --idea-command-size: 16px;
+  --idea-command-size: var(--reading-size);
   --panel-gap: 8px;
   --office-top: 10px;
   --office-bottom: 60px;
@@ -957,7 +957,7 @@
   border: var(--window-border) solid var(--color-border);
   font: inherit;
 }
-.task-detail textarea:hover {
+.task-detail textarea:hover:not(:disabled) {
   border-color: var(--color-accent-bright);
 }
 .task-detail textarea:focus-visible {

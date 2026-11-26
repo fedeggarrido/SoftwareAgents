@@ -398,8 +398,8 @@ body:has(.panel-window-mobile:not([hidden])) .office-notices {
   outline: var(--border-thick) solid var(--color-text);
   outline-offset: -2px;
 }
-/* The blocker outranks first-run office notices only: they drop to the HUD layer (still above
-   the dock), while panels and dock menus keep their higher layers. */
+/* The blocker outranks first-run office notices only: they drop to the HUD layer (below the
+   dock), while panels and dock menus keep their higher layers. */
 body:has(.critical-blocker) .office-notices {
   z-index: var(--z-hud);
 }

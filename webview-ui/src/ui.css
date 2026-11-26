@@ -879,3 +879,35 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 .changelog-body summary {
   line-height: var(--control-target);
 }
+
+/* Hidden until reached with the keyboard, like a skip link, then a readable list. */
+.agent-list:not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.agent-list:focus-within {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-alert);
+  width: min(420px, calc(100vw - 2 * var(--space-2)));
+  max-height: 60dvh;
+  overflow: auto;
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: var(--border-thick) solid var(--color-border);
+  font-family: var(--font-reading);
+  font-size: var(--reading-size);
+}
+.agent-list button {
+  min-height: var(--control-target);
+  width: 100%;
+  text-align: left;
+}
+.agent-list button:focus-visible {
+  outline: var(--border-thick) solid var(--color-text);
+}

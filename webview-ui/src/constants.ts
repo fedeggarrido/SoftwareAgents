@@ -710,3 +710,5 @@ export const NEW_PROJECT_REQUEST_TIMEOUT_MS = 15_000;
 export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;
 /** Longer than a system double-click interval. */
 export const DECISION_REVIEW_ARM_MS = 600;
+/** The accessible agent list mirrors the canvas; once a second is enough for reading. */
+export const AGENT_LIST_REFRESH_MS = 1_000;

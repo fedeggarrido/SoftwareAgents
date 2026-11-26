@@ -2,6 +2,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState } from
 
 import type { WorkflowStageId } from '../../core/src/messages.js';
 import { toMajorMinor } from './changelogData.js';
+import { AgentList } from './components/AgentList.js';
 import { AuditPanel } from './components/AuditPanel.js';
 import { BacklogPanel } from './components/BacklogPanel.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
@@ -392,7 +393,9 @@ function App() {
     },
     <div className="office-shell w-full h-full">
       <ConnectionIndicator />
-      <div ref={containerRef} className="office-viewport relative overflow-hidden">
+      <main ref={containerRef} className="office-viewport relative overflow-hidden">
+        <h1 className="sr-only">{es.agentList.heading}</h1>
+        <AgentList officeState={officeState} agentTools={agentTools} />
         <OfficeCanvas
           officeState={officeState}
           onClick={handleClick}
@@ -547,22 +550,6 @@ function App() {
           </div>
         </Modal>
 
-        <BottomToolbar
-          onMenuOpenChange={setIsDockMenuOpen}
-          isEditMode={editor.isEditMode}
-          editActions={
-            editor.isEditMode ? <EditActionBar editor={editor} editorState={editorState} /> : null
-          }
-          onOpenClaude={editor.handleOpenClaude}
-          onToggleEditMode={editor.handleToggleEditMode}
-          isSettingsOpen={isSettingsOpen}
-          onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-          activePanel={panel.isOpen ? panel.tab : null}
-          onTogglePanel={panel.toggle}
-          onNewIdea={handleNewIdea}
-          workspaceFolders={workspaceFolders}
-        />
-
         <div className="office-panels">
           <div className="office-panel-hud">
             <CompanyHud
@@ -611,6 +598,22 @@ function App() {
             hidden={editor.isEditMode || isDebugMode || guide.open}
           />
         </div>
+        <BottomToolbar
+          onMenuOpenChange={setIsDockMenuOpen}
+          isEditMode={editor.isEditMode}
+          editActions={
+            editor.isEditMode ? <EditActionBar editor={editor} editorState={editorState} /> : null
+          }
+          onOpenClaude={editor.handleOpenClaude}
+          onToggleEditMode={editor.handleToggleEditMode}
+          isSettingsOpen={isSettingsOpen}
+          onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+          activePanel={panel.isOpen ? panel.tab : null}
+          onTogglePanel={panel.toggle}
+          onNewIdea={handleNewIdea}
+          workspaceFolders={workspaceFolders}
+        />
+
         <PanelWindow
           isOpen={panel.isOpen}
           tab={panel.tab}
@@ -766,7 +769,7 @@ function App() {
         {guide.open && (
           <ProjectGuide visible={introAllowed} onClose={guide.onClose} onNewIdea={handleNewIdea} />
         )}
-      </div>
+      </main>
     </div>,
   );
 }

@@ -2,6 +2,12 @@ import { glossary } from './glossary.js';
 
 /** Spanish UI copy. Functions own interpolation; protocol values are never translated in place. */
 export const es = {
+  agentList: {
+    title: 'Agentes de la oficina',
+    empty: 'No hay agentes en la oficina.',
+    needsYou: (name: string) => `${name} necesita tu aprobación.`,
+    heading: 'Oficina de SoftwareAgents',
+  },
   agentCard: {
     needsPermission: 'Necesita tu aprobación. Respóndela en la terminal de su sesión.',
     needsDecision: 'Su tarea espera una decisión tuya.',

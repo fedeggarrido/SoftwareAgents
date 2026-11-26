@@ -243,6 +243,7 @@ export const es = {
   common: {
     details: 'Detalles',
     close: 'Cerrar',
+    dismissNotice: 'Cerrar aviso',
     features: glossary.Features.label,
     backlog: glossary.Backlog.label,
     project: glossary.Project.label,

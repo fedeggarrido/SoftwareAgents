@@ -68,3 +68,21 @@ test('the office is usable with the keyboard and announces who needs you @area:s
   agent = page.getByRole('button', { name: /Necesita tu aprobación/ });
   await expect(agent).toHaveCount(1);
 });
+
+test('reduced motion stops every animation and transition @area:standalone', async ({
+  page,
+  standalone: _standalone,
+}) => {
+  // The media query applies live: no reload needed.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.getByRole('main')).toHaveCount(1);
+  const moving = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('body *'))
+      .filter((el) => {
+        const s = getComputedStyle(el);
+        return s.animationName !== 'none' || !/^(0s,?\s*)+$/.test(s.transitionDuration);
+      })
+      .map((el) => el.className.toString().slice(0, 40)),
+  );
+  expect(moving).toEqual([]);
+});

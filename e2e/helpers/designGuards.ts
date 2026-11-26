@@ -113,6 +113,56 @@ export async function sweepDesign(page: Page, options: SweepOptions): Promise<st
         }
       }
 
+      // Accessible names (SA-127): every control says what it is to a screen reader.
+      const textOf = (ids: string | null) =>
+        (ids ?? '').split(/\s+/).some((id) => document.getElementById(id)?.textContent?.trim());
+      type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+      const isField = (el: Element): el is Field =>
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLSelectElement ||
+        el instanceof HTMLTextAreaElement;
+      const writable = (el: Element): el is Field =>
+        isField(el) &&
+        !(el instanceof HTMLInputElement && /^(checkbox|radio|range|file)$/.test(el.type));
+      const fieldLooks = new Map<string, string>();
+      for (const el of Array.from(
+        document.querySelectorAll('button,a[href],input,select,textarea,[role="tab"]'),
+      )) {
+        if (!visible(el) || el.closest('[aria-hidden="true"],.xterm')) continue;
+        const text = el.textContent?.trim() ?? '';
+        const value =
+          el instanceof HTMLInputElement && /^(submit|button|reset)$/.test(el.type) ? el.value : '';
+        const named =
+          el.getAttribute('aria-label')?.trim() ||
+          textOf(el.getAttribute('aria-labelledby')) ||
+          (isField(el) && el.labels?.length) ||
+          el.getAttribute('title')?.trim() ||
+          value.trim() ||
+          (!(el instanceof HTMLInputElement) && text) ||
+          el.querySelector('img[alt]:not([alt=""])');
+        // A lone "x" glyph is read as the letter: it needs a real name.
+        const glyphOnly = /^[x×]$/i.test(text) && !el.getAttribute('aria-label');
+        if (!named || glyphOnly) out.push(`name|${label(el)}|${short(text)}`);
+        // A disabled field must not look like a writable one of the same kind.
+        if (writable(el)) {
+          const st = getComputedStyle(el);
+          const look = [st.borderStyle, st.color, st.backgroundColor, st.opacity].join(';');
+          const key = `${el.tagName}:${el.disabled}`;
+          fieldLooks.set(key, look);
+          const twin = fieldLooks.get(`${el.tagName}:${!el.disabled}`);
+          if (twin === look) out.push(`disabled-look|${label(el)}|`);
+        }
+      }
+
+      // Button hierarchy: one primary action per dialog or panel window.
+      for (const box of Array.from(
+        document.querySelectorAll('[role="dialog"],[data-testid="panel-window"]'),
+      )) {
+        if (!visible(box)) continue;
+        const primaries = Array.from(box.querySelectorAll('.pixel-button-primary')).filter(visible);
+        if (primaries.length > 1) out.push(`primary-count|${label(box)}|${primaries.length}`);
+      }
+
       // Horizontal overflow on the page and on panels.
       if (document.documentElement.scrollWidth > window.innerWidth + 1) out.push('overflow|page|');
       for (const el of Array.from(

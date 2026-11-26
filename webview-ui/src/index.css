@@ -748,7 +748,10 @@
 
 /* Above the dock band: a wider dock must never sit under the label. */
 .version-label {
-  bottom: calc(var(--dock-bottom) + var(--dock-mobile-height) + var(--space-2));
+  /* Above the real dock: in edit mode it grows and must stay reachable. */
+  bottom: calc(
+    var(--dock-bottom) + var(--office-dock-height, var(--dock-mobile-height)) + var(--space-2)
+  );
 }
 @media (max-width: 480px) {
   .version-label {

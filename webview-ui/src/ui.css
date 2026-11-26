@@ -958,5 +958,20 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 .inbox-kind {
   font-size: var(--reading-size);
   font-weight: 700;
+
+/* Office at a glance (SA-131): who needs you stands out by shape and text, idle recedes. */
+.agent-label[data-activity='needs_you'] .character-hover-label {
+  border-color: var(--color-warning);
+  border-width: var(--border-thick);
+}
+.agent-needs-mark {
+  display: inline-block;
+  margin-right: var(--space-1);
+  padding: 0 var(--space-1);
+  background: var(--color-warning);
+  color: var(--color-bg-dark);
+  font-weight: 700;
+}
+.agent-label[data-activity='waiting'] .character-hover-label {
   color: var(--color-text-muted);
 }

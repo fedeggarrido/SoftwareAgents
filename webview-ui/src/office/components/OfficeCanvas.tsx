@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import {
-  CAMERA_FOLLOW_LERP,
-  CAMERA_FOLLOW_SNAP_THRESHOLD,
-  PAN_MARGIN_FRACTION,
-  ZOOM_MAX,
-  ZOOM_MIN,
-  ZOOM_SCROLL_THRESHOLD,
-} from '../../constants.js';
+import { PAN_MARGIN_FRACTION, ZOOM_MAX, ZOOM_MIN, ZOOM_SCROLL_THRESHOLD } from '../../constants.js';
 import { unlockAudio } from '../../notificationSound.js';
 import { isBrowserRuntime } from '../../runtime.js';
 import { transport } from '../../transport/index.js';
@@ -26,7 +19,7 @@ import type {
 import { renderFrame } from '../engine/renderer.js';
 import { visibleAreas } from '../engine/seatPlacement.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
-import { MobileZoomPolicy } from '../mobileZoom.js';
+import { followPan, OfficeZoomPolicy } from '../officeZoom.js';
 import { EditTool, TILE_SIZE, TileType } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
 
@@ -105,9 +98,15 @@ export function OfficeCanvas({
     [officeState, zoom],
   );
 
-  const mobileZoomRef = useRef(new MobileZoomPolicy(zoom));
-  mobileZoomRef.current.observe(zoom);
+  const zoomPolicyRef = useRef(new OfficeZoomPolicy(zoom));
+  zoomPolicyRef.current.observe(zoom);
   const cameraRef = useRef({ onZoomChange, isEditMode });
+  // Any manual camera move ends follow, greeter framing and automatic fitting.
+  const takeCamera = useCallback(() => {
+    officeState.cameraFollowId = null;
+    officeState.cancelGreeterCamera();
+    zoomPolicyRef.current.takeOver();
+  }, [officeState]);
   cameraRef.current = { onZoomChange, isEditMode };
 
   // Resize canvas backing store to device pixels (no DPR transform on ctx)
@@ -130,16 +129,20 @@ export function OfficeCanvas({
     const camera = cameraRef.current;
     // A narrow VS Code panel is still a desktop: only the browser office fits itself.
     if (isBrowserRuntime && !camera.isEditMode) {
-      const fitted = mobileZoomRef.current.fit(
-        rect.width,
+      const fitted = zoomPolicyRef.current.fit(
+        rect,
         dpr,
-        officeState.getLayout().cols,
-        officeState.cameraFollowId !== null,
+        officeState.getLayout(),
+        officeState.cameraFollowId !== null || officeState.greeterCameraTarget !== null,
       );
-      if (fitted !== null) camera.onZoomChange(fitted);
+      if (fitted) {
+        camera.onZoomChange(fitted.zoom);
+        // After the zoom: a zoom change rescales the pan around its anchor.
+        panRef.current = fitted.pan;
+      }
     }
     // No ctx.scale(dpr) — we render directly in device pixels
-  }, [officeState]);
+  }, [officeState, panRef]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -147,11 +150,17 @@ export function OfficeCanvas({
 
     resizeCanvas();
 
+    let framedLayout = officeState.getLayout();
     const loop = startGameLoop(canvas, {
       update: (dt) => {
         officeState.update(dt);
       },
       render: (ctx) => {
+        // A newly loaded or edited layout is framed again (until the user takes the camera).
+        if (officeState.getLayout() !== framedLayout) {
+          framedLayout = officeState.getLayout();
+          resizeCanvas();
+        }
         // Canvas dimensions are in device pixels
         const w = canvas.width;
         const h = canvas.height;
@@ -265,26 +274,8 @@ export function OfficeCanvas({
             ? officeState.characters.get(officeState.cameraFollowId)
             : undefined;
         const cameraFocus = followCh ?? officeState.greeterCameraTarget;
-        if (cameraFocus) {
-          const layout = officeState.getLayout();
-          const mapW = layout.cols * TILE_SIZE * zoom;
-          const mapH = layout.rows * TILE_SIZE * zoom;
-          const targetX = mapW / 2 - cameraFocus.x * zoom;
-          const targetY = mapH / 2 - cameraFocus.y * zoom;
-          const dx = targetX - panRef.current.x;
-          const dy = targetY - panRef.current.y;
-          if (
-            Math.abs(dx) < CAMERA_FOLLOW_SNAP_THRESHOLD &&
-            Math.abs(dy) < CAMERA_FOLLOW_SNAP_THRESHOLD
-          ) {
-            panRef.current = { x: targetX, y: targetY };
-          } else {
-            panRef.current = {
-              x: panRef.current.x + dx * CAMERA_FOLLOW_LERP,
-              y: panRef.current.y + dy * CAMERA_FOLLOW_LERP,
-            };
-          }
-        }
+        if (cameraFocus)
+          panRef.current = followPan(panRef.current, cameraFocus, officeState.getLayout(), zoom);
 
         // Build selection render state
         const selectionRender: SelectionRenderState = {
@@ -432,8 +423,7 @@ export function OfficeCanvas({
         if (dx * dx + dy * dy >= 16) {
           isPanningRef.current = true;
           suppressClickRef.current = true;
-          officeState.cameraFollowId = null;
-          officeState.cancelGreeterCamera();
+          takeCamera();
         }
       }
 
@@ -576,6 +566,7 @@ export function OfficeCanvas({
       officeState.hoveredAgentId = hitId;
     },
     [
+      takeCamera,
       officeState,
       screenToWorld,
       screenToTile,
@@ -597,8 +588,7 @@ export function OfficeCanvas({
       if (e.button === 1) {
         e.preventDefault();
         // Break camera follow + greeter centering on manual pan
-        officeState.cameraFollowId = null;
-        officeState.cancelGreeterCamera();
+        takeCamera();
         isPanningRef.current = true;
         panStartRef.current = {
           mouseX: e.clientX,
@@ -703,6 +693,7 @@ export function OfficeCanvas({
       }
     },
     [
+      takeCamera,
       officeState,
       isEditMode,
       editorState,
@@ -931,23 +922,21 @@ export function OfficeCanvas({
                     y: (e.clientY - rect.top) * dpr - canvas.height / 2,
                   }
                 : undefined;
-            officeState.cameraFollowId = null;
-            officeState.cancelGreeterCamera();
+            takeCamera();
             onZoomChange(newZoom, anchor);
           }
         }
       } else {
         // Pan via trackpad two-finger scroll or mouse wheel
         const dpr = window.devicePixelRatio || 1;
-        officeState.cameraFollowId = null;
-        officeState.cancelGreeterCamera();
+        takeCamera();
         panRef.current = clampPan(
           panRef.current.x - e.deltaX * dpr,
           panRef.current.y - e.deltaY * dpr,
         );
       }
     },
-    [zoom, onZoomChange, officeState, panRef, clampPan],
+    [zoom, onZoomChange, panRef, clampPan, takeCamera],
   );
 
   // Attach wheel listener with { passive: false } so preventDefault() works.
@@ -969,6 +958,7 @@ export function OfficeCanvas({
       <canvas
         ref={canvasRef}
         tabIndex={0}
+        data-zoom={zoom}
         title={
           isEditMode ? undefined : 'Arrastra para mover la oficina · Ctrl + rueda para ampliar'
         }

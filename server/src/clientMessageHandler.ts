@@ -858,7 +858,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     lastSeenVersion: adapter?.getSetting(KEY_LAST_SEEN_VERSION, '') ?? '',
     extensionVersion: process.env.PIXEL_AGENTS_VERSION ?? '',
     watchAllSessions,
-    alwaysShowLabels: adapter?.getSetting(KEY_ALWAYS_SHOW_LABELS, false) ?? false,
+    alwaysShowLabels: adapter?.getSetting(KEY_ALWAYS_SHOW_LABELS, true) ?? true,
     ghostHeadlessAgents: adapter?.getSetting(KEY_GHOST_HEADLESS_AGENTS, false) ?? false,
     hooksEnabled,
     hooksInfoShown: adapter?.getSetting(KEY_HOOKS_INFO_SHOWN, false) ?? false,

@@ -290,3 +290,30 @@ merge, deployment, Operator config writes or unrestricted tools. External policy
 must authorize and enforce access; declaring a profile does not confine an Executor.
 `context.brainPaths` is declarative: consumers must validate path containment before
 reading. The canonical domain vocabulary remains in `CONTEXT.md`.
+
+## ClickUp mirror (SA-053)
+
+ClickUp reflects the work store; it is never the source of truth. `server/src/integrations/clickup/`:
+`client.ts` (REST: list tasks, set status, read/post comments; honours `X-RateLimit-Remaining/Reset`,
+retries a 429 after the reset; errors carry only the HTTP status and route), `mirror.ts`
+(reconciliation: binds by ClickUp custom id, then by a task name that starts with the work-store key;
+any drift — a hand-made change included — is audited as `drift` and overwritten, the work store wins;
+the PR comment text is its own idempotency key) and `sync.ts` (one run for the bound Project, plus the
+office timer every `CLICKUP_SYNC_INTERVAL_MS`).
+
+Opt-in per Project in the Operator config (`~/.pixel-agents/config.json`, never the repository):
+
+```json
+"clickupMirror": {
+  "enabled": true,
+  "statuses": { "READY": "to do", "IN_PROGRESS": "in progress", "REVIEW": "review",
+                "QA": "qa", "BLOCKED": "blocked", "DONE": "complete" }
+}
+```
+
+The lists come from `clickup.listIds` in `project.yaml`. The token comes from `CLICKUP_TOKEN` or
+`~/.pixel-agents/secrets.json` (`{"clickupToken": "…"}`, owner-only permissions); it never reaches
+the repository, logs or audit. Every write passes `clickup_write` (A3 for system actors);
+a denial writes nothing and is audited. `pixel-agents clickup sync [--dry-run]` runs one
+reconciliation by hand. Cancelled tasks have no column and are left alone. Webhooks and OAuth
+remain out of scope.

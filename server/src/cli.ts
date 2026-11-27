@@ -29,6 +29,7 @@ import {
 } from './clientMessageHandler.js';
 import { cliErrorOutput, CliUsageError } from './cliErrors.js';
 import { CodexWatcher } from './codexWatcher.js';
+import { runClickUpCommand } from './commands/clickup.js';
 import { runDesignCommand } from './commands/design.js';
 import { runFeatureCommand } from './commands/feature.js';
 import { runLearningCommand } from './commands/learning.js';
@@ -53,6 +54,7 @@ import { ExecutionRegistry } from './executors/executionRegistry.js';
 import { confirmHumanIngress } from './featureIngress.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { runFlowCommand } from './flowCommand.js';
+import { startClickUpMirror } from './integrations/clickup/sync.js';
 import { MachineCapacityPublisher } from './machineCapacity.js';
 import { presentOfficeAccess, runOpenCommand } from './openOffice.js';
 import { createPullRequestMonitor, type PullRequestMonitor } from './prMonitor.js';
@@ -119,6 +121,7 @@ Comandos:
   research <acción>     Investigar una pregunta o contrastar una feature construida con su plan
   design <acción>       Revisar el diseño visual y proponer o aplicar una dirección de producto
   task <acción>         Consultar y gestionar tareas, dependencias, reintentos y vínculos a PR
+  clickup sync [--dry-run]  Reflejar el estado de las tareas en ClickUp (opcional, por proyecto)
   worker run            Ejecutar una tarea mediante un Executor autorizado
   executors recover     Recuperar un cambio interrumpido de disponibilidad de Executors
   quota check           Comprobar cuota y admisión para un Executor o una selección
@@ -228,6 +231,8 @@ export async function dispatchCli(
     await runLearningCommand(argv.slice(1));
   } else if (argv[0] === 'eval') {
     await runEvalCommand(argv.slice(1));
+  } else if (argv[0] === 'clickup') {
+    await runClickUpCommand(argv.slice(1));
   } else if (argv[0] === 'task') {
     await runTaskCommand(argv.slice(1));
   } else if (argv[0] === 'feature') {
@@ -387,10 +392,12 @@ async function startServer(argv: string[]): Promise<void> {
     let roleResolver: RoleResolver | undefined;
     let boardWatcher: BoardWatcher | undefined;
     let domainEventRelay: ReturnType<typeof createDomainEventRelay>;
+    let clickUpMirror: { dispose(): void } | undefined;
     const refreshProjectBinding = (root: string) => {
       roleResolver?.dispose();
       boardWatcher?.dispose();
       domainEventRelay?.dispose();
+      clickUpMirror?.dispose();
       void shutdownPullRequestMonitor(pullRequestMonitor);
       boardSelection = loadBoardSelection(root);
       configureCompanyControl(root, boardSelection);
@@ -423,6 +430,7 @@ async function startServer(argv: string[]): Promise<void> {
       domainEventRelay?.start();
       pullRequestMonitor = createPullRequestMonitor(boardSelection);
       pullRequestMonitor?.start();
+      clickUpMirror = boardSelection.kind === 'project' ? startClickUpMirror(root) : undefined;
     };
 
     const config = await server.start({
@@ -544,6 +552,7 @@ async function startServer(argv: string[]): Promise<void> {
       roleResolver?.dispose();
       boardWatcher?.dispose();
       domainEventRelay?.dispose();
+      clickUpMirror?.dispose();
       try {
         await shutdownPullRequestMonitor(pullRequestMonitor);
       } finally {

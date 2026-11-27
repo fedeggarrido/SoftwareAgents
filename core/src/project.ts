@@ -32,6 +32,21 @@ export interface TelemetryConfig {
   prices?: Record<string, TelemetryModelPrice>;
 }
 
+/** SA-053: work-store states mirrored to ClickUp, each mapped to a status name of the list. */
+export const CLICKUP_MIRROR_STATES = [
+  'READY',
+  'IN_PROGRESS',
+  'REVIEW',
+  'QA',
+  'BLOCKED',
+  'DONE',
+] as const;
+export type ClickUpMirrorState = (typeof CLICKUP_MIRROR_STATES)[number];
+export interface ClickUpMirrorConfig {
+  enabled: boolean;
+  statuses: Record<ClickUpMirrorState, string>;
+}
+
 /** Operator-owned policy in ~/.pixel-agents/config.json, never in Project Brain. */
 export interface ProjectOperatorConfig {
   wip?: { running?: number; review?: number };
@@ -55,6 +70,8 @@ export interface ProjectOperatorConfig {
   executorLevels?: Partial<Record<'claude' | 'codex', ModelTier[]>>;
   /** Additive protected paths/globs from Operator config only. */
   protectedPaths?: string[];
+  /** SA-053: opt-in ClickUp mirror; absent or disabled means no ClickUp writes. */
+  clickupMirror?: ClickUpMirrorConfig;
   binaryPaths?: Record<string, string>;
   /** Optional Operator-owned Claude profile shared by worker launches and probes. */
   executors?: { claude?: { configDir?: string } };

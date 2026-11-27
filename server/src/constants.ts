@@ -518,3 +518,12 @@ export const STACK_RESEARCH_QUESTION =
 
 /** SA-102: document text the isolated reader reviews in one bounded request (~40 pages). */
 export const DOCUMENT_READER_MAX_BYTES = 96 * 1024;
+
+/** SA-053: ClickUp REST mirror. The work store is the brain; ClickUp only reflects it. */
+export const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
+/** Retries after a 429 before the call fails; each waits for X-RateLimit-Reset. */
+export const CLICKUP_RATE_LIMIT_RETRIES = 3;
+/** Upper bound for one rate-limit wait, so a bad reset header cannot stall the mirror. */
+export const CLICKUP_RATE_LIMIT_MAX_WAIT_MS = 60_000;
+export const CLICKUP_SYNC_INTERVAL_MS = 5 * 60_000;
+export const CLICKUP_SECRETS_FILE = 'secrets.json';

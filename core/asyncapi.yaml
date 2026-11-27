@@ -144,6 +144,8 @@ components:
         - $ref: '#/components/schemas/AgentContextUsage'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
+        - $ref: '#/components/schemas/LayoutSaved'
+        - $ref: '#/components/schemas/LayoutConflict'
         # Assets
         - $ref: '#/components/schemas/FurnitureAssetsLoaded'
         - $ref: '#/components/schemas/CharacterSpritesLoaded'
@@ -1709,6 +1711,39 @@ components:
             - type: 'null'
         wasReset:
           type: boolean
+        revision:
+          type: string
+          description: |
+            SA-162: content revision of the saved layout. The client echoes it
+            as `baseRevision` so a stale save never overwrites a newer layout.
+
+    LayoutSaved:
+      description: SA-162. The client's save was written; `revision` is the new base.
+      type: object
+      additionalProperties: false
+      required: [type, revision]
+      properties:
+        type:
+          const: layoutSaved
+        revision:
+          type: string
+
+    LayoutConflict:
+      description: |
+        SA-162. A save was refused because another client saved a newer layout
+        since this client's `baseRevision`. Carries the saved layout so the
+        owner can choose which one to keep.
+      type: object
+      additionalProperties: false
+      required: [type, layout, revision]
+      properties:
+        type:
+          const: layoutConflict
+        layout:
+          type: object
+          description: Opaque layout object; format owned by the rendering layer.
+        revision:
+          type: string
 
     FurnitureAssetsLoaded:
       description: Furniture catalog and sprite data, sent once after webviewReady.
@@ -2114,6 +2149,11 @@ components:
         layout:
           type: object
           description: Opaque layout object; format owned by the rendering layer.
+        baseRevision:
+          type: string
+          description: |
+            SA-162: revision this layout was edited from. When it no longer
+            matches the saved layout the server replies `layoutConflict`.
 
     SetSoundEnabled:
       type: object

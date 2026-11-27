@@ -1,7 +1,9 @@
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { LayoutConflict, LayoutSaved } from '../../core/src/messages.js';
 import {
   LAYOUT_FILE_DIR,
   LAYOUT_FILE_NAME,
@@ -44,6 +46,31 @@ export function writeLayoutToFile(layout: Record<string, unknown>): void {
   } catch (err) {
     console.error('[Pixel Agents] Failed to write layout file:', err);
   }
+}
+
+/** SA-162: content revision of a layout, echoed back by clients as their save base. */
+export function layoutRevision(layout: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(layout)).digest('hex').slice(0, 16);
+}
+
+/**
+ * SA-162: write a client's layout unless another client saved a newer one since
+ * the client's base; then the reply carries the saved layout instead. A save
+ * without a base (older clients) keeps the old last-write-wins behaviour.
+ * `beforeWrite` lets a file watcher ignore this process's own write.
+ */
+export function saveLayoutIfCurrent(
+  layout: Record<string, unknown>,
+  baseRevision: string | undefined,
+  beforeWrite?: () => void,
+): LayoutSaved | LayoutConflict {
+  const current = baseRevision === undefined ? null : readLayoutFromFile();
+  const currentRevision = current && layoutRevision(current);
+  if (current && currentRevision && currentRevision !== baseRevision)
+    return { type: 'layoutConflict', layout: current, revision: currentRevision };
+  beforeWrite?.();
+  writeLayoutToFile(layout);
+  return { type: 'layoutSaved', revision: layoutRevision(layout) };
 }
 
 interface LayoutLoadResult {

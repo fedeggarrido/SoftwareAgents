@@ -36,6 +36,7 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
+import { layoutSync, useLayoutSync } from './hooks/useLayoutSync.js';
 import { useOwnerInbox } from './hooks/useOwnerInbox.js';
 import { usePanelWindow } from './hooks/usePanelWindow.js';
 import { useProjectGuide } from './hooks/useProjectGuide.js';
@@ -127,6 +128,12 @@ function App() {
     showAreas,
     setShowAreas,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
+  useLayoutSync(getOfficeState, {
+    isDirty: isEditDirty,
+    setLastSavedLayout: editor.setLastSavedLayout,
+    markClean: editor.markClean,
+    cancelPendingSave: editor.cancelPendingSave,
+  });
 
   // Show migration notice once layout reset is detected
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
@@ -369,10 +376,7 @@ function App() {
           const migrated = migrateLayoutColors(imported as unknown as OfficeLayout);
           getOfficeState().rebuildFromLayout(migrated);
           editor.setLastSavedLayout(migrated);
-          transport.send({
-            type: 'saveLayout',
-            layout: migrated as unknown as Record<string, unknown>,
-          });
+          layoutSync.save(migrated);
           editor.markClean();
         } catch {
           window.alert(es.office.unreadableDesign);

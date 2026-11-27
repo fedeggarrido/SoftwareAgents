@@ -47,6 +47,7 @@ import type {
 import { EditTool } from '../office/types.js';
 import { TileType } from '../office/types.js';
 import { transport } from '../transport/index.js';
+import { layoutSync } from './useLayoutSync.js';
 
 interface EditorActions {
   isEditMode: boolean;
@@ -58,6 +59,7 @@ interface EditorActions {
   setLastSavedLayout: (layout: OfficeLayout) => void;
   /** Clear the dirty flag (used after a browser import applies a new saved baseline). */
   markClean: () => void;
+  cancelPendingSave: () => void;
   handleOpenClaude: () => void;
   handleToggleEditMode: () => void;
   handleToolChange: (tool: EditToolType) => void;
@@ -142,11 +144,16 @@ export function useEditorActions(
     setIsDirty(false);
   }, [editorState]);
 
+  const cancelPendingSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+  }, []);
+
   // Debounced layout save
   const saveLayout = useCallback((layout: OfficeLayout) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      transport.send({ type: 'saveLayout', layout: layout as unknown as Record<string, unknown> });
+      layoutSync.save(layout);
     }, LAYOUT_SAVE_DEBOUNCE_MS);
   }, []);
 
@@ -538,7 +545,7 @@ export function useEditorActions(
     const os = getOfficeState();
     const layout = os.getLayout();
     lastSavedLayoutRef.current = structuredClone(layout);
-    transport.send({ type: 'saveLayout', layout: layout as unknown as Record<string, unknown> });
+    layoutSync.save(layout);
     editorState.isDirty = false;
     setIsDirty(false);
   }, [getOfficeState, editorState]);
@@ -934,6 +941,7 @@ export function useEditorActions(
     saveTimerRef,
     setLastSavedLayout,
     markClean,
+    cancelPendingSave,
     handleOpenClaude,
     handleToggleEditMode,
     handleToolChange,

@@ -79,18 +79,22 @@ const AUTOPILOT_TEXT: Record<string, string> = {
   paused: 'en pausa',
 };
 
-/** Board phases drive the pulse; with no board work, open sessions still count as activity. */
+/**
+ * «Trabajando» counts live Sessions in the office; «en curso» counts board tasks
+ * whose phase is in progress, which may have nobody on them right now.
+ */
 function HudPulse({ phases, sessions }: { phases: readonly string[]; sessions: number }) {
   const pulse = backlogPulse(phases);
-  const idle = pulse.working === 0 && pulse.needsYou === 0 && pulse.blocked === 0;
+  const idle = pulse.inProgress === 0 && pulse.needsYou === 0 && pulse.blocked === 0;
   return (
     <span className="hud-pulse" data-testid="hud-pulse">
       {idle ? (
         `${sessions === 0 ? 'Nadie trabajando' : `${sessions} ${sessions === 1 ? 'sesión abierta' : 'sesiones abiertas'}`} · nada espera tu revisión`
       ) : (
         <>
-          <strong>{pulse.working}</strong> trabajando · <strong>{pulse.needsYou}</strong> te
-          necesitan · <strong>{pulse.blocked}</strong> bloqueadas
+          <strong>{sessions}</strong> trabajando · <strong>{pulse.inProgress}</strong> en curso ·{' '}
+          <strong>{pulse.needsYou}</strong> te necesitan · <strong>{pulse.blocked}</strong>{' '}
+          bloqueadas
         </>
       )}
     </span>

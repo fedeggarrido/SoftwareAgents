@@ -13,7 +13,7 @@ test.describe('Standalone / first visit guide', () => {
     await expect(page.getByText(/Actualizado a/)).toHaveCount(0);
     await guide.getByRole('button', { name: 'Continuar' }).click();
     await expect(guide).toContainText('Del plan al desarrollo');
-    await openDockAction(page, 'Decisiones');
+    await openDockAction(page, 'Te necesita');
     await expect(page.getByTestId('panel-window')).toBeVisible();
     await expect(guide).toBeHidden();
     await page.getByRole('button', { name: 'Cerrar ventana' }).click();

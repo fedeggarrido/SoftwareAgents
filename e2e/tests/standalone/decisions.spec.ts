@@ -65,24 +65,25 @@ for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       try {
         const dock = page.locator('.bottom-toolbar');
-        const decisions = dock.getByRole('button', { name: 'Decisiones', exact: true });
-        await expect(decisions).toContainText('Urgente');
+        const inbox = dock.getByRole('button', { name: 'Te necesita', exact: true });
+        await expect(inbox).toContainText('Urgente');
         await expect(dock.getByRole('status')).toHaveAttribute(
           'aria-label',
-          /1 decisión pendiente, 1 urgente$/,
+          /1 asunto espera tu respuesta, 1 decisión urgente$/,
         );
         await dock.getByRole('button', { name: 'Trabajo pendiente', exact: true }).click();
         expect(
-          await decisions.evaluate((element) => {
+          await inbox.evaluate((element) => {
             const rect = element.getBoundingClientRect();
             return element.contains(
               document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
             );
           }),
         ).toBe(true);
-        await decisions.click();
-        await expect(decisions).toBeInViewport();
-        const box = await decisions.boundingBox();
+        await inbox.click();
+        await page.getByRole('button', { name: 'Responder', exact: true }).click();
+        await expect(inbox).toBeInViewport();
+        const box = await inbox.boundingBox();
         expect(box!.height).toBeGreaterThanOrEqual(44);
         const panel = page.getByTestId('decisions-panel');
         await expect(panel).toContainText('Preparar recibos');
@@ -136,8 +137,9 @@ for (const width of [390, 1440]) {
         try {
           await page
             .locator('.bottom-toolbar')
-            .getByRole('button', { name: 'Decisiones', exact: true })
+            .getByRole('button', { name: 'Te necesita', exact: true })
             .click();
+          await page.getByRole('button', { name: 'Ver todas las decisiones', exact: true }).click();
           const panel = page.getByTestId('decisions-panel');
           await panel.getByRole('button', { name: 'Esperar revisión', exact: true }).click();
           save(

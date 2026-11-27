@@ -13,6 +13,7 @@ import { DebugView } from './components/DebugView.js';
 import { DecisionsPanel } from './components/DecisionsPanel.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { FeaturesPanel } from './components/FeaturesPanel.js';
+import { InboxPanel } from './components/InboxPanel.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { MeetingPanel } from './components/MeetingPanel.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
@@ -28,12 +29,14 @@ import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
+import { INBOX_TITLE_BASE } from './constants.js';
 import { canShowTour } from './hooks/tourVisibility.js';
 import { useOpenLayerCount } from './hooks/useDismissibleLayer.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
+import { useOwnerInbox } from './hooks/useOwnerInbox.js';
 import { usePanelWindow } from './hooks/usePanelWindow.js';
 import { useProjectGuide } from './hooks/useProjectGuide.js';
 import { es } from './i18n/es.js';
@@ -45,6 +48,8 @@ import { OfficeState } from './office/engine/officeState.js';
 import { exportLayoutToFile } from './office/layout/exportLayout.js';
 import { isRotatable } from './office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from './office/layout/layoutSerializer.js';
+import type { InboxAction } from './office/ownerInbox.js';
+import { inboxTitle } from './office/ownerInbox.js';
 import { OfficeRecoveryContext } from './office/recoveryActions.js';
 import { getPetCount } from './office/sprites/petSpriteData.js';
 import { EditTool, type OfficeLayout } from './office/types.js';
@@ -133,6 +138,32 @@ function App() {
   const [isHudOpen, setIsHudOpen] = useState(false);
   const [isDockMenuOpen, setIsDockMenuOpen] = useState(false);
   const [focusedTask, setFocusedTask] = useState<string | null>(null);
+  const inbox = useOwnerInbox(getOfficeState());
+  const focusAgent = (id: number) => {
+    const os = getOfficeState();
+    os.selectedAgentId = id;
+    os.cameraFollowId = id;
+  };
+  const actOnInbox = (action: InboxAction) => {
+    switch (action.kind) {
+      case 'decision':
+        return panel.select('decisions');
+      case 'meeting':
+        return panel.select('meeting');
+      case 'task':
+        setFocusedTask(action.taskKey);
+        return panel.select('backlog');
+      case 'agent':
+        focusAgent(action.agentId);
+        if (panel.mobile) panel.close();
+        return;
+      case 'none':
+        return;
+    }
+  };
+  useEffect(() => {
+    document.title = inboxTitle(INBOX_TITLE_BASE, inbox.length);
+  }, [inbox.length]);
   const [workflowStage, setWorkflowStage] = useState<WorkflowStageId | null>(null);
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
@@ -609,6 +640,7 @@ function App() {
           isSettingsOpen={isSettingsOpen}
           onToggleSettings={() => setIsSettingsOpen((v) => !v)}
           activePanel={panel.isOpen ? panel.tab : null}
+          inboxCount={inbox.length}
           onTogglePanel={panel.toggle}
           onNewIdea={handleNewIdea}
           workspaceFolders={workspaceFolders}
@@ -654,12 +686,15 @@ function App() {
             focusedTask={focusedTask}
             workflowStage={workflowStage}
             onClearWorkflowStage={() => setWorkflowStage(null)}
-            onFocusAgent={(id) => {
-              const os = getOfficeState();
-              os.selectedAgentId = id;
-              os.cameraFollowId = id;
-            }}
+            onFocusAgent={focusAgent}
           />
+          {panel.isOpen && panel.tab === 'inbox' && (
+            <InboxPanel
+              entries={inbox}
+              onAct={actOnInbox}
+              onOpenDecisions={() => panel.select('decisions')}
+            />
+          )}
           <DecisionsPanel
             hosted
             isOpen={panel.isOpen && panel.tab === 'decisions'}

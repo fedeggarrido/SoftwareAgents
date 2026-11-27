@@ -30,6 +30,8 @@ interface BottomToolbarProps {
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
   activePanel: PanelTab | null;
+  /** Everything waiting for the owner (SA-132), shown on the inbox button. */
+  inboxCount: number;
   onTogglePanel: (tab: PanelTab) => void;
   onNewIdea: () => void;
   onMenuOpenChange: (open: boolean) => void;
@@ -44,6 +46,7 @@ export function BottomToolbar({
   isSettingsOpen,
   onToggleSettings,
   activePanel,
+  inboxCount,
   onTogglePanel,
   onNewIdea,
   onMenuOpenChange,
@@ -71,7 +74,7 @@ export function BottomToolbar({
     return () => clearInterval(timer);
   }, []);
   const prs = pullRequestDockSummary(board?.items ?? [], prNow);
-  const { open: pending, urgent } = decisionsHudView(board ?? {});
+  const { urgent } = decisionsHudView(board ?? {});
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < DOCK_MOBILE_BREAKPOINT_PX,
   );
@@ -182,7 +185,7 @@ export function BottomToolbar({
 
   const panels = [
     { id: 'backlog', label: es.common.backlog, title: es.vocabulary.backlogHint },
-    { id: 'decisions', label: 'Decisiones', title: 'Decisiones del propietario' },
+    { id: 'inbox', label: es.inbox.title, title: es.inbox.hint },
     { id: 'summary', label: 'Proyecto', title: 'Resumen del proyecto que se está construyendo' },
     { id: 'features', label: 'Funcionalidades', title: es.vocabulary.featuresHint },
     { id: 'audit', label: 'Auditoría', title: 'Auditoría de solo lectura' },
@@ -199,9 +202,7 @@ export function BottomToolbar({
       aria-label={entry.label}
       aria-pressed={activePanel === entry.id}
       aria-controls="office-panel-content"
-      aria-describedby={
-        entry.id === 'decisions' && pending > 0 ? 'dock-decisions-pending' : undefined
-      }
+      aria-describedby={entry.id === 'inbox' && inboxCount > 0 ? 'dock-inbox-pending' : undefined}
       title={
         entry.id === 'backlog' && prs
           ? `${entry.title}\n${es.pullRequest.dockStatus(prs.label, prs.title)}`
@@ -211,21 +212,21 @@ export function BottomToolbar({
     >
       <span className="dock-symbol">
         <DockIcon name={entry.id} />
-        {entry.id === 'decisions' && pending > 0 && (
+        {entry.id === 'inbox' && inboxCount > 0 && (
           <span
-            id="dock-decisions-pending"
+            id="dock-inbox-pending"
             className="dock-badge"
             role="status"
-            aria-label={`${pending} ${pending === 1 ? 'decisión pendiente' : 'decisiones pendientes'}${urgent ? `, ${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}` : ''}`}
+            aria-label={`${es.inbox.count(inboxCount)}${urgent ? `, ${es.inbox.urgentCount(urgent)}` : ''}`}
           >
             <DockIcon name="attention" />
-            {pending}
+            {inboxCount}
           </span>
         )}
       </span>
       <span>
         {entry.label}
-        {entry.id === 'decisions' && urgent > 0 && <span className="dock-urgent"> · Urgente</span>}
+        {entry.id === 'inbox' && urgent > 0 && <span className="dock-urgent"> · Urgente</span>}
       </span>
     </button>
   );
@@ -333,7 +334,7 @@ export function BottomToolbar({
             <p id="editing-help">{es.office.editingHelp}</p>
           </div>
           {editActions}
-          {panels.filter((entry) => entry.id === 'decisions').map(panelButton)}
+          {panels.filter((entry) => entry.id === 'inbox').map(panelButton)}
           {editButton}
           {/* Agents can still be opened while arranging seats and areas, as before. */}
           {agentControl}

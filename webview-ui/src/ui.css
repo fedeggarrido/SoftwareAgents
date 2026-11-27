@@ -940,6 +940,27 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
   color: var(--color-text);
 }
 
+/* Owner inbox (SA-132). */
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.inbox-entry {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: var(--border-thin) solid var(--color-border);
+}
+.inbox-entry > button {
+  justify-self: start;
+}
+.inbox-kind {
+  font-size: var(--reading-size);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
 /* Office at a glance (SA-131): who needs you stands out by shape and text, idle recedes. */
 .agent-label[data-activity='needs_you'] .character-hover-label {
   border-color: var(--color-warning);

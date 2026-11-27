@@ -4,6 +4,7 @@ const paths = {
   summary: 'M1 2h14v12H1zm2 2v8h10V4zM4 5h8v2H4zm0 4h3v2H4zm5 0h3v2H9z',
   idea: 'M7 2h2v5h5v2H9v5H7V9H2V7h5z',
   backlog: 'M2 2h12v12H2zm2 2v8h8V4zM5 5h2v2H5zm3 0h3v2H8zM5 9h2v2H5zm3 0h3v2H8z',
+  inbox: 'M1 3h14v10H1zm2 2v6h10V5zM3 5h3l2 3 2-3h3v1h-2l-3 4-3-4H3z',
   decisions: 'M2 2h12v10H9l-3 3v-3H2zm2 2v6h3v2l2-2h3V4zM7 5h2v2H7zm0 3h2v1H7z',
   features: 'M2 2h2v12H2zm2 0h10v7H4zm2 2v3h6V4z',
   audit: 'M3 1h8v2h2v12H3zm2 2v10h6V5H9V3zm1 3h3v2H6zm0 3h4v2H6z',

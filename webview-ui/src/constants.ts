@@ -482,6 +482,7 @@ export const PANEL_WINDOW_Z_INDEX = UI_LAYERS.panel;
 export const MODAL_Z_INDEX = UI_LAYERS.modal;
 export const OFFICE_HELP_Z_INDEX = UI_LAYERS.notices;
 export const PANEL_TABS = [
+  { id: 'inbox', label: es.inbox.title },
   { id: 'summary', label: 'Proyecto' },
   { id: 'backlog', label: es.common.backlog },
   { id: 'decisions', label: 'Decisiones' },
@@ -716,3 +717,5 @@ export const GITHUB_HOSTING_REQUEST_TIMEOUT_MS = 180_000;
 export const DECISION_REVIEW_ARM_MS = 600;
 /** The accessible agent list mirrors the canvas; once a second is enough for reading. */
 export const AGENT_LIST_REFRESH_MS = 1_000;
+/** Browser tab title; the inbox count is prefixed when something waits for the owner. */
+export const INBOX_TITLE_BASE = 'SoftwareAgents';

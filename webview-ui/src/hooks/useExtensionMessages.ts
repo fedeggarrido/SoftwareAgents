@@ -40,7 +40,6 @@ import {
 } from '../office/ideasStore.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
-import { isOverwrittenLayout } from '../office/layoutSync.js';
 import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { setCharacterTemplates } from '../office/sprites/spriteData.js';
@@ -59,6 +58,7 @@ import { setWallSprites } from '../office/wallTiles.js';
 import { isBrowserRuntime, isE2E } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { bindExtensionTransportLifecycle } from './extensionTransportLifecycle.js';
+import { layoutSync } from './useLayoutSync.js';
 
 /**
  * A Headless agent is one the office adopted from outside (`claude -p`, a session
@@ -321,7 +321,7 @@ export function useExtensionMessages(
 
       if (msg.type === 'layoutLoaded') {
         // Skip external updates over unsaved edits or a layout already overwritten (SA-162)
-        if (layoutReadyRef.current && (isEditDirty?.() || isOverwrittenLayout(msg.revision))) {
+        if (layoutReadyRef.current && (isEditDirty?.() || layoutSync.isOverwritten(msg.revision))) {
           return;
         }
         const rawLayout = msg.layout as OfficeLayout | null;

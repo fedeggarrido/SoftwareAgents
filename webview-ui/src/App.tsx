@@ -34,7 +34,7 @@ import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
-import { useLayoutSync } from './hooks/useLayoutSync.js';
+import { layoutSync, useLayoutSync } from './hooks/useLayoutSync.js';
 import { usePanelWindow } from './hooks/usePanelWindow.js';
 import { useProjectGuide } from './hooks/useProjectGuide.js';
 import { es } from './i18n/es.js';
@@ -46,7 +46,6 @@ import { OfficeState } from './office/engine/officeState.js';
 import { exportLayoutToFile } from './office/layout/exportLayout.js';
 import { isRotatable } from './office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from './office/layout/layoutSerializer.js';
-import { sendLayoutSave } from './office/layoutSync.js';
 import { OfficeRecoveryContext } from './office/recoveryActions.js';
 import { getPetCount } from './office/sprites/petSpriteData.js';
 import { EditTool, type OfficeLayout } from './office/types.js';
@@ -346,7 +345,7 @@ function App() {
           const migrated = migrateLayoutColors(imported as unknown as OfficeLayout);
           getOfficeState().rebuildFromLayout(migrated);
           editor.setLastSavedLayout(migrated);
-          sendLayoutSave(migrated);
+          layoutSync.save(migrated);
           editor.markClean();
         } catch {
           window.alert(es.office.unreadableDesign);

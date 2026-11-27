@@ -36,7 +36,6 @@ import {
   getRotatedType,
   getToggledType,
 } from '../office/layout/furnitureCatalog.js';
-import { sendLayoutSave } from '../office/layoutSync.js';
 import { zoomPanAt } from '../office/projection.js';
 import type {
   EditTool as EditToolType,
@@ -48,6 +47,7 @@ import type {
 import { EditTool } from '../office/types.js';
 import { TileType } from '../office/types.js';
 import { transport } from '../transport/index.js';
+import { layoutSync } from './useLayoutSync.js';
 
 interface EditorActions {
   isEditMode: boolean;
@@ -153,7 +153,7 @@ export function useEditorActions(
   const saveLayout = useCallback((layout: OfficeLayout) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      sendLayoutSave(layout);
+      layoutSync.save(layout);
     }, LAYOUT_SAVE_DEBOUNCE_MS);
   }, []);
 
@@ -545,7 +545,7 @@ export function useEditorActions(
     const os = getOfficeState();
     const layout = os.getLayout();
     lastSavedLayoutRef.current = structuredClone(layout);
-    sendLayoutSave(layout);
+    layoutSync.save(layout);
     editorState.isDirty = false;
     setIsDirty(false);
   }, [getOfficeState, editorState]);

@@ -3,9 +3,12 @@ import { useEffect } from 'react';
 import { es } from '../i18n/es.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
-import { layoutConflicted, layoutLoaded, layoutSaved } from '../office/layoutSync.js';
+import { createLayoutSync } from '../office/layoutSync.js';
 import type { OfficeLayout } from '../office/types.js';
 import { transport } from '../transport/index.js';
+
+/** The tab's one save channel (SA-162); every layout save goes through it. */
+export const layoutSync = createLayoutSync((message) => transport.send(message));
 
 interface LayoutSyncEditor {
   isDirty: () => boolean;
@@ -28,19 +31,19 @@ export function useLayoutSync(
       transport.onMessage((msg) => {
         switch (msg.type) {
           case 'layoutLoaded':
-            layoutLoaded(msg.revision, isDirty());
+            layoutSync.loaded(msg.revision, isDirty());
             return;
           case 'layoutSaved':
-            layoutSaved(msg.revision);
+            layoutSync.saved(msg.revision);
             return;
           case 'layoutConflict': {
             const os = getOfficeState();
             if (window.confirm(es.office.layoutConflict)) {
-              layoutConflicted(msg.revision, os.getLayout());
+              layoutSync.conflicted(msg.revision, os.getLayout());
               return;
             }
             cancelPendingSave();
-            layoutConflicted(msg.revision, null);
+            layoutSync.conflicted(msg.revision, null);
             // SAFETY: the server only stores layouts this UI saved (OfficeLayout v1).
             const saved = migrateLayoutColors(msg.layout as OfficeLayout);
             os.rebuildFromLayout(saved);

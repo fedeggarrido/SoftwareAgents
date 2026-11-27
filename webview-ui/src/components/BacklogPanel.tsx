@@ -293,8 +293,8 @@ export function BacklogPanel({
         <>
           <div className="backlog-pulse" data-testid="backlog-pulse">
             <div className="backlog-stat">
-              <span className="backlog-stat-value">{pulse.working}</span>
-              <span className="backlog-stat-label">Trabajando</span>
+              <span className="backlog-stat-value">{pulse.inProgress}</span>
+              <span className="backlog-stat-label">En curso</span>
             </div>
             {pulse.needsYou > 0 ? (
               <button

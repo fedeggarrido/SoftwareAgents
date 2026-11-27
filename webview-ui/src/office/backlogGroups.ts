@@ -38,7 +38,7 @@ export function backlogGroupOf(phase: string): BacklogGroupId {
 }
 
 export interface BacklogPulse {
-  working: number;
+  inProgress: number;
   needsYou: number;
   blocked: number;
 }
@@ -46,7 +46,7 @@ export interface BacklogPulse {
 /** The three numbers of the top strip: is anything waiting for me? */
 export function backlogPulse(phases: readonly string[]): BacklogPulse {
   return {
-    working: phases.filter((p) => backlogGroupOf(p) === 'inProgress').length,
+    inProgress: phases.filter((p) => backlogGroupOf(p) === 'inProgress').length,
     needsYou: phases.filter((p) => backlogGroupOf(p) === 'needsYou').length,
     blocked: phases.filter((p) => BLOCKED_PHASES.has(p)).length,
   };

@@ -12,7 +12,7 @@ describe('backlog groups (SA-152)', () => {
 
   it('counts the three pulse numbers', () => {
     expect(backlogPulse(['RUNNING', 'REVIEW', 'WAITING_HUMAN', 'BLOCKED', 'DONE'])).toEqual({
-      working: 2,
+      inProgress: 2,
       needsYou: 1,
       blocked: 1,
     });

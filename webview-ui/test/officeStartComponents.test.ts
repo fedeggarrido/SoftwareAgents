@@ -99,7 +99,7 @@ it('welcomes empty offices, reuses Nueva idea, dismisses, hides after work, and 
     })`);
     await browserExpect(welcome).toHaveCount(0);
     await browserExpect(page.getByTestId('hud-pulse')).toHaveText(
-      '0 trabajando · 1 te necesitan · 0 bloqueadas',
+      '0 trabajando · 0 en curso · 1 te necesitan · 0 bloqueadas',
     );
     await page.evaluate('window.setStartBoard({})');
     await browserExpect(welcome).toHaveCount(0);

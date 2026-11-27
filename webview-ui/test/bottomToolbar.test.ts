@@ -24,6 +24,7 @@ const props = {
   onTogglePanel: vi.fn(),
   onNewIdea: vi.fn(),
   onToggleSettings: vi.fn(),
+  onOpenHelp: vi.fn(),
   onToggleEditMode: vi.fn(),
   onOpenClaude: vi.fn(),
   workspaceFolders: [],
@@ -76,6 +77,7 @@ it('groups primary, panel segments and secondary controls in keyboard order', as
     'Funcionalidades',
     'Auditoría',
     'Editar diseño de la oficina',
+    'Ayuda',
     'Ajustes',
   ]);
   expect(html.match(/class="dock-button dock-primary"/g)).toHaveLength(1);
@@ -162,7 +164,7 @@ it.each([320, 390, 767, 768])('uses four mobile slots below 768px at %spx', asyn
   const { BottomToolbar } = await import(toolbarPath);
   vi.stubGlobal('window', { innerWidth });
   const html = renderToStaticMarkup(createElement(BottomToolbar, props));
-  expect(html.match(/<button\b/g)).toHaveLength(innerWidth < 768 ? 4 : 8);
+  expect(html.match(/<button\b/g)).toHaveLength(innerWidth < 768 ? 4 : 9);
   if (innerWidth < 768) {
     expect(html).toContain('aria-controls="dock-more-sheet"');
     expect(html).toContain('aria-expanded="false"');

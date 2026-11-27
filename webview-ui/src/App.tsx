@@ -643,6 +643,11 @@ function App() {
           onToggleEditMode={editor.handleToggleEditMode}
           isSettingsOpen={isSettingsOpen}
           onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+          onOpenHelp={() => {
+            panel.close();
+            setIsSettingsOpen(false);
+            guide.reopen();
+          }}
           activePanel={panel.isOpen ? panel.tab : null}
           inboxCount={inbox.length}
           onTogglePanel={panel.toggle}

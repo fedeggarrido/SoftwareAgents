@@ -187,19 +187,29 @@ export const es = {
     guide: 'Guía del proyecto',
     workflow: [
       {
-        title: 'De la idea a las decisiones',
+        title: 'Prepara el proyecto',
         description:
-          'En Nueva idea, cuenta qué necesitas y para quién. Responde las preguntas sobre requisitos en Decisiones y confirma las decisiones pendientes.',
+          'Cada oficina trabaja sobre un proyecto: una carpeta con su repositorio. Si aún no hay ninguno, la propia oficina te ofrece prepararlo. Lo ves en el panel Proyecto.',
       },
       {
-        title: 'Del plan al desarrollo',
+        title: 'De la idea a los requisitos',
         description:
-          'Revisa el plan técnico y apruébalo cuando refleje lo acordado. Sigue el desarrollo en Trabajo pendiente y responde si surge una duda.',
+          'En Nueva idea, cuenta qué necesitas y para quién, y responde la entrevista para concretar los requisitos. Si después surge una duda, llega como decisión a Te necesita.',
       },
       {
-        title: 'Revisión, pruebas e integración',
+        title: 'Plan y aprobación',
         description:
-          'Consulta la revisión y los resultados de las pruebas. La integración requiere una decisión humana: revisa las evidencias antes de autorizarla.',
+          'Con los requisitos claros, se propone un plan técnico dividido en tareas. Revísalo en Funcionalidades y apruébalo cuando refleje lo acordado.',
+      },
+      {
+        title: 'El trabajo de los agentes',
+        description:
+          'Los agentes se sientan en la oficina y trabajan las tareas. Síguelas en Trabajo pendiente; si alguno necesita algo, aparece en Te necesita.',
+      },
+      {
+        title: 'Revisión y entrega',
+        description:
+          'Cada tarea pasa revisión y pruebas antes de integrarse. Integrar requiere tu decisión: revisa las evidencias antes de autorizarla. Auditoría guarda todo lo hecho.',
       },
       {
         title: 'Tu primera idea',
@@ -212,6 +222,60 @@ export const es = {
     back: 'Anterior',
     finish: 'Terminar',
     next: 'Continuar',
+    help: 'Ayuda',
+    glossary: 'Glosario',
+    backToGuide: 'Volver a la guía',
+    terms: [
+      {
+        term: 'Agente',
+        definition:
+          'Un trabajador de IA con un papel fijo en el proyecto (desarrollo, revisión, pruebas…). No es el modelo: un mismo modelo puede hacer de varios agentes.',
+      },
+      {
+        term: 'Funcionalidad (FEAT)',
+        definition:
+          'Una parte entregable del producto, con su propia clave, como FEAT-001. Se divide en tareas.',
+      },
+      {
+        term: 'Tarea',
+        definition:
+          'Un trabajo concreto dentro de una funcionalidad, que hace un agente y se revisa antes de integrarse.',
+      },
+      {
+        term: 'Decisión',
+        definition:
+          'Una pregunta que los agentes no pueden resolver solos, como aprobar un plan o integrar un cambio. Espera tu respuesta en Te necesita.',
+      },
+      {
+        term: 'Modo operador',
+        definition:
+          'Acceso completo: puedes crear ideas, aprobar y decidir. Se obtiene abriendo la oficina desde la terminal.',
+      },
+      {
+        term: 'Solo lectura',
+        definition:
+          'Puedes mirar la oficina, pero no cambiar nada ni ver los registros privados del proyecto.',
+      },
+    ],
+  },
+  panelHelp: {
+    tabs: {
+      inbox:
+        'Lo que espera tu respuesta: decisiones, aprobaciones, revisiones y bloqueos. Si está vacío, nadie te necesita ahora.',
+      summary:
+        'El proyecto en el que trabaja la oficina: su objetivo, el progreso y lo próximo que toca.',
+      backlog:
+        'Todas las tareas agrupadas por estado. Abre una para ver de qué va, qué se decidió y pedir un cambio.',
+      decisions:
+        'Las preguntas planteadas por los agentes, abiertas y ya resueltas, con su respuesta.',
+      audit:
+        'El registro de todo lo hecho por personas y agentes. Sirve para comprobar qué pasó y quién lo hizo; no se puede editar.',
+      features:
+        'Las ideas y funcionalidades del proyecto, con su plan. Aquí revisas y apruebas los planes.',
+      meeting: 'Las reuniones entre agentes y lo que concluyeron.',
+    },
+    show: 'Mostrar ayuda de este panel',
+    hide: 'Ocultar ayuda de este panel',
   },
   intro: {
     step: (current: number, total: number) => `Paso ${current} de ${total}`,

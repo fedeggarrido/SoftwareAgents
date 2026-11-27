@@ -982,3 +982,29 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 .agent-label[data-activity='waiting'] .character-hover-label {
   color: var(--color-text-muted);
 }
+
+/* SA-147: glossary inside the guide and the per-panel help line. */
+.guide-glossary {
+  margin: 8px 0;
+}
+.guide-glossary dt {
+  font-weight: 700;
+  margin-top: var(--space-2);
+}
+.guide-glossary dd {
+  margin: 0;
+}
+.intro-guide footer {
+  flex-wrap: wrap;
+}
+.panel-window-help {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--border-thin) solid var(--color-border);
+  font-size: var(--reading-size);
+  line-height: 1.4;
+}
+.panel-window-title button {
+  min-width: var(--control-target);
+  min-height: var(--control-target);
+}

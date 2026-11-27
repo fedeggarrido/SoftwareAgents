@@ -10,6 +10,7 @@ const paths = {
   audit: 'M3 1h8v2h2v12H3zm2 2v10h6V5H9V3zm1 3h3v2H6zm0 3h4v2H6z',
   edit: 'M10 1h2v2h2v2h-2V3h-2zM8 3h2v2H8zM6 5h2v2H6zM4 7h2v2H4zM2 9h2v3h3v2H2zm4 0h2v2H6zm2-2h2v2H8zm2-2h2v2h-2z',
   settings: 'M6 1h4v2h2v3h3v4h-3v2h-2v3H6v-3H4v-2H1V6h3V4h2zm0 5v4h4V6z',
+  help: 'M5 1h6v2h2v4h-2v2H9v2H7V8h2V6h2V3H5v2H3V3h2zm2 11h2v2H7z',
   more: 'M2 7h2v2H2zm5 0h2v2H7zm5 0h2v2h-2z',
   agent: 'M5 2h6v6H5zm2 2v2h2V4zM3 10h10v4h-2v-2H5v2H3z',
   attention: 'M7 1h2v9H7zm0 11h2v2H7z',

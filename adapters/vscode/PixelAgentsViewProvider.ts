@@ -42,7 +42,9 @@ import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/file
 import { handleGithubHostingMessage } from '../../server/src/githubHosting.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
+  layoutRevision,
   readLayoutFromFile,
+  saveLayoutIfCurrent,
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
@@ -548,8 +550,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         console.log(`[Pixel Agents] State: saveAgentSeats:`, JSON.stringify(message.seats));
         this.adapter.saveSeats(message.seats);
       } else if (message.type === 'saveLayout') {
-        this.layoutWatcher?.markOwnWrite();
-        writeLayoutToFile(message.layout as Record<string, unknown>);
+        this.webview?.postMessage(
+          saveLayoutIfCurrent(message.layout, message.baseRevision, () =>
+            this.layoutWatcher?.markOwnWrite(),
+          ),
+        );
       } else if (message.type === 'setSoundEnabled') {
         this.adapter.setSetting(GLOBAL_KEY_SOUND_ENABLED, message.enabled);
       } else if (message.type === 'setLastSeenVersion') {
@@ -982,7 +987,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           }
           this.layoutWatcher?.markOwnWrite();
           writeLayoutToFile(imported);
-          this.webview?.postMessage({ type: 'layoutLoaded', layout: imported });
+          this.webview?.postMessage({
+            type: 'layoutLoaded',
+            layout: imported,
+            revision: layoutRevision(imported),
+          });
           vscode.window.showInformationMessage('Pixel Agents: Layout imported successfully.');
         } catch {
           vscode.window.showErrorMessage('Pixel Agents: Failed to read or parse layout file.');
@@ -1111,7 +1120,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     if (this.layoutWatcher) return;
     this.layoutWatcher = watchLayoutFile((layout) => {
       console.log('[Pixel Agents] External layout change — pushing to webview');
-      this.webview?.postMessage({ type: 'layoutLoaded', layout });
+      this.webview?.postMessage({ type: 'layoutLoaded', layout, revision: layoutRevision(layout) });
     });
   }
 

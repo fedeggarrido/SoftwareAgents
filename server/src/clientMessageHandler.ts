@@ -51,7 +51,11 @@ import { readFeaturesView } from './featuresView.js';
 import { handleGithubHostingMessage } from './githubHosting.js';
 import { answerProjectDecision } from './humanDecisions.js';
 import { handleIdeaDocumentMessage } from './ideaDocument.js';
-import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import {
+  layoutRevision,
+  readLayoutFromFile,
+  saveLayoutIfCurrent,
+} from './layoutPersistence.js';
 import { handleNewProjectMessage } from './newProject.js';
 import { evaluatePolicy, type PolicyAction, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
@@ -370,7 +374,10 @@ export function handleClientMessage(
 
     case 'saveLayout':
       if (msg.layout) {
-        writeLayoutToFile(msg.layout as Record<string, unknown>);
+        // SAFETY: the layout is opaque to the server; the schema only guarantees an object.
+        const layout = msg.layout as Record<string, unknown>;
+        const base = typeof msg.baseRevision === 'string' ? msg.baseRevision : undefined;
+        send({ ...saveLayoutIfCurrent(layout, base) });
       }
       break;
 
@@ -956,7 +963,9 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // 7. Layout last (see step 3): flushes the webview's buffered existingAgents
   // into characters once seats are rebuilt.
   const savedLayout = readLayoutFromFile();
-  send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+  const layout = savedLayout ?? cache?.defaultLayout ?? null;
+  // The default carries a revision too: a save from it must not replace a layout saved since.
+  send({ type: 'layoutLoaded', layout, ...(layout ? { revision: layoutRevision(layout) } : {}) });
 
   // 7b. Work state of the server's Project (SA-029): live domainEvent notices only
   // say that something changed since; this snapshot is the state itself.

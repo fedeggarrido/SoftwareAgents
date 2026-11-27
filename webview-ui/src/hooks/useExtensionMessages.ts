@@ -40,6 +40,7 @@ import {
 } from '../office/ideasStore.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
+import { isOverwrittenLayout } from '../office/layoutSync.js';
 import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { setCharacterTemplates } from '../office/sprites/spriteData.js';
@@ -319,9 +320,8 @@ export function useExtensionMessages(
       }
 
       if (msg.type === 'layoutLoaded') {
-        // Skip external layout updates while editor has unsaved changes
-        if (layoutReadyRef.current && isEditDirty?.()) {
-          console.log('[Webview] Skipping external layout update — editor has unsaved changes');
+        // Skip external updates over unsaved edits or a layout already overwritten (SA-162)
+        if (layoutReadyRef.current && (isEditDirty?.() || isOverwrittenLayout(msg.revision))) {
           return;
         }
         const rawLayout = msg.layout as OfficeLayout | null;

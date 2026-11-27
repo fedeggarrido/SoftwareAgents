@@ -15,7 +15,7 @@ import {
   reassignAgentToFile,
   startFileWatching,
 } from '../../server/src/fileWatcher.js';
-import { loadLayout } from '../../server/src/layoutPersistence.js';
+import { layoutRevision, loadLayout } from '../../server/src/layoutPersistence.js';
 import { assignPaletteIfNeeded } from '../../server/src/paletteAssigner.js';
 import { loadProjectConfig } from '../../server/src/projectConfig.js';
 import { CLAUDE_TERMINAL_NAME_PREFIX } from '../../server/src/providers/hook/claude/constants.js';
@@ -610,5 +610,6 @@ export function sendLayout(
     type: 'layoutLoaded',
     layout: result?.layout ?? null,
     wasReset: result?.wasReset ?? false,
+    ...(result ? { revision: layoutRevision(result.layout) } : {}),
   });
 }

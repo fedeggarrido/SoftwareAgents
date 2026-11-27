@@ -45,6 +45,8 @@ export type ServerMessage =
   | AgentTeamInfo
   | AgentContextUsage
   | LayoutLoaded
+  | LayoutSaved
+  | LayoutConflict
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
   | PetSpritesLoaded
@@ -873,6 +875,18 @@ export interface LayoutLoaded {
   type: 'layoutLoaded';
   layout: Record<string, any> | null;
   wasReset?: boolean;
+  revision?: string;
+}
+
+export interface LayoutSaved {
+  type: 'layoutSaved';
+  revision: string;
+}
+
+export interface LayoutConflict {
+  type: 'layoutConflict';
+  layout: Record<string, any>;
+  revision: string;
 }
 
 export interface FurnitureAssetsLoaded {
@@ -1516,6 +1530,7 @@ export interface SeatAssignment {
 export interface SaveLayout {
   type: 'saveLayout';
   layout: Record<string, any>;
+  baseRevision?: string;
 }
 
 export interface SetSoundEnabled {

@@ -314,6 +314,8 @@ export const es = {
     importHelp: 'Carga un diseño de oficina guardado desde un archivo.',
     saveDesign: 'Guardar diseño de la oficina',
     resetDesign: 'Volver al diseño de oficina guardado',
+    layoutConflict:
+      'Otra pestaña o VS Code guardó un diseño de la oficina más reciente. ¿Guardar tu diseño encima? Si no, se cargará el más reciente y se descartarán tus cambios.',
     replaceDesign: '¿Reemplazar el diseño de la oficina? Se perderán los cambios sin guardar.',
     invalidDesign: 'El archivo de diseño de la oficina no es válido.',
     unreadableDesign: 'No se pudo leer el archivo de diseño de la oficina.',

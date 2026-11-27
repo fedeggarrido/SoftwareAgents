@@ -9,7 +9,7 @@ import type { CriticalBlocker } from './criticalBlockers.js';
  */
 
 export type InboxAction =
-  | { kind: 'decision'; decisionId: string }
+  | { kind: 'decision' }
   | { kind: 'task'; taskKey: string }
   | { kind: 'agent'; agentId: number }
   | { kind: 'meeting' }
@@ -63,7 +63,7 @@ export function ownerInbox(sources: InboxSources): InboxEntry[] {
       kindLabel: urgent ? copy.kinds.urgentDecision : copy.kinds.decision,
       title: decision.question,
       detail: decision.blocks?.length ? copy.blocks(decision.blocks.join(', ')) : undefined,
-      action: { kind: 'decision', decisionId: decision.id },
+      action: { kind: 'decision' },
     });
   }
   for (const agent of sources.agentsNeedingApproval ?? [])

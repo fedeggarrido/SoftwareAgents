@@ -11,28 +11,54 @@ import type { InboxEntry } from '../office/ownerInbox.js';
 import { ownerInbox } from '../office/ownerInbox.js';
 import { getAgentRole, getProviderLabel } from '../office/toolUtils.js';
 
-/** The owner's inbox from the live stores; agent approvals are sampled like the agent list. */
+type Approval = { id: number; name: string };
+
+/** Agents waiting for a permission answer; a sub-agent's ask is listed on its parent. */
+function approvalsOf(officeState: OfficeState): Approval[] {
+  const ids = new Set<number>();
+  for (const ch of officeState.getCharacters()) {
+    if (ch.bubbleType !== 'permission') continue;
+    const id = ch.isSubagent ? ch.parentAgentId : ch.id;
+    if (id !== null && id > 0) ids.add(id);
+  }
+  return [...ids]
+    .sort((a, b) => a - b)
+    .map((id) => {
+      const ch = officeState.characters.get(id);
+      const name = ch
+        ? characterDisplayName(ch, getAgentRole(id)?.label, getProviderLabel(id))
+        : String(id);
+      return { id, name };
+    });
+}
+
+/** Samples the office like the agent list, but re-renders only when the asks change. */
+function useApprovals(officeState: OfficeState): Approval[] {
+  const [approvals, setApprovals] = useState<Approval[]>(() => approvalsOf(officeState));
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = approvalsOf(officeState);
+      setApprovals((current) =>
+        JSON.stringify(current) === JSON.stringify(next) ? current : next,
+      );
+    }, AGENT_LIST_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [officeState]);
+  return approvals;
+}
+
+/** The owner's inbox from the live stores. */
 export function useOwnerInbox(officeState: OfficeState): InboxEntry[] {
   const board = useBoard();
   const executors = useExecutorStore().state;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick((n) => n + 1), AGENT_LIST_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, []);
+  const approvals = useApprovals(officeState);
   const meeting = board?.meeting;
   const meetingView = meeting ? meetingPresentation(meeting, board?.decisions) : null;
   return ownerInbox({
     decisions: board?.decisions,
     items: board?.items,
     blockers: criticalBlockers(executors),
-    agentsNeedingApproval: officeState
-      .getCharacters()
-      .filter((ch) => ch.id > 0 && ch.bubbleType === 'permission')
-      .map((ch) => ({
-        id: ch.id,
-        name: characterDisplayName(ch, getAgentRole(ch.id)?.label, getProviderLabel(ch.id)),
-      })),
+    agentsNeedingApproval: approvals,
     // A meeting waiting on a decision is already listed through that decision.
     meetingNeedsOwner:
       meeting && meetingView?.needsOwner && !meetingView.decision ? { topic: meeting.topic } : null,

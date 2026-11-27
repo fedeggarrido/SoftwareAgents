@@ -75,7 +75,6 @@ export function BottomToolbar({
   }, []);
   const prs = pullRequestDockSummary(board?.items ?? [], prNow);
   const { urgent } = decisionsHudView(board ?? {});
-  const pending = inboxCount;
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < DOCK_MOBILE_BREAKPOINT_PX,
   );
@@ -203,7 +202,7 @@ export function BottomToolbar({
       aria-label={entry.label}
       aria-pressed={activePanel === entry.id}
       aria-controls="office-panel-content"
-      aria-describedby={entry.id === 'inbox' && pending > 0 ? 'dock-inbox-pending' : undefined}
+      aria-describedby={entry.id === 'inbox' && inboxCount > 0 ? 'dock-inbox-pending' : undefined}
       title={
         entry.id === 'backlog' && prs
           ? `${entry.title}\n${es.pullRequest.dockStatus(prs.label, prs.title)}`
@@ -213,15 +212,15 @@ export function BottomToolbar({
     >
       <span className="dock-symbol">
         <DockIcon name={entry.id} />
-        {entry.id === 'inbox' && pending > 0 && (
+        {entry.id === 'inbox' && inboxCount > 0 && (
           <span
             id="dock-inbox-pending"
             className="dock-badge"
             role="status"
-            aria-label={`${es.inbox.count(pending)}${urgent ? `, ${urgent} ${urgent === 1 ? 'decisión urgente' : 'decisiones urgentes'}` : ''}`}
+            aria-label={`${es.inbox.count(inboxCount)}${urgent ? `, ${es.inbox.urgentCount(urgent)}` : ''}`}
           >
             <DockIcon name="attention" />
-            {pending}
+            {inboxCount}
           </span>
         )}
       </span>

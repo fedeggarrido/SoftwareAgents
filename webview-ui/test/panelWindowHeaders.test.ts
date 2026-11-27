@@ -82,6 +82,7 @@ it.each(PANEL_TABS)(
       onNavigate: vi.fn(),
       entries: [],
       onAct: vi.fn(),
+      onOpenDecisions: vi.fn(),
       officeState: { characters: new Map() },
     });
     const content = renderToStaticMarkup(child);

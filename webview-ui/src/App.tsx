@@ -139,15 +139,26 @@ function App() {
   const [isDockMenuOpen, setIsDockMenuOpen] = useState(false);
   const [focusedTask, setFocusedTask] = useState<string | null>(null);
   const inbox = useOwnerInbox(getOfficeState());
+  const focusAgent = (id: number) => {
+    const os = getOfficeState();
+    os.selectedAgentId = id;
+    os.cameraFollowId = id;
+  };
   const actOnInbox = (action: InboxAction) => {
-    if (action.kind === 'decision') panel.select('decisions');
-    else if (action.kind === 'meeting') panel.select('meeting');
-    else if (action.kind === 'task') {
-      setFocusedTask(action.taskKey);
-      panel.select('backlog');
-    } else if (action.kind === 'agent') {
-      getOfficeState().selectedAgentId = action.agentId;
-      if (panel.mobile) panel.close();
+    switch (action.kind) {
+      case 'decision':
+        return panel.select('decisions');
+      case 'meeting':
+        return panel.select('meeting');
+      case 'task':
+        setFocusedTask(action.taskKey);
+        return panel.select('backlog');
+      case 'agent':
+        focusAgent(action.agentId);
+        if (panel.mobile) panel.close();
+        return;
+      case 'none':
+        return;
     }
   };
   useEffect(() => {
@@ -675,14 +686,14 @@ function App() {
             focusedTask={focusedTask}
             workflowStage={workflowStage}
             onClearWorkflowStage={() => setWorkflowStage(null)}
-            onFocusAgent={(id) => {
-              const os = getOfficeState();
-              os.selectedAgentId = id;
-              os.cameraFollowId = id;
-            }}
+            onFocusAgent={focusAgent}
           />
           {panel.isOpen && panel.tab === 'inbox' && (
-            <InboxPanel entries={inbox} onAct={actOnInbox} />
+            <InboxPanel
+              entries={inbox}
+              onAct={actOnInbox}
+              onOpenDecisions={() => panel.select('decisions')}
+            />
           )}
           <DecisionsPanel
             hosted

@@ -101,6 +101,12 @@ function activePanel(page: Page, name: string) {
 
 /** Panels open from the dock (or its «Más» sheet on mobile); meetings from the HUD. */
 async function openPanel(page: Page, name: string) {
+  if (name === 'Decisiones') {
+    // Decisions live behind the owner inbox (SA-132).
+    await openPanel(page, 'Te necesita');
+    await page.getByRole('button', { name: 'Ver todas las decisiones', exact: true }).click();
+    return;
+  }
   if (name === 'Reuniones') {
     await page
       .getByTestId('company-hud')
@@ -503,7 +509,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
         expect(await dock.getByRole('button').allTextContents()).toEqual([
           'Idea',
           'Trabajo pendiente',
-          'Decisiones',
+          'Te necesita',
           'Más',
         ]);
         const more = dock.getByRole('button', { name: 'Más', exact: true });
@@ -582,7 +588,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       } else {
         expect(
           await dock.getByRole('group', { name: 'Paneles' }).getByRole('button').allTextContents(),
-        ).toEqual(['Trabajo pendiente', 'Decisiones', 'Proyecto', 'Funcionalidades', 'Auditoría']);
+        ).toEqual(['Trabajo pendiente', 'Te necesita', 'Proyecto', 'Funcionalidades', 'Auditoría']);
         for (const button of await dock.getByRole('button').all()) {
           expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         }
@@ -676,13 +682,13 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
           "getComputedStyle(document.querySelector('.ui-counter')).fontVariantNumeric",
         ),
       ).toContain('slashed-zero');
-      for (const name of ['Auditoría', 'Funcionalidades', 'Decisiones', 'Trabajo pendiente']) {
+      for (const name of ['Auditoría', 'Funcionalidades', 'Te necesita', 'Trabajo pendiente']) {
         await openPanel(page, name);
         expect(await windowPanel.count()).toBe(1);
         expect(await activePanel(page, name).count()).toBe(1);
         const labels: Record<string, string> = {
           'Trabajo pendiente': 'Trabajo pendiente',
-          Decisiones: 'Decisiones',
+          'Te necesita': 'Te necesita',
           Funcionalidades: 'Funcionalidades',
           Auditoría: 'Auditoría',
         };
@@ -803,7 +809,7 @@ it('uses one movable office window at 390/1024/1440px, with modal-first Escape a
       expect(await decisionHud.textContent()).toContain('Decisiones');
       expect(await decisionHud.locator('.ui-counter').textContent()).toBe('· 2');
       await activePanel(page, 'Decisiones').waitFor();
-      const badge = dock.getByRole('status', { name: '2 decisiones pendientes' });
+      const badge = dock.getByRole('status', { name: '2 asuntos esperan tu respuesta' });
       expect(await badge.textContent()).toBe('2');
       expect(await badge.locator('svg').count()).toBe(1);
       if (width !== 390) {

@@ -5,10 +5,12 @@ import { Button } from './ui/Button.js';
 interface InboxPanelProps {
   entries: readonly InboxEntry[];
   onAct: (action: InboxAction) => void;
+  /** Answered decisions and their history stay one click away. */
+  onOpenDecisions: () => void;
 }
 
 /** SA-132: one place for everything that waits for the owner, most urgent first. */
-export function InboxPanel({ entries, onAct }: InboxPanelProps) {
+export function InboxPanel({ entries, onAct, onOpenDecisions }: InboxPanelProps) {
   const copy = es.inbox;
   return (
     <section
@@ -38,6 +40,9 @@ export function InboxPanel({ entries, onAct }: InboxPanelProps) {
           ))}
         </ol>
       )}
+      <Button size="sm" variant="ghost" onClick={onOpenDecisions}>
+        {copy.allDecisions}
+      </Button>
     </section>
   );
 }

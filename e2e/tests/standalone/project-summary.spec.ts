@@ -99,9 +99,7 @@ test.describe('Standalone / project summary', () => {
     await expect(panel.locator('input,textarea,select')).toHaveCount(0);
     expect(fs.readFileSync(file)).toEqual(before);
     await panel.getByRole('button', { name: 'Ver decisiones', exact: true }).click();
-    await expect(
-      page.locator('.bottom-toolbar').getByRole('button', { name: 'Decisiones', exact: true }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('decisions-panel')).toBeVisible();
   });
 
   test('denies unprivileged access without project details @area:standalone', async ({
@@ -391,7 +389,7 @@ for (const width of [375, 390]) {
     await page.setViewportSize({ width: width + 1, height: 812 });
     await expect(reduce).toBeEnabled();
     const dock = page.getByRole('navigation', { name: 'Controles de la oficina' });
-    for (const name of ['Proyecto', 'Trabajo pendiente', 'Decisiones']) {
+    for (const name of ['Proyecto', 'Trabajo pendiente', 'Te necesita']) {
       if (name === 'Proyecto')
         await dock.getByRole('button', { name: 'M\u00e1s', exact: true }).click();
       const button = dock.getByRole('button', { name, exact: true });

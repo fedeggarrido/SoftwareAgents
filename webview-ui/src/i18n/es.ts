@@ -7,7 +7,7 @@ export const es = {
     hint: 'Todo lo que espera tu respuesta, lo más urgente primero',
     empty: 'Nada espera tu respuesta.',
     covers:
-      'Aquí aparecen decisiones, aprobaciones de agentes, tareas que esperan tu revisión, bloqueos y reuniones que te necesitan.',
+      'Aquí aparecen decisiones, aprobaciones de agentes, tareas que esperan tu revisión, bloqueos y reuniones que te necesitan. Los planes de funcionalidades se revisan en Funcionalidades.',
     kinds: {
       blocker: 'Bloqueo',
       urgentDecision: 'Decisión urgente',
@@ -25,6 +25,9 @@ export const es = {
       meeting: 'Ver reunión',
     },
     blocks: (tasks: string) => `Bloquea: ${tasks}`,
+    allDecisions: 'Ver todas las decisiones',
+    urgentCount: (count: number) =>
+      `${count} ${count === 1 ? 'decisión urgente' : 'decisiones urgentes'}`,
     approvalTitle: (name: string) => `${name} pide permiso para continuar`,
     approvalDetail: 'Respóndelo en la terminal de su sesión.',
     count: (count: number) =>

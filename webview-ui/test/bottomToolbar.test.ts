@@ -20,6 +20,7 @@ const props = {
   isEditMode: false,
   isSettingsOpen: false,
   activePanel: null,
+  inboxCount: 0,
   onTogglePanel: vi.fn(),
   onNewIdea: vi.fn(),
   onToggleSettings: vi.fn(),
@@ -70,7 +71,7 @@ it('groups primary, panel segments and secondary controls in keyboard order', as
   expect([...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1])).toEqual([
     'Nueva idea',
     'Trabajo pendiente',
-    'Decisiones',
+    'Te necesita',
     'Proyecto',
     'Funcionalidades',
     'Auditoría',
@@ -95,7 +96,7 @@ it('retains the VS Code launcher as a secondary icon without adding an accent ac
     );
     expect(
       [...editing.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]),
-    ).toEqual(['Decisiones', 'Salir de la edición', 'Abrir agente', 'Ajustes']);
+    ).toEqual(['Te necesita', 'Salir de la edición', 'Abrir agente', 'Ajustes']);
     expect(editing).not.toContain('aria-label="Más"');
     expect(editing).toContain('<h2>Edición de la oficina</h2>');
     expect(editing).toContain('aria-describedby="editing-help"');
@@ -104,7 +105,7 @@ it('retains the VS Code launcher as a secondary icon without adding an accent ac
   }
 });
 
-it.each(['backlog', 'decisions', 'summary', 'features', 'audit', 'meeting', null])(
+it.each(['backlog', 'inbox', 'decisions', 'summary', 'features', 'audit', 'meeting', null])(
   'derives the pressed segment from the shared window tab %s',
   async (activePanel) => {
     const { BottomToolbar } = await import(toolbarPath);
@@ -114,7 +115,7 @@ it.each(['backlog', 'decisions', 'summary', 'features', 'audit', 'meeting', null
     ].map((match) => match[1]);
     const labels: Record<string, string> = {
       backlog: 'Trabajo pendiente',
-      decisions: 'Decisiones',
+      inbox: 'Te necesita',
       summary: 'Proyecto',
       features: 'Funcionalidades',
       audit: 'Auditoría',
@@ -123,20 +124,13 @@ it.each(['backlog', 'decisions', 'summary', 'features', 'audit', 'meeting', null
   },
 );
 
-it('counts only open decisions and exposes the icon and number as a description', async () => {
+it('shows the inbox count as an icon and number with a description', async () => {
   const { BottomToolbar } = await import(toolbarPath);
   const empty = renderToStaticMarkup(createElement(BottomToolbar, props));
   expect(empty).not.toContain('class="dock-badge"');
-  setBoardState({
-    ...board,
-    decisions: [
-      { id: 'd1', status: 'open', question: '¿Continuar?', options: [] },
-      { id: 'd2', status: 'answered', question: '¿Listo?', options: [] },
-    ],
-  });
-  const html = renderToStaticMarkup(createElement(BottomToolbar, props));
-  expect(html).toContain('aria-describedby="dock-decisions-pending"');
-  expect(html).toContain('aria-label="1 decisión pendiente"');
+  const html = renderToStaticMarkup(createElement(BottomToolbar, { ...props, inboxCount: 1 }));
+  expect(html).toContain('aria-describedby="dock-inbox-pending"');
+  expect(html).toContain('aria-label="1 asunto espera tu respuesta"');
   expect(html).toMatch(/class="dock-badge"[^>]*>.*<svg.*<\/svg>1<\/span>/);
 });
 
@@ -160,7 +154,7 @@ it('collapses editing mode to exit and settings at desktop and mobile widths', a
     const html = renderToStaticMarkup(createElement(BottomToolbar, { ...props, isEditMode: true }));
     expect(
       [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]),
-    ).toEqual(['Decisiones', 'Salir de la edición', 'Ajustes']);
+    ).toEqual(['Te necesita', 'Salir de la edición', 'Ajustes']);
   }
 });
 

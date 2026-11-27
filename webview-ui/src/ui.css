@@ -958,6 +958,8 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
 .inbox-kind {
   font-size: var(--reading-size);
   font-weight: 700;
+  color: var(--color-text-muted);
+}
 
 /* Office at a glance (SA-131): who needs you stands out by shape and text, idle recedes. */
 .agent-label[data-activity='needs_you'] .character-hover-label {

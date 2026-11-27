@@ -28,7 +28,7 @@ const VIEWPORTS = {
 } as const;
 type ViewportName = keyof typeof VIEWPORTS;
 // The dock is the only panel navigation (no duplicate tabs inside the window).
-const WINDOW_PANELS = ['Decisiones', 'Auditoría', 'Funcionalidades'];
+const WINDOW_PANELS = ['Te necesita', 'Auditoría', 'Funcionalidades'];
 const CONNECTION_TIMEOUT_MS = 15_000;
 
 async function dockButton(page: Page, viewport: ViewportName, name: string) {

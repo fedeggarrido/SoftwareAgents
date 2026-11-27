@@ -269,6 +269,8 @@ export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32;
+/** Gap kept between an agent label and the office edge when the agent stands near it. */
+export const TOOL_OVERLAY_EDGE_MARGIN_PX = 8;
 
 // ── Greeter + Intro bubble ──────────────────────────────────
 /** Reserved character id for the Intro's greeter. Far outside both real agent

@@ -109,6 +109,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The activity gives way first: who the agent is must stay readable. */
+.character-hover-label > .agent-name,
+.character-hover-label > .external-session-chip {
+  flex-shrink: 0;
+}
 .external-session-chip {
   color: var(--color-text-muted);
   border: var(--border-thin) solid currentColor;

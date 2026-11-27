@@ -17,7 +17,7 @@ import {
 } from './integrationConstants.js';
 import { type Learning, type LearningScope, selectLearnings } from './learnings.js';
 import { HEXAGONAL_TEMPLATE } from './projectArchitectureConstants.js';
-import { testingBlocks,type TestProfile } from './projectTestProfile.js';
+import { testingBlocks, type TestProfile } from './projectTestProfile.js';
 import { qualityBlocks } from './qualityRules.js';
 import { TECH_LEAD_PROMPT } from './techLead.js';
 

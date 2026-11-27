@@ -1004,3 +1004,7 @@ body:has(.dock-urgent-notice) [role='dialog'][aria-modal='true']:not(.dock-sheet
   font-size: var(--reading-size);
   line-height: 1.4;
 }
+.panel-window-title button {
+  min-width: var(--control-target);
+  min-height: var(--control-target);
+}

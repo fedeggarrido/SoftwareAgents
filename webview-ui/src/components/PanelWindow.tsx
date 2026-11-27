@@ -39,7 +39,9 @@ export function PanelWindow({
   children,
 }: PanelWindowProps) {
   const label = PANEL_TABS.find((entry) => entry.id === tab)?.label;
-  const [help, setHelp] = useState(false);
+  // Help is per tab: opening another panel never shows help nobody asked for.
+  const [helpTab, setHelpTab] = useState<PanelTab | null>(null);
+  const help = helpTab === tab;
   const { state, lastContactAt } = useConnectionStatus();
   const stale = state !== undefined && state !== 'connected' && !!lastContactAt;
   const titleRef = useRef<HTMLDivElement>(null);
@@ -149,7 +151,7 @@ export function PanelWindow({
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => setHelp(!help)}
+          onClick={() => setHelpTab(help ? null : tab)}
           aria-expanded={help}
           aria-controls="office-panel-help"
           aria-label={help ? es.panelHelp.hide : es.panelHelp.show}
@@ -170,11 +172,9 @@ export function PanelWindow({
           ✕
         </Button>
       </div>
-      {help && (
-        <p id="office-panel-help" className="panel-window-help">
-          {es.panelHelp[tab]}
-        </p>
-      )}
+      <p id="office-panel-help" className="panel-window-help" hidden={!help}>
+        {es.panelHelp.tabs[tab]}
+      </p>
       <div id="office-panel-content" data-panel={tab} className="panel-window-content" tabIndex={0}>
         {children}
       </div>

@@ -50,5 +50,7 @@ test.describe('Standalone / first visit guide', () => {
     const window = page.getByTestId('panel-window');
     await window.getByRole('button', { name: 'Mostrar ayuda de este panel' }).click();
     await expect(window.locator('#office-panel-help')).toContainText('registro de todo lo hecho');
+    await openDockAction(page, 'Proyecto');
+    await expect(window.locator('#office-panel-help')).toBeHidden();
   });
 });

@@ -194,7 +194,7 @@ export const es = {
       {
         title: 'De la idea a los requisitos',
         description:
-          'En Nueva idea, cuenta qué necesitas y para quién. Los agentes te hacen preguntas para concretar los requisitos; las respondes en Te necesita.',
+          'En Nueva idea, cuenta qué necesitas y para quién, y responde la entrevista para concretar los requisitos. Si después surge una duda, llega como decisión a Te necesita.',
       },
       {
         title: 'Plan y aprobación',
@@ -259,19 +259,21 @@ export const es = {
     ],
   },
   panelHelp: {
-    inbox:
-      'Lo que espera tu respuesta: decisiones, aprobaciones, revisiones y bloqueos. Si está vacío, nadie te necesita ahora.',
-    summary:
-      'El proyecto en el que trabaja la oficina: su objetivo, el progreso y lo próximo que toca.',
-    backlog:
-      'Todas las tareas agrupadas por estado. Abre una para ver de qué va, qué se decidió y pedir un cambio.',
-    decisions:
-      'Las preguntas planteadas por los agentes, abiertas y ya resueltas, con su respuesta.',
-    audit:
-      'El registro de todo lo hecho por personas y agentes. Sirve para comprobar qué pasó y quién lo hizo; no se puede editar.',
-    features:
-      'Las ideas y funcionalidades del proyecto, con su plan. Aquí revisas y apruebas los planes.',
-    meeting: 'Las reuniones entre agentes y lo que concluyeron.',
+    tabs: {
+      inbox:
+        'Lo que espera tu respuesta: decisiones, aprobaciones, revisiones y bloqueos. Si está vacío, nadie te necesita ahora.',
+      summary:
+        'El proyecto en el que trabaja la oficina: su objetivo, el progreso y lo próximo que toca.',
+      backlog:
+        'Todas las tareas agrupadas por estado. Abre una para ver de qué va, qué se decidió y pedir un cambio.',
+      decisions:
+        'Las preguntas planteadas por los agentes, abiertas y ya resueltas, con su respuesta.',
+      audit:
+        'El registro de todo lo hecho por personas y agentes. Sirve para comprobar qué pasó y quién lo hizo; no se puede editar.',
+      features:
+        'Las ideas y funcionalidades del proyecto, con su plan. Aquí revisas y apruebas los planes.',
+      meeting: 'Las reuniones entre agentes y lo que concluyeron.',
+    },
     show: 'Mostrar ayuda de este panel',
     hide: 'Ocultar ayuda de este panel',
   },

@@ -61,7 +61,7 @@ export function ProjectGuide({
         </div>
       )}
       <footer>
-        <Button variant="ghost" aria-pressed={glossary} onClick={() => setGlossary(!glossary)}>
+        <Button variant="ghost" onClick={() => setGlossary(!glossary)}>
           {glossary ? es.projectGuide.backToGuide : es.projectGuide.glossary}
         </Button>
         {!glossary && step > 0 && (

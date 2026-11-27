@@ -126,6 +126,7 @@ import {
 import { resolveInside } from './pathGuard.js';
 import { evaluatePolicy, type PolicyDecision } from './policy.js';
 import { loadProjectConfig } from './projectConfig.js';
+import { detectTestProfile } from './projectTestProfile.js';
 import {
   qaBrief,
   qaCommands,
@@ -596,6 +597,7 @@ async function runWorkerExecution(
       taskType: (options.developer?.task ?? options.reviewer?.task)?.type ?? '',
     },
     documentationOnly: options.developer?.task.type === 'doc',
+    testProfile: detectTestProfile(config.repoRoot),
     task: { key: args.task, brief, verifierFailures: [] as VerifierFailure[] },
     brainContents: {} as Record<string, string>,
     repository: {

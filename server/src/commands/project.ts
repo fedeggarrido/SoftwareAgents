@@ -12,9 +12,10 @@ import {
   projectPreparationError,
 } from '../projectPreparation.js';
 import { runProjectScaffold } from './projectScaffold.js';
+import { runProjectTests } from './projectTests.js';
 
 export const PROJECT_INIT_HELP =
-  'pixel-agents project init [--name <name>] [--yes] | project scaffold FEAT-### [--confirm]';
+  'pixel-agents project init [--name <name>] [--yes] | project scaffold FEAT-### [--confirm] | project tests';
 
 async function confirmCreation(): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
@@ -36,6 +37,7 @@ export async function runProjectCommand(argv: string[]): Promise<void> {
     return;
   }
   if (argv[0] === 'scaffold') return runProjectScaffold(argv);
+  if (argv[0] === 'tests') return runProjectTests(argv);
   if (argv[0] !== 'init') throw new CliUsageError(PROJECT_INIT_HELP);
   let name: string | undefined;
   let yes = false;

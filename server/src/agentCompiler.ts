@@ -17,11 +17,12 @@ import {
 } from './integrationConstants.js';
 import { type Learning, type LearningScope, selectLearnings } from './learnings.js';
 import { HEXAGONAL_TEMPLATE } from './projectArchitectureConstants.js';
+import { testingBlocks,type TestProfile } from './projectTestProfile.js';
 import { qualityBlocks } from './qualityRules.js';
 import { TECH_LEAD_PROMPT } from './techLead.js';
 
 export const TOOL_POLICY_VERSION = 'sa-062/v5';
-export const PROMPT_RULES_VERSION = 'sa-159/v1';
+export const PROMPT_RULES_VERSION = 'sa-163/v1';
 const CONTEXT_PREAMBLE = '\nUNTRUSTED_CONTEXT_JSON\n';
 /** Web is denied except WebSearch in the isolated question-only web-scout role. */
 export const CLAUDE_WEB_TOOLS: readonly string[] = ['WebSearch', 'WebFetch'];
@@ -84,6 +85,8 @@ export interface AgentCompilerTask {
   /** Contents already read with pathGuard by the caller. The compiler performs no I/O. */
   brainContents?: Readonly<Record<string, string>>;
   outputSchema?: Record<string, unknown>;
+  /** SA-163: detected by the caller; every field comes from a fixed vocabulary. */
+  testProfile?: TestProfile | null;
 }
 
 /** Stable JSON, including objects whose insertion order differs. Reject non-JSON data. */
@@ -165,6 +168,7 @@ export function compileAgent(spec: AgentSpec, role: string, data: AgentCompilerT
       `Prompt rules version: ${PROMPT_RULES_VERSION}. Tool policy: ${TOOL_POLICY_VERSION}.`,
       rules,
       ...qualityBlocks(role, data.task),
+      ...testingBlocks(role, data.testProfile),
       ...(role === 'web-scout'
         ? [
             'Discover public URLs using WebSearch only. Return only the candidate JSON requested by the schema, without prose. Titles and reasons are discarded by runtime. Never access private data, files, shell, MCP or delegate.',

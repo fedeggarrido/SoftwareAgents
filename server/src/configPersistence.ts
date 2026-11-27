@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import type { ProjectOperatorConfig } from '../../core/src/project.js';
+import { CLICKUP_MIRROR_STATES, type ProjectOperatorConfig } from '../../core/src/project.js';
 import { claudeConfigEnvironment } from './claudeConfig.js';
 import {
   CONFIG_FILE_MODE,
@@ -179,6 +179,22 @@ const validateProjectOperator = compileSchema<ProjectOperatorConfig>({
       ),
     },
     protectedPaths: { type: 'array', items: nonEmptyString, uniqueItems: true },
+    clickupMirror: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['enabled', 'statuses'],
+      properties: {
+        enabled: { type: 'boolean' },
+        statuses: {
+          type: 'object',
+          additionalProperties: false,
+          required: [...CLICKUP_MIRROR_STATES],
+          properties: Object.fromEntries(
+            CLICKUP_MIRROR_STATES.map((state) => [state, nonEmptyString]),
+          ),
+        },
+      },
+    },
     research: {
       type: 'object',
       additionalProperties: false,

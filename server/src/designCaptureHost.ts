@@ -15,7 +15,7 @@ import { contrastRatio } from './designer.js';
 const VIEW_LABELS = {
   features: 'Funcionalidades',
   audit: 'Auditoría',
-  backlog: 'Trabajo',
+  backlog: 'Trabajo pendiente',
 };
 const VIEWPORTS = [
   { width: 1440, height: 1000 },
@@ -229,7 +229,8 @@ export async function captureInHost(
                     fixture === 'error' ? /No se|Error|error|consulta/ : /^Sin funcionalidades/i,
                   )
                   .first()
-                  .waitFor({ timeout: CAPTURE_WAIT_MS });
+                  // The empty state's command help may be folded; it only has to be rendered.
+                  .waitFor({ state: 'attached', timeout: CAPTURE_WAIT_MS });
               if (view === 'audit')
                 await panel
                   .getByText(
@@ -249,7 +250,8 @@ export async function captureInHost(
               result: 'pass',
               evidence: `${id}.png (demo fixture: ${fixture})`,
             });
-            const toolbarButton = page.getByRole('button', {
+            // The dock's action, not the welcome card's button with the same name.
+            const toolbarButton = page.locator('.bottom-toolbar').getByRole('button', {
               name: 'Nueva idea',
               exact: true,
             });

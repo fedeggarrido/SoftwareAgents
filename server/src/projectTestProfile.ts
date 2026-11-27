@@ -26,12 +26,13 @@ const LAYERS: Record<ProjectKind, readonly TestLayer[]> = {
   library: ['unit'],
 };
 
-const WEB_DEPENDENCIES = ['react', 'vue', 'svelte', 'solid-js', 'preact', 'vite', 'next', 'astro'];
+const WEB_DEPENDENCIES = ['react', 'vue', 'svelte', 'solid-js', 'preact', 'next', 'astro'];
 const API_DEPENDENCIES = ['express', 'fastify', 'koa', 'hono', '@nestjs/core'];
 const PYTHON_WEB = /\b(django|flask|fastapi)\b/i;
 
 interface PackageJson {
   bin?: unknown;
+  workspaces?: unknown;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 }
@@ -44,17 +45,45 @@ function readText(root: string, file: string): string | null {
   }
 }
 
+/** Workspace member manifests (`dir` or `dir/*` patterns), so a monorepo root reuses their runners. */
+function workspaceMembers(pkg: PackageJson, root: string): PackageJson[] {
+  const patterns = Array.isArray(pkg.workspaces)
+    ? pkg.workspaces.filter((pattern): pattern is string => typeof pattern === 'string')
+    : [];
+  const dirs = patterns.flatMap((pattern) => {
+    if (!pattern.endsWith('/*')) return [pattern];
+    const parent = pattern.slice(0, -2);
+    try {
+      return fs.readdirSync(path.join(root, parent)).map((name) => `${parent}/${name}`);
+    } catch {
+      return [];
+    }
+  });
+  return dirs.flatMap((dir) => {
+    const text = readText(root, `${dir}/package.json`);
+    if (text === null) return [];
+    try {
+      // SAFETY: only optional, separately checked fields are read from the manifest.
+      return [JSON.parse(text) as PackageJson];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function nodeProfile(pkg: PackageJson, root: string): TestProfile {
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const members = [pkg, ...workspaceMembers(pkg, root)];
+  const deps = Object.assign({}, ...members.flatMap((m) => [m.dependencies, m.devDependencies]));
   const has = (name: string) => Object.hasOwn(deps, name);
-  const kind: ProjectKind =
-    WEB_DEPENDENCIES.some(has) || fs.existsSync(path.join(root, 'index.html'))
+  const browserPage = has('vite') && fs.existsSync(path.join(root, 'index.html'));
+  // A declared binary wins: a terminal UI built with React (Ink) is still a CLI.
+  const kind: ProjectKind = members.some((m) => m.bin !== undefined)
+    ? 'cli'
+    : WEB_DEPENDENCIES.some(has) || browserPage
       ? 'web'
       : API_DEPENDENCIES.some(has)
         ? 'api'
-        : pkg.bin !== undefined
-          ? 'cli'
-          : 'library';
+        : 'library';
   // Reuse what the project already runs; node:test needs nothing new.
   const unit: TestRunner = has('vitest') ? 'vitest' : has('jest') ? 'jest' : 'node-test';
   const e2e: TestRunner | null = kind === 'web' ? 'playwright' : null;
@@ -116,8 +145,15 @@ const LAYER_RULES: Record<TestLayer, string> = {
     'contract: the public interface runs as a black box (CLI arguments, exit codes and output, or HTTP status and response schema)',
 };
 
-/** Prompt block that turns a task's acceptance criteria into the tests this project needs. */
-export function testingRules(profile: TestProfile): string {
+/** Roles that write code or tests; only they receive the project's test layers. */
+const TEST_ROLES: ReadonlySet<string> = new Set(['developer', 'integrations', 'qa-author']);
+
+/** Prompt blocks that turn a task's acceptance criteria into the tests this project needs. */
+export function testingBlocks(role: string, profile: TestProfile | null | undefined): string[] {
+  return profile && TEST_ROLES.has(role) ? [testingRules(profile)] : [];
+}
+
+function testingRules(profile: TestProfile): string {
   const runners = [profile.unit, profile.e2e].filter((runner) => runner !== null).join(', ');
   return [
     `Project tests (SA-163): this is a ${profile.kind} project; use ${runners}.`,

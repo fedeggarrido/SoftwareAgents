@@ -46,6 +46,27 @@ describe('SA-163 project test profile', () => {
     });
   });
 
+  it('a CLI built with React stays a CLI; vite without a page is not a web app', () => {
+    write('package.json', { bin: 'cli.js', dependencies: { react: '1', ink: '1' } });
+    expect(detectTestProfile(root)).toMatchObject({ kind: 'cli', e2e: null, missing: [] });
+    write('package.json', { devDependencies: { vite: '1' } });
+    expect(detectTestProfile(root)?.kind).toBe('library');
+    write('index.html', '<!doctype html>');
+    expect(detectTestProfile(root)?.kind).toBe('web');
+  });
+
+  it('a workspace root reuses the runners its members already have', () => {
+    write('package.json', { workspaces: ['packages/*', 'app'] });
+    fs.mkdirSync(path.join(root, 'packages', 'ui'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'app'));
+    write('packages/ui/package.json', {
+      dependencies: { react: '1' },
+      devDependencies: { vitest: '1' },
+    });
+    write('app/package.json', { devDependencies: { '@playwright/test': '1' } });
+    expect(detectTestProfile(root)).toMatchObject({ kind: 'web', unit: 'vitest', missing: [] });
+  });
+
   it('recognises an API and a plain library', () => {
     write('package.json', { dependencies: { fastify: '1' } });
     expect(detectTestProfile(root)?.kind).toBe('api');
@@ -89,8 +110,8 @@ describe('SA-163 project test profile', () => {
       expect(log.mock.calls.map(([line]) => line)).toEqual([
         'Proyecto: aplicación web.',
         'Tests que se exigen por cada criterio: unitarios, e2e en navegador real con capturas, barrido de diseño y accesibilidad.',
-        'Herramientas: node-test, playwright.',
-        'Falta instalar, con tu aprobación: @playwright/test. Los agentes no la instalan.',
+        'Herramientas: el ejecutor de tests incluido en Node.js, Playwright.',
+        'Falta instalar, con tu aprobación: @playwright/test. Los agentes no instalan dependencias.',
       ]);
     } finally {
       log.mockRestore();

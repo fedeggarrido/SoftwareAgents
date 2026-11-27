@@ -43,7 +43,11 @@ para lecturas puntuales.
   (Vitest/Jest/node:test, Playwright, pytest, cargo, go). `agentCompiler.ts` añade a
   developer, integrations y qa-author las capas exigidas por criterio (unitarios;
   e2e con navegador y capturas y barrido de diseño en web; contrato en API/CLI).
-  Las dependencias de test que faltan se informan, nunca se instalan.
+  Un `bin` declarado gana a React (CLIs con Ink); en monorepos se leen los
+  `workspaces`. El barrido de diseño aplica a cada proyecto las mismas reglas que
+  esta app (14 px, 44 px, contraste, nombres accesibles): es una decisión de producto.
+  Las dependencias de test que faltan se informan, nunca se instalan; se detectan
+  en la rama principal del proyecto, así que siguen «faltando» hasta integrarse.
   `pixel-agents project tests` muestra el perfil. El resultado de las pruebas ya se
   ve en la oficina mediante el estado de CI de cada propuesta.
 - Integraciones externas (SA-159) añade `agents/templates/integrations.yaml` con el

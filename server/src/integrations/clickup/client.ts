@@ -4,6 +4,8 @@ import * as path from 'path';
 
 import {
   CLICKUP_API_BASE,
+  CLICKUP_COMMENT_PAGE_SIZE,
+  CLICKUP_COMMENT_PAGES_MAX,
   CLICKUP_RATE_LIMIT_MAX_WAIT_MS,
   CLICKUP_RATE_LIMIT_RETRIES,
   CLICKUP_SECRETS_FILE,
@@ -57,7 +59,13 @@ export function clickUpToken(
   }
   if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
     throw new Error(`${file} debe ser legible solo por su propietario (chmod 600)`);
-  const secrets: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let secrets: unknown;
+  try {
+    secrets = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    // JSON.parse quotes the text around the error: that could be the token itself.
+    throw new Error(`${file} no es JSON válido`);
+  }
   const token =
     typeof secrets === 'object' && secrets !== null && 'clickupToken' in secrets
       ? secrets.clickupToken
@@ -136,22 +144,36 @@ export function createClickUpClient({
       await request('PUT', `/task/${encodeURIComponent(taskId)}`, { status });
     },
     async comments(taskId) {
-      const result = await request('GET', `/task/${encodeURIComponent(taskId)}/comment`);
-      const raw =
-        typeof result === 'object' &&
-        result &&
-        'comments' in result &&
-        Array.isArray(result.comments)
-          ? result.comments
-          : [];
-      return raw.flatMap((item: unknown) =>
-        typeof item === 'object' &&
-        item !== null &&
-        'comment_text' in item &&
-        typeof item.comment_text === 'string'
-          ? [item.comment_text]
-          : [],
-      );
+      // ClickUp returns the newest page; older pages continue from the oldest comment seen.
+      const texts: string[] = [];
+      let cursor = '';
+      for (let page = 0; page < CLICKUP_COMMENT_PAGES_MAX; page++) {
+        const result = await request('GET', `/task/${encodeURIComponent(taskId)}/comment${cursor}`);
+        const raw =
+          typeof result === 'object' &&
+          result &&
+          'comments' in result &&
+          Array.isArray(result.comments)
+            ? result.comments
+            : [];
+        let oldest: { id: string; date: string } | null = null;
+        for (const item of raw) {
+          if (typeof item !== 'object' || item === null) continue;
+          if ('comment_text' in item && typeof item.comment_text === 'string')
+            texts.push(item.comment_text);
+          if (
+            'id' in item &&
+            typeof item.id === 'string' &&
+            'date' in item &&
+            typeof item.date === 'string'
+          )
+            oldest = { id: item.id, date: item.date };
+        }
+        if (raw.length < CLICKUP_COMMENT_PAGE_SIZE || !oldest) return texts;
+        cursor = `?start=${encodeURIComponent(oldest.date)}&start_id=${encodeURIComponent(oldest.id)}`;
+      }
+      // Too many pages to be sure the comment is absent: refuse instead of posting a duplicate.
+      throw new Error(`ClickUp task ${taskId}: demasiados comentarios para comprobar duplicados`);
     },
     async comment(taskId, text) {
       await request('POST', `/task/${encodeURIComponent(taskId)}/comment`, { comment_text: text });

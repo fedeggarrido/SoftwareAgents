@@ -57,7 +57,7 @@ export async function syncClickUp(root: string, options: SyncOptions): Promise<M
           action: event.action,
           resourceType: 'task',
           resourceId: event.key,
-          policyDecision: null,
+          policyDecision: event.decision,
           riskLevel: 'low',
           outcome: { status: event.status, detail: event.detail },
           taskKey: event.key,
@@ -81,11 +81,14 @@ export function startClickUpMirror(root: string): { dispose(): void } {
     } catch (error) {
       // Not opted in (or no token) is the normal case: stay quiet. ClickUpError carries no token.
       if (!(error instanceof ClickUpMirrorUnavailable))
-        console.error(`[Pixel Agents] ClickUp mirror: ${(error as Error).message}`);
+        console.error(
+          `[Pixel Agents] ClickUp mirror: ${error instanceof Error ? error.message : String(error)}`,
+        );
     } finally {
       running = false;
     }
   };
+  void tick();
   const timer = setInterval(() => void tick(), CLICKUP_SYNC_INTERVAL_MS);
   timer.unref();
   return { dispose: () => clearInterval(timer) };

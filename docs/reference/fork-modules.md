@@ -317,3 +317,9 @@ the repository, logs or audit. Every write passes `clickup_write` (A3 for system
 a denial writes nothing and is audited. `pixel-agents clickup sync [--dry-run]` runs one
 reconciliation by hand. Cancelled tasks have no column and are left alone. Webhooks and OAuth
 remain out of scope.
+
+**Devex callouts:** new optional env var `CLICKUP_TOKEN`; new optional secret file
+`~/.pixel-agents/secrets.json` (the owner-only check is skipped on Windows, where POSIX modes do not
+apply); once a Project opts in, the office makes outbound HTTPS calls to `api.clickup.com` every
+five minutes. A plain `clickup sync` run is the `system` actor, so it needs autonomy A3; from a
+managed Session it is the `agent` actor.

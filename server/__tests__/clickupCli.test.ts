@@ -81,7 +81,7 @@ it('mirrors the bound Project and audits the correction', async () => {
   const lines: string[] = [];
   await runClickUpCommand(['sync'], repo, (line) => lines.push(line), client);
   expect(writes).toEqual(['c1=to do']);
-  expect(lines).toEqual(['T-1: estado corregido (complete → to do)']);
+  expect(lines).toEqual(['T-1: estado complete → to do']);
   const audit = fs.readFileSync(path.join(root, '.pixel-agents/audit/test.jsonl'), 'utf8');
   expect(audit).toContain('"action":"clickup_status"');
   expect(audit).toContain('"status":"drift"');

@@ -168,6 +168,22 @@ describe('SA-053 ClickUp REST client', () => {
     ]);
   });
 
+  it('pages through comments from the oldest one seen', async () => {
+    const page = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `m${from + i}`,
+        date: String(1000 - from - i),
+        comment_text: `c${from + i}`,
+      }));
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(reply({ comments: page(25, 0) }))
+      .mockResolvedValueOnce(reply({ comments: page(2, 25) }));
+    const client = createClickUpClient({ token: TOKEN, fetch });
+    expect(await client.comments('t1')).toHaveLength(27);
+    expect(String(fetch.mock.calls[1][0])).toContain('start=976&start_id=m24');
+  });
+
   it('reads the token from CLICKUP_TOKEN, then from the Operator secrets file', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'clickup-home-'));
     try {
@@ -177,7 +193,15 @@ describe('SA-053 ClickUp REST client', () => {
       const file = path.join(home, '.pixel-agents', 'secrets.json');
       fs.writeFileSync(file, JSON.stringify({ clickupToken: 'file' }), { mode: 0o600 });
       expect(clickUpToken({}, home)).toBe('file');
+      fs.writeFileSync(file, `{"clickupToken": "${TOKEN}"`, { mode: 0o600 });
+      expect(() => clickUpToken({}, home)).toThrow('no es JSON válido');
+      try {
+        clickUpToken({}, home);
+      } catch (error) {
+        expect(String(error)).not.toContain(TOKEN);
+      }
       if (process.platform !== 'win32') {
+        fs.writeFileSync(file, JSON.stringify({ clickupToken: 'file' }));
         fs.chmodSync(file, 0o644);
         expect(() => clickUpToken({}, home)).toThrow('chmod 600');
       }
@@ -196,10 +220,10 @@ describe('SA-053 ClickUp mirror reconciliation', () => {
     expect(await result).toEqual([
       {
         key: 'FEAT-001-T01',
-        result: 'corrected',
+        result: 'mirrored',
         clickupId: 'c1',
-        from: 'complete',
-        to: 'in progress',
+        status: { from: 'complete', to: 'in progress' },
+        prComment: false,
       },
     ]);
     expect(writes).toEqual(['c1=in progress']);
@@ -218,7 +242,11 @@ describe('SA-053 ClickUp mirror reconciliation', () => {
   it('a repeated sync posts the PR comment once', async () => {
     const { client, writes } = fakeClickUp([{ id: 'c1', name: 'T1 · x', status: 'review' }]);
     const tasks = [task('T1', 'REVIEW', 'https://github.com/o/r/pull/7')];
-    expect((await run(client, tasks).result)[0]).toMatchObject({ result: 'pr_commented' });
+    expect((await run(client, tasks).result)[0]).toMatchObject({
+      result: 'mirrored',
+      status: null,
+      prComment: true,
+    });
     expect((await run(client, tasks).result)[0]).toMatchObject({ result: 'in_sync' });
     expect(writes).toEqual(['c1+comment']);
     expect(await client.comments('c1')).toEqual([
@@ -236,16 +264,43 @@ describe('SA-053 ClickUp mirror reconciliation', () => {
     expect(events[0]).toMatchObject({ status: 'denied' });
   });
 
-  it('a dry run only reports, and a disabled mirror does nothing at all', async () => {
+  it('a dry run only reports and records nothing', async () => {
     const { client, writes } = fakeClickUp([{ id: 'c1', name: 'T1 · x', status: 'to do' }]);
-    expect((await run(client, [task('T1', 'QA')], { dryRun: true }).result)[0]).toMatchObject({
-      result: 'would_correct',
+    const { result, events } = run(client, [task('T1', 'QA')], { dryRun: true });
+    expect((await result)[0]).toMatchObject({ result: 'would_mirror' });
+    expect(writes).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('does not ask the policy when nothing is pending', async () => {
+    const { client } = fakeClickUp([{ id: 'c1', name: 'T1 · x', status: 'qa' }]);
+    const { result } = run(client, [task('T1', 'QA')], {
+      authorize: (actor) => evaluatePolicy('clickup_write', actor, 'A1'),
     });
-    const listTasks = vi.spyOn(client, 'listTasks');
-    expect(
-      await run(client, [task('T1', 'QA')], { config: { ...config, enabled: false } }).result,
-    ).toEqual([]);
-    expect(listTasks).not.toHaveBeenCalled();
+    expect((await result)[0]).toMatchObject({ result: 'in_sync' });
+  });
+
+  it('a failed write records the failure and continues with the next task', async () => {
+    const { client, writes } = fakeClickUp([
+      { id: 'c1', name: 'T1 · x', status: 'to do' },
+      { id: 'c2', name: 'T2 · y', status: 'to do' },
+    ]);
+    const setStatus = client.setStatus;
+    client.setStatus = async (id, status) => {
+      if (id === 'c1') throw new ClickUpError(500, 'PUT /task');
+      await setStatus(id, status);
+    };
+    const { result, events } = run(client, [task('T1', 'QA'), task('T2', 'QA')]);
+    expect((await result).map((o) => o.result)).toEqual(['failed', 'mirrored']);
+    expect(writes).toEqual(['c2=qa']);
+    expect(events.some((e) => e.status === 'failed')).toBe(true);
+  });
+
+  it('never binds a sub-task whose key extends the task key', async () => {
+    const { client, writes } = fakeClickUp([{ id: 's', name: 'T1.1 · sub', status: 'to do' }]);
+    expect((await run(client, [task('T1', 'DONE')]).result)[0]).toMatchObject({
+      result: 'unmatched',
+    });
     expect(writes).toEqual([]);
   });
 

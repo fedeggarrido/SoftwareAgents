@@ -526,4 +526,7 @@ export const CLICKUP_RATE_LIMIT_RETRIES = 3;
 /** Upper bound for one rate-limit wait, so a bad reset header cannot stall the mirror. */
 export const CLICKUP_RATE_LIMIT_MAX_WAIT_MS = 60_000;
 export const CLICKUP_SYNC_INTERVAL_MS = 5 * 60_000;
+/** ClickUp pages task comments 25 at a time; the duplicate check reads at most this many pages. */
+export const CLICKUP_COMMENT_PAGE_SIZE = 25;
+export const CLICKUP_COMMENT_PAGES_MAX = 20;
 export const CLICKUP_SECRETS_FILE = 'secrets.json';

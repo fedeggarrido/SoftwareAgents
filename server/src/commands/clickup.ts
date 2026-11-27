@@ -6,20 +6,28 @@ import { ClickUpMirrorUnavailable, syncClickUp } from '../integrations/clickup/s
 
 const USAGE = 'Usage: pixel-agents clickup sync [--dry-run]';
 
-const LINE: Record<MirrorOutcome['result'], string> = {
-  in_sync: 'al día',
-  unmapped: 'sin columna en ClickUp (cancelada)',
-  unmatched: 'sin tarea enlazada en ClickUp',
-  corrected: 'estado corregido',
-  would_correct: 'se corregiría el estado',
-  denied: 'escritura denegada por la política',
-  pr_commented: 'comentario con la PR publicado',
-  would_comment: 'se publicaría el comentario con la PR',
-};
-
 function describe(outcome: MirrorOutcome): string {
-  const change = 'from' in outcome ? ` (${outcome.from} → ${outcome.to})` : '';
-  return `${outcome.key}: ${LINE[outcome.result]}${change}`;
+  switch (outcome.result) {
+    case 'in_sync':
+      return `${outcome.key}: al día`;
+    case 'unmapped':
+      return `${outcome.key}: sin columna en ClickUp (cancelada)`;
+    case 'unmatched':
+      return `${outcome.key}: sin tarea enlazada en ClickUp`;
+    case 'denied':
+      return `${outcome.key}: escritura denegada por la política (${outcome.reason})`;
+    case 'failed':
+      return `${outcome.key}: falló (${outcome.reason})`;
+    case 'mirrored':
+    case 'would_mirror': {
+      const verb = outcome.result === 'mirrored' ? '' : 'se haría: ';
+      const parts = [
+        ...(outcome.status ? [`estado ${outcome.status.from} → ${outcome.status.to}`] : []),
+        ...(outcome.prComment ? ['comentario con la PR'] : []),
+      ];
+      return `${outcome.key}: ${verb}${parts.join(' y ')}`;
+    }
+  }
 }
 
 /** SA-053: reflect the work store in ClickUp. Opt-in per Project in the Operator config. */

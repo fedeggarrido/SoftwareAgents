@@ -24,25 +24,25 @@ const MIRRORED: Record<TaskStatus, ClickUpMirrorState | null> = {
 
 export type MirrorOutcome =
   | { key: string; result: 'in_sync' | 'unmapped' | 'unmatched' }
+  | { key: string; result: 'denied' | 'failed'; clickupId: string; reason: string }
   | {
       key: string;
-      result: 'corrected' | 'would_correct';
+      result: 'mirrored' | 'would_mirror';
       clickupId: string;
-      from: string;
-      to: string;
-    }
-  | { key: string; result: 'denied'; clickupId: string; reason: string }
-  | { key: string; result: 'pr_commented' | 'would_comment'; clickupId: string };
+      /** Present when the status drifted: what ClickUp had and what the work store wants. */
+      status: { from: string; to: string } | null;
+      prComment: boolean;
+    };
 
 export interface MirrorRun {
   tasks: readonly TaskRecord[];
   listIds: readonly string[];
   config: ClickUpMirrorConfig;
   client: ClickUpClient;
-  /** Decides clickup_write once per run (evaluatePolicy with the caller's actor). */
+  /** clickup_write for the caller's actor; asked once, applied only to tasks with pending writes. */
   authorize: (actor: PolicyActor) => PolicyDecision;
   actor: PolicyActor;
-  /** Every write and every drift found, before and after the write. */
+  /** Drift found, writes done, denials and failures; never in a dry run. */
   record: (event: MirrorAuditEvent) => void;
   dryRun?: boolean;
 }
@@ -51,98 +51,94 @@ export interface MirrorAuditEvent {
   action: 'clickup_status' | 'clickup_comment';
   key: string;
   clickupId: string;
-  status: 'drift' | 'written' | 'denied';
+  status: 'drift' | 'written' | 'denied' | 'failed';
   detail: string;
+  decision: PolicyDecision;
 }
 
-/** The comment linking a PR; its exact text is the idempotency key. */
+/** The comment linking a PR; its trimmed text is the idempotency key. */
 export function pullRequestComment(key: string, pr: string): string {
   return `SoftwareAgents · ${key} · PR: ${pr}`;
 }
 
-/** ClickUp task bound to a work-store key: custom id first, then a name that starts with it. */
+/** ClickUp task bound to a work-store key: custom id first, then a name that starts with it
+ *  followed by a separator (so SA-053 never binds SA-0530 or the sub-task SA-053.1). */
 function bound(key: string, tasks: readonly ClickUpTask[]): ClickUpTask | undefined {
   return (
     tasks.find((task) => task.customId === key) ??
-    tasks.find((task) => task.name.startsWith(key) && !/[\w-]/.test(task.name.charAt(key.length)))
+    tasks.find((task) => task.name.startsWith(key) && !/[\w.-]/.test(task.name.charAt(key.length)))
   );
 }
 
 /**
- * The work store wins: drift in ClickUp (a hand-made change included) is recorded as
- * drift and overwritten. Writes go through clickup_write; a denial writes nothing.
+ * The work store wins: drift in ClickUp (a hand-made change included) is audited and
+ * overwritten. Reads are free; writes need clickup_write. One task failing never stops the rest.
  */
 export async function reconcileClickUp(run: MirrorRun): Promise<MirrorOutcome[]> {
-  if (!run.config.enabled) return [];
   const remote = (await Promise.all(run.listIds.map((id) => run.client.listTasks(id)))).flat();
   const decision = run.authorize(run.actor);
   const outcomes: MirrorOutcome[] = [];
   for (const task of run.tasks) {
     const state = MIRRORED[task.status];
-    if (!state) {
-      outcomes.push({ key: task.key, result: 'unmapped' });
+    const target = state ? bound(task.key, remote) : undefined;
+    if (!state || !target) {
+      outcomes.push({ key: task.key, result: state ? 'unmatched' : 'unmapped' });
       continue;
     }
-    const target = bound(task.key, remote);
-    if (!target) {
-      outcomes.push({ key: task.key, result: 'unmatched' });
-      continue;
-    }
+    const record = (
+      action: MirrorAuditEvent['action'],
+      status: MirrorAuditEvent['status'],
+      detail: string,
+    ) => {
+      if (!run.dryRun)
+        run.record({ action, key: task.key, clickupId: target.id, status, detail, decision });
+    };
     const wanted = run.config.statuses[state];
-    const drift = target.status.toLowerCase() !== wanted.toLowerCase();
-    const comment = task.pr_ref ? pullRequestComment(task.key, task.pr_ref) : null;
-    if (!drift && !comment) {
-      outcomes.push({ key: task.key, result: 'in_sync' });
-      continue;
-    }
-    if (decision.outcome !== 'allow' && !run.dryRun) {
-      run.record({
-        action: 'clickup_status',
-        key: task.key,
-        clickupId: target.id,
-        status: 'denied',
-        detail: decision.reason,
-      });
-      outcomes.push({
-        key: task.key,
-        result: 'denied',
-        clickupId: target.id,
-        reason: decision.reason,
-      });
-      continue;
-    }
-    if (drift) {
-      const event = { action: 'clickup_status', key: task.key, clickupId: target.id } as const;
-      run.record({ ...event, status: 'drift', detail: `${target.status} → ${wanted}` });
-      if (!run.dryRun) {
-        await run.client.setStatus(target.id, wanted);
-        run.record({ ...event, status: 'written', detail: wanted });
+    const status =
+      target.status.toLowerCase() === wanted.toLowerCase()
+        ? null
+        : { from: target.status, to: wanted };
+    const action = status ? 'clickup_status' : 'clickup_comment';
+    try {
+      const comment = task.pr_ref ? pullRequestComment(task.key, task.pr_ref) : null;
+      const prComment =
+        comment !== null &&
+        !(await run.client.comments(target.id)).some((text) => text.trim() === comment);
+      if (!status && !prComment) {
+        outcomes.push({ key: task.key, result: 'in_sync' });
+        continue;
       }
-      outcomes.push({
-        key: task.key,
-        result: run.dryRun ? 'would_correct' : 'corrected',
-        clickupId: target.id,
-        from: target.status,
-        to: wanted,
-      });
-    }
-    if (comment && !(await run.client.comments(target.id)).includes(comment)) {
-      if (!run.dryRun) {
-        await run.client.comment(target.id, comment);
-        run.record({
-          action: 'clickup_comment',
+      if (decision.outcome !== 'allow') {
+        record(action, 'denied', decision.reason);
+        outcomes.push({
           key: task.key,
+          result: 'denied',
           clickupId: target.id,
-          status: 'written',
-          detail: task.pr_ref ?? '',
+          reason: decision.reason,
         });
+        continue;
+      }
+      if (status) {
+        record('clickup_status', 'drift', `${status.from} → ${status.to}`);
+        if (!run.dryRun) await run.client.setStatus(target.id, status.to);
+        record('clickup_status', 'written', status.to);
+      }
+      if (prComment && comment) {
+        if (!run.dryRun) await run.client.comment(target.id, comment);
+        record('clickup_comment', 'written', task.pr_ref ?? '');
       }
       outcomes.push({
         key: task.key,
-        result: run.dryRun ? 'would_comment' : 'pr_commented',
+        result: run.dryRun ? 'would_mirror' : 'mirrored',
         clickupId: target.id,
+        status,
+        prComment,
       });
-    } else if (!drift) outcomes.push({ key: task.key, result: 'in_sync' });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      record(action, 'failed', reason);
+      outcomes.push({ key: task.key, result: 'failed', clickupId: target.id, reason });
+    }
   }
   return outcomes;
 }

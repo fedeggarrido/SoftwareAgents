@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { CharacterDetailPanel } from '../../components/CharacterDetailPanel.js';
 import { ContextGauge } from '../../components/ContextGauge.js';
@@ -6,6 +6,7 @@ import {
   CHARACTER_SITTING_OFFSET_PX,
   EXTERNAL_SESSION_LABEL,
   EXTERNAL_SESSION_TOOLTIP,
+  TOOL_OVERLAY_EDGE_MARGIN_PX,
   TOOL_OVERLAY_VERTICAL_OFFSET,
   WORK_STATE,
 } from '../../constants.js';
@@ -19,6 +20,7 @@ import {
   characterDisplayName,
   characterNeed,
 } from '../characterActivity.js';
+import { edgeShift } from '../edgeShift.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { useExecutorStore } from '../executorStore.js';
 import { overlayProjection } from '../projection.js';
@@ -177,13 +179,15 @@ export function ToolOverlay({
           >
             {!hideLabel && (
               <>
-                <div className="pixel-panel character-hover-label">
+                <EdgeSafeLabel container={containerRef}>
                   {characterActivity(ch) === 'needs_you' && (
                     <span className="agent-needs-mark" aria-hidden="true">
                       !
                     </span>
                   )}
-                  <span data-testid="agent-pill">{name}</span>
+                  <span className="agent-name" data-testid="agent-pill">
+                    {name}
+                  </span>
                   <span> · </span>
                   <span data-testid="agent-activity">{activity}</span>
                   {external && (
@@ -196,7 +200,7 @@ export function ToolOverlay({
                       {EXTERNAL_SESSION_LABEL}
                     </span>
                   )}
-                </div>
+                </EdgeSafeLabel>
                 {!ch.isSubagent && ch.contextTokens > 0 && (
                   <ContextGauge used={ch.contextTokens} limit={ch.maxContextTokens} />
                 )}
@@ -206,5 +210,36 @@ export function ToolOverlay({
         );
       })}
     </>
+  );
+}
+
+/** Shifts a hover label sideways so an agent near the office edge keeps its whole name visible. */
+function EdgeSafeLabel({
+  container,
+  children,
+}: {
+  container: React.RefObject<HTMLElement | null>;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Runs after every render: the overlay re-renders as agents move, and the shift must follow.
+  useLayoutEffect(() => {
+    const label = ref.current;
+    const bounds = container.current?.getBoundingClientRect();
+    if (!label || !bounds) return;
+    label.style.translate = '';
+    const rect = label.getBoundingClientRect();
+    const shift = edgeShift(
+      rect.left,
+      rect.right,
+      bounds.left + TOOL_OVERLAY_EDGE_MARGIN_PX,
+      bounds.right - TOOL_OVERLAY_EDGE_MARGIN_PX,
+    );
+    if (shift) label.style.translate = `${shift}px 0`;
+  });
+  return (
+    <div ref={ref} className="pixel-panel character-hover-label">
+      {children}
+    </div>
   );
 }

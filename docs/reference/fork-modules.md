@@ -38,6 +38,14 @@ para lecturas puntuales.
   cada violación de capas en hallazgo mayor que bloquea la aprobación. Si Architect
   propone otra arquitectura, `architectureDecisions.ts` abre una decisión humana con
   el ADR propuesto; el diseño queda bloqueado hasta que el humano responda.
+- Tests por proyecto (SA-163): `projectTestProfile.ts` detecta, solo leyendo
+  manifiestos, el tipo (web, API, CLI, librería) y los runners ya presentes
+  (Vitest/Jest/node:test, Playwright, pytest, cargo, go). `agentCompiler.ts` añade a
+  developer, integrations y qa-author las capas exigidas por criterio (unitarios;
+  e2e con navegador y capturas y barrido de diseño en web; contrato en API/CLI).
+  Las dependencias de test que faltan se informan, nunca se instalan.
+  `pixel-agents project tests` muestra el perfil. El resultado de las pruebas ya se
+  ve en la oficina mediante el estado de CI de cada propuesta.
 - Integraciones externas (SA-159) añade `agents/templates/integrations.yaml` con el
   mismo perfil `branch_write`, herramientas y flujo de ejecución que Developer.
   `integrationConstants.ts` compila la política de clientes, resiliencia, contratos

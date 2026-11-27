@@ -240,3 +240,28 @@ it('requires a materialized Codex schema and validates Claude results against it
     compileAgent(template('qa'), 'qa', { task: '', outputSchema: { type: 'invalid' } }),
   ).toThrow();
 });
+
+it('SA-163: code roles get the project test layers; other roles and unknown stacks do not', () => {
+  const testProfile = {
+    kind: 'web',
+    layers: ['unit', 'e2e', 'design'],
+    unit: 'vitest',
+    e2e: 'playwright',
+    missing: ['@playwright/test'],
+  } as const;
+  const developer = compileAgent(template('developer'), 'developer', {
+    task: { key: 'SA-163' },
+    testProfile,
+  }).systemPrompt;
+  expect(developer).toContain('this is a web project; use vitest, playwright');
+  expect(developer).toContain('saves a screenshot of every state');
+  expect(developer).toContain('Not installed yet: @playwright/test. Never install it');
+  expect(
+    compileAgent(template('reviewer'), 'reviewer', { task: { key: 'SA-163' }, testProfile })
+      .systemPrompt,
+  ).not.toContain('Project tests');
+  expect(
+    compileAgent(template('developer'), 'developer', { task: { key: 'SA-163' }, testProfile: null })
+      .systemPrompt,
+  ).not.toContain('Project tests');
+});

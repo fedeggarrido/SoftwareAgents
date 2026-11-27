@@ -7,7 +7,12 @@ import type { IdeaAnswer } from '../../../core/src/messages.js';
 import { CliUsageError } from '../cliErrors.js';
 import { readIdeas, submitIdea } from '../featureIdeas.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
-import { IdeaDocumentFailure, readIdeaDocument } from '../ideaDocument.js';
+import {
+  IdeaDocumentFailure,
+  readDocumentFacts,
+  readIdeaDocument,
+  workspaceDocumentReader,
+} from '../ideaDocument.js';
 
 export const FEATURE_IDEA_USAGE =
   'pixel-agents feature idea --from <archivo.pdf|md|txt> [--confirm]';
@@ -26,12 +31,16 @@ export async function runFeatureIdeaCommand(
   const snapshot = readIdeas('cli-idea', true, cwd);
   if (!snapshot.canSubmit || !snapshot.projectId)
     throw new CliUsageError('El proyecto no está preparado. Abre Nueva idea en la oficina.');
-  const extracted = await readIdeaDocument(path.resolve(cwd, args[2])).catch((error: unknown) => {
-    if (error instanceof IdeaDocumentFailure) throw new CliUsageError(error.message);
-    throw error;
-  });
+  const extracted = await readIdeaDocument(path.resolve(cwd, args[2]))
+    .then((text) => readDocumentFacts(text, workspaceDocumentReader(cwd)))
+    .catch((error: unknown) => {
+      if (error instanceof IdeaDocumentFailure) throw new CliUsageError(error.message);
+      throw error;
+    });
   log(stripVTControlCharacters(extracted));
-  log('Revisa el texto antes de guardar. Puedes editarlo y responder la entrevista.');
+  log(
+    'Estos son los hechos que el lector aislado sacó del documento. Revísalos antes de guardar: puedes editarlos y responder la entrevista.',
+  );
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new CliUsageError('Abre una terminal interactiva para revisar y guardar la idea.');
   const prompt = createInterface({ input: process.stdin, output: process.stdout });

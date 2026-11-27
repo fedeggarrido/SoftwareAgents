@@ -5,8 +5,15 @@ import { ideaDocumentErrorText } from '../../core/src/ideaDocument.js';
 import type { ExtractIdeaDocumentResult, IdeaDocumentError } from '../../core/src/messages.js';
 import { companyWorkspaceRoot } from './companyControl.js';
 import { IDEA_DOCUMENT_MAX_BYTES } from './constants.js';
+import {
+  documentFactsText,
+  type DocumentReader,
+  DocumentReaderFailure,
+  projectDocumentReader,
+} from './documentReader.js';
 import { readIdeas } from './featureIdeas.js';
 import { featureIngressActor } from './featureIngress.js';
+import { loadProjectConfig } from './projectConfig.js';
 
 export class IdeaDocumentFailure extends Error {
   constructor(readonly code: IdeaDocumentError) {
@@ -112,6 +119,33 @@ export async function readIdeaDocument(file: string): Promise<string> {
   }
 }
 
+/**
+ * SA-102: the owner reviews the isolated reader's facts, never the document's raw text,
+ * so third-party instructions cannot ride into the idea and on to tool roles.
+ */
+export async function readDocumentFacts(text: string, reader: DocumentReader): Promise<string> {
+  try {
+    const facts = documentFactsText(await reader(text));
+    if (!facts.trim()) throw new IdeaDocumentFailure('no_text');
+    return facts;
+  } catch (error) {
+    if (error instanceof DocumentReaderFailure) throw new IdeaDocumentFailure(error.code);
+    throw error;
+  }
+}
+
+/** The bound Project's reader, or none when the Project cannot run Claude. */
+export function workspaceDocumentReader(root: string | undefined): DocumentReader {
+  let config: ReturnType<typeof loadProjectConfig> = null;
+  try {
+    config = root ? loadProjectConfig(root, true) : null;
+  } catch {
+    throw new IdeaDocumentFailure('reader_unavailable');
+  }
+  if (!config) throw new IdeaDocumentFailure('reader_unavailable');
+  return projectDocumentReader(config);
+}
+
 /** Human capability and Project binding precede decoding/parsing. No document is persisted. */
 export async function handleIdeaDocumentMessage(
   msg: Record<string, unknown>,
@@ -119,6 +153,7 @@ export async function handleIdeaDocumentMessage(
   privileged: boolean,
   supported = true,
   root = companyWorkspaceRoot(),
+  reader?: DocumentReader,
 ): Promise<void> {
   if (typeof msg.requestId !== 'string' || typeof msg.projectId !== 'string') return;
   const result: ExtractIdeaDocumentResult = {
@@ -140,6 +175,7 @@ export async function handleIdeaDocumentMessage(
       typeof msg.base64 !== 'string'
     )
       throw new IdeaDocumentFailure('invalid_request');
+    const name = msg.name;
     const snapshot = readIdeas(msg.requestId, privileged, root);
     if (!snapshot.canSubmit) throw new IdeaDocumentFailure('unavailable');
     if (snapshot.projectId !== msg.projectId) throw new IdeaDocumentFailure('unknown_project');
@@ -147,7 +183,10 @@ export async function handleIdeaDocumentMessage(
       throw new IdeaDocumentFailure('document_too_large');
     const bytes = Buffer.from(msg.base64, 'base64');
     if (bytes.toString('base64') !== msg.base64) throw new IdeaDocumentFailure('invalid_request');
-    result.text = await extractIdeaDocument(msg.name, bytes);
+    const text = await extractIdeaDocument(name, bytes);
+    // Identity may change during extraction; re-check before the paid reader call.
+    requireHuman();
+    result.text = await readDocumentFacts(text, reader ?? workspaceDocumentReader(root));
     // Managed-process identity can change while asynchronous extraction is running.
     requireHuman();
   } catch (error) {

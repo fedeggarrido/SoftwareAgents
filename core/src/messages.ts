@@ -528,7 +528,9 @@ export type IdeaDocumentError =
   | 'document_too_large'
   | 'unsupported_type'
   | 'corrupt_file'
-  | 'no_text';
+  | 'no_text'
+  | 'document_too_long'
+  | 'reader_unavailable';
 
 export interface PrepareProjectResult {
   type: 'prepareProjectResult';

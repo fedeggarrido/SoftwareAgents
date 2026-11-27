@@ -136,7 +136,12 @@ export async function readDocumentFacts(text: string, reader: DocumentReader): P
 
 /** The bound Project's reader, or none when the Project cannot run Claude. */
 export function workspaceDocumentReader(root: string | undefined): DocumentReader {
-  const config = root ? loadProjectConfig(root, true) : null;
+  let config: ReturnType<typeof loadProjectConfig> = null;
+  try {
+    config = root ? loadProjectConfig(root, true) : null;
+  } catch {
+    throw new IdeaDocumentFailure('reader_unavailable');
+  }
   if (!config) throw new IdeaDocumentFailure('reader_unavailable');
   return projectDocumentReader(config);
 }
@@ -179,6 +184,8 @@ export async function handleIdeaDocumentMessage(
     const bytes = Buffer.from(msg.base64, 'base64');
     if (bytes.toString('base64') !== msg.base64) throw new IdeaDocumentFailure('invalid_request');
     const text = await extractIdeaDocument(name, bytes);
+    // Identity may change during extraction; re-check before the paid reader call.
+    requireHuman();
     result.text = await readDocumentFacts(text, reader ?? workspaceDocumentReader(root));
     // Managed-process identity can change while asynchronous extraction is running.
     requireHuman();

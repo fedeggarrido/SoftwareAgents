@@ -39,7 +39,7 @@ export type DocumentReaderConfig = Pick<ProjectConfig, 'repoRoot'> & {
   >;
 };
 
-/** One tool-free researcher call, bounded by the deep research budget and audited. */
+/** One tool-free researcher call, bounded by the quick research budget (one short call) and audited. */
 export function projectDocumentReader(
   config: DocumentReaderConfig,
   executor?: Executor,
@@ -65,7 +65,7 @@ export function projectDocumentReader(
         taskKey: null,
         executionId: id,
       });
-    const policy = researchPolicy('deep', config.operator.research);
+    const policy = researchPolicy('quick', config.operator.research);
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), policy.maxSeconds * 1000);
     const { executor: bounded } = researchBudget(

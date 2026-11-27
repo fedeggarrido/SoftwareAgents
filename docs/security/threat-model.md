@@ -133,9 +133,11 @@ reemplazarse por un import con otra declaración. No se migran tareas antiguas.
 desarrollarse: es el comportamiento buscado (fail closed). Para trabajarla, el
 operador la reescribe con sus propias palabras en un brief o DAG local con otra
 key (`--origin local`) y cancela la externa; el texto externo nunca se copia tal
-cual. Pendiente (SA-102 fase C): un lector en cuarentena que convierta la tarea
-externa en una especificación estructurada y validada, revisada por el humano,
-como hace `researchHandoff` con las fuentes de Research.
+cual. Ayuda (SA-102 fase C): `pixel-agents task read-external <KEY>` (solo ingreso
+humano) pasa el texto de la declaración inmutable al lector aislado sin
+herramientas (`documentReader`, origen `issue`, presupuesto quick) e imprime
+solo hechos validados por `EXTERNAL_HANDOFF_SCHEMA`, con controles escapados.
+El operador los reescribe en su brief local; nada se copia ni se reimporta solo.
 
 Sin opción (o con `--origin local`), el contrato sigue siendo el DAG local del
 Architect o una tarea escrita por el operador; no se añade contaminación externa.

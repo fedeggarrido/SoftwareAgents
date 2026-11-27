@@ -125,7 +125,7 @@ export async function readIdeaDocument(file: string): Promise<string> {
  */
 export async function readDocumentFacts(text: string, reader: DocumentReader): Promise<string> {
   try {
-    const facts = documentFactsText(await reader(text));
+    const facts = documentFactsText(await reader(text, 'document'));
     if (!facts.trim()) throw new IdeaDocumentFailure('no_text');
     return facts;
   } catch (error) {

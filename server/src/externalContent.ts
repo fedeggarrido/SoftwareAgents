@@ -96,3 +96,33 @@ export function containsExternalContent(
   }
   return Object.values(object).some((entry) => containsExternalContent(entry, options));
 }
+
+/** `task import --origin external`: taint stored in the description (and immutable declaration). */
+export function taintImportedDescription(text: string): string {
+  return JSON.stringify({ provenance: 'untrusted-external', origin: 'task-import', text });
+}
+
+/** The raw text a task declaration was tainted with, or null when it was imported as local. */
+export function importedExternalText(declaration: string | null | undefined): string | null {
+  const parse = (json: string | null | undefined): unknown => {
+    try {
+      return JSON.parse(json ?? '');
+    } catch {
+      return null;
+    }
+  };
+  const task = parse(declaration);
+  if (typeof task !== 'object' || task === null || !('description' in task)) return null;
+  if (typeof task.description !== 'string') return null;
+  const value = parse(task.description);
+  return typeof value === 'object' &&
+    value !== null &&
+    'provenance' in value &&
+    value.provenance === 'untrusted-external' &&
+    'origin' in value &&
+    value.origin === 'task-import' &&
+    'text' in value &&
+    typeof value.text === 'string'
+    ? value.text
+    : null;
+}

@@ -215,7 +215,7 @@ describe('SA-142 local document extraction', () => {
       insufficientEvidence: false,
     }));
     await handleIdeaDocumentMessage(request, send, true, true, root, reader);
-    expect(reader).toHaveBeenCalledWith('# Idea\nTexto');
+    expect(reader).toHaveBeenCalledWith('# Idea\nTexto', 'document');
     expect(send).toHaveBeenLastCalledWith({
       type: 'extractIdeaDocumentResult',
       requestId: 'r',

@@ -259,7 +259,7 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/agent-card.spec.ts:16` — the agent card explains an external session at 1440px
 - `e2e/standalone/audit.spec.ts:85` — reads, filters and expands the latest 500 without writing (Standalone / audit)
 - `e2e/standalone/audit.spec.ts:173` — untokened URL denies access without entries or counts (Standalone / audit)
-- `e2e/standalone/audit.spec.ts:200` — shows the empty state without creating a log (Standalone / audit › missing log)
+- `e2e/standalone/audit.spec.ts:204` — shows the empty state without creating a log (Standalone / audit › missing log)
 - `e2e/standalone/decisions.spec.ts:50` — corrects an accidental choice before sending, including keyboard confirmation (Standalone / decision review at 390px)
 - `e2e/standalone/decisions.spec.ts:50` — corrects an accidental choice before sending, including keyboard confirmation (Standalone / decision review at 1440px)
 - `e2e/standalone/decisions.spec.ts:122` — blocks a review updated by another person (Standalone / decision review at 390px)
@@ -286,12 +286,12 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/offline.spec.ts:8` — stopping the office is noticed at once and no action leaves silently at 1440px
 - `e2e/standalone/project-summary.spec.ts:81` — shows the app, real work and next steps through the office window without writes (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:105` — denies unprivileged access without project details (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:123` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:201` — completes and corrects an idea with visible actions on desktop and mobile (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:256` — SA-123 readable feature cards and completed tasks (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:308` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
-- `e2e/standalone/project-summary.spec.ts:343` — mobile supervision at 375px keeps controls separate
-- `e2e/standalone/project-summary.spec.ts:343` — mobile supervision at 390px keeps controls separate
+- `e2e/standalone/project-summary.spec.ts:126` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:204` — completes and corrects an idea with visible actions on desktop and mobile (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:259` — SA-123 readable feature cards and completed tasks (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:311` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
+- `e2e/standalone/project-summary.spec.ts:346` — mobile supervision at 375px keeps controls separate
+- `e2e/standalone/project-summary.spec.ts:346` — mobile supervision at 390px keeps controls separate
 - `e2e/standalone/settings-editing.spec.ts:8` — settings and editing remain understandable at 390px
 - `e2e/standalone/settings-editing.spec.ts:8` — settings and editing remain understandable at 1440px
 - `e2e/standalone/settings-editing.spec.ts:107` — resizing redraws the office without waiting for an animation frame

@@ -30,7 +30,7 @@ export function Tooltip({ title, onDismiss, position = 'top-right', children }: 
           aria-label={es.common.dismissNotice}
           className="tooltip-dismiss bg-transparent border-none text-text-muted cursor-pointer"
         >
-          ×
+          ✕
         </button>
       </div>
       <div className="py-6 px-8">{children}</div>

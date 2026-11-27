@@ -31,7 +31,7 @@ import { useProjectSummary } from '../office/useProjectSummary.js';
 import { transport } from '../transport/index.js';
 import { FeaturePlanButton } from './FeaturePlanDialog.js';
 import { IdeasList } from './IdeasList.js';
-import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { OfficeRecoveryActions, OperatorOnlyNotice } from './OfficeRecoveryActions.js';
 import { StatusChip } from './StatusChip.js';
 import { TerminalInstructions } from './TerminalInstructions.js';
 import { Button } from './ui/Button.js';
@@ -161,8 +161,10 @@ export function FeaturesPanel({
                 </p>
               </TerminalInstructions>
             )}
-            {state === 'denied' && 'Acceso denegado a las funcionalidades'}
           </div>
+          {state === 'denied' && (
+            <OperatorOnlyNotice message="La lista de funcionalidades solo la ve el operador." />
+          )}
           {state === 'read_error' && (
             <PanelError
               cause={`Error de lectura: ${featuresReasonText(selectedStore.snapshot?.reason ?? null)}`}

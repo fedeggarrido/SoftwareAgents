@@ -182,7 +182,11 @@ test.describe('Standalone / audit', () => {
       const spectator = await context.newPage();
       await spectator.goto(standalone.hostUrl);
       const panel = await openAudit(spectator);
-      await expect(panel.getByRole('status')).toHaveText('Acceso denegado a la auditoría');
+      await expect(
+        panel.getByText('El registro de auditoría solo lo ve el operador.', { exact: false }),
+      ).toBeVisible();
+      await expect(panel.getByRole('button', { name: 'Abrir Ajustes' })).toBeVisible();
+      await expect(panel.getByLabel('Acción')).toBeHidden();
       await expect(panel.locator('article')).toHaveCount(0);
       await expect(
         panel.getByText(/más recientes|líneas corruptas|entradas excluidas/),

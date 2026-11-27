@@ -18,8 +18,10 @@ import {
   documentFactsText,
   type DocumentReader,
   type DocumentReaderConfig,
+  DocumentReaderFailure,
   projectDocumentReader,
 } from '../documentReader.js';
+import { importedExternalText, taintImportedDescription } from '../externalContent.js';
 import { withoutOperatorToken } from '../featureIngress.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
@@ -50,32 +52,6 @@ function textField(value: string): string {
     if (control === '\t') return '\\t';
     return `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
   });
-}
-
-/** From the immutable declaration: the raw text of a task imported with `--origin external`, or null for local tasks. */
-function importedExternalText(declaration: string | null | undefined): string | null {
-  try {
-    const task: unknown = JSON.parse(declaration ?? '');
-    const value: unknown =
-      typeof task === 'object' &&
-      task !== null &&
-      'description' in task &&
-      typeof task.description === 'string'
-        ? JSON.parse(task.description)
-        : null;
-    return typeof value === 'object' &&
-      value !== null &&
-      'provenance' in value &&
-      value.provenance === 'untrusted-external' &&
-      'origin' in value &&
-      value.origin === 'task-import' &&
-      'text' in value &&
-      typeof value.text === 'string'
-      ? value.text
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function parseArgs(argv: string[]) {
@@ -345,12 +321,7 @@ export async function runTaskCommand(
       // Persist taint in the description (and immutable declaration) so every
       // existing task consumer reaches the compiler guard without a DB migration.
       if (args.origin === 'external')
-        for (const task of dag.tasks)
-          task.description = JSON.stringify({
-            provenance: 'untrusted-external',
-            origin: 'task-import',
-            text: task.description,
-          });
+        for (const task of dag.tasks) task.description = taintImportedDescription(task.description);
       // Resolve canonical pipeline artifacts without opening/activating SQLite for invalid DAGs.
       // Relate Brain paths to the canonical repo root they are built from: `cwd` may be
       // the same directory in Windows 8.3 short form, which would yield a '..' escape.
@@ -447,7 +418,11 @@ export async function runTaskCommand(
         if (!task) throw new CliUsageError('Unknown task');
         const text = importedExternalText(task.declaration);
         if (text === null) throw new CliUsageError('Task was not imported with --origin external');
-        const result = await documentReader(config)(text, 'issue');
+        const result = await documentReader(config)(text, 'issue').catch((error: unknown) => {
+          if (error instanceof DocumentReaderFailure)
+            throw new CliUsageError(`isolated reader: ${error.code}`);
+          throw error;
+        });
         log(
           [
             'Facts the isolated reader extracted (untrusted; rewrite them in your own brief):',

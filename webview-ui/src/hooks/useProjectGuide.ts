@@ -14,5 +14,6 @@ export function useProjectGuide(
     setState(firstVisit ? 'open' : 'closed');
   }, [state, currentVersion, lastSeenVersion, hooksInfoShown]);
   const onClose = useCallback(() => setState('closed'), []);
-  return { open: state === 'open', onClose };
+  const reopen = useCallback(() => setState('open'), []);
+  return { open: state === 'open', onClose, reopen };
 }

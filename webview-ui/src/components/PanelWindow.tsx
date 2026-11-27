@@ -1,5 +1,5 @@
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   PANEL_TABS,
@@ -9,6 +9,7 @@ import {
   PANEL_WINDOW_Z_INDEX,
 } from '../constants.js';
 import { useDismissibleLayer } from '../hooks/useDismissibleLayer.js';
+import { es } from '../i18n/es.js';
 import { useConnectionStatus } from '../office/connectionStatus.js';
 import type { PanelRect, PanelTab } from '../office/panelWindowState.js';
 import { resizePanelRect } from '../office/panelWindowState.js';
@@ -38,6 +39,7 @@ export function PanelWindow({
   children,
 }: PanelWindowProps) {
   const label = PANEL_TABS.find((entry) => entry.id === tab)?.label;
+  const [help, setHelp] = useState(false);
   const { state, lastContactAt } = useConnectionStatus();
   const stale = state !== undefined && state !== 'connected' && !!lastContactAt;
   const titleRef = useRef<HTMLDivElement>(null);
@@ -147,6 +149,17 @@ export function PanelWindow({
         <Button
           size="sm"
           variant="ghost"
+          onClick={() => setHelp(!help)}
+          aria-expanded={help}
+          aria-controls="office-panel-help"
+          aria-label={help ? es.panelHelp.hide : es.panelHelp.show}
+          title={help ? es.panelHelp.hide : es.panelHelp.show}
+        >
+          <DockIcon name="help" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={onReset}
           aria-label="Restablecer posición"
           title="Restablecer posición"
@@ -157,6 +170,11 @@ export function PanelWindow({
           ✕
         </Button>
       </div>
+      {help && (
+        <p id="office-panel-help" className="panel-window-help">
+          {es.panelHelp[tab]}
+        </p>
+      )}
       <div id="office-panel-content" data-panel={tab} className="panel-window-content" tabIndex={0}>
         {children}
       </div>

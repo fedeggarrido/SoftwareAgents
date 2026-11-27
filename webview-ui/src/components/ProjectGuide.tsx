@@ -16,6 +16,7 @@ export function ProjectGuide({
   onNewIdea: () => void;
 }) {
   const [step, setStep] = useState(0);
+  const [glossary, setGlossary] = useState(false);
   const access = officeAccessView(useOfficeAccess(), !isBrowserRuntime);
   const steps = es.projectGuide.workflow;
   const last = step === steps.length - 1;
@@ -34,27 +35,41 @@ export function ProjectGuide({
       hidden={!visible}
     >
       <header>
-        <h2 aria-live="polite">{steps[step].title}</h2>
+        <h2 aria-live="polite">{glossary ? es.projectGuide.glossary : steps[step].title}</h2>
         <Button variant="ghost" size="icon" aria-label={es.projectGuide.close} onClick={onClose}>
-          x
+          ✕
         </Button>
       </header>
-      <div aria-live="polite">
-        <p>{es.projectGuide.step(step + 1, steps.length)}</p>
-        <p>{steps[step].description}</p>
-        {last && (access.blocked || access.pending) && (
-          <p>
-            {access.explanation} {access.details}
-          </p>
-        )}
-      </div>
+      {glossary ? (
+        <dl className="guide-glossary">
+          {es.projectGuide.terms.map((entry) => (
+            <div key={entry.term}>
+              <dt>{entry.term}</dt>
+              <dd>{entry.definition}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <div aria-live="polite">
+          <p>{es.projectGuide.step(step + 1, steps.length)}</p>
+          <p>{steps[step].description}</p>
+          {last && (access.blocked || access.pending) && (
+            <p>
+              {access.explanation} {access.details}
+            </p>
+          )}
+        </div>
+      )}
       <footer>
-        {step > 0 && (
+        <Button variant="ghost" aria-pressed={glossary} onClick={() => setGlossary(!glossary)}>
+          {glossary ? es.projectGuide.backToGuide : es.projectGuide.glossary}
+        </Button>
+        {!glossary && step > 0 && (
           <Button variant="ghost" onClick={() => setStep(step - 1)}>
             {es.projectGuide.back}
           </Button>
         )}
-        {last ? (
+        {glossary ? null : last ? (
           access.blocked || access.pending ? (
             <Button onClick={onClose}>{es.projectGuide.finish}</Button>
           ) : (

@@ -29,6 +29,7 @@ interface BottomToolbarProps {
   onToggleEditMode: () => void;
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
+  onOpenHelp: () => void;
   activePanel: PanelTab | null;
   /** Everything waiting for the owner (SA-132), shown on the inbox button. */
   inboxCount: number;
@@ -45,6 +46,7 @@ export function BottomToolbar({
   onToggleEditMode,
   isSettingsOpen,
   onToggleSettings,
+  onOpenHelp,
   activePanel,
   inboxCount,
   onTogglePanel,
@@ -246,6 +248,21 @@ export function BottomToolbar({
       {moreVisible && <span>Ajustes</span>}
     </button>
   );
+  const helpButton = (
+    <button
+      type="button"
+      className="dock-button dock-icon-button"
+      title={es.projectGuide.help}
+      aria-label={es.projectGuide.help}
+      onClick={() => {
+        setMoreOpen(false);
+        onOpenHelp();
+      }}
+    >
+      <DockIcon name="help" />
+      {moreVisible && <span>{es.projectGuide.help}</span>}
+    </button>
+  );
   const editButton = (
     <button
       type="button"
@@ -372,6 +389,7 @@ export function BottomToolbar({
             <div className="dock-secondary" role="group" aria-label="Oficina y ajustes">
               {agentControl}
               {editButton}
+              {helpButton}
               {settingsButton}
             </div>
           )}
@@ -398,6 +416,7 @@ export function BottomToolbar({
           {panels.slice(2).map(panelButton)}
           {agentControl}
           {editButton}
+          {helpButton}
           {settingsButton}
         </div>
       )}

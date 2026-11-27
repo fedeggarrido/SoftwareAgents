@@ -335,7 +335,9 @@ export function NewIdeaDialog({
                       if (file && canSave) void sendIdeaDocument(file, transport);
                     }}
                   />
-                  {documentLoading && <p role="status">Extrayendo texto del documento…</p>}
+                  {documentLoading && (
+                    <p role="status">Extrayendo los hechos del documento con el lector aislado…</p>
+                  )}
                   {store.document?.phase === 'error' && (
                     <div role="alert">
                       <StatusChip state="FAILED" />
@@ -343,8 +345,9 @@ export function NewIdeaDialog({
                     </div>
                   )}
                   <p>
-                    Revisa y edita el texto antes de guardar. La idea y la entrevista admiten hasta
-                    1 MiB.
+                    Un documento adjunto se convierte en una lista de hechos: un lector aislado, sin
+                    herramientas, lo lee por ti y ningún agente recibe el texto original. Revisa y
+                    edita antes de guardar. La idea y la entrevista admiten hasta 1 MiB.
                   </p>
                   <label htmlFor="new-idea-text">Tu idea</label>
                   <p id="idea-example">{ideaInterview.ideaExample}</p>

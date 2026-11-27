@@ -691,6 +691,8 @@ components:
           unsupported_type,
           corrupt_file,
           no_text,
+          document_too_long,
+          reader_unavailable,
         ]
 
     SubmitIdea:

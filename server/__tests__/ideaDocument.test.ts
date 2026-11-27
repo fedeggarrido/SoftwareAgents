@@ -11,6 +11,7 @@ import { IDEA_QUESTIONS } from '../../core/src/ideaInterview.js';
 import { compileAgent } from '../src/agentCompiler.js';
 import { readTaskInput } from '../src/commands/taskFiles.js';
 import { FEATURE_IDEAS_DIRECTORY, IDEA_DOCUMENT_MAX_BYTES } from '../src/constants.js';
+import { DocumentReaderFailure } from '../src/documentReader.js';
 import { submitIdea } from '../src/featureIdeas.js';
 import {
   extractIdeaDocument,
@@ -207,14 +208,35 @@ describe('SA-142 local document extraction', () => {
     expect(send).toHaveBeenLastCalledWith(
       expect.objectContaining({ errorCode: 'document_too_large' }),
     );
-    await handleIdeaDocumentMessage(request, send, true, true, root);
+    // SA-102: the raw text goes only to the isolated reader; the preview holds its facts.
+    const reader = vi.fn(async () => ({
+      kind: 'external-reader-result' as const,
+      facts: [{ text: 'Una idea con texto', confidence: 'high' as const }],
+      insufficientEvidence: false,
+    }));
+    await handleIdeaDocumentMessage(request, send, true, true, root, reader);
+    expect(reader).toHaveBeenCalledWith('# Idea\nTexto');
     expect(send).toHaveBeenLastCalledWith({
       type: 'extractIdeaDocumentResult',
       requestId: 'r',
       projectId: 'documents',
-      text: '# Idea\nTexto',
+      text: '- Una idea con texto',
       errorCode: null,
     });
+    for (const code of ['document_too_long', 'reader_unavailable'] as const) {
+      const failing = vi.fn(async () => {
+        throw new DocumentReaderFailure(code);
+      });
+      await handleIdeaDocumentMessage(request, send, true, true, root, failing);
+      expect(send).toHaveBeenLastCalledWith(
+        expect.objectContaining({ text: null, errorCode: code }),
+      );
+    }
+    // Without a Project that can run Claude, the document is refused, never shown raw.
+    await handleIdeaDocumentMessage(request, send, true, true, root);
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: null, errorCode: 'reader_unavailable' }),
+    );
     expect(fs.existsSync(path.join(root, FEATURE_IDEAS_DIRECTORY))).toBe(false);
     expect(fs.existsSync(path.join(root, 'home'))).toBe(false);
   });

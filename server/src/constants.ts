@@ -515,3 +515,6 @@ export const STACK_CLAIM_POLICIES = {
 } as const;
 export const STACK_RESEARCH_QUESTION =
   'Compare mature application technology stacks, languages, frameworks, databases, hosting, testing and CI. Find official documentation on capabilities, lifecycle, ecosystem, limitations and pricing. Include ports-and-adapters architecture compatibility.';
+
+/** SA-102: document text the isolated reader reviews in one bounded request (~40 pages). */
+export const DOCUMENT_READER_MAX_BYTES = 96 * 1024;

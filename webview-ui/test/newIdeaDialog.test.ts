@@ -207,7 +207,7 @@ describe('SA-109/110 dialog lifecycle and presentation', () => {
     });
     await Promise.resolve();
     await Promise.resolve();
-    expect(await render()).toContain('Extrayendo texto');
+    expect(await render()).toContain('Extrayendo los hechos');
     const pending = getIdeasStore().document;
     if (pending?.phase !== 'extracting') throw new Error('Expected pending extraction');
     receiveIdeaDocument({

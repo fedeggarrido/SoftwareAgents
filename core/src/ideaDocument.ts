@@ -19,6 +19,10 @@ export function ideaDocumentErrorText(code: IdeaDocumentError): string {
       return 'El proyecto ha cambiado. Vuelve a abrir Nueva idea.';
     case 'invalid_request':
       return 'El documento recibido no es válido. Selecciona de nuevo el archivo.';
+    case 'document_too_long':
+      return 'El texto del documento es demasiado largo para revisarlo de una vez (unas 40 páginas). Adjunta solo la parte que describe la idea.';
+    case 'reader_unavailable':
+      return 'No se pudo resumir el documento con el lector aislado. Comprueba que Claude está disponible y vuelve a adjuntarlo, o escribe la idea con tus palabras.';
     case 'unavailable':
       return 'No se pudo extraer el documento. Comprueba la conexión y vuelve a adjuntarlo.';
   }

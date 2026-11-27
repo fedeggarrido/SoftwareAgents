@@ -85,7 +85,9 @@ export function AuditPanel({
         </>
       ) : (
         <>
-          {state === 'denied' && <OperatorOnlyNotice subject="El registro de auditoría" />}
+          {state === 'denied' && (
+            <OperatorOnlyNotice message="El registro de auditoría solo lo ve el operador." />
+          )}
           <div className="audit-filters flex flex-wrap gap-8" hidden={state === 'denied'}>
             <label>
               Acción{' '}

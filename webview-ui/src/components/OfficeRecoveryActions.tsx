@@ -19,11 +19,11 @@ export function OfficeRecoveryActions({ project = false }: { project?: boolean }
 }
 
 /** A read-only connection asked for operator-only data: say whose it is and how to get access. */
-export function OperatorOnlyNotice({ subject }: { subject: string }) {
+export function OperatorOnlyNotice({ message }: { message: string }) {
   return (
-    <div role="status">
-      <p>
-        {subject} solo lo ve el operador. {OFFICE_ACCESS_INSTRUCTIONS}
+    <div>
+      <p role="status">
+        {message} {OFFICE_ACCESS_INSTRUCTIONS}
       </p>
       <OfficeRecoveryActions />
     </div>

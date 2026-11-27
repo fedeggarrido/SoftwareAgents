@@ -286,12 +286,12 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 - `e2e/standalone/offline.spec.ts:8` — stopping the office is noticed at once and no action leaves silently at 1440px
 - `e2e/standalone/project-summary.spec.ts:81` — shows the app, real work and next steps through the office window without writes (Standalone / project summary)
 - `e2e/standalone/project-summary.spec.ts:105` — denies unprivileged access without project details (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:125` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:203` — completes and corrects an idea with visible actions on desktop and mobile (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:258` — SA-123 readable feature cards and completed tasks (Standalone / project summary)
-- `e2e/standalone/project-summary.spec.ts:310` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
-- `e2e/standalone/project-summary.spec.ts:345` — mobile supervision at 375px keeps controls separate
-- `e2e/standalone/project-summary.spec.ts:345` — mobile supervision at 390px keeps controls separate
+- `e2e/standalone/project-summary.spec.ts:126` — filters Trabajo from the live workflow at 390, 1024 and 1440 px (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:204` — completes and corrects an idea with visible actions on desktop and mobile (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:259` — SA-123 readable feature cards and completed tasks (Standalone / project summary)
+- `e2e/standalone/project-summary.spec.ts:311` — explains how to start from the mobile dock (Standalone / project summary › empty project on mobile)
+- `e2e/standalone/project-summary.spec.ts:346` — mobile supervision at 375px keeps controls separate
+- `e2e/standalone/project-summary.spec.ts:346` — mobile supervision at 390px keeps controls separate
 - `e2e/standalone/settings-editing.spec.ts:8` — settings and editing remain understandable at 390px
 - `e2e/standalone/settings-editing.spec.ts:8` — settings and editing remain understandable at 1440px
 - `e2e/standalone/settings-editing.spec.ts:107` — resizing redraws the office without waiting for an animation frame

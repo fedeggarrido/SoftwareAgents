@@ -231,7 +231,7 @@ export function ProjectSummaryPanel({
       ) : !snapshot ? (
         <p role="status">Cargando el resumen del proyecto…</p>
       ) : snapshot.status === 'denied' ? (
-        <OperatorOnlyNotice subject="El resumen del proyecto" />
+        <OperatorOnlyNotice message="El resumen del proyecto solo lo ve el operador." />
       ) : snapshot.status === 'unknown_project' ? (
         <p role="alert">El proyecto seleccionado ya no está vinculado a esta oficina.</p>
       ) : snapshot.status === 'read_error' ? (

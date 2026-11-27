@@ -115,6 +115,7 @@ test.describe('Standalone / project summary', () => {
       await expect(
         panel.getByText('El resumen del proyecto solo lo ve el operador.', { exact: false }),
       ).toBeVisible();
+      await expect(panel.getByRole('button', { name: 'Abrir Ajustes' })).toBeVisible();
       await expect(panel).not.toContainText('Tienda de barrio');
       await expect(panel).not.toContainText('Consultar los pedidos de la tienda');
     } finally {

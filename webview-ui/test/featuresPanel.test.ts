@@ -362,7 +362,7 @@ describe('FEAT-002-T06 panel acceptance', () => {
   it.each([
     ['empty', 'pixel-agents feature run &lt;FEAT&gt; --request &lt;file&gt;'],
     ['read_error', 'Error de lectura'],
-    ['denied', 'Acceso denegado'],
+    ['denied', 'solo la ve el operador'],
   ] as const)('AC-009/010 distinguishes %s without rows', async (status, text) => {
     respond({ status, reason: 'unavailable' });
     const html = await render();

@@ -9,6 +9,7 @@ import { featureCostLabel, featuresReasonText } from '../office/featuresStore.js
 import type { PanelTab } from '../office/panelWindowState.js';
 import { useProjectSummary } from '../office/useProjectSummary.js';
 import { GithubHostingWizard } from './GithubHostingWizard.js';
+import { OperatorOnlyNotice } from './OfficeRecoveryActions.js';
 import { ProjectWorkflow } from './ProjectWorkflow.js';
 import { StatusChip } from './StatusChip.js';
 import { Button } from './ui/Button.js';
@@ -230,9 +231,7 @@ export function ProjectSummaryPanel({
       ) : !snapshot ? (
         <p role="status">Cargando el resumen del proyecto…</p>
       ) : snapshot.status === 'denied' ? (
-        <p role="alert">
-          Acceso denegado al resumen del proyecto. Abre la oficina con el acceso del operador.
-        </p>
+        <OperatorOnlyNotice subject="El resumen del proyecto" />
       ) : snapshot.status === 'unknown_project' ? (
         <p role="alert">El proyecto seleccionado ya no está vinculado a esta oficina.</p>
       ) : snapshot.status === 'read_error' ? (

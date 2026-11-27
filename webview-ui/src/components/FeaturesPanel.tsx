@@ -161,7 +161,7 @@ export function FeaturesPanel({
                 </p>
               </TerminalInstructions>
             )}
-            {state === 'denied' && 'Acceso denegado a las funcionalidades'}
+            {state === 'denied' && 'La lista de funcionalidades solo la ve el operador.'}
           </div>
           {state === 'read_error' && (
             <PanelError

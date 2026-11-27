@@ -22,7 +22,7 @@ import {
 import { knownText } from '../office/displayText.js';
 import { useExecutorStore } from '../office/executorStore.js';
 import { transport } from '../transport/index.js';
-import { OfficeRecoveryActions } from './OfficeRecoveryActions.js';
+import { OfficeRecoveryActions, OperatorOnlyNotice } from './OfficeRecoveryActions.js';
 import { Button } from './ui/Button.js';
 import { PanelError } from './ui/PanelError.js';
 import { PanelHeading } from './ui/PanelHeading.js';
@@ -85,7 +85,8 @@ export function AuditPanel({
         </>
       ) : (
         <>
-          <div className="audit-filters flex flex-wrap gap-8">
+          {state === 'denied' && <OperatorOnlyNotice subject="El registro de auditoría" />}
+          <div className="audit-filters flex flex-wrap gap-8" hidden={state === 'denied'}>
             <label>
               Acción{' '}
               <select
@@ -148,7 +149,6 @@ export function AuditPanel({
           <div role="status">
             {state === 'loading' && 'Cargando auditoría…'}
             {state === 'empty' && AUDIT_EMPTY_TEXT}
-            {state === 'denied' && 'Acceso denegado a la auditoría'}
             {state === 'no_matches' &&
               'Ninguna entrada cumple los filtros. Usa Quitar filtros para ver todas.'}
           </div>

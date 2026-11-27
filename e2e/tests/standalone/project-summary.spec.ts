@@ -112,7 +112,9 @@ test.describe('Standalone / project summary', () => {
       await spectator.goto(standalone.hostUrl);
       await spectator.getByRole('button', { name: 'Proyecto', exact: true }).click();
       const panel = spectator.getByRole('region', { name: 'Resumen del proyecto', exact: true });
-      await expect(panel.getByRole('alert')).toContainText('Acceso denegado');
+      await expect(
+        panel.getByText('El resumen del proyecto solo lo ve el operador.', { exact: false }),
+      ).toBeVisible();
       await expect(panel).not.toContainText('Tienda de barrio');
       await expect(panel).not.toContainText('Consultar los pedidos de la tienda');
     } finally {

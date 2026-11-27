@@ -501,6 +501,8 @@
   display: block;
   font-size: var(--ui-info-size);
   white-space: nowrap;
+  font-weight: 400;
+  color: var(--color-text-muted);
 }
 .panel-actions {
   display: flex;

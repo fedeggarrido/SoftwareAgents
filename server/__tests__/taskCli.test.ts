@@ -177,6 +177,42 @@ it('persists external import provenance and rejects the task before tool executi
   );
 });
 
+it('reads an external task only through the isolated reader and prints facts, never raw text', async () => {
+  expect((await cli('import', 'dag.yaml', '--origin', 'external')).code).toBe(0);
+  const seen: string[] = [];
+  const lines: string[] = [];
+  await runTaskCommand(
+    ['read-external', first],
+    repo,
+    (line) => lines.push(line),
+    () => async (text, origin) => {
+      seen.push(`${origin}:${text}`);
+      return {
+        kind: 'external-reader-result',
+        facts: [{ text: 'Objetivo\u001b[31m: login', confidence: 'high' }],
+        insufficientEvidence: false,
+      };
+    },
+  );
+  expect(seen).toEqual(['issue:Implement']);
+  expect(lines.join('\n')).toContain('- Objetivo\\u001b[31m: login');
+  expect(lines.join('\n')).not.toContain('Implement');
+});
+
+it('refuses read-external for local tasks and for managed processes', async () => {
+  expect((await cli('import', 'dag.yaml')).code).toBe(0);
+  const never = () => async () => {
+    throw new Error('reader must not run');
+  };
+  await expect(runTaskCommand(['read-external', first], repo, () => {}, never)).rejects.toThrow(
+    'not imported with --origin external',
+  );
+  vi.stubEnv('SA_MANAGED_EXECUTION', 'fixture-agent');
+  await expect(runTaskCommand(['read-external', first], repo, () => {}, never)).rejects.toThrow(
+    'human ingress',
+  );
+});
+
 it.each([{ options: [] }, { options: ['--origin', 'local'] }])(
   'keeps local Architect DAGs usable: $options',
   async ({ options }) => {

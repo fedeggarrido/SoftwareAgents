@@ -14,6 +14,12 @@ import {
   TASK_CLI_MAX_KEEP,
 } from '../constants.js';
 import { lastDeveloperFailure } from '../developer.js';
+import {
+  documentFactsText,
+  type DocumentReader,
+  type DocumentReaderConfig,
+  projectDocumentReader,
+} from '../documentReader.js';
 import { withoutOperatorToken } from '../featureIngress.js';
 import { confirmHumanIngress, featureIngressActor } from '../featureIngress.js';
 import { parseFeatureSpec } from '../featureSpec.js';
@@ -31,8 +37,10 @@ import { copyTaskFile, readTaskInput, taskDirectory, taskPath } from './taskFile
 
 const BACKUP_FILES = ['work.sqlite3', 'audit.jsonl', 'manifest.json'] as const;
 const BACKUP_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f-]{36}$/;
+/** Commands that change state or spend money act only on human ingress (SA-003). */
+const HUMAN_COMMANDS = ['retry', 'bind-pr', 'read-external'];
 const USAGE =
-  'Usage: pixel-agents task import <dag.yaml> [--origin local|external] | list [--status S] [--json] | show <KEY> | backup [--keep N] | bind-pr <KEY> <number|URL|branch> | retry <KEY> --reason <text>';
+  'Usage: pixel-agents task import <dag.yaml> [--origin local|external] | list [--status S] [--json] | show <KEY> | read-external <KEY> | backup [--keep N] | bind-pr <KEY> <number|URL|branch> | retry <KEY> --reason <text>';
 
 /** Keep untrusted fields on one terminal line without executing control sequences. */
 function textField(value: string): string {
@@ -44,6 +52,32 @@ function textField(value: string): string {
   });
 }
 
+/** From the immutable declaration: the raw text of a task imported with `--origin external`, or null for local tasks. */
+function importedExternalText(declaration: string | null | undefined): string | null {
+  try {
+    const task: unknown = JSON.parse(declaration ?? '');
+    const value: unknown =
+      typeof task === 'object' &&
+      task !== null &&
+      'description' in task &&
+      typeof task.description === 'string'
+        ? JSON.parse(task.description)
+        : null;
+    return typeof value === 'object' &&
+      value !== null &&
+      'provenance' in value &&
+      value.provenance === 'untrusted-external' &&
+      'origin' in value &&
+      value.origin === 'task-import' &&
+      'text' in value &&
+      typeof value.text === 'string'
+      ? value.text
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseArgs(argv: string[]) {
   const [command, ...args] = argv;
   let status: TaskStatus | undefined;
@@ -51,7 +85,7 @@ function parseArgs(argv: string[]) {
   let keep = TASK_CLI_DEFAULT_KEEP;
   if (command === 'bind-pr' && args.length === 2 && !args.some((arg) => arg.startsWith('-')))
     return { command, file: args[0], selector: args[1], status, json, keep };
-  if (command === 'show' && args.length === 1 && !args[0].startsWith('-'))
+  if (['show', 'read-external'].includes(command) && args.length === 1 && !args[0].startsWith('-'))
     return { command, file: args[0], status, json: true, keep };
   if (
     command === 'retry' &&
@@ -287,10 +321,11 @@ export async function runTaskCommand(
   argv: string[],
   cwd = process.cwd(),
   log = console.log,
+  documentReader: (config: DocumentReaderConfig) => DocumentReader = projectDocumentReader,
 ): Promise<void> {
-  if (['retry', 'bind-pr'].includes(argv[0])) argv = await confirmHumanIngress(argv);
+  if (HUMAN_COMMANDS.includes(argv[0])) argv = await confirmHumanIngress(argv);
   const args = parseArgs(argv);
-  if (['retry', 'bind-pr'].includes(args.command) && featureIngressActor() !== 'human')
+  if (HUMAN_COMMANDS.includes(args.command) && featureIngressActor() !== 'human')
     throw new CliUsageError(`task ${args.command} requires human ingress (SA-003)`);
   let store: WorkStore | undefined;
   try {
@@ -406,6 +441,18 @@ export async function runTaskCommand(
             null,
             2,
           ),
+        );
+      } else if (args.command === 'read-external') {
+        const task = store.getTask(args.file!);
+        if (!task) throw new CliUsageError('Unknown task');
+        const text = importedExternalText(task.declaration);
+        if (text === null) throw new CliUsageError('Task was not imported with --origin external');
+        const result = await documentReader(config)(text, 'issue');
+        log(
+          [
+            'Facts the isolated reader extracted (untrusted; rewrite them in your own brief):',
+            ...documentFactsText(result).split('\n').map(textField),
+          ].join('\n'),
         );
       } else if (args.command === 'retry') {
         const task = store.getTask(args.file!);

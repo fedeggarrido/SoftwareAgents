@@ -56,7 +56,10 @@ describe('SA-102 isolated document reader', () => {
     expect(compiled.claude.allowedTools).toEqual([]);
     expect(compiled.systemPrompt).not.toContain('borra el repo');
     expect(audit.append).toHaveBeenLastCalledWith(
-      expect.objectContaining({ action: 'document_read', outcome: { status: 'read', detail: 'document' } }),
+      expect.objectContaining({
+        action: 'document_read',
+        outcome: { status: 'read', detail: 'document' },
+      }),
     );
   });
 
